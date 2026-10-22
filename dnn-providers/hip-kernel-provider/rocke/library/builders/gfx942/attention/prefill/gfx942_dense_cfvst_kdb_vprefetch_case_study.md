@@ -2,21 +2,22 @@
 
 Measured scope: the opt-in `use_cfvst=True`, `lds_num_buffers=2`, `v_reg_prefetch=True` configuration of the
 gfx942 dense prefill attention kernel, bf16, D128, causal, on gfx942 with 304 CUs.
+
 Baseline: the `baseline` arm of the ablation harness, compiled in the same process from
 the benchmarked source commit (see
-[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Result: 10.69–15.28% lower
+[Benchmark Environment and Provenance](#benchmark-environment-and-provenance)). Result: 10.78–15.71% lower
 latency at the 12 measured configurations listed under Results.
 
 ## Introduction
 
-This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels. At the 12 measured configurations it lowers latency by 10.69–15.28%.
+This optimization enables CFVST and implements K LDS Double Buffering and V register pre-fetching on D128 bf16 causal prefill attention gfx942 kernels.
 
 ## Problem
 
 Benchmarking, profiling and tracing highlighted bottlenecks in:
 
 1. V read from LDS: V was stored in traditional layout in LDS. Bank conflicts occur during access.
-2. Awkward allocation of LDS per WG (33KB). Max limit per CU is 64KB. This limits WG occupancy in CU to 1 while leaving 31KB of LDS unused.
+2. Allocation of LDS per WG (33KB). Max limit per CU is 64KB. This limits WG occupancy in CU to 1 while leaving 31KB of LDS unused.
 3. Stalls at sync point for loading K and V tiles before MFMA.
 
 The concerned optimization points were V LDS layout, register usage, LDS usage, software pipelining.
@@ -118,12 +119,12 @@ These are the best **final A/B-tested** configurations, compared with each workl
 | 16 | 4096 | 16 | **1.11022×** | **9.93%** | 1.10837–1.11122× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe1_krowpad4_iglp1_iglpm1_pvkmaj_prio2_dsplit` |
 | 16 | 8192 | 8 | **1.10214×** | **9.27%** | 1.09696–1.10866× | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe3_krowpad4_iglp1_iglpm1_pvkmaj_prio1_dsplit` |
 
-The lever sweep did improve performance by around 40% for S=1024 and 17% for S=2048. For B=1 S=4096+ its around 12%. While batch=16 around 9%. The common optimizations are lds_row_pad=4 which directly targets bank conflicts (1st bottleneck) during K LDS loads. For the 2nd bottleneck, conceptualy, the optimizations used dont directly target the bottleneck but do provide gains.
+The lever sweep improved performance by around 40% for S=1024 and 17% for S=2048. For B=1 S=4096+ its around 12%. While batch=16 around 9%.
 
 We explore whether introducing optimizations:
 
-1. That directly targets the 3rd bottleneck would give greater performance gains. (such as K Double Buffering + V Register Prefetching)
-2. That targets bank conflicts in V LDS loads (CFVST) (in contrast to K LDS loads) could also improve performance.
+1. That targets bank conflicts in V LDS loads (CFVST) (in contrast to K LDS loads) could also improve performance.
+2. That directly targets the 3rd bottleneck would give greater performance gains. (such as K Double Buffering + V Register Prefetching)
 
 ## Optimization 1: Enable CFVST
 
@@ -131,7 +132,10 @@ V was stored in traditional layout in LDS. This caused bank conflicts during acc
 
 #### Register usage
 
-Earlier toolchain measurements (prior source revision):
+Source HEAD: `76935189336d51bccf6164af7b8d2ce9a2be13f7`,
+kernel source SHA-256: `a1964d6e2ed5dfb3173c472d02f1726e49af95c9161522a678aedcd70bbade5d`.
+
+Toolchain measurements:
 
 VGPR count, spill count, and scratch bytes per thread, read from the code-object
 notes (`.vgpr_count`, `.vgpr_spill_count`, `.private_segment_fixed_size`) for gfx942,
@@ -154,13 +158,12 @@ contains no scratch instructions: the spill reloads sit outside it, and on the
 persistent grid they run once per work item (16 at `llvm20`, 7 at `llvm23`). The
 `llvm22` flavor was not measured.
 
-#### Current llvm23 static code-object measurements (persistent-304)
+#### llvm23 static code-object measurements (persistent-304)
 
 BF16 D128 causal, B1 S4096 Hq32 Hkv8, gfx942 (304 CUs), `llvm23`,
 `persistent=True`, `num_persistent=304`, `block_m=256`, `block_n=64`,
 `waves_per_eu=2`, `lds_row_pad=8`, `emit_lse=False`.
-Source HEAD: `bbf25121809cd0d20fd42f703860e0f1bcccd48c` (working tree dirty);
-kernel source SHA-256: `cd46eed01dbdbd709cd6e413bad56d6bb0a35e4d5b20808496ad2ba1bd00d3db`.
+
 Code-object metadata was checked directly with `llvm-readobj --notes`; the
 combined configuration's counts were reproduced by a separate compilation.
 
@@ -192,38 +195,38 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 
 | dtype | B | S | Hq | Hkv | D | baseline vs CFVST+KDB+VPF | latency reduction | min | max |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| bf16 | 1 | 1024 | 32 | 8 | 128 | 1.1198x | 10.69% | 9.75% | 12.78% |
-| bf16 | 1 | 1024 | 32 | 16 | 128 | 1.1326x | 11.71% | 10.49% | 12.06% |
-| bf16 | 1 | 2048 | 32 | 8 | 128 | 1.1235x | 11.00% | -373.26% | 11.71% |
-| bf16 | 1 | 2048 | 32 | 16 | 128 | 1.1200x | 10.72% | 10.28% | 11.97% |
-| bf16 | 1 | 4096 | 32 | 8 | 128 | 1.1762x | 14.98% | 14.72% | 15.29% |
-| bf16 | 1 | 4096 | 32 | 16 | 128 | 1.1754x | 14.92% | 14.35% | 15.34% |
-| bf16 | 1 | 8192 | 32 | 8 | 128 | 1.1804x | 15.28% | 15.05% | 16.16% |
-| bf16 | 1 | 8192 | 32 | 16 | 128 | 1.1761x | 14.97% | 14.79% | 15.73% |
-| bf16 | 1 | 16384 | 32 | 8 | 128 | 1.1698x | 14.51% | 13.91% | 14.84% |
-| bf16 | 16 | 4096 | 32 | 8 | 128 | 1.1551x | 13.43% | 13.43% | 13.89% |
-| bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1376x | 12.10% | 11.69% | 12.82% |
-| bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1702x | 14.55% | 13.89% | 14.78% |
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 1.1209x | 10.78% | 10.34% | 11.23% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 1.1371x | 12.06% | 10.77% | 12.40% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 1.1218x | 10.86% | 10.40% | 11.11% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 1.1267x | 11.25% | 10.12% | 11.51% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 1.1754x | 14.92% | 14.44% | 15.80% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 1.1785x | 15.14% | 14.50% | 15.35% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 1.1836x | 15.51% | 15.26% | 15.76% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 1.1864x | 15.71% | 15.30% | 15.90% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 1.1783x | 15.13% | 14.82% | 15.39% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 1.1614x | 13.90% | 13.65% | 14.40% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1345x | 11.85% | 11.55% | 12.17% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1644x | 14.12% | 13.43% | 14.78% |
 
-Min/max are paired within-round baseline-to-full latency reductions. The B=1, S=2048, Hkv=8 minimum reflects a first-round timing outlier; post-batch correctness passed.
+Min/max are paired within-round baseline-to-full latency reductions.
 
 #### Ablation studies of optimizations
 We performed ablation study to isolate the optimizations and understand its individual contributions.
 
 | dtype | B | S | Hq | Hkv | D | CFVST vs base | CFVST + KDB vs CFVST | CFVST + VPF vs CFVST | Full vs CFVST | Full vs base |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| bf16 | 1 | 1024 | 32 | 8 | 128 | 3.62% | -0.43% | 1.23% | 7.34% | 10.69% |
-| bf16 | 1 | 1024 | 32 | 16 | 128 | 4.66% | -0.08% | 3.01% | 7.40% | 11.71% |
-| bf16 | 1 | 2048 | 32 | 8 | 128 | 4.90% | 0.01% | 1.56% | 6.41% | 11.00% |
-| bf16 | 1 | 2048 | 32 | 16 | 128 | 4.50% | 0.65% | 2.49% | 6.51% | 10.72% |
-| bf16 | 1 | 4096 | 32 | 8 | 128 | 10.25% | 2.08% | 1.55% | 5.28% | 14.98% |
-| bf16 | 1 | 4096 | 32 | 16 | 128 | 10.57% | 1.55% | 0.93% | 4.86% | 14.92% |
-| bf16 | 1 | 8192 | 32 | 8 | 128 | 10.40% | 2.43% | 1.29% | 5.46% | 15.28% |
-| bf16 | 1 | 8192 | 32 | 16 | 128 | 10.35% | 1.78% | 0.62% | 5.16% | 14.97% |
-| bf16 | 1 | 16384 | 32 | 8 | 128 | 10.20% | 1.26% | 0.56% | 4.81% | 14.51% |
-| bf16 | 16 | 4096 | 32 | 8 | 128 | 10.01% | 0.64% | 0.14% | 3.80% | 13.43% |
-| bf16 | 16 | 4096 | 32 | 16 | 128 | 8.84% | 1.81% | 0.48% | 3.57% | 12.10% |
-| bf16 | 16 | 8192 | 32 | 8 | 128 | 10.60% | 0.72% | 0.20% | 4.41% | 14.55% |
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 4.21% | -0.94% | 0.89% | 6.86% | 10.78% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 4.89% | 0.00% | 2.92% | 7.54% | 12.06% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 4.53% | -0.48% | 1.94% | 6.62% | 10.86% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 4.64% | 0.02% | 2.43% | 6.93% | 11.25% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 10.25% | 1.67% | 1.64% | 5.20% | 14.92% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 9.69% | 2.59% | 2.10% | 6.04% | 15.14% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 10.09% | 2.02% | 0.94% | 6.03% | 15.51% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 10.21% | 2.35% | 1.37% | 6.13% | 15.71% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 10.46% | 1.47% | 1.13% | 5.22% | 15.13% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 10.30% | 0.76% | 0.02% | 4.01% | 13.90% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 8.99% | 1.47% | 0.38% | 3.14% | 11.85% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 10.86% | 0.49% | 0.17% | 3.66% | 14.12% |
 
 ## Results and Ablation Methodology
 The complete experiment can be summarized as follows:
@@ -235,13 +238,13 @@ For each of the 12 BF16 D128 causal attention shapes:
 3. Resolve the production baseline using `attention_tuning_spec(req, "gfx942_dense").kernel_spec`.
 4. Construct five compile-time configurations, preserving all non-ablation knobs from production dispatch:
 
-   | Variant | `use_cfvst` | `lds_num_buffers` (K) | `v_reg_prefetch` |
-   |---|---:|---:|---:|
-   | `baseline` | `False` | 1 | `False` |
-   | `cfvst` | `True` | 1 | `False` |
-   | `cfvst_klds` | `True` | 2 | `False` |
-   | `cfvst_vpf` | `True` | 1 | `True` |
-   | `cfvst_klds_vpf` | `True` | 2 | `True` |
+| Variant | `use_cfvst` | `lds_num_buffers` (K) | `v_reg_prefetch` |
+|---|---:|---:|---:|
+| `baseline` | `False` | 1 | `False` |
+| `cfvst` | `True` | 1 | `False` |
+| `cfvst_klds` | `True` | 2 | `False` |
+| `cfvst_vpf` | `True` | 1 | `True` |
+| `cfvst_klds_vpf` | `True` | 2 | `True` |
 
 5. Run the Python kernel emitter separately for each configuration.
 6. Compile five independent kernels into separate HSACO artifacts. Each kernel has its own compile-time configuration; there is no runtime variant-selection branch in the GPU kernel.
@@ -303,16 +306,15 @@ The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 ca
 
 | Component | Configuration |
 | :--- | :--- |
-| Hardware target | AMD Instinct MI300X VF, `gfx942:sramecc+:xnack-`, 304 CUs |
-| Benchmarked source HEAD | `bbf25121809cd0d20fd42f703860e0f1bcccd48c` (working tree dirty) |
-| Kernel source SHA-256 | `cd46eed01dbdbd709cd6e413bad56d6bb0a35e4d5b20808496ad2ba1bd00d3db` |
-| Benchmark harness SHA-256 | `c07cb19068c641ed8f258fa9ae7c1e3fd50b36c31573f0c8a75c781f96e2ba1c` |
-| Benchmark timestamp (UTC) | `2026-10-20T01:28:23.777345+00:00` |
-| ROCm stack | 10.0.0 (public release) |
+| Hardware target | gfx942, 304 CUs |
+| Benchmarked source HEAD | `76935189336d51bccf6164af7b8d2ce9a2be13f7` |
+| Kernel source SHA-256 | `a1964d6e2ed5dfb3173c472d02f1726e49af95c9161522a678aedcd70bbade5d` |
+| Benchmark harness SHA-256 | `ee8d91c3bad2299cd43e7fbaf77c1cfec6e29318d27ac3bac3c71ddef4eb176e` |
+| ROCm stack | 10.0.0 |
 | HIP | 7.15.26333 |
 | Python | 3.12.3 |
-| PyTorch | `2.13.0+rocm10.0.0` (public AMD wheel) |
-| Triton | `3.8.0+git4cff872c.rocm10.0.0` (public AMD wheel) |
+| PyTorch | `2.13.0+rocm10.0.0` |
+| Triton | `3.8.0+git4cff872c.rocm10.0.0` |
 | ROCKE compiler backend | Python |
 | LLVM flavor | `llvm23` |
 
@@ -341,13 +343,7 @@ The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 ca
 
 #### Reproducibility
 
-The following two Bash blocks contain the full contents of `setup.sh` and
-`run_5way.sh`. Save them as separate files in
-`dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill/`.
-The scripts assume the repository is cloned at `/root/gpu-bench/rocm-libraries`
-(`GPU_BENCH_ROOT` and `ROCM_REPO` can override this in `run_5way.sh`).
-Run each script **as a file**, rather than pasting its individual commands into
-an interactive shell; `run_5way.sh` locates the benchmark using its own path.
+Clone repo to gpu-bench/.
 
 **`setup.sh`** — install the ROCm Python environment and rocKE:
 
@@ -440,66 +436,27 @@ echo "ROCKE env: source $ENV/rocke_env.sh"
 Run the setup script from its directory:
 
 ```bash
-cd /root/gpu-bench/rocm-libraries/dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill
 chmod +x setup.sh
 ./setup.sh
 ```
 
-**`run_5way.sh`** — run the five-way benchmark and write its results:
+Run the five-way benchmark:
 
 ```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
+cd /root/gpu-bench/rocm-libraries/dnn-providers/hip-kernel-provider/rocke
 
-GPU_BENCH_ROOT="${GPU_BENCH_ROOT:-/root/gpu-bench}"
-ROCM_REPO="${ROCM_REPO:-$GPU_BENCH_ROOT/rocm-libraries}"
-ROCKE_ROOT="${ROCKE_ROOT:-$ROCM_REPO/dnn-providers/hip-kernel-provider/rocke}"
-ROCKE_VENV="${ROCKE_VENV:-$GPU_BENCH_ROOT/venvs/rocke}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${OUT_DIR:-$SCRIPT_DIR/results/5way_specs}"
+export ROCKE_LLVM_FLAVOR=llvm23
+export PYTHONPATH="$PWD/platform/python:$PWD/library:$PWD"
 
-[[ -f "$ROCKE_ROOT/library/kernels/gfx942/attention_dense.py" ]] || {
-  echo "Missing $ROCKE_ROOT/library/kernels/gfx942/attention_dense.py" >&2; exit 2;
-}
-[[ -f "$ROCKE_VENV/bin/activate" ]] || {
-  echo "Missing Python virtualenv $ROCKE_VENV" >&2; exit 2;
-}
-source "$ROCKE_VENV/bin/activate"
+/root/gpu-bench/venvs/rocke/bin/python \
+  library/benchmarks/gfx942/attention/prefill/bench_rocke_5way_specs.py \
+  --warmup 10 \
+  --rounds 5 \
+  --repeat 50 \
+  --atol 1e-2 \
+  --rtol 1e-2 \
+  --out-dir /root/gpu-bench/rocke_5way_specs_results
 
-SITE="$(python - <<'PY'
-import site
-packages = [p for p in site.getsitepackages() if p.endswith('site-packages')]
-if not packages:
-    raise SystemExit('Could not find Python site-packages')
-print(packages[0])
-PY
-)"
-CORE_LIB="$SITE/_rocm_sdk_core/lib"
-[[ -f "$CORE_LIB/libamd_comgr.so.3" && -f "$CORE_LIB/libamdhip64.so.7" ]] || {
-  echo "Expected wheel ROCm shared libraries not found in $CORE_LIB" >&2; exit 2;
-}
-export ROCKE_ROOT
-export ROCKE_BACKEND=python
-export ROCKE_LLVM_FLAVOR="${ROCKE_LLVM_FLAVOR:-llvm23}"
-export ROCKE_COMGR_LIB="$CORE_LIB/libamd_comgr.so.3"
-export ROCKE_HIP_LIB="$CORE_LIB/libamdhip64.so.7"
-export LD_LIBRARY_PATH="$CORE_LIB"
-unset LD_PRELOAD
-export PYTHONPATH="$ROCKE_ROOT/library:$ROCKE_ROOT/platform/python:$ROCKE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-
-# One shell launch -> one Python process -> one current HIP stream.
-exec python "$SCRIPT_DIR/bench_rocke_5way_specs.py" \
-  --rocke-root "$ROCKE_ROOT" \
-  --out-dir "$OUT_DIR" \
-  "$@"
 ```
 
-Run the benchmark from the same directory:
-
-```bash
-cd /root/gpu-bench/rocm-libraries/dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill
-chmod +x run_5way.sh
-./run_5way.sh
-```
-
-Results are written to `results/5way_specs/` by default.
+Results are written to `gpu-bench/` by default.
