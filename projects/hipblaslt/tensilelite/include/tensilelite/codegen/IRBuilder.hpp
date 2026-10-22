@@ -170,6 +170,29 @@ public:
   /// Emits dst = the low 32 bits of a * b.
   void muli32(RegisterRef dst, Operand a, Operand b);
 
+  // Buffer resource descriptors.
+
+  /// Emits a raw buffer resource descriptor (V#) for buffer_load and
+  /// buffer_store into dst, which must be 4 SGPRs starting at an index that is
+  /// a multiple of 4. The layout is: dst[0:1] = pointer, the 48-bit base
+  /// address with stride and swizzle 0, so offsets are plain bytes; dst+2 =
+  /// sizeBytes, the num_records the hardware checks offsets against; dst+3 =
+  /// the target's fixed upper word from rocisa::SrdUpperValue (0x00020000, a
+  /// 32-bit data format, on gfx9). An access whose byte offset is >= sizeBytes
+  /// is out of bounds: loads return 0 and stores are dropped, so sizeBytes 0
+  /// makes every access out of bounds.
+  ///
+  /// pointer must be an SGPR pair. An immediate pointer is rejected because a
+  /// descriptor base is a runtime address; use sizeBytes 0 for a descriptor
+  /// that never touches memory. sizeBytes is one SGPR or an immediate in
+  /// [0, UINT32_MAX]. A descriptor must be uniform, so VGPRs and AGPRs are
+  /// rejected. dst may overlap pointer or sizeBytes; each word is read before
+  /// it is overwritten, and a word whose source already is its destination is
+  /// not copied. Throws std::invalid_argument, before emitting anything, if an
+  /// operand has the wrong kind, width or alignment, or sizeBytes is out of
+  /// range.
+  void makeRsrc(RegisterRef dst, Operand pointer, Operand sizeBytes);
+
 private:
   void insertItem(const std::shared_ptr<rocisa::Item> &item);
 

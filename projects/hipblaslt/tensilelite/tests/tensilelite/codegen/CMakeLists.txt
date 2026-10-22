@@ -4,6 +4,7 @@
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/Arith_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BufferResource_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Kernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Move_test.cpp"
@@ -18,6 +19,7 @@ if(TENSILELITE_ENABLE_JIT)
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/ArithDeviceTest.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/ArithDevice_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/BufferResourceDevice_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/KernelLaunch_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/MoveDevice_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Saxpy_test.cpp"
