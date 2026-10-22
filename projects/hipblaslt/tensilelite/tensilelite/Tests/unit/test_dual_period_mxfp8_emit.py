@@ -182,3 +182,24 @@ def test_prefetch_local_read_is_name_only(dual_src):
         return [ln.split("//")[0].rstrip() for ln in _mainloop_lines(src)]
 
     assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
+
+
+def test_no_scale_local_read_in_preloop(dual_src):
+    """The pre-loop prefetches data operands but not scales.
+
+    Scale local reads are epoch-granular: the mainloop, NLL, NGLL and tail
+    paths each re-read the whole group set at their head, so a pre-loop copy
+    would be overwritten before any MFMA consumes it.  Data local reads are
+    partition-granular and must still be there, feeding partition 0's MFMAs.
+    """
+    preloop = []
+    for ln in dual_src.splitlines():
+        if ln.strip() == "label_LoopBeginL:":
+            break
+        preloop.append(ln)
+
+    scale_lr = [l for l in preloop if "ds_read" in l and "scaleMXS" in l]
+    assert not scale_lr, "pre-loop re-reads scales the mainloop reloads: %s" % scale_lr
+
+    data_lr = [l for l in preloop if "ds_read" in l and "Subtile" in l]
+    assert data_lr, "pre-loop lost its data operand prefetch"

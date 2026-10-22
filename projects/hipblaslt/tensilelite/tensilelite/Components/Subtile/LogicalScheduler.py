@@ -3351,6 +3351,8 @@ class LogicalScheduler:
         """Create LR placements for first partition.
 
         tiles: per-tensor MFMATileRange, e.g. {'A': MFMATileRange(0, k, mn0, mn1), ...}
+        A tensor omitted from `tiles` gets no placement, which is how the caller
+        keeps a tensor out of the pre-loop entirely.
 
         Uses the first MFMA's vgpr tile maps (the preloop loads data consumed
         by the first MFMA, not the next subIterK like mainloop LRs).
@@ -3359,6 +3361,8 @@ class LogicalScheduler:
 
         placements = []
         for tensor in self.tensors:
+            if tensor not in tiles:
+                continue
             lr = LRPlacement(
                 tensor=tensor, mtIteration=0,
                 tiles=tiles[tensor],
@@ -3574,7 +3578,14 @@ class LogicalScheduler:
             'A':  MFMATileRange(0, cfg.lrA.k, *part0['A']),
             'B':  MFMATileRange(0, cfg.lrB.k, *part0['B']),
         }
-        if cfg.hasScale:
+        if cfg.hasScale and not cfg.prefetchNextPartition:
+            # Scales are left out of the partition-directed prefetch.  Data local
+            # reads are partition-granular, so the pre-loop's copies feed the
+            # first partition's MFMAs and are genuinely live.  Scale local reads
+            # are epoch-granular instead: every entry point re-reads the whole
+            # group set before consuming it -- the mainloop at its C0 head, and
+            # the NLL, NGLL and tail paths at theirs -- so a pre-loop copy would
+            # be overwritten before use on every path out of here.
             lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
             lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
