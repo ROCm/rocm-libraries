@@ -414,7 +414,7 @@ on the verifying machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode. Checks every launch of a multi-launch (`sources`) descriptor: a binary's identity is its launches' `(name, builder, spec, role)` tuple, a failure names its launch, and a descriptor with `sources` never nests in a single-launch one | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? It never compares what the two halves compute | `launch_surface.py MANIFEST --check [--allow-unguarded]` |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--manifest MANIFEST] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. `--manifest` is forwarded to rung 1 as above. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. This tool cannot run rung 3, so `--min-served N` with N > 0 fails the gate (`serving-not-run`); `tools/sweep.py`'s `min_served` is the device gate. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
 | `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells (by cell axes; it does not check that a sequence length can be served); prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]` (`--plan-space` with `--out` or `--shapes` is a usage error). Exit 2 is unusable input, naming the field: a malformed manifest, a duplicate key, a `ground_truth.value_map` whose keys differ from a cell field's values, or a builder value with no `specialization.vocabulary` mapping; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
@@ -705,6 +705,36 @@ processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole
 Any other value is a `ConfigError`; the key is rejected for every other kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
+A packaged `rocke` `kernel_source` (or `kernel_defaults`) may also set
+`launches: {<name>: {<overrides>}}` to declare the launches of a multi-stage kernel
+([RFC 0017 §15.1](../../docs/rfcs/0017_UniversalKernelDescriptor.md)). Each value is merged
+onto the base `kernel_source`: `{role: merge}` selects a companion kernel of the same
+builder's `KernelModule`, and a different `builder` and `spec` name another builder
+entirely. The generator then emits the authored descriptor with a `sources` map keyed by
+launch name, in place of `kernel_source`, and the descriptor declares UKD 1.1. Launch names
+are lowercase identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else
+is a `ConfigError`, and so is the key on any kind but `rocke`. Two launch names may name
+one kernel (a stage that runs one kernel twice with different arguments), so equal
+launches are valid config. A kernel's launches are part
+of its candidate identity, so two entries that differ only in their launches are not
+de-duplicated. A config with no `launches` key generates exactly what it did before.
+
+A launch's `spec` override **replaces** the spec for that launch and is never varied by
+`variants`, `axes` or `shape_axes`: it is the same static spec in every expanded kernel. It
+may not state a metadata field at a value that differs from the variant being generated,
+which is a `ConfigError` naming the variant and the field, so a launch whose spec depends
+on an expanded axis cannot be spelled this way. A launch with no `spec` override takes the
+variant's own expanded spec. The packer checks each declared consumer field against the
+launches that report it (see the packaging reference).
+
+The descriptor only lists the launches: the pack's native dispatch handler declares the
+names it launches and owns their order, and the provider drops a kernel whose launch names
+differ from the handler's when it builds its catalog. One engine has one handler, so every
+kernel of an engine must name the same set of launches: a config mixing single- and
+multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
+engines by launch set). See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
 ## The five pre-mint config-loader checks
 
 Run, in this order, **before any UUID is minted**:
@@ -792,7 +822,19 @@ matcher-test stubs with `g++`/`clang++`, plus an intentionally broken source con
 plugin/data/flatbuffers SDK and provider sources beside this checkout plus
 `flatbuffers/array.h` under `/opt/rocm/include`, and generates stand-ins for the
 CMake-configured `version.h`/`CacheRootDefaults.h` headers. Missing prerequisites skip
-explicitly.
+explicitly, so a checkout with no compiler or ROCm headers still runs green. Setting
+`HIPDNN_INGESTOR_STUB_INCLUDE_FILE` to a file of include directories (one per line,
+containing `flatbuffers/array.h` and `hip/hip_runtime.h`) replaces the
+`/opt/rocm/include` probe, and a bad value then fails rather than skips.
+
+Under `HIPDNN_ENABLE_TOOLING_TESTS` the hipDNN build runs this suite with the
+`tools/pytest_plugins/hipdnn_strict_skips.py` plugin (`-p hipdnn_strict_skips`), which turns
+every skip into a failure, so a missing compiler, validator binary, `hkp_pack` or
+`rocm_kpack` fails CI instead of passing by not running. A skip that is correct by design
+(an author-supplied input such as `HIPDNN_INGESTOR_SHAPES` or an authoring profile, or the
+POSIX-only sweep tests on Windows) carries `@pytest.mark.allow_skip(reason="...")` beside the
+skip. Run by hand, the plugin is not loaded: `python -m pytest -p hipdnn_strict_skips` (with
+`tools/pytest_plugins` on `PYTHONPATH`) reproduces the CI behavior.
 
 ### Fragment contracts (`tests/test_fragment_contracts.py`)
 
