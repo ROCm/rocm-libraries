@@ -14,8 +14,11 @@ add_test(
 set_tests_properties(${FMHA_FWD_SPLITKV_CODEGEN_PY_TEST}
     PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx1100" AND
-   "fwd_splitkv" IN_LIST FMHA_FWD_ENABLE_APIS AND
+# No FMHA_FWD_ENABLE_APIS check: example/ sets it to "all" under BUILD_TESTING,
+# but only in its own scope, so here it still reads the cache default "fwd".
+# gfx11-generic builds carry the gfx1100 tile too; the test skips itself on any
+# device other than gfx1100.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1100|gfx11-generic" AND
    TARGET ${FMHA_FWD_INSTANCES})
     set(FMHA_FWD_SPLITKV_GFX1100_TEST test_ck_tile_fmha_fwd_splitkv_gfx1100)
     add_gtest_executable(${FMHA_FWD_SPLITKV_GFX1100_TEST}
