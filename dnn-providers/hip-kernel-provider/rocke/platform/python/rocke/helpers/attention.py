@@ -681,6 +681,23 @@ def mfma_32x32x16_for_dtype(
 # Binary search on ``cu_q``
 # ---------------------------------------------------------------------------
 
+# Trip count when the batch size is unknown (num_seqs <= 0), as in direct
+# unit-test specs. Enough for any i32 batch count.
+BINARY_SEARCH_FALLBACK_ITERS = 32
+
+
+def binary_search_seq_idx_iters(num_seqs: int, *, floor: int = 1) -> int:
+    """Trip count for :func:`binary_search_seq_idx` over ``num_seqs`` sequences.
+
+    ``ceil(log2(num_seqs + 1))``, at least ``floor``, or
+    :data:`BINARY_SEARCH_FALLBACK_ITERS` when ``num_seqs`` is unknown. Spec
+    classes specialize ``iterations`` with this, and launcher cache keys that
+    skip building the spec key on it, so both share one definition.
+    """
+    if num_seqs <= 0:
+        return BINARY_SEARCH_FALLBACK_ITERS
+    return max(floor, int(math.ceil(math.log2(num_seqs + 1))))
+
 
 def binary_search_seq_idx(
     b: IRBuilder,
@@ -698,8 +715,8 @@ def binary_search_seq_idx(
     ``find_seq_idx``. By default (``per_token=False``) the loop
     invariant is ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the
     cumulative Q-block count up to sequence ``i``). The caller
-    specializes ``iterations`` from the known problem batch size;
-    32 is a safe fallback for unspecialized tests.
+    specializes ``iterations`` from the known problem batch size with
+    :func:`binary_search_seq_idx_iters`.
 
     P49: ``per_token=True`` switches to per-token mode
     (``cu_q[s] <= q_token < cu_q[s+1]``) used by ``fmha_paged_prefill``,
