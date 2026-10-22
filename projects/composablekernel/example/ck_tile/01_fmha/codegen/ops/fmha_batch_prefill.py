@@ -926,8 +926,8 @@ def receipt_accepts(receipt, dtype: str, mode: str, pipeline: FmhaFwdPipeline) -
 
 
 class PageTileFactoryGfx125:
-    """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear K/V pool, vLLM 2D or SGLang 1D page
-    table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
+    """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear or vectorized K/V pool, vLLM 2D or
+    SGLang 1D page table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
     tokens and per-head sink logits), optional tanh logits soft cap or elementwise bias or ALiBi,
     optional LSE."""
 
@@ -949,12 +949,21 @@ class PageTileFactoryGfx125:
         # them. The masked arm takes any window (causal, sliding, local) from either corner, like
         # the simplified-mask dispatch of the gfx9 kernels.
         pipelines = []
-        for logits, mask, bias, lse, sink, kv_lookup_table in itertools.product(
+        for (
+            logits,
+            mask,
+            bias,
+            lse,
+            sink,
+            kv_memory_layout,
+            kv_lookup_table,
+        ) in itertools.product(
             ["t", "f"],
             ["s_no", "s_mask"],
             ["no", "bias", "alibi"],
             ["t", "f"],
             ["t", "f"],
+            SUPPORTED_KV_MEMORY_LAYOUT,
             SUPPORTED_KV_LOOKUP_TABLE,
         ):
             # Sink tokens and sink logits share the sink instance and need a mask, as for gfx9.
@@ -963,7 +972,7 @@ class PageTileFactoryGfx125:
             # The logits soft cap applies to unbiased scores, as for gfx9.
             if logits == "t" and bias != "no":
                 continue
-            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", logits, bias, lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
+            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", logits, bias, lse, "f", "no", mask, sink, kv_memory_layout, kv_lookup_table))  # fmt: skip
         return pipelines
 
 

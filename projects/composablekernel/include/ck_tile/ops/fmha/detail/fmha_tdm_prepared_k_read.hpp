@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_vectorized_v_read.hpp"
 
 namespace ck_tile {
 
@@ -18,40 +19,52 @@ struct FmhaTdmPreparedKRead
     template <index_t IAccess, typename TileWindow>
     CK_TILE_DEVICE static Address Prepare(const TileWindow& window)
     {
+        // Token-contiguous (vectorized KV) V tile: the plain-load address of the same access.
+        if constexpr(detail::fmha_tdm_is_token_contiguous_lds<TileWindow>())
+        {
+            const auto raw = FmhaTdmVecVRead::Prepare<IAccess>(window);
+            return {raw.byte_address, raw.valid};
+        }
+        else
+        {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-        using Base     = typename TileWindow::Base;
-        using Traits   = typename Base::Traits;
-        using SFCYs    = typename Traits::SFC_Ys;
-        using DataType = typename Base::DataType;
-        static_assert(TileWindow::NumAccessPerCoord == 8 || TileWindow::NumAccessPerCoord == 16 ||
-                      TileWindow::NumAccessPerCoord == 24);
-        static_assert(IAccess >= 0 && IAccess < TileWindow::NumAccessPerCoord);
-        static_assert(Traits::PackedSize == 1 && sizeof(DataType) == 2);
+            using Base     = typename TileWindow::Base;
+            using Traits   = typename Base::Traits;
+            using SFCYs    = typename Traits::SFC_Ys;
+            using DataType = typename Base::DataType;
+            static_assert(TileWindow::NumAccessPerCoord == 8 ||
+                          TileWindow::NumAccessPerCoord == 16 ||
+                          TileWindow::NumAccessPerCoord == 24);
+            static_assert(IAccess >= 0 && IAccess < TileWindow::NumAccessPerCoord);
+            static_assert(Traits::PackedSize == 1 && sizeof(DataType) == 2);
 
-        constexpr auto distribution = typename Base::TileDstr{};
-        constexpr auto input_index  = SFCYs::get_index(number<IAccess>{});
-        const auto partition_index  = get_partition_index(distribution);
-        const auto adaptor_coord    = make_tensor_adaptor_coordinate(
-            distribution.get_ps_ys_to_xs_adaptor(),
-            container_concat(partition_index, to_array<index_t, input_index.size()>(input_index)));
-        const auto& view = window.get_bottom_tensor_view();
-        const auto coord =
-            make_tensor_coordinate(view.get_tensor_descriptor(),
-                                   window.get_window_origin() + adaptor_coord.get_bottom_index());
-        const auto& buffer = view.get_buffer_view();
-        using Buffer       = remove_cvref_t<decltype(buffer)>;
-        static_assert(Buffer::get_address_space() == address_space_enum::lds);
+            constexpr auto distribution = typename Base::TileDstr{};
+            constexpr auto input_index  = SFCYs::get_index(number<IAccess>{});
+            const auto partition_index  = get_partition_index(distribution);
+            const auto adaptor_coord    = make_tensor_adaptor_coordinate(
+                distribution.get_ps_ys_to_xs_adaptor(),
+                container_concat(partition_index,
+                                 to_array<index_t, input_index.size()>(input_index)));
+            const auto& view   = window.get_bottom_tensor_view();
+            const auto coord   = make_tensor_coordinate(view.get_tensor_descriptor(),
+                                                      window.get_window_origin() +
+                                                          adaptor_coord.get_bottom_index());
+            const auto& buffer = view.get_buffer_view();
+            using Buffer       = remove_cvref_t<decltype(buffer)>;
+            static_assert(Buffer::get_address_space() == address_space_enum::lds);
 
-        using LdsPointer   = const __attribute__((address_space(3))) DataType*;
-        const auto pointer = c_style_pointer_cast<LdsPointer>(buffer.p_data_ + coord.get_offset());
-        uint32_t address   = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pointer));
-        return {address,
-                coordinate_has_valid_offset_assuming_top_index_is_valid(
-                    view.get_tensor_descriptor(), coord)};
+            using LdsPointer = const __attribute__((address_space(3))) DataType*;
+            const auto pointer =
+                c_style_pointer_cast<LdsPointer>(buffer.p_data_ + coord.get_offset());
+            uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pointer));
+            return {address,
+                    coordinate_has_valid_offset_assuming_top_index_is_valid(
+                        view.get_tensor_descriptor(), coord)};
 #else
-        ignore = window;
-        return {};
+            ignore = window;
+            return {};
 #endif
+        }
     }
 
     template <index_t IAccess, typename DistributedTensor, typename TileWindow>

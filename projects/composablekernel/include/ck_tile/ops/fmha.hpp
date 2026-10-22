@@ -30,6 +30,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_schedule_d192.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_schedule_types.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_vectorized_v_read.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_window.hpp"

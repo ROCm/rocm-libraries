@@ -714,7 +714,10 @@ struct DeviceProblem
     }
 
     // Linear pool [page][token][head][D] -> vectorized page-heads: K [page][head][D/8][P][8],
-    // V [page][head][P/8][D][8]. The page stride is unchanged.
+    // V [page][head][P/8][D][8]. The page stride is unchanged. V rows that no sequence reads
+    // (kUnusedRowValue, including the tail of each sequence's last page) become NaN: a partial
+    // group of 8 tokens is read past seqlen_k unless the kernel keeps those rows out of LDS, and
+    // a zero probability does not hide a NaN.
     static std::vector<Data>
     Vectorize(const HostProblem& h, const std::vector<Data>& linear, bool is_k)
     {
@@ -728,7 +731,11 @@ struct DeviceProblem
                         const std::size_t base = (page * H + head) * P * D;
                         const std::size_t dst  = is_k ? base + ((d / 8) * P + t) * 8 + d % 8
                                                       : base + ((t / 8) * D + d) * 8 + t % 8;
-                        out[dst]               = linear[((page * P + t) * H + head) * D + d];
+                        const Data x           = linear[((page * P + t) * H + head) * D + d];
+                        out[dst] = !is_k && ck_tile::type_convert<float>(x) == kUnusedRowValue
+                                       ? ck_tile::type_convert<Data>(
+                                             std::numeric_limits<float>::quiet_NaN())
+                                       : x;
                     }
         return out;
     }

@@ -62,11 +62,23 @@ struct FmhaTdmAffineVRead
                                     const TileWindow& window,
                                     const FmhaTdmPreparedKRead::Address& base)
     {
-        static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
-        auto address         = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
-        address.byte_address = base.byte_address +
-                               ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
-        FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
+        // Token-contiguous (vectorized KV) V tile: the access offset follows that layout.
+        if constexpr(detail::fmha_tdm_is_token_contiguous_lds<TileWindow>())
+        {
+            auto address = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
+            address.byte_address =
+                base.byte_address + FmhaTdmVecVRead::ByteDelta<IAccess, TileWindow>();
+            FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
+        }
+        else
+        {
+            static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
+            auto address = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
+            address.byte_address =
+                base.byte_address +
+                ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
+            FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
+        }
     }
 };
 
