@@ -98,7 +98,8 @@ foreach(m IN LISTS TEST_MATRICES)
   get_filename_component(mat "${m}" NAME)
   if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
     list(APPEND unconverted_matrices "${mat}")
-    if(NOT ROCSPARSE_MTX_DIR AND NOT EXISTS "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
+    if(NOT (ROCSPARSE_MTX_DIR AND EXISTS "${ROCSPARSE_MTX_DIR}/${mat}/${mat}.mtx")
+       AND NOT EXISTS "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
       list(APPEND missing_matrices "${mat}")
     endif()
   endif()
@@ -131,7 +132,8 @@ else()
 endif()
 
 if(BUILD_ADDRESS_SANITIZER)
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -fsanitize=address -shared-libasan -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe
+  # Static ASan runtime: the shared one is not on the library path when mtx2csr.exe runs
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -fsanitize=address -static-libasan -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe
     COMMAND_ERROR_IS_FATAL ANY)
 else()
   execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe
@@ -153,7 +155,12 @@ foreach(i RANGE 0 ${len1})
   if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
     # Only a downloaded archive is removed after conversion, never the DVC-tracked one
     set(downloaded_archive)
-    if(NOT ROCSPARSE_MTX_DIR)
+    set(extracted_dir)
+    set(mtx_file "${ROCSPARSE_MTX_DIR}/${mat}/${mat}.mtx")
+    if(ROCSPARSE_MTX_DIR AND EXISTS "${mtx_file}")
+      # Copy, so that the user's file survives the cleanup after conversion
+      file(COPY "${mtx_file}" DESTINATION "${CMAKE_MATRICES_DIR}")
+    else()
       set(archive "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
       if(EXISTS "${archive}")
         message("-- Extracting test matrix ${m}.tar.gz from ${ROCSPARSE_DVC_MATRICES_DIR}")
@@ -210,14 +217,10 @@ foreach(i RANGE 0 ${len1})
       execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${archive}
         WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
         COMMAND_ERROR_IS_FATAL ANY)
+      set(extracted_dir "${CMAKE_MATRICES_DIR}/${mat}")
 
       file(RENAME ${CMAKE_MATRICES_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
-    else()
-      file(RENAME ${ROCSPARSE_MTX_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     endif()
-    # mtx2csr.exe is having relative RUNPATH with respect to package install directory
-    # Set LD_LIBRARY_PATH for running the executable from build directory
-    set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}")
     # Write to a temporary name so that an interrupted conversion leaves no .csr that a rerun would skip
     execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.csr.part
       RESULT_VARIABLE STATUS
@@ -228,7 +231,7 @@ foreach(i RANGE 0 ${len1})
     endif()
     file(RENAME ${CMAKE_MATRICES_DIR}/${mat}.csr.part ${CMAKE_MATRICES_DIR}/${mat}.csr)
     message(STATUS "${mat} success.")
-    file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx ${downloaded_archive})
+    file(REMOVE_RECURSE ${extracted_dir} ${CMAKE_MATRICES_DIR}/${mat}.mtx ${downloaded_archive})
 
   endif()
 endforeach()

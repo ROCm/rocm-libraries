@@ -22,3 +22,5 @@
 /shipsec1.tar.gz
 /sme3Dc.tar.gz
 /webbase-1M.tar.gz
+/*.csr
+/*.csr.part
