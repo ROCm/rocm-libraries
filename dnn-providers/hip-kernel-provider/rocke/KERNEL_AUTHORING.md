@@ -167,6 +167,12 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       stays GREEN with no re-bless (proof the knob is inert by default).
 - [ ] Test for the knob (golden-IR if default-ON; on-GPU numeric if it is a
       feature/numeric knob).
+- [ ] Launcher cache key carries every input that changes the compiled binary, and
+      nothing that doesn't. Prefer deriving it from the built spec. A key computed
+      from the problem without building the spec must carry each selector's
+      resolved output, not raw shape fields or env values, and needs a test that
+      key equality ⇔ built-spec equality. Attention example:
+      [Appendix B, step 4](#b-add-a-new-knob-to-a-spec).
 
 ### C. New feature / enablement
 
@@ -301,9 +307,11 @@ documented in [library/builders/common/README.md](library/builders/common/README
    knobs may stay unwired (env/flag-only) until a sweep proves a win.
    **Add the predicate's resolved output to the launcher cache key**
    (`_tiled_cache_key` / `_tiled_3d_cache_key` in
-   [attention_unified.py](library/kernels/common/attention_unified.py)). The key is
-   computed per launch without building the spec, so a selector missing from it lets
-   two shapes that build different kernels share one cached binary.
+   [attention_unified.py](library/kernels/common/attention_unified.py), or `_cache_key`
+   for a knob wired into the scalar path), unless an existing key entry already
+   implies it. The key is computed per launch without building the spec, so a
+   selector missing from it lets two shapes that build different kernels share one
+   cached binary.
    [test_attention_tiled_cache_key.py](library/tests/test_attention_tiled_cache_key.py)
    sweeps the selector thresholds and fails when key equality and built-spec equality
    disagree.

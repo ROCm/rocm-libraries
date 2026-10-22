@@ -35,6 +35,9 @@ from kernels.common import attention_unified as au
 from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250Spec2D,
 )
+from kernels.gfx1250.attention_tiled_3d import (
+    UnifiedAttention3DTiledSpec as Gfx1250Spec3D,
+)
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx942Spec2D,
 )
@@ -79,10 +82,11 @@ def routing_env(monkeypatch):
 
 def _norm_spec(spec):
     """Spec identity as the emitter sees it: ``num_seqs`` only reaches IR
-    through ``binary_search_iters``."""
+    through ``binary_search_iters``, which the 3D decode grid does not emit."""
     fields = dataclasses.asdict(spec)
     fields.pop("num_seqs")
-    fields["binary_search_iters"] = spec.binary_search_iters
+    if not getattr(spec, "use_decode_grid", False):
+        fields["binary_search_iters"] = spec.binary_search_iters
     return fields
 
 
@@ -165,9 +169,28 @@ def _sweep(arch):
             )
 
 
+# Env states to pool per arch. Routing knobs are read on every launch and can
+# flip mid-process; pooling them catches a selector whose output only changes
+# when a knob flips.
+_ENV_STATES = {
+    "gfx942": (
+        {},
+        {"HIPDNN_GFX942_FLASH_WIDE": "0"},
+        {"HIPDNN_GFX942_FLASH_WIDE": "2"},
+    ),
+    "gfx950": (
+        {},
+        {
+            "HIPDNN_GFX950_D128_SMALL_TILE": "0",
+            "HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE": "off",
+        },
+    ),
+}
+
+
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("path", ("2d", "3d"))
-def test_key_matches_build_identity(routing_env, arch, path):
+def test_key_matches_build_identity(routing_env, monkeypatch, arch, path):
     """Key equality and build equality must coincide across the sweep.
 
     Equal key, different build: under-keying. This is the guard for the next
@@ -176,6 +199,9 @@ def test_key_matches_build_identity(routing_env, arch, path):
 
     Equal build, different key: over-keying. A raw shape field, or a selector
     the arch's builder never reads, compiles duplicate binaries.
+
+    Pooling the env states also catches a selector whose output only changes
+    when a knob flips.
     """
     if path == "2d":
         supported = au.supports_native_unified_attention_tiled
@@ -187,40 +213,52 @@ def test_key_matches_build_identity(routing_env, arch, path):
     first = {}
     key_of_build = {}
     checked = 0
-    for problem in _sweep(arch):
-        if not supported(problem, arch)[0]:
-            continue
-        try:
-            # gfx1250's 3D key builds the spec itself, so it raises too.
-            key = key_fn(problem, arch)
-            built = built_fn(problem, arch)
-        except (ValueError, NotImplementedError):
-            # Admitted by the gate but rejected by the spec; never launches.
-            continue
-        checked += 1
-        seen = first.setdefault(key, (problem, built))
-        if seen[1] != built:
-            other, other_built = seen
-            diff = {
-                name: (other_built["spec"].get(name), built["spec"].get(name))
-                for name in built["spec"]
-                if other_built["spec"].get(name) != built["spec"].get(name)
-            }
-            for name in built:
-                if name != "spec" and other_built[name] != built[name]:
-                    diff[name] = (other_built[name], built[name])
-            pytest.fail(
-                f"{arch} {path}: one key, two kernels\n  {other}\n  {problem}\n"
-                f"  differing: {diff}"
+    for env in _ENV_STATES.get(arch, ({},)):
+        for var, val in env.items():
+            monkeypatch.setenv(var, val)
+        for problem in _sweep(arch):
+            if not supported(problem, arch)[0]:
+                continue
+            try:
+                # gfx1250's 3D key builds the spec itself, so it raises too.
+                key = key_fn(problem, arch)
+                built = built_fn(problem, arch)
+            except (ValueError, NotImplementedError):
+                # Admitted by the gate but rejected by the spec; never launches.
+                continue
+            checked += 1
+            launch = (problem, env)
+            seen = first.setdefault(key, (launch, built))
+            if seen[1] != built:
+                other_launch, other_built = seen
+                diff = {
+                    name: (other_built["spec"].get(name), built["spec"].get(name))
+                    for name in built["spec"]
+                    if other_built["spec"].get(name) != built["spec"].get(name)
+                }
+                for name in built:
+                    if name != "spec" and other_built[name] != built[name]:
+                        diff[name] = (other_built[name], built[name])
+                pytest.fail(
+                    f"{arch} {path}: one key, two kernels\n"
+                    f"  {other_launch}\n  {launch}\n"
+                    f"  differing: {diff}"
+                )
+            build_id = repr(
+                sorted((name, repr(value)) for name, value in built.items())
             )
-        build_id = repr(sorted((name, repr(value)) for name, value in built.items()))
-        other_key, other = key_of_build.setdefault(build_id, (key, problem))
-        if other_key != key:
-            diff = [(i, a, b) for i, (a, b) in enumerate(zip(other_key, key)) if a != b]
-            pytest.fail(
-                f"{arch} {path}: one kernel, two keys\n  {other}\n  {problem}\n"
-                f"  differing key entries (index, a, b): {diff}"
-            )
+            other_key, other_launch = key_of_build.setdefault(build_id, (key, launch))
+            if other_key != key:
+                diff = [
+                    (i, a, b) for i, (a, b) in enumerate(zip(other_key, key)) if a != b
+                ]
+                pytest.fail(
+                    f"{arch} {path}: one kernel, two keys\n"
+                    f"  {other_launch}\n  {launch}\n"
+                    f"  differing key entries (index, a, b): {diff}"
+                )
+        for var in env:
+            monkeypatch.delenv(var, raising=False)
     assert checked > 0
 
 
@@ -257,17 +295,20 @@ def test_search_bucket_edge_splits_2d_key(routing_env, arch):
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
 def test_search_bucket_edge_splits_3d_key(routing_env, arch):
+    # Two query tokens per sequence, so the launch takes the searching prefill
+    # grid rather than the decode grid.
     base = dict(
         num_query_heads=32,
         num_kv_heads=8,
         head_size=128,
         block_size=16,
-        max_seqlen_q=1,
+        max_seqlen_q=2,
         max_seqlen_k=8192,
         dtype="bf16",
     )
-    a = P(total_q=3, num_seqs=3, **base)
-    b = P(total_q=4, num_seqs=4, **base)
+    a = P(total_q=6, num_seqs=3, **base)
+    b = P(total_q=8, num_seqs=4, **base)
+    assert not au._use_decode_grid(a, arch)
     _assert_split(au._tiled_3d_cache_key, _built_3d, a, b, "binary_search_iters", arch)
 
 
@@ -418,13 +459,17 @@ _SHARED_PAIRS = [
         P(total_q=1200, num_seqs=2, max_seqlen_q=600, max_seqlen_k=600, **_D64_GQA8),
         P(total_q=1400, num_seqs=2, max_seqlen_q=700, max_seqlen_k=700, **_D64_GQA8),
     ),
+    # The decode grid emits no search, so batch sizes in different search
+    # buckets share a binary. The decode split rule sizes segments by
+    # num_seqs * num_kv_heads, so the pair also needs a shared segment count:
+    # ns 31 and 64 both clamp to 2 segments, two buckets apart.
     *(
         (
-            f"{arch}-3d-ns4-vs-ns7",
+            f"{arch}-3d-decode-ns31-vs-ns64",
             arch,
             "3d",
-            P(total_q=4, num_seqs=4, **_D128_DECODE),
-            P(total_q=7, num_seqs=7, **_D128_DECODE),
+            P(total_q=31, num_seqs=31, **_D128_DECODE),
+            P(total_q=64, num_seqs=64, **_D128_DECODE),
         )
         for arch in ("gfx942", "gfx950")
     ),
@@ -490,14 +535,22 @@ def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
 # ---------------------------------------------------------------------------
 
 
-# gfx1250 3D floors the search at 32 iterations, so it is checked through the key
-# (test_same_outputs_share_key_and_ir) rather than mirrored here.
-_SPEC_CLASSES = (Gfx942Spec2D, Gfx942Spec3D, Gfx950Spec2D, Gfx950Spec3D, Gfx1250Spec2D)
+# (spec class, floor). gfx1250 3D floors the search at 32 iterations.
+_SPEC_CLASSES = (
+    (Gfx942Spec2D, 1),
+    (Gfx942Spec3D, 1),
+    (Gfx950Spec2D, 1),
+    (Gfx950Spec3D, 1),
+    (Gfx1250Spec2D, 1),
+    (Gfx1250Spec3D, 32),
+)
 
 
 @pytest.mark.parametrize("num_seqs", (0, 1, 2, 3, 4, 7, 8, 15, 16, 450, 1 << 20))
-@pytest.mark.parametrize("spec_cls", _SPEC_CLASSES, ids=lambda c: c.__module__)
-def test_binary_search_iters_mirrors_spec(spec_cls, num_seqs):
+@pytest.mark.parametrize(
+    "spec_cls, floor", _SPEC_CLASSES, ids=[c.__module__ for c, _ in _SPEC_CLASSES]
+)
+def test_binary_search_iters_mirrors_spec(spec_cls, floor, num_seqs):
     # binary_search_iters is a pure function of num_seqs; bypass __init__
     # validation so the comparison needs no full geometry.
     spec = object.__new__(spec_cls)
@@ -513,4 +566,4 @@ def test_binary_search_iters_mirrors_spec(spec_cls, num_seqs):
         max_seqlen_k=1,
         dtype="bf16",
     )
-    assert au._binary_search_iters(problem) == spec.binary_search_iters
+    assert au._binary_search_iters(problem, floor=floor) == spec.binary_search_iters
