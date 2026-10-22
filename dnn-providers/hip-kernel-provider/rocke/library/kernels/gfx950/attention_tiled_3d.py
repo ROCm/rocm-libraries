@@ -1595,3 +1595,50 @@ def supports_tiled_3d_spec(
         kv_storage_dtype=spec.kv_storage_dtype,
         arch=arch,
     )
+
+
+# Two bounds the reduce builder relies on without checking: one wave64 owns
+# ``head_size // 64`` output dims per thread, and the per-segment factor is cached in
+# an LDS array of ``num_segments`` floats.
+_REDUCE_THREADS = 64
+_REDUCE_MAX_SEGMENTS = 4096
+
+
+def supports_tiled_reduce_spec(
+    spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
+
+    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
+    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
+    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
+    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
+    evenly, and the segment-factor cache fits in LDS. The kernel is arch-neutral, so
+    ``arch`` is only checked to be a gfx target.
+    """
+    if not isinstance(arch, str) or not arch.startswith("gfx"):
+        return False, f"tiled reduce kernel: {arch!r} is not a gfx target"
+    if spec.dtype not in ("fp16", "bf16"):
+        return (
+            False,
+            f"tiled reduce kernel currently supports fp16/bf16 (got {spec.dtype!r})",
+        )
+    if spec.head_size <= 0 or spec.head_size % _REDUCE_THREADS != 0:
+        return (
+            False,
+            "tiled reduce kernel needs head_size divisible by "
+            f"{_REDUCE_THREADS} (got {spec.head_size})",
+        )
+    if spec.num_kv_heads < 1 or spec.num_query_heads % spec.num_kv_heads != 0:
+        return (
+            False,
+            "tiled reduce kernel needs num_query_heads divisible by num_kv_heads "
+            f"(got {spec.num_query_heads} / {spec.num_kv_heads})",
+        )
+    if spec.num_segments > _REDUCE_MAX_SEGMENTS:
+        return (
+            False,
+            f"tiled reduce kernel caches one LDS factor per segment; "
+            f"num_segments={spec.num_segments} exceeds {_REDUCE_MAX_SEGMENTS}",
+        )
+    return True, "supported"
