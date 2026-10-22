@@ -58,6 +58,19 @@ inline void unit_test_throw_hip_error(const char* call, hipError_t status)
     throw std::runtime_error(message.str());
 }
 
+inline void unit_test_throw_rocsparse_error(const char* call, rocsparse_status status)
+{
+    if(status == rocsparse_status_success)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << call << " failed: " << rocsparse_get_status_name(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
+
 namespace rocsparse_ut
 {
 #define UT_CHECK_HIP(cmd)                                             \
@@ -123,6 +136,8 @@ namespace rocsparse_ut
     }
 
     // ----- tiny device buffer RAII ------------------------------------------
+    // Both constructors throw std::runtime_error if hipMalloc or hipMemcpy fails,
+    // so ptr is null only for an empty buffer.
     template <typename T>
     struct device_vector
     {
@@ -139,7 +154,6 @@ namespace rocsparse_ut
             if(copy_status != hipSuccess)
             {
                 rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
-                ptr = nullptr;
                 unit_test_throw_hip_error("hipMemcpy", copy_status);
             }
         }
