@@ -8,8 +8,8 @@ an exception type or its message.
 Internal fallible helpers return `detail::Expected<T, E>`, a C++20 subset of the
 `std::expected` model. Values construct directly; errors use `detail::Unexpected`.
 The result provides `[[nodiscard]]`, boolean/`has_value()` checks, value access,
-and `error()` for propagation. It retains C++20 consumer compatibility; assignment
-and unused standard APIs are omitted. Layout, storage, scalar conversion and
+and `error()` for propagation. It retains C++20 consumer compatibility; unused
+standard APIs are omitted. Layout, storage, scalar conversion and
 descriptor checks use a closed failure vocabulary; numerical conversion also carries the
 destination width and signedness. Diagnostics are obtained from the failure at
 reporting boundaries, without error-message output parameters. Checks needing
@@ -36,7 +36,7 @@ a failed operation can have written part of a caller-owned output.
 
 ## Internal C++ results
 
-`detail::Expected<T, E>` in `result.hpp` owns either a value or a typed failure.
+`detail::Expected<T, E>` in `expected.hpp` owns either a value or a typed failure.
 Construct a failure with `detail::Unexpected(error)`, check `has_value()` or the
 boolean conversion, then access the active payload with `*`/`->` or `error()`.
 Accessing the inactive alternative is a programming error checked by assertions.
@@ -49,8 +49,10 @@ Constructors preserve payload-based `noexcept` and support in-place values and
 move-only payloads. Observers preserve constness and value category.
 
 This is an internal value-or-error interface for C++20, with no source or ABI
-compatibility promise. It deliberately omits assignment, void values, converting
+compatibility promise. It deliberately omits void values, converting
 result constructors, throwing `value()` access, fallback access, comparisons, and
 monadic operations. Propagate a value or tagged failure explicitly when changing
-result types. Assignment is disabled so throwing payload assignment cannot leave
-a result's variant valueless; construct another result instead.
+result types. Copy and move assignment require both payloads to have nonthrowing move
+constructors and support the corresponding assignment. This keeps an active
+payload present when copying a replacement throws. Add and test `Expected<void, E>`
+alongside the first check that needs to return only success or an error.
