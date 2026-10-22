@@ -360,6 +360,13 @@ void testing_preconditioner_all(Arguments argus)
     T diff = x_host.Norm();
     std::cout << "diff = " << diff << std::endl;
 
+    // VariablePreconditioner applies its next preconditioner on every Solve()
+    if(precond != "VariablePreconditioner")
+    {
+        T tol = std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+        EXPECT_LE(diff, tol * x_acc.Norm()) << precond << " on the accelerator and the host";
+    }
+
     ls.Clear();
     delete p;
     if(mcilu_p != NULL)
