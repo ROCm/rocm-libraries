@@ -654,6 +654,164 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnPerThreadStre
     executePackagedKernel(hipStreamPerThread);
 }
 
+// ---------------------------------------------------------------------------
+// The reset sweep reaches the attention pack too
+//
+// Device-side complement to TestIngestorPacksModuleCacheOwnership, which cannot exercise a
+// live module.
+// ---------------------------------------------------------------------------
+
+// Graph::sdpa needs HIPDNN_ENABLE_SDPA, which is independent of
+// HIPDNN_ENABLE_KERNEL_INGESTOR; without this guard an SDPA-off build fails to compile.
+#ifdef HIPDNN_ENABLE_SDPA
+
+namespace
+{
+
+/// One shipped, aligned, causal BF16 variant of the pack. kernelMatches requires an exact
+/// shape match against the shipped descriptors, so the shape must be one the pack ships.
+struct AttentionDenseFixture
+{
+    std::string engineName;
+    /// The only arch the pack ships for; other devices skip.
+    std::string servedArch;
+    int64_t batch;
+    int64_t numQueryHeads;
+    int64_t numKvHeads;
+    int64_t seqLen;
+    int64_t headSize;
+};
+
+/// Builds a single-node BSHD SDPA graph (the layout the pack requires) pinned to
+/// `fixture.engineName`.
+std::shared_ptr<Graph> buildAttentionDenseGraph(const AttentionDenseFixture& fixture)
+{
+    auto graph = std::make_shared<Graph>();
+    graph->set_io_data_type(DataType::BFLOAT16)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> qDims{
+        fixture.batch, fixture.numQueryHeads, fixture.seqLen, fixture.headSize};
+    const std::vector<int64_t> kvDims{
+        fixture.batch, fixture.numKvHeads, fixture.seqLen, fixture.headSize};
+
+    auto q = Graph::tensor(TensorAttributes()
+                               .set_name("Q")
+                               .set_dim(qDims)
+                               .set_stride(generateStrides(qDims))
+                               .set_data_type(DataType::BFLOAT16));
+    auto k = Graph::tensor(TensorAttributes()
+                               .set_name("K")
+                               .set_dim(kvDims)
+                               .set_stride(generateStrides(kvDims))
+                               .set_data_type(DataType::BFLOAT16));
+    auto v = Graph::tensor(TensorAttributes()
+                               .set_name("V")
+                               .set_dim(kvDims)
+                               .set_stride(generateStrides(kvDims))
+                               .set_data_type(DataType::BFLOAT16));
+
+    SdpaAttributes attrs;
+    attrs.set_causal_mask(true).set_attn_scale(1.0F
+                                               / std::sqrt(static_cast<float>(fixture.headSize)));
+    auto [o, stats] = graph->sdpa(q, k, v, attrs);
+    static_cast<void>(stats);
+    o->set_name("O").set_output(true).set_data_type(DataType::BFLOAT16);
+
+    graph->set_preferred_engine_id_ext(fixture.engineName);
+    return graph;
+}
+
+} // namespace
+
+class IntegrationGpuKernelIngestorAttentionDenseResetP
+    : public hip_kernel_provider::test_utilities::
+          IntegrationGraphVerificationHarness<float, AttentionDenseFixture>
+{
+protected:
+    /// Runs the pinned graph to completion, asserting the named engine actually served it.
+    void executeOnPinnedAttentionEngine(Graph& graph, const std::string& engineName)
+    {
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId),
+                  rankedEngineIds.end())
+            << engineName << " did not offer itself for the pinned graph";
+
+        result = graph.create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t servingEngineId = 0;
+        ASSERT_EQ(graph.get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
+        ASSERT_EQ(servingEngineId, engineId)
+            << "engine id " << servingEngineId << " served the pinned graph, not " << engineName;
+
+        // ASM SDPA forward suites' BF16 tolerance; only needs to rule out garbage from a
+        // dropped or corrupted module.
+        constexpr float BF16_ATTENTION_TOLERANCE = 1e-2f;
+        GraphVerificationContext context(graph);
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& output : node.getNodeOutputTensorAttributes())
+            {
+                if(!output->get_is_virtual())
+                {
+                    registerValidator(context, output, BF16_ATTENTION_TOLERANCE);
+                }
+            }
+        });
+        verifyBuiltGraph(context, /*seed=*/0);
+    }
+};
+
+/// Runs, resets every pack's module cache, then runs again: a reset that crashed,
+/// corrupted the cache, or dropped a module a live plan still needs fails the second run.
+TEST_P(IntegrationGpuKernelIngestorAttentionDenseResetP, SurvivesAResetAfterFirstDispatch)
+{
+    const auto& fixture = GetParam();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_stream);
+
+    if(arch != fixture.servedArch)
+    {
+        GTEST_SKIP() << fixture.engineName << " ships for " << fixture.servedArch
+                     << " only; this device is " << arch;
+    }
+
+    {
+        auto graph = buildAttentionDenseGraph(fixture);
+        ASSERT_NO_FATAL_FAILURE(executeOnPinnedAttentionEngine(*graph, fixture.engineName));
+    }
+
+    ASSERT_EQ(resetProviderModuleCaches(), "");
+
+    {
+        auto graph = buildAttentionDenseGraph(fixture);
+        ASSERT_NO_FATAL_FAILURE(executeOnPinnedAttentionEngine(*graph, fixture.engineName));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    IntegrationGpuKernelIngestorAttentionDenseResetP,
+    ::testing::Values(
+        // hipkernel:gfx950_attention_dense.kdp.json: BF16, causal, batch=1, Sq=Skv=512,
+        // Hq=32, Hkv=8, D=128, ragged=0 (512 % 256 == 0 and 512 % block_n(64) == 0).
+        AttentionDenseFixture{"hipkernel:Gfx950AttentionDense", "gfx950", 1, 32, 8, 512, 128}),
+    [](const ::testing::TestParamInfo<AttentionDenseFixture>& info) {
+        return info.param.servedArch;
+    });
+
+#endif // HIPDNN_ENABLE_SDPA
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
