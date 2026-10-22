@@ -83,6 +83,7 @@ _FORW_BIT = {"fwd": 1, "dgrad": 2}
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "int8",
@@ -221,15 +222,21 @@ def parse_miopen_cmd(cmd: str):
     import shlex
 
     tokens = shlex.split(cmd)
-    driver_idx = next(
-        (
-            i
-            for i, t in enumerate(tokens)
-            if t.split("/")[-1].lower() in _MIOPEN_DTYPE_MAP
-        ),
-        None,
-    )
-    if driver_idx is None:
+
+    # Strip binary path (anything before the driver keyword).
+    driver_kw = None
+    driver_idx = None
+    for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
+        key = t.split("/")[-1].lower()
+        if key in _MIOPEN_DTYPE_MAP:
+            driver_kw = key
+            driver_idx = i
+            break
+    if driver_kw is None:
         raise ValueError(
             f"No MIOpenDriver keyword found in command "
             f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
@@ -521,8 +528,8 @@ def _build_jobs(specs):
 def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> int:
     """Bring ``cache`` up to date for ``specs``; compile only what changed."""
     from benchmarks.common.kernel_sweep import compile_jobs
-    from kernels.conv.aot_jobs import build_kernel
-    from kernels.conv.direct_aot_jobs import build_direct_job
+    from kernels.conv.aot_jobs import kernel_for_job
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
 
     try:
         groups = _build_jobs(specs)
@@ -538,7 +545,7 @@ def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> in
             compile_jobs(
                 cache=cache,
                 all_jobs=all_jobs,
-                build=build_direct_job if direct else build_kernel,
+                build=direct_kernel_for_job if direct else kernel_for_job,
                 arch=arch,
                 dtype=dtype,
                 directions=sorted({j.identity.direction for j in all_jobs}),

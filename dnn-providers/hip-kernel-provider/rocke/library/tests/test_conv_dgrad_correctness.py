@@ -603,6 +603,74 @@ class TestConvDgradCorrectness(unittest.TestCase):
             label="fp16 grouped g4 split_k=auto",
         )
 
+    def test_bf16_depthwise_large_filter(self):
+        """Depthwise (cpg=kpg=1) dgrad: a one-column GEMM per group, every
+        operand scalar. A tall, asymmetric filter with per-axis "same"
+        padding pins the separate Y/X and pH/pW decode."""
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "14",
+            "--Wi",
+            "14",
+            "--C",
+            "32",
+            "--K",
+            "32",
+            "--Y",
+            "11",
+            "--X",
+            "3",
+            "--pH",
+            "5",
+            "--pW",
+            "1",
+            "--groups",
+            "32",
+            "--split-k",
+            "1",
+            label="bf16 depthwise g32 11x3",
+        )
+
+    def test_fp16_depthwise_stride2(self):
+        """Depthwise dgrad on the stride-2 tilde decomposition path."""
+        if ARCH not in _MFMA_ARCHES:
+            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "15",
+            "--Wi",
+            "13",
+            "--C",
+            "64",
+            "--K",
+            "64",
+            "--Y",
+            "5",
+            "--X",
+            "3",
+            "--pH",
+            "2",
+            "--pW",
+            "0",
+            "--sH",
+            "2",
+            "--sW",
+            "2",
+            "--groups",
+            "64",
+            "--split-k",
+            "1",
+            label="fp16 depthwise g64 stride=2",
+        )
+
 
 def _count_vector_buffer_loads(ll: str) -> int:
     """Number of vector-typed raw buffer loads in the lowered IR (dY free axis)."""
@@ -1208,6 +1276,175 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         self.assertEqual(tuple(got.shape), tuple(ref.shape))
         delta = (got.float() - ref).abs().max().item()
         self.assertLess(delta / ref.abs().max().item(), 2e-2)
+
+
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradPatch(unittest.TestCase):
+    """The patch-embedding dgrad (``DgradConvSpec.patch``) against torch.
+
+    The parity configs only show that both engines emit the same IR; these
+    check the dX it stores: both store epilogues, partial M/N tiles, a K tail
+    (K not a multiple of tile_k: the tail lands on y = Y and reads no W row),
+    stride > filter (pixels no patch covers stay zero), dX runs of X*C that
+    are odd or 2 mod 4 at narrow vector widths, and a width-folded ViT stem
+    (``fold_width``), checked against the unfolded problem's reference.
+    """
+
+    def _check(
+        self,
+        problem,
+        *,
+        fold=False,
+        epilogue="cshuffle",
+        vec_bc=None,
+        tile_m=128,
+        tile_n=64,
+        tile_k=64,
+        dtype="bf16",
+    ):
+        import torch
+
+        sys.path.insert(0, os.path.abspath(_PYDIR))
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            fold_width,
+            is_valid_dgrad_spec,
+        )
+        from rocke.core.arch import ArchTarget
+
+        p = problem
+        run = fold_width(p) if fold else p
+        if fold:
+            self.assertNotEqual(run, p, "the case is meant to fold")
+        atom = ArchTarget.from_gfx(ARCH).mma.select_largest_k(
+            family="mma", a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
+        )
+        spec = DgradConvSpec(
+            problem=run,
+            name="rocke_test_dgrad_patch",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=atom.k,
+            wave_size=64,
+            pipeline="mem",
+            epilogue=epilogue,
+            vector_size_a=8,
+            vector_size_b=vec_bc,
+            vector_size_c=vec_bc if epilogue == "cshuffle" else None,
+            patch=True,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, reason)
+        spec.validate()
+        got = _dgrad_run_inprocess(spec, dtype, seed=0)
+
+        # _dgrad_run_inprocess's inputs, regenerated: the folded tensors hold
+        # the unfolded ones' bytes, so they are the same values reshaped.
+        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+        torch.manual_seed(0)
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+        W = torch.empty(p.K, p.Y, p.X, p.C).uniform_(-1.0, 1.0).to(td)
+        ref = torch.nn.grad.conv2d_input(
+            (p.N, p.C, p.Hi, p.Wi),
+            W.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            stride=(p.sH, p.sW),
+        ).permute(0, 2, 3, 1)
+        got = got.float().reshape(ref.shape)
+        self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
+        delta = (got - ref).abs().max().item()
+        self.assertLess(
+            delta / ref.abs().max().item(), 2e-2, f"max |dX - ref| = {delta}"
+        )
+        # Every pixel no patch covers is exactly zero (the caller's memset).
+        uncovered = ref == 0
+        if uncovered.any():
+            self.assertEqual(got[uncovered].abs().max().item(), 0.0)
+
+    @staticmethod
+    def _problem(**kw):
+        from kernels.common.conv_implicit_gemm import ConvProblem
+
+        return ConvProblem(**kw)
+
+    def test_stride_equals_filter_cshuffle(self):
+        # Parity config 34's problem: M = 4*8*8 = 256 (two M tiles),
+        # N = Y*X*C = 48 (a partial N tile), K = 64.
+        self._check(
+            self._problem(N=4, Hi=32, Wi=32, C=3, K=64, Y=4, X=4, sH=4, sW=4),
+            vec_bc=4,
+        )
+
+    def test_stride_gaps_default_epilogue(self):
+        # Parity config 35's problem (stride 3 > filter 2): a third of the dX
+        # rows and columns take no tap; and a height that leaves an edge row.
+        self._check(
+            self._problem(N=2, Hi=31, Wi=30, C=4, K=32, Y=2, X=2, sH=3, sW=3),
+            epilogue="default",
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+        )
+
+    def test_stride_gaps_cshuffle(self):
+        self._check(
+            self._problem(N=2, Hi=31, Wi=30, C=4, K=32, Y=2, X=2, sH=3, sW=3),
+            vec_bc=8,
+            tile_k=32,
+        )
+
+    def test_k_tail(self):
+        # K = 72 is not a multiple of tile_k = 64: the tail of the second K
+        # tile must read no W row (ydot = 1 lands on y = Y).
+        for epilogue in ("cshuffle", "default"):
+            with self.subTest(epilogue=epilogue):
+                self._check(
+                    self._problem(N=2, Hi=34, Wi=35, C=3, K=72, Y=4, X=4, sH=4, sW=4),
+                    epilogue=epilogue,
+                    vec_bc=4 if epilogue == "cshuffle" else None,
+                )
+
+    def test_odd_run_scalar_width(self):
+        # X*C = 9 and Y*X*C = 27: odd runs, stored one element at a time.
+        self._check(
+            self._problem(N=3, Hi=27, Wi=30, C=3, K=40, Y=3, X=3, sH=3, sW=3),
+            vec_bc=1,
+        )
+
+    def test_run_two_mod_four(self):
+        # X*C = 18: a run of two elements per vector, then a 2-wide tail.
+        self._check(
+            self._problem(N=2, Hi=30, Wi=30, C=6, K=64, Y=3, X=3, sH=3, sW=3),
+            vec_bc=2,
+        )
+
+    def test_folded_vit_stem(self):
+        # 16x16/s16 at 224: folds to C = 48 with X = 1; one record of
+        # 16*48 = 768 columns, against the unfolded reference.
+        self._check(
+            self._problem(N=2, Hi=224, Wi=224, C=3, K=768, Y=16, X=16, sH=16, sW=16),
+            fold=True,
+            tile_n=128,
+            vec_bc=8,
+        )
+
+    def test_folded_partial_fold(self):
+        # 14x14/s14 at 196: Wi/14 = 14, so the fold is the full 14; and a
+        # K tail (K = 200).
+        self._check(
+            self._problem(N=1, Hi=196, Wi=196, C=3, K=200, Y=14, X=14, sH=14, sW=14),
+            fold=True,
+            vec_bc=2,
+        )
 
 
 if __name__ == "__main__":
