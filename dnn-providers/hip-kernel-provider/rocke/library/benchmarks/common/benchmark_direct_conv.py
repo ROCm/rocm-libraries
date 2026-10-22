@@ -32,6 +32,7 @@ grouped dgrad forms:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
 import os
 import sys
@@ -2233,6 +2234,33 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
     return _run_from_cache(args, arch, cases, cache, directions)
 
 
+_TENSOR_LIMIT = 1 << 31
+
+
+def _batch_chunks(p, direction: str) -> int:
+    """Smallest number of equal batch chunks that keeps every activation under 2 GiB."""
+    if direction == "wgrad":
+        return 1
+    elem = 2
+    per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
+    for n_chunks in range(1, p.N + 1):
+        if p.N % n_chunks == 0 and per_image * (p.N // n_chunks) < _TENSOR_LIMIT:
+            return n_chunks
+    return 1
+
+
+def _chunk_buffers(ptrs, sizes, inputs, out_name, n_chunks, i):
+    """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``."""
+    if n_chunks == 1:
+        return ptrs, sizes
+    ptrs, sizes = dict(ptrs), dict(sizes)
+    for name in [n for n in inputs if n != "w"] + [out_name]:
+        chunk = sizes[name] // n_chunks
+        ptrs[name] = ptrs[name] + i * chunk
+        sizes[name] = chunk
+    return ptrs, sizes
+
+
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     """Benchmark every cached kernel that can run each case. Nothing is compiled.
 
@@ -2264,8 +2292,12 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
+            # A problem whose tensors pass the kernels' 2 GiB (i32 offset)
+            # limit runs as equal batch chunks, each launch on its slice.
+            n_chunks = _batch_chunks(p, direction)
+            p_run = p if n_chunks == 1 else dataclasses.replace(p, N=p.N // n_chunks)
             plans, rejected = _filter_variants(
-                *direct_plans(cache, p, direction, arch), variants
+                *direct_plans(cache, p_run, direction, arch), variants
             )
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
@@ -2346,9 +2378,15 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                                 kernel_name=st.kernel_name,
                                 signature=st.signature,
                             ),
-                            launch_values(st, ptrs, sizes),
+                            launch_values(
+                                st,
+                                *_chunk_buffers(
+                                    ptrs, sizes, inputs, out_name, n_chunks, i
+                                ),
+                            ),
                             LaunchConfig(grid=st.grid, block=st.block, stream=0),
                         )
+                        for i in range(n_chunks)
                         for st in plan.steps
                     ]
                 except HipError as e:
