@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt_datatype2string.hpp"
+#include "w4a16_datagen.hpp"
 #include <hipblaslt/client/MatmulPreparation.hpp>
 
 #include <gtest/gtest.h>
@@ -426,4 +428,35 @@ TEST(MatmulPreparation, CountsEveryBatchOfByteEncodedMxScales)
                                        * static_cast<size_t>(problem.batchCount);
 
     EXPECT_EQ(preparation.rotatingBytes, expectedBytes);
+}
+
+TEST(MatmulPreparation, PreservesInt4GroupScaleModesAndAllocation)
+{
+    for(auto bType : {HIP_R_16F, HIP_R_16BF})
+        for(int group = 0; group < 3; ++group)
+            for(bool zeroPoint : {false, true})
+            {
+                auto arguments   = baseArguments();
+                arguments.transA = 'T';
+                arguments.a_type = static_cast<hipDataType>(HIP_R_4I);
+                arguments.b_type = arguments.c_type = arguments.d_type = bType;
+                arguments.M[0]                                         = 9;
+                arguments.K[0]                                         = 384;
+                arguments.lda[0]                                       = 384;
+                arguments.ldb[0]                                       = 384;
+                arguments.ldc[0] = arguments.ldd[0] = 9;
+                const int firstMode                 = bType == HIP_R_16BF
+                                                          ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT
+                                                          : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT;
+                const int mode                      = firstMode + group + (zeroPoint ? 3 : 0);
+                arguments.scaleA                    = static_cast<hipblaslt_scaling_format>(mode);
+                const auto   preparation            = prepare(arguments);
+                const size_t scaleBytes
+                    = w4a16::scaleBytes(9, 384 / w4a16GroupSize(arguments.scaleA), zeroPoint);
+                EXPECT_EQ(hipblaslt::client::matmulScaleMode(arguments.scaleA), mode);
+                EXPECT_EQ(preparation.problems.front().a.scaleElements, scaleBytes);
+                EXPECT_FALSE(preparation.problems.front().a.mxScaleStorage);
+                arguments.scaleA = hipblaslt_scaling_format::none;
+                EXPECT_EQ(preparation.rotatingBytes - prepare(arguments).rotatingBytes, scaleBytes);
+            }
 }

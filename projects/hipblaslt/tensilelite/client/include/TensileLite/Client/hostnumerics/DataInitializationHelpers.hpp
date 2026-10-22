@@ -173,6 +173,13 @@ namespace TensileLite
                 throw std::runtime_error("Unsupported TensileLite MX data initialization.");
             }
 
+            void initializeMxDataIndependently(rocisa::DataType dataType,
+                                               rocisa::DataType scaleType,
+                                               InitMode         dataInitialization,
+                                               InitMode         scaleInitialization,
+                                               uint64_t         seed,
+                                               const roc::hostnumerics::MxTensor& generated);
+
             inline roc::hostnumerics::MxTensor generateMxData(rocisa::DataType         dataType,
                                                               rocisa::DataType         scaleType,
                                                               roc::hostnumerics::Shape shape,
@@ -181,7 +188,8 @@ namespace TensileLite
                                                               size_t   blockSize,
                                                               InitMode dataInitialization,
                                                               InitMode scaleInitialization,
-                                                              uint64_t seed)
+                                                              uint64_t seed,
+                                                              bool     independentData = false)
             {
                 using roc::hostnumerics::generateMx;
                 using roc::hostnumerics::MxDataGeneration;
@@ -191,7 +199,10 @@ namespace TensileLite
                 if(leadingDimension > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
                     throw std::runtime_error("TensileLite MX leading dimension exceeds ptrdiff_t.");
                 MxDataGeneration dataGeneration
-                    = mxDataGeneration(dataInitialization, hostDataType, shape, seed);
+                    = mxDataGeneration(independentData ? InitMode::Zero : dataInitialization,
+                                       hostDataType,
+                                       shape,
+                                       seed);
 
                 MxGenerationOptions options;
                 options.dataType         = hostDataType;
@@ -199,8 +210,17 @@ namespace TensileLite
                 options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
                 options.blockAxis        = blockAxis;
                 options.blockSize        = blockSize;
-                options.scale            = mxScaleGenerationMode(scaleInitialization);
-                return generateMx(std::move(shape), std::move(dataGeneration), options);
+                options.scale  = independentData ? roc::hostnumerics::MxScaleGenerationMode::One
+                                                 : mxScaleGenerationMode(scaleInitialization);
+                auto generated = generateMx(std::move(shape), std::move(dataGeneration), options);
+                if(independentData)
+                    initializeMxDataIndependently(dataType,
+                                                  scaleType,
+                                                  dataInitialization,
+                                                  scaleInitialization,
+                                                  seed,
+                                                  generated);
+                return generated;
             }
         } // namespace hostnumerics::detail
     } // namespace Client
