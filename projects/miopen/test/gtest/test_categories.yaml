@@ -666,14 +666,17 @@ exclude_gpu:
 
   exclude_gpu_gfx115X_linux:
     test_patterns:
-      # Fails on Linux gfx1151 (PR #13107 run 39358709264): "no fdeep .tn.model files found" in the system db.
+      # Fails on Linux gfx1151 (ALMIOPEN-2966, PR #13107 run 39358709264): "no fdeep .tn.model files found" in the system db.
       # AI heuristic models ship only for gfx908/gfx90a/gfx942/gfx950, and TheRock's Linux install keeps only the
-      # runner target's db files. Passes on Windows gfx1151. Remove once the test skips archs without bundled models.
+      # runner target's db files. Passes on Windows gfx1151. Remove when ALMIOPEN-2966 makes the test skip archs without models.
       - "GPU_ConvAIModelLoad_FP32*"
-      # OOM-killed on the 7.5 GB Linux gfx1151 runner strixhalo-12 (ALMIOPEN-2964): SIGKILL / exit 137 in PR #13107 runs
-      # 39480689944 and 39358709264; the same cases pass on the 31-125 GB gfx1151 hosts. Remove when ALMIOPEN-2964 closes.
+      # OOM-killed on the 7.5 GB Linux gfx1151 runners strixhalo-12 and strixhalo-10 (ALMIOPEN-2964): SIGKILL / exit 137 in
+      # PR #13107 runs 39358709264, 39480689944 and 39529845480; the same cases pass on the 31-125 GB gfx1151 hosts.
+      # Remove when ALMIOPEN-2964 closes.
       - "CPU_PerfDb_NONE.*"
       - "Full/GPU_na_*nchw_8_480_128_256_*" # largest BN+activation shape (126M elements, ~500 MB per FP32 tensor)
+      - "GPU_BN_Spatial_FP32.MIOpen3900Regression"           # 1x2048x512x512 FP32, ~2.1 GB per tensor
+      - "Full/GPU_BN_Spatial_FP32.TestFloat32/n8c192h256w512" # 201M elements, ~800 MB per FP32 tensor
     labels:
       - "quick"
       - "standard"
