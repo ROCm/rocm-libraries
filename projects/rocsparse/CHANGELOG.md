@@ -19,7 +19,7 @@ Documentation for rocSPARSE is available at
 ### Changed
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
-* GoogleTest 1.11.0 or later must be installed before building the clients. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* GoogleTest 1.11.0 or later must be installed before building the client tests (`BUILD_CLIENTS_TESTS`). Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * `install.sh -d` no longer builds and installs GoogleTest from source.
 * The 24 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/rocsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `ROCSPARSE_TEST_MIRROR`. The `--matrices-dir` and `--matrices-dir-install` options of `install.sh` and the `--matrices-dir` option of `rmake.py` still download missing matrices.
 
@@ -45,6 +45,10 @@ Documentation for rocSPARSE is available at
 * Fixed an invalid kernel launch in legacy `rocsparse_Xbsr2csr` and the 64-bit BSR-to-CSR conversion, where the 1024-thread kernels overflowed the 32-bit work-item grid limit at about 4.2 million block rows because the grid was not clamped.
 * Fixed an integer overflow in the SELL SpMV kernels used by `rocsparse_v2_spmv`. With 32-bit indices, the row index of each thread was computed in 32-bit arithmetic, so for matrices with close to `2^31` rows the threads past the last row wrapped to a negative row index that passed the `row < m` check. Those threads could read past the end of the slice offsets, and the non-transposed kernel could write `y` at a negative index. The row index is now computed in 64-bit arithmetic. The transposed kernel for slice sizes up to 128 also no longer reads `x` for threads past the last row.
 * Fixed an overflow issue in the COO atomic SpMV kernels used by `rocsparse_spmv` and `rocsparse_v2_spmv` for COO and COO AoS matrices. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-ID calculation could overflow and prevent some nonzeros from being accumulated. The kernels now compute element IDs in 64-bit arithmetic.
+* Fixed `install.sh --matrices-dir-install` and `--matrices-dir`, which reported success when a test matrix couldn't be extracted, downloaded or converted.
+* Fixed the test matrix conversion with `ROCSPARSE_MTX_DIR`, which moved the `.mtx` files out of that directory and deleted them after conversion. They are now copied, and matrices missing from that directory are taken from the DVC archives.
+* Fixed the test matrix conversion in address sanitizer builds, where the converter failed to load the shared address sanitizer runtime.
+* Fixed the test matrix converter, which accepted a `.mtx` file with fewer entries than its header declares.
 
 ## rocSPARSE 5.1.0 for ROCm 10.1
 

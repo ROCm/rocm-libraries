@@ -54,7 +54,7 @@ cmake --build build/release --parallel
 
 Out-of-source builds land in `build/<release|debug|release-debug>/clients/staging/`.
 
-The functional suites that read `.csr` inputs need the SuiteSparse test matrices. The `.tar.gz` archives are stored with DVC in `clients/matrices/` (remote `sparse-matrices`); after `dvc pull -R projects/rocsparse/clients/matrices`, the build above converts them into `build/<release|debug|release-debug>/clients/matrices`. If they're missing, configuration fails unless you configure with `-DALLOW_FETCH_DEPS=ON`, which downloads them from SuiteSparse.
+The functional suites that read `.csr` inputs need the SuiteSparse test matrices. The `.tar.gz` archives are stored with DVC in `clients/matrices/` (remote `sparse-matrices`); after the `dvc pull` above, the build converts them into `build/<release|debug|release-debug>/clients/matrices`. If they're missing, configuration fails unless you configure with `-DALLOW_FETCH_DEPS=ON`, which downloads them from SuiteSparse.
 
 > **Note:** If you already have the converted matrices in a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them on a rebuild. `--matrices-dir` and `--matrices-dir-install` download any missing matrices that aren't pulled with DVC:
 >
@@ -210,7 +210,8 @@ at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should fin
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
 matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`), MD5-verified and converted by
 `cmake/ClientMatrices.cmake`. The `.tar.gz` archives are stored with DVC in `clients/matrices/`
-(remote `sparse-matrices`; run `dvc pull -R projects/rocsparse/clients/matrices`). Only with
+(remote `sparse-matrices`; run `dvc pull -R projects/rocsparse/clients/matrices` from the repository
+root). Only with
 `ALLOW_FETCH_DEPS=ON` are missing archives downloaded from SuiteSparse (mirror overridable via
 `ROCSPARSE_TEST_MIRROR`). The runtime matrix
 directory is set with `--matrices-dir` or `ROCSPARSE_CLIENTS_MATRICES_DIR`.
@@ -331,7 +332,9 @@ filters exclude `*known_bug*`. The device unit binary is not invoked by `prechec
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
-**Build command pattern (Jenkins pre-checkin):**
+**Build command pattern (Jenkins pre-checkin):** unless the node's matrices cache is complete,
+Jenkins first runs `dvc pull -R projects/rocsparse/clients/matrices` (`pullMatricesCommand` in
+`.jenkins/common.groovy`).
 
 ```bash
 ./install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices \
