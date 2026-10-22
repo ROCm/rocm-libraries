@@ -21,24 +21,20 @@
  *
  * ************************************************************************ */
 #pragma once
-#include <nanobind/nanobind.h>
-#include <nanobind/stl/map.h>
-#include <nanobind/stl/string.h>
-#include <nanobind/stl/tuple.h>
-
 #include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <typeinfo>
+#include <utility>
 
 #include "hardware_caps.hpp"
 #include "helper.hpp"
-
-namespace nb = nanobind;
 
 #define MAKE(FUNCTION, ...) std::make_shared<FUNCTION>(__VA_ARGS__)
 
@@ -96,10 +92,8 @@ namespace rocisa
             return instance;
         }
 
-        void init(const nb::tuple& arch, const std::string& assemblerPath, bool debug = false)
+        void init(const IsaVersion& isaVersion, const std::string& assemblerPath, bool debug = false)
         {
-            IsaVersion isaVersion
-                = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             if(m_isainfo.find(isaVersion) != m_isainfo.end())
                 return;
             // Init ISA
@@ -116,11 +110,9 @@ namespace rocisa
             return (m_isainfo.size() > 0);
         }
 
-        void setKernel(const nb::tuple& arch, const int wavefrontSize)
+        void setKernel(const IsaVersion& isaVersion, const int wavefrontSize)
         {
             std::thread::id id = std::this_thread::get_id();
-            IsaVersion      isaVersion
-                = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             m_mutex.lock();
             m_threads[id] = std::move(KernelInfo(isaVersion, wavefrontSize));
             m_vgpridx[id] = std::move(std::map<std::string, int>());
@@ -131,13 +123,6 @@ namespace rocisa
         KernelInfo getKernel()
         {
             return m_threads[std::this_thread::get_id()];
-        }
-
-        IsaInfo getIsaInfo(const nb::tuple& arch)
-        {
-            IsaVersion isaVersion
-                = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
-            return m_isainfo[isaVersion];
         }
 
         IsaInfo getIsaInfo(const IsaVersion& isaVersion)
@@ -253,6 +238,13 @@ namespace rocisa
         std::map<std::thread::id, bool>       m_forceScaledWMMA;
     };
 
+    struct Item;
+
+    // Resolves the type name that Item::prettyPrint prints; the Python bindings install one
+    // that reports the bound Python class name.
+    using ItemTypeNameResolver = std::string (*)(const Item&);
+    void setItemTypeNameResolver(ItemTypeNameResolver resolver);
+
     struct Item
     {
     public:
@@ -304,16 +296,13 @@ namespace rocisa
             return rocIsa::getInstance().getKernel();
         }
 
-        virtual int countType(const nb::object& obj) const
-        {
-            nb::object self = nb::cast(*this);
-            return static_cast<int>(nb::isinstance(self, obj));
-        }
-
         virtual int countExactType(const std::type_info& targetType) const
         {
             return static_cast<int>(typeid(*this) == targetType);
         }
+
+        // Name of the dynamic type, as printed by prettyPrint.
+        std::string typeName() const;
 
         virtual std::string toString() const
         {
@@ -322,10 +311,7 @@ namespace rocisa
 
         virtual std::string prettyPrint(const std::string& indent = "") const
         {
-            nb::object  self = nb::cast(*this);
-            std::string s
-                = indent + nb::cast<std::string>(self.type().attr("__name__")) + " " + toString();
-            return s;
+            return indent + typeName() + " " + toString();
         }
 
         Item*       parent = nullptr;
@@ -338,14 +324,8 @@ namespace rocisa
             : Item("")
         {
         }
-
-        int countType(const nb::object& obj) const override
-        {
-            return 0;
-        }
     };
 
-    std::string isaToGfx(const nb::tuple& arch);
     std::string isaToGfx(const IsaVersion& arch);
     std::string getGlcBitName();
     std::string getSlcBitName();

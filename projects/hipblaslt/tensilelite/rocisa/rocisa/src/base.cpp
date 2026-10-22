@@ -22,14 +22,30 @@
  * ************************************************************************ */
 #include "base.hpp"
 
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/map.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+
 namespace nb = nanobind;
 
 namespace rocisa
 {
-    std::string isaToGfx(const nb::tuple& arch)
+    namespace
     {
-        return getGfxNameTuple(
-            IsaVersion{nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])});
+        ItemTypeNameResolver itemTypeNameResolver = nullptr;
+    }
+
+    void setItemTypeNameResolver(ItemTypeNameResolver resolver)
+    {
+        itemTypeNameResolver = resolver;
+    }
+
+    std::string Item::typeName() const
+    {
+        if(itemTypeNameResolver)
+            return itemTypeNameResolver(*this);
+        return demangle(typeid(*this).name());
     }
 
     std::string isaToGfx(const IsaVersion& arch)
@@ -64,9 +80,23 @@ namespace rocisa
 
 }
 
+namespace
+{
+    IsaVersion isaVersionFromTuple(const nb::tuple& arch)
+    {
+        return {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
+    }
+}
+
 void init_base(nb::module_ m)
 {
-    m.def("isaToGfx", nb::overload_cast<const nb::tuple&>(&rocisa::isaToGfx));
+    // prettyPrint reports the Python class name, so Python output matches the bound names.
+    rocisa::setItemTypeNameResolver([](const rocisa::Item& item) -> std::string {
+        return nb::cast<std::string>(nb::cast(item).type().attr("__name__"));
+    });
+
+    m.def("isaToGfx",
+          [](const nb::tuple& arch) { return rocisa::isaToGfx(isaVersionFromTuple(arch)); });
     m.def("isaToGfx", nb::overload_cast<const IsaVersion&>(&rocisa::isaToGfx));
     m.def("getGlcBitName", &rocisa::getGlcBitName);
     m.def("getSlcBitName", &rocisa::getSlcBitName);
@@ -100,16 +130,27 @@ void init_base(nb::module_ m)
                     nb::rv_policy::reference,
                     "Get instance of ISA.")
         .def("init",
-             &rocisa::rocIsa::init,
+             [](rocisa::rocIsa&    self,
+                const nb::tuple&   arch,
+                const std::string& assemblerPath,
+                bool               debug) {
+                 self.init(isaVersionFromTuple(arch), assemblerPath, debug);
+             },
              nb::arg("arch"),
              nb::arg("assemblerPath"),
              nb::arg("debug") = false,
              "Init ISA.")
         .def("isInit", &rocisa::rocIsa::isInit, "Check if any ISA is init.")
-        .def("setKernel", &rocisa::rocIsa::setKernel, "Set kernel with given ISA and wavefront.")
+        .def("setKernel",
+             [](rocisa::rocIsa& self, const nb::tuple& arch, int wavefrontSize) {
+                 self.setKernel(isaVersionFromTuple(arch), wavefrontSize);
+             },
+             "Set kernel with given ISA and wavefront.")
         .def("getKernel", &rocisa::rocIsa::getKernel, "Get current set kernel.")
         .def("getIsaInfo",
-             nb::overload_cast<const nb::tuple&>(&rocisa::rocIsa::getIsaInfo),
+             [](rocisa::rocIsa& self, const nb::tuple& arch) {
+                 return self.getIsaInfo(isaVersionFromTuple(arch));
+             },
              "Get ISA info.")
         .def("getIsaInfo",
              nb::overload_cast<const IsaVersion&>(&rocisa::rocIsa::getIsaInfo),
