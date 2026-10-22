@@ -1,16 +1,29 @@
-# GDN/KDA decode on gfx950 — load-first case study: register counts and measured speed
+# GDN/KDA decode on gfx950 — load-first case study: register counts and speed comparison
 
 Measured scope: the single-token GDN/KDA decode kernels of
-`kernels/gfx950/gdn_decode.py` before and after the warp-tiled emitter issued
-every global load first (ALGORITHM.md §4.3). Section 4 records static
-register, wave-per-SIMD and scratch counts per compiler. Section 6 records,
-without figures, how device time compared with the merge base at three batch
-sizes, with its scope, correctness gate and method. No latency or speedup
-figures appear.
-ALGORITHM.md states the rule and the exception; this file keeps the
-measurements, which change with the compiler. The register, wave and scratch
-numbers are static counts read from the gfx950 code object, not hardware
-counters.
+[`kernels/gfx950/gdn_decode.py`](../../../kernels/gfx950/gdn_decode.py) before
+and after the warp-tiled emitter issued every global load first
+([ALGORITHM.md §4.3](ALGORITHM.md#43-dataflow-and-pipeline)). Section 4 records
+static register, wave-per-SIMD and scratch counts per compiler. Section 6
+records the scope, method, correctness gate and qualitative result of a
+device-time comparison with the merge base; it publishes no speed numbers.
+[ALGORITHM.md](ALGORITHM.md) states the rule and the exception; this file keeps
+the measurements, which change with the compiler. The register, wave and
+scratch numbers are static counts read from the gfx950 code object, not
+hardware counters.
+
+## Contents
+
+- [1. Mechanism](#1-mechanism)
+- [2. Spec set](#2-spec-set)
+- [3. How the counts are read](#3-how-the-counts-are-read)
+- [4. Results](#4-results)
+  - [4.1 ROCm 7.1.0](#41-rocm-710-llvm20-comgr-sha-256-b3e6941ac89a1ba6)
+  - [4.2 ROCm 7.13](#42-rocm-713-llvm23-comgr-sha-256-dd9edec7b6e078a2)
+  - [4.3 ROCm 10 pre-release](#43-rocm-10-pre-release-llvm23-comgr-sha-256-f18da4b1298b9c6f)
+- [5. Decisions](#5-decisions)
+- [6. Measured speed](#6-measured-speed)
+- [7. Reproducing](#7-reproducing)
 
 ## 1. Mechanism
 
@@ -22,7 +35,7 @@ The register count rises on tiles where those inputs used to be loaded and
 consumed one row at a time, and falls on tiles where the earlier order kept
 intermediate values live longer.
 
-The exception (ALGORITHM.md §4.3) is keyed on the wave count: with `fuse_conv`
+The exception ([ALGORITHM.md §4.3](ALGORITHM.md#43-dataflow-and-pipeline)) is keyed on the wave count: with `fuse_conv`
 and one wave, a lane owns many V rows, so that tile keeps the interleaved order
 for each row's `v` conv inputs, each state chunk and the norm inputs. Multi-wave
 `fuse_conv` tiles hoist everything. Their per-lane cap is `512 / ceil(NW / 4)`
@@ -35,11 +48,14 @@ Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
 `f32` state, `DK = DV = 128` unless stated:
 
 - **Dispatcher tiles (114 tile and state-dtype pairs):** GDN at `Hk/Hv = 16/32`,
-  every tile in `CONFIGURED_TILES`; KDA at `32/32`, the three tiles in
-  `_TUNED_TILES_KDA`; each with bf16 and `f32` state. Dispatch accepts only a
-  16-bit state today, so the `f32` half is not reachable from a request yet.
+  every tile in [`CONFIGURED_TILES`](../../../dispatch/gdn/gfx950.py); KDA at
+  `32/32`, the three tiles in
+  [`_TUNED_TILES_KDA`](../../../dispatch/gdn/gfx950.py); each with bf16 and
+  `f32` state. Dispatch accepts only a 16-bit state today, so the `f32` half is
+  not reachable from a request yet.
 - **Auto-route fallback (4):** GDN `(1,1,1)` at `DK = DV = 64` and `192`, where
-  `DEFAULT_TILE` `(2,16,8)` is illegal (ALGORITHM.md §4.6).
+  [`DEFAULT_TILE`](../../../dispatch/gdn/gfx950.py) `(2,16,8)` is illegal
+  ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
   `(NW, WTK)` with `NW` in 1–16 and `WTK` in 1–32, with `fuse_conv`,
   `fuse_out_norm` (`rn` below) or both (`cv+rn`). The registry never builds a
@@ -51,7 +67,8 @@ load-first emitter.
 ## 3. How the counts are read
 
 The Python lowerer (`ROCKE_BACKEND=python`) emits the IR, comgr compiles it, and
-`rocke.analysis.isa.analyze_hsaco` reads the VGPR count and private-segment
+[`rocke.analysis.isa.analyze_hsaco`](../../../../platform/python/rocke/analysis/isa.py)
+reads the VGPR count and private-segment
 (scratch) bytes from the code object. Waves per SIMD are modeled, not measured:
 `min(8, 512 // VGPRs rounded up to 8)`. A change in that number below means the
 count crossed a granule boundary in that model; a case can cross more than one.
@@ -123,51 +140,52 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
   differs per compiler, so a footprint-keyed exemption would encode one
   compiler's register allocator.
 - **The scratch test holds the stable subset.**
-  `test_lowers_and_compiles_without_scratch` lowers all 228 fused cases and
+  [`test_lowers_and_compiles_without_scratch`](../../../tests/test_gdn_decode_fused.py)
+  lowers all 228 fused cases and
   compiles and holds at 0 B the 116 that ROCm 7.1, 7.13 and 10 all keep there:
   every mode on `(1,16,1)`, `(2,8,1)`, `(2,16,1)`, `(4,8,1)`, `(4,16,1)` and
   `(8,16,1)`, plus norm-only on every other legal tile except `(1,1,1)` and
   `(1,2,1)`.
-- **Tile defaults were picked on the interleaved order.** Re-run `tune.py` before
-  relying on their ranking (ALGORITHM.md §4.6).
+- **Tile defaults were picked on the interleaved order.** Re-run
+  [`tune.py`](tune.py) before relying on their ranking
+  ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 
 ## 6. Measured speed
 
-Device time of the load-first emitter was compared with the merge base
-(`153bf493555`, the interleaved order) on gfx950. This section records what was
-measured and how, and states the outcome in words; it publishes no speedup
-figures.
-
-**Result.** At the measured configurations the plain GDN and KDA paths were
-faster at every measured batch size. The fused conv + norm f32 KDA path was
-slower at batch 16 in each of three independent runs and changed little at
-batches 1 and 128. The cause was not investigated.
+The load-first emitter was timed against the merge base (`153bf493555`, the
+interleaved order) on gfx950. The two-tree A/B driver that produced the
+timings is not in this tree, so this section states the scope, method,
+correctness gate and result in words and publishes no speed numbers.
 
 **Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
 GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
 `(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
 and fused arms were built as specs directly: a dispatch request cannot ask for an
 `f32` state or for fusion today. GDN fused performance was not measured. The tile
-choices were made on the old load order (§5).
+choices were made on the old load order ([§5](#5-decisions)).
 
-**Method.** Both trees run in one process, with their arms interleaved. State,
-conv-state and output buffers rotate through at least 1 GiB per cycle, so every
-launch reads from HBM; every copy has its own cloned inputs. Timing replays a
-HIP graph. Each configuration was run three times in separate processes. The
+**Method.** Both trees run in one process, with their arms interleaved, and each
+result is the median of 3 independent runs. State, conv-state and output
+buffers rotate through at least 1 GiB per cycle, so every launch reads from
+HBM; every copy has its own cloned inputs. Timing replays a HIP graph. The
 Python lowerer and `llvm23` build both trees. The runs used the ROCm 7.13
 container.
 
 **Correctness gate.** Every timed arm is checked against the fp32 reference
 before it is timed, with tolerance `1e-2` on the max-abs error of the output
 and of the written state; for the fused-norm arm the output error is divided
-by `max(1, |reference|)` (`out_error` in `gdn_decode.py`). All 54 measured
-rows passed, and output, state and conv state were bitwise equal between the
-two trees in every row.
+by `max(1, |reference|)` ([`out_error` in `gdn_decode.py`](gdn_decode.py)). All
+54 measured cases passed, and output, state and conv state were bitwise equal
+between the two trees in every case.
+
+**Result.** The plain paths were faster at every measured configuration. Fused
+conv + norm with f32 state was slower at batch 16; the cause was not
+investigated.
 
 ## 7. Reproducing
 
 Save the block below as `regs.py` anywhere outside the tree. Run it from
-`rocke/library` once in a checkout of the merge base and once at the head, with
+[`rocke/library`](../../..) once in a checkout of the merge base and once at the head, with
 the same compiler, then join the two outputs. Each row is the kernel name,
 VGPRs, modeled waves per SIMD and scratch bytes.
 
@@ -236,6 +254,7 @@ join -t $'\t' /tmp/base.tsv /tmp/head.tsv
 
 Select the compiler with `ROCKE_COMGR_LIB=<path to libamd_comgr.so.3>` and
 `ROCKE_LLVM_FLAVOR` (`llvm20` for ROCm 7.1, `llvm23` for ROCm 7.13 and later),
-and put that ROCm's `llvm/bin` first on `PATH` so `analyze_hsaco` uses a
+and put that ROCm's `llvm/bin` first on `PATH` so
+[`analyze_hsaco`](../../../../platform/python/rocke/analysis/isa.py) uses a
 `llvm-objdump` that knows the AMDGPU target. The pool uses every CPU the process
 may run on; on a shared node, run one instance at a time.

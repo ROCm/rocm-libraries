@@ -99,22 +99,42 @@ def dtype_to_ir_type(dtype: str) -> Type:
     return types[info.name]
 
 
-# AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
-# the ``raw_ptr_buffer_load[_lds]`` intrinsics encodes the GLC and SLC
-# bits that bias the load's L1/L2 caching policy. Pass one of these
-# constants as the ``coherency`` argument to
-# ``async_buffer_load_lds_addr`` / ``buffer_load_vN_*``.
-CACHE_ALL = 0  # Cache at all levels (default).
-CACHE_GLOBAL = 1  # GLC set — skip L2; useful for one-shot loads.
-CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
-NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
-# GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same bit values
-# are SC0 (1) and NT (2).
+# AMDGPU buffer-load cache-policy bits: the AUX operand of the
+# ``raw_ptr_buffer_load[_lds]`` intrinsics. Pass one of these constants as the
+# ``coherency`` argument to ``async_buffer_load_lds_addr`` / ``buffer_load_vN_*``.
+# Bit 0 (1) is GLC on gfx90a and SC0 on gfx942 / gfx950; bit 1 (2) is SLC on
+# gfx90a and NT on gfx942 / gfx950. On gfx942 / gfx950, SC0 selects the coherence
+# scope and NT marks the data as streaming; for loads, NT caches the same with or
+# without SC0.
+CACHE_ALL = 0  # no bits: the default caching
+CACHE_GLOBAL = 1  # GLC / SC0
+CACHE_STREAM = 2  # SLC / NT: streaming (non-temporal) data
+NON_TEMPORAL = 3  # GLC + SLC / SC0 + NT
 #
 # Not the same thing as ``TemporalHint.STREAMING`` on ``global_load_vN`` /
 # ``global_store_vN``. That hint emits LLVM ``!nontemporal`` and the backend
 # picks the bits per arch: on gfx942 / gfx950 it sets NT only, i.e. the bits
 # of CACHE_STREAM, NOT NON_TEMPORAL (which also sets SC0).
+
+# Policy names, as kernel spec fields spell them (e.g. ``kv_cache_policy``).
+CACHE_POLICY_NAMES = ("all", "global", "stream", "nt")
+
+
+def cache_policy_from_name(name: str) -> int:
+    """The cache-policy bits of a :data:`CACHE_POLICY_NAMES` name: "all" ->
+    :data:`CACHE_ALL`, "global" -> :data:`CACHE_GLOBAL`, "stream" ->
+    :data:`CACHE_STREAM`, "nt" -> :data:`NON_TEMPORAL`.
+
+    C twin: ``rocke_cache_policy_from_name`` in ``rocke/ir.h``.
+    """
+    bits = dict(
+        zip(CACHE_POLICY_NAMES, (CACHE_ALL, CACHE_GLOBAL, CACHE_STREAM, NON_TEMPORAL))
+    )
+    if name not in bits:
+        raise ValueError(
+            f"cache policy must be one of {', '.join(CACHE_POLICY_NAMES)} (got {name!r})"
+        )
+    return bits[name]
 
 
 class TemporalHint(enum.Enum):
@@ -285,6 +305,109 @@ def _is_flag_ptr(t: "Type") -> bool:
     disagree on the flag's address and width.
     """
     return isinstance(t, PtrType) and t.space == "global" and t.pointee.name == "i32"
+
+
+# ``arith.cmp`` predicates: the signed orderings, equality, and one unsigned
+# ordering (``ult``, which reads both operands as unsigned at their width).
+_INT_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne", "ult")
+# ``arith.add`` overflow flag: ``nsw`` (no signed wrap, the default when the
+# attr is absent) or ``nuw`` (no unsigned wrap).
+_INT_ADD_WRAPS = ("nsw", "nuw")
+
+
+def _int_add_wrap_error(wrap: Any, operand_type: str) -> Optional[str]:
+    """The error for an ``arith.add`` ``wrap`` attr on operands of type
+    ``operand_type`` (a type name), or None when it is valid.
+
+    Absent (None) means ``nsw``. ``nuw`` is ``add_nuw``'s form, so it takes the
+    builder's operands: i32 or i64. The verifier and both lowerings use it, and
+    the C++ engine reports the same texts.
+    """
+    if wrap is None:
+        return None
+    if not isinstance(wrap, str):
+        return "arith.add: wrap must be the string 'nsw' or 'nuw'"
+    if wrap not in _INT_ADD_WRAPS:
+        return f"arith.add: unknown wrap '{wrap}'"
+    if wrap == "nuw" and operand_type not in ("i32", "i64"):
+        return f"arith.add: wrap 'nuw' needs i32 or i64 operands, got {operand_type}"
+    return None
+
+
+def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
+    """The error for an ``arith.cmp`` ``pred`` attr on operands of type
+    ``operand_type`` (a type name), or None when it is valid.
+
+    Absent (None) means ``lt``. ``ult`` is ``cmp_ult``'s form, so it takes the
+    builder's operands: i32 or i64. The C++ verifier reports the same texts.
+    """
+    if pred is None:
+        return None
+    if not isinstance(pred, str):
+        return "arith.cmp: pred must be a string"
+    if pred not in _INT_CMP_PREDICATES:
+        return f"arith.cmp: unknown pred '{pred}'"
+    if pred == "ult" and operand_type not in ("i32", "i64"):
+        return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
+    return None
+
+
+# ``arith.assume_range`` integer attrs, in the order their type is checked.
+_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "lo", "hi", "hi_plus")
+
+
+def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
+    """Every rule an ``arith.assume_range`` marker's attrs break, in order.
+
+    The one home of the marker's attr rules: the builder raises the first
+    message and the verifier reports all of them. The C++ verifier emits the
+    same texts. ``num_operands`` is 2 when the end is a runtime value
+    (``hi_value``) and 1 otherwise.
+    """
+    errors = [
+        f"arith.assume_range: {key} must be an integer"
+        for key in _ASSUME_RANGE_INT_ATTRS
+        if key in attrs
+        and (not isinstance(attrs[key], int) or isinstance(attrs[key], bool))
+    ]
+    if errors:
+        # The value rules below compare these attrs as integers.
+        return errors
+    multiple_of = attrs.get("multiple_of", 1)
+    residue = attrs.get("residue", 0)
+    if multiple_of < 1:
+        errors.append(
+            f"arith.assume_range: multiple_of must be >= 1, got {multiple_of}"
+        )
+    elif not 0 <= residue < multiple_of:
+        errors.append(
+            f"arith.assume_range: residue must be in [0, {multiple_of}), got {residue}"
+        )
+    has_hi_value = num_operands == 2
+    if "hi" in attrs and has_hi_value:
+        errors.append(
+            "arith.assume_range: hi and hi_value are both given; state at most one end"
+        )
+    if "hi_plus" in attrs and not has_hi_value:
+        errors.append("arith.assume_range: hi_plus is given without hi_value")
+    if "lo" in attrs and "hi" in attrs and attrs["lo"] >= attrs["hi"]:
+        errors.append(
+            f"arith.assume_range: lo ({attrs['lo']}) must be below hi ({attrs['hi']})"
+        )
+    return errors
+
+
+def _check_unsigned_int_operands(op_name: str, a: "Value", b: "Value") -> None:
+    """Refuse operands an unsigned integer op cannot take.
+
+    Both lowerings read the operands as ``uint32_t`` / ``uint64_t`` by width,
+    so the operands are two i32 or two i64 values.
+    """
+    if a.type != b.type or a.type.name not in ("i32", "i64"):
+        raise ValueError(
+            f"{op_name} expects two i32 or two i64 operands, got "
+            f"{a.type.name} / {b.type.name}"
+        )
 
 
 def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
@@ -1083,6 +1206,19 @@ class IRBuilder:
     def add(self, a: Value, b: Value) -> Value:
         return self._op("arith.add", [a, b], [a.type], result_name_hint="add").result
 
+    def add_nuw(self, a: Value, b: Value) -> Value:
+        """Integer ``a + b`` that the caller knows does not wrap as unsigned.
+
+        Lowers to ``add nuw`` (plain :meth:`add` is ``add nsw``). Use it for a
+        sum of non-negative values that may pass the signed maximum but never
+        the unsigned one, where ``nsw`` would make LLVM treat the result as
+        poison. Operands are two i32 or two i64 values.
+        """
+        _check_unsigned_int_operands("add_nuw", a, b)
+        return self._op(
+            "arith.add", [a, b], [a.type], attrs={"wrap": "nuw"}, result_name_hint="add"
+        ).result
+
     def sub(self, a: Value, b: Value) -> Value:
         return self._op("arith.sub", [a, b], [a.type], result_name_hint="sub").result
 
@@ -1113,8 +1249,8 @@ class IRBuilder:
     def fabs(self, a: Value) -> Value:
         """Floating-point absolute value (single-instruction on AMDGPU).
 
-        Lowers to ``llvm.fabs.f32`` (or the matching f16 / bf16
-        variant). On the AMDGPU backend this becomes a free input
+        Lowers to ``llvm.fabs.f32`` (or the matching f64 / f16 / bf16
+        variant; HIP uses ``fabs`` for f64). On the AMDGPU backend this becomes a free input
         modifier on the consumer or a single-cycle ``v_max_f32 a, -a``
         — strictly cheaper than the historical ``fmax(a, fneg(a))``
         idiom which materialises ``-a`` as an SSA value and prevents
@@ -1201,6 +1337,69 @@ class IRBuilder:
     def cmp_ne(self, a: Value, b: Value) -> Value:
         return self._op(
             "arith.cmp", [a, b], [I1], attrs={"pred": "ne"}, result_name_hint="ne"
+        ).result
+
+    def cmp_ult(self, a: Value, b: Value) -> Value:
+        """Unsigned ``a < b`` (``icmp ult``): both operands read as unsigned.
+
+        A negative value reads as a large unsigned one, so ``cmp_ult(x, n)``
+        with ``n >= 0`` is ``0 <= x < n`` in one compare. Operands are two
+        i32 or two i64 values.
+        """
+        _check_unsigned_int_operands("cmp_ult", a, b)
+        return self._op(
+            "arith.cmp", [a, b], [I1], attrs={"pred": "ult"}, result_name_hint="ult"
+        ).result
+
+    def _assume_range(
+        self,
+        v: Value,
+        *,
+        lo: Optional[int] = None,
+        hi: Optional[int] = None,
+        hi_value: Optional[Value] = None,
+        hi_plus: int = 0,
+        multiple_of: int = 1,
+        residue: int = 0,
+    ) -> Value:
+        """Return ``v`` unchanged, marked with facts its caller has checked.
+
+        The marker records ``lo <= v``, ``v < hi`` (an int ``hi``, or
+        ``hi_value + hi_plus`` for an end only known at run time) and
+        ``v == residue (mod multiple_of)``. It emits no instruction: both
+        lowerings print ``v`` wherever the result is used. Its one reader is
+        the tiling layer's IR range walk, which trusts every marker.
+
+        Private on purpose: a fact stated here is never checked, so only
+        callers that checked or proved it first may state it. Those callers
+        write ``b._assume_range(...)  # noqa: SLF001``.
+        """
+        if v.type not in (I32, I64):
+            raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
+        if hi_value is not None and hi_value.type != v.type:
+            raise ValueError(
+                f"_assume_range: hi_value type {hi_value.type.name} != v type {v.type.name}"
+            )
+        attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
+        if lo is not None:
+            attrs["lo"] = lo
+        if hi is not None:
+            attrs["hi"] = hi
+        operands = [v]
+        if hi_value is not None:
+            operands.append(hi_value)
+            attrs["hi_plus"] = hi_plus
+        elif hi_plus != 0:
+            attrs["hi_plus"] = hi_plus
+        errors = _assume_range_errors(attrs, len(operands))
+        if errors:
+            raise ValueError(errors[0])
+        return self._op(
+            "arith.assume_range",
+            operands,
+            [v.type],
+            attrs=attrs,
+            result_name_hint="range",
         ).result
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
@@ -2056,9 +2255,10 @@ class IRBuilder:
 
     # ----- gfx1250 workgroup clusters -----
     #
-    # Lowering requires gfx1250 and the llvm23 flavor. A launch without a
-    # cluster shape is a 1x1x1 cluster: every id and max id inside the cluster
-    # reads 0 and the cluster id equals the workgroup id.
+    # Lowering requires a target with memory.has_cluster_launch and the llvm23
+    # flavor. A launch without a cluster shape is a 1x1x1 cluster: every id and
+    # max id inside the cluster reads 0 and the cluster id equals the workgroup
+    # id.
 
     def set_cluster_dims(self, x: int, y: int = 1, z: int = 1) -> None:
         """Declare the workgroup-cluster shape this kernel must be launched with.
@@ -2178,6 +2378,9 @@ class IRBuilder:
 
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
+
+    def global_load_f64(self, ptr: Value, idx: Value, *, align: int = 8) -> Value:
+        return self.global_load(ptr, idx, F64, align=align)
 
     def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, I8, align=align)
@@ -3179,9 +3382,13 @@ class IRBuilder:
 
         Returns a wave-uniform i32 that is 1 iff *every* lane's
         ``predicate`` was non-zero, 0 otherwise. Lowered to
-        ``__builtin_amdgcn_read_exec()`` AND/compare on AMDGPU
-        (a single ``s_or_b64`` / ``s_cmp_eq`` pair) — no ds_bpermute,
+        ``@llvm.amdgcn.ballot.i64`` compared against the full-wave mask
+        (``-1`` on wave64, ``0xffffffff`` on wave32) — no ds_bpermute,
         no LDS round-trip.
+
+        Precondition: every lane of the wave is active (full EXEC). Unlike
+        HIP's ``__all``, which counts only active lanes, this returns 0
+        under partial EXEC (a divergent region or a sub-wave workgroup).
 
         Pairs naturally with adaptive online-softmax rescaling: when
         ``wave_all(max_diff < THRESHOLD)`` is 1, the workgroup can skip
@@ -3211,8 +3418,8 @@ class IRBuilder:
         """Wave-wide ballot: returns a 64-bit mask of which lanes
         satisfied the predicate.
 
-        Lowered to ``__builtin_amdgcn_ballot_w64`` (or the wave32
-        equivalent on gfx12). For boolean reductions prefer the
+        Lowered to ``@llvm.amdgcn.ballot.i64`` (the mask has only the low
+        ``wave_size`` bits set on wave32). For boolean reductions prefer the
         higher-level :meth:`wave_all` / :meth:`wave_any` which avoid
         forcing the mask materialisation on the consumer side.
         """
@@ -3510,13 +3717,17 @@ class IRBuilder:
     # ----- gfx1250 data prefetch -----
     #
     # All of these are hints: they must never change a kernel's results, only
-    # when data arrives. Lowering requires gfx1250 and the llvm23 flavor.
+    # when data arrives. Lowering requires a target with
+    # memory.has_scalar_data_prefetch (``s_*prefetch_data``) or
+    # memory.has_global_prefetch (``global``/``flat_prefetch``) and the llvm23
+    # flavor.
 
     def s_setreg(self, simm16: int, value: Value) -> None:
         """``llvm.amdgcn.s.setreg`` — write ``value`` into a hardware-register field.
 
         ``simm16`` selects the register field; build it with :func:`hwreg`.
-        Field layouts differ between generations, so the op is gfx1250-only.
+        Field layouts differ between target families, so lowering requires
+        target_family gfx12_cdna.
         """
         simm16 = _check_u16("s_setreg", "simm16", simm16)
         self._check_i32_value("s_setreg", "value", value)
@@ -4214,13 +4425,11 @@ class IRBuilder:
         intrinsic.
 
         Args:
-        coherency: AMDGPU buffer-load AUX bits (0..3). One of
+        coherency: AMDGPU buffer-load cache-policy bits (0..3). One of
         :data:`CACHE_ALL` (0, default), :data:`CACHE_GLOBAL`
-        (1, GLC set — skip L2), :data:`CACHE_STREAM` (2, SLC
-        set), :data:`NON_TEMPORAL` (3, GLC|SLC). The AUX field
-        lives in the last argument of
-        ``llvm.amdgcn.raw.ptr.buffer.load[.lds]`` and biases
-        the L1/L2 caching policy. ``CACHE_STREAM`` is the
+        (1, GLC / SC0), :data:`CACHE_STREAM` (2, SLC / NT),
+        :data:`NON_TEMPORAL` (3, both). The bits go into the last
+        (AUX) argument of ``llvm.amdgcn.raw.ptr.buffer.load[.lds]``. ``CACHE_STREAM`` is the
         right hint for one-shot streaming loads in a
         ping-pong pipeline that won't reuse the data.
         """
@@ -4594,7 +4803,8 @@ class IRBuilder:
     # One load, delivered to every workgroup of the cluster whose bit is set in
     # ``mask``. The mask goes to M0[15:0] (bit i is the workgroup whose
     # cluster_workgroup_flat_id is i); lanes of the issuing workgroup must pass
-    # the same wave-uniform mask. Lowering requires gfx1250 and llvm23.
+    # the same wave-uniform mask. Lowering requires a target with
+    # memory.has_multicast_load and llvm23.
 
     def cluster_load(
         self,
@@ -5626,6 +5836,7 @@ PURE_OP_NAMES = {
     "arith.cmp",
     "arith.fcmp",
     "arith.select",
+    "arith.assume_range",
     "arith.fmax",
     "arith.fmin",
     "arith.select",

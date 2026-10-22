@@ -2043,6 +2043,7 @@ read the validator before combining flags. Cohort impact is from §17.4.
 | `use_k_single_buffer` | One `K_lds` slot instead of two, keeping `T=2*block_size` | In the tree but **not the production lever** — it addressed an llvm20 occupancy wall that does not exist on llvm22 (the d128 body is already 213 VGPR / 2 WG/CU) |
 | `use_sched_barrier` | Compile-time `llvm.amdgcn.sched.barrier` fence between the QK MFMA cluster and the post-QK prefetch issue (keeps QK MFMAs packed) | An early llvm20 measurement gave +35–36 % at `num_warps==1` only; **backend-specific and superseded** by `use_softmax_mfma_interleave` on llvm22 — off on every live cohort, kept for the mechanism |
 | `use_agpr_alloc_zero` | Force VGPR-form MFMA | Bit-accurate but **not** the d128 lever on llvm22 (leaves the inter-MFMA gap unchanged); redundant on R4 (already 0 AGPR moves) |
+| `use_additive_bias` | **Feature flag, not a perf lever** — adds an fp32 `[B,H,Sq,Sk]` bias (stride 0 broadcasts B/H) to the scores; also on `UnifiedAttention3DTiledSpec`. gfx950 only, default OFF, driven by `UnifiedAttentionProblem.use_additive_bias` | Do not sweep. Rejected with the transposed softmax VALU opts, `use_grouped_kv2_softmax` and `use_register_pv`; see the [builders/common Knob reference](../../../library/builders/common/README.md#knob-reference) |
 
 **Selector-driven (auto-on) attention routing levers.** The single-batch d128
 levers above are *selected automatically* by
@@ -2060,6 +2061,25 @@ combo uses `num_warps=4`. The K-single-buffer / small-tile occupancy levers and
 the `HIPDNN_GFX950_D128_SMALL_TILE=0` opt-out hatch remain in the tree but
 address an llvm20-only occupancy wall — they are not the production lever. See
 arch reference §21.4a and §17.4 for the measured occupancy and per-shape numbers.
+
+#### 12.1.K2 Attention-3D split-KV levers (UA 3D specific)
+
+Fields of the gfx942 and gfx950 `UnifiedAttention3DTiledSpec`
+(`library/kernels/<arch>/attention_tiled_3d.py`); `__post_init__` rejects the
+combinations a kernel does not implement. The dispatcher derives each one from
+the problem (helpers in `library/kernels/common/attention_unified.py`), so set
+them by hand only through an explicit tuning spec.
+
+| Field | Effect | Selected by / when to change |
+|---|---|---|
+| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough CTAs (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences |
+| `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few CTAs to fill the device; gfx942 `_gfx942_3d_tile_size_override` |
+| `use_wide_kv_load` (gfx942) | Wide synchronous K/V loads instead of 4-byte async copies | `_enable_gfx942_3d_wide_kv_load`; relies on the compiler overlapping the loads, so large head sizes keep the async copies |
+| `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes, since each K/V byte is read once |
+| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; pays where LDS reads stall the loop (large tiles, gfx942) |
+| `use_wave_page_id_load` | The wave loads 64 page-table entries at once and each tile reads its page ids from registers | `_wave_page_id_load_3d`; takes the page-table load off the KV loop's critical path, which lets fewer CTAs per CU hide latency |
+| `use_decode_grid` | One CTA per sequence on grid x, no search over `query_start_len` | Derived (`_use_decode_grid`), legal only when every sequence has one query token; not a tuning axis |
+| `use_invariant_hoist` | Inert; kept so saved specs that set it still load | — |
 
 #### 12.1.L Multi-XCD / chiplet grid swizzle
 
