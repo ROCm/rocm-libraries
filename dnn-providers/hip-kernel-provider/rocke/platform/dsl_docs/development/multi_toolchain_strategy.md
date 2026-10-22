@@ -10,12 +10,12 @@ strategy** for scaling to more toolchains and more targets.
 > the rest as §4's items land. Related: the decl-table half of this problem is
 > tracked in [`f8f6f4_and_decl_validation_plan.md`](f8f6f4_and_decl_validation_plan.md).
 
-> **Toolchain this was surveyed on.** AMD clang 23.0.0git at
-> `/opt/rocm/lib/llvm/bin/clang`; comgr reports ROCm 7.13, so rocke detects
-> flavor **`llvm23`**. Note `/opt/rocm/.info/version` does **not** exist here —
-> `_system_rocm_version()` returns `None` and detection falls through to the
-> comgr-vintage step, exactly as designed (§1.3). Probe results in §2.4 are
-> LLVM-23 facts; re-run before trusting them on another flavor.
+> **Historical survey environment.** The original probes used AMD clang
+> 23.0.0git and COMGR package metadata reporting ROCm 7.13. That recorded
+> pairing is provenance, not a release-to-flavor rule. Current AUTO queries
+> the loaded compiler; the old release-file and COMGR-vintage proxies are
+> obsolete. Probe results in §2.4 are LLVM-23 observations; re-run before
+> trusting them on another compiler.
 >
 > **Superseded in part.** §4's R1 has since shipped as
 > `tools/gen_arch_domain.py`, and the §2.4 hand-probes are no longer the data —
@@ -30,28 +30,14 @@ strategy** for scaling to more toolchains and more targets.
 
 ## 1. What exists today: the flavor architecture
 
-### 1.1 Three axes collapse to one
+### 1.1 Compiler evidence selects a baseline flavor
 
-rocke does **not** carry a ROCm axis and an LLVM axis separately. `_ROCM_FLAVOR_LADDER`
-(`core/lower_llvm.py:195`) maps a ROCm release to the LLVM vintage its comgr
-bundles, and everything downstream keys off the resulting *flavor*:
-
-```python
-_ROCM_FLAVOR_LADDER = (
-    ((7, 13), LLVM_FLAVOR_LLVM23),
-    ((7, 2),  LLVM_FLAVOR_LLVM22),
-)
-```
-
-`_flavor_for_rocm` clamps at both ends and never raises: newer-than-newest
-resolves to the newest flavor, older-than-oldest to `LLVM_FLAVORS[0]` (which is
-what pre-7.2 actually shipped, not a fallback). Both callers are best-effort
-guesses about a host, so raising would be wrong; callers wanting strictness pass
-`llvm_flavor=` explicitly, which *is* validated.
-
-The ladder's own comment states the design goal: *"Add a row when a ROCm release
-bumps its bundled LLVM; nothing else needs editing."* That is the right contract
-and it mostly holds.
+rocke keys LLVM emission by `llvm20`, `llvm22`, or `llvm23`. The Python
+`_LLVM_FLAVOR_LADDER` maps the loaded compiler’s LLVM major: <=20 to `llvm20`,
+21/22 to `llvm22`, and >=23 to `llvm23`. ROCm package versions and installation
+paths do not determine the compiler version. The selected baseline does not
+prove exact DataLayout or intrinsic compatibility across every compiler build;
+toolchain-specific conformance checks remain necessary.
 
 ### 1.2 The flavor set is an SSOT with an anti-drift lint
 
@@ -64,26 +50,26 @@ documented — `test_no_hand_rolled_flavor_membership_lists` pins that no privat
 copy reappears. The comment records why: a hand-rolled tuple is how `llvm23` was
 once silently rejected by the C++ path while the Python path accepted it.
 
-### 1.3 Detection is resolved against the *compiling* comgr, not the environment
+### 1.3 Detection queries the loaded COMGR compiler
 
-`_detect_llvm_flavor()` (`:324`) resolves in this order:
+`_detect_llvm_flavor()` honors a supported `ROCKE_LLVM_FLAVOR` override first.
+Without one, `runtime.comgr.loaded_compiler_info()` queries `LLVMGetVersion`
+through the loaded COMGR handle or preprocesses Clang’s built-in version macros
+through that same library. If COMGR cannot be loaded or queried, AUTO raises;
+there is no release-metadata proxy or default flavor.
 
-1. `$ROCKE_LLVM_FLAVOR` (explicit override; test/dev knob)
-2. **the ROCm vintage of the comgr lib that will actually compile the IR**
-3. `torch.version.hip` (proxy)
-4. `/opt/rocm/.info/version` (proxy)
-5. `llvm22` (modern default)
+The first successfully loaded COMGR and its compiler evidence are retained for
+process lifetime, including unavailable evidence. Failed loads remain retryable.
+Importing torch or changing a library-selection variable later does not replace
+a retained compiler; use a new process to change it. Python-driven C++ lowering
+receives Python’s concrete flavor. Standalone native AUTO retains its own
+candidate; callers owning a separate compilation stage must pass that compiler’s
+flavor explicitly.
 
-Step 2 is the load-bearing one and the design is subtle in a good way: a torch
-wheel bundles its *own* `libamd_comgr.so` whose LLVM follows the wheel's ROCm,
-not the system `/opt/rocm`. Emitting IR for the wrong one means comgr either
-rejects the declares or silently auto-upgrades them.
-
-The cache (`_resolve_llvm_flavor`, `:367`) is keyed on the **resolved comgr lib
-path** rather than resolved-once-forever, so an early torch-less call cannot
-lock in the `/opt/rocm` flavor — once torch enters the process the basis changes
-and the flavor re-resolves. Every step is exception-wrapped so a misconfigured
-environment never breaks import.
+`resolved_lib_rocm_version()` remains installation/package metadata for
+provenance and stale-library selection, separate from compiler compatibility.
+See [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance)
+for the shipped contract.
 
 ### 1.4 Two distinct kinds of cross-flavor divergence, modelled differently
 
@@ -131,9 +117,9 @@ column:
 
 ```c
 } ROCKE_LL_FLAVOR_LADDER[] = {
-    {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, 0, false},
-    {ROCKE_LLVM_FLAVOR_LLVM22, "llvm22", 7, 2, true},
-    {ROCKE_LLVM_FLAVOR_LLVM23, "llvm23", 7, 13, true},
+    {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, false},
+    {ROCKE_LLVM_FLAVOR_LLVM22, "llvm22", 21, true},
+    {ROCKE_LLVM_FLAVOR_LLVM23, "llvm23", 23, true},
 };
 ```
 
@@ -143,7 +129,7 @@ row here plus the enumerator in `lower_llvm.h` — previously it was five
 coordinated edits across three files."*
 
 Python spreads the same facts across **five** structures: `LLVM_FLAVORS`,
-`_DATALAYOUT_KIND_FLAVORS`, `_P8_MARKERS`, `_ROCM_FLAVOR_LADDER`, and the
+`_DATALAYOUT_KIND_FLAVORS`, `_P8_MARKERS`, `_LLVM_FLAVOR_LADDER`, and the
 if-chain in `_datalayout_for_flavor`. Adding a flavor to Python is still the
 five-coordinated-edits shape that the C++ side already escaped.
 
@@ -153,7 +139,7 @@ Twelve tests. They fall into three groups, and the sizes are the interesting par
 
 | group | count | what it proves |
 |---|---|---|
-| internal consistency | 9 | the partition is exhaustive, markers match constants, no hand-rolled lists, unknown flavors raise, the ladder clamps |
+| internal consistency | 9 | the partition is exhaustive, markers match constants, no hand-rolled lists, unknown flavors raise, compiler majors map to baseline flavors |
 | cross-engine agreement | 2 | `test_cpp_engine_accepts_exactly_the_python_flavor_set`, `test_cpp_backend_path_accepts_every_known_flavor` |
 | **toolchain conformance** | **1** | `test_datalayout_matches_hipcc_emitted_ir` — the only one that compares against a real toolchain, and only for the flavor of the `hipcc` on PATH |
 
@@ -175,8 +161,8 @@ Twelve tests. They fall into three groups, and the sizes are the interesting par
   already figured that out.
 - **The flavor set is an SSOT with a lint that bans copies of it.** Rare, and
   motivated by a real past bug.
-- **Detection tracks the *compiling* comgr, cached on the comgr path.** This is
-  the hard part of the problem and it is solved well.
+- **Detection queries the loaded COMGR compiler and retains its evidence.**
+  Python-driven native lowering shares Python’s selection.
 - **The comgr guard claims a generation, not a flavor.** It asserts exactly what
   the evidence supports, no more.
 - **Golden is flavor-parameterized**, so all three flavors are regression-locked
@@ -278,7 +264,7 @@ through the binding — worth confirming before acting.)
 
 ---
 
-## 3. The strategy
+## 3. Historical proposal: strategy
 
 ### 3.1 The cube is not dense — it factorizes
 
@@ -345,7 +331,7 @@ only lever here that reduces cost rather than merely organizing it.
 
 ---
 
-## 4. Recommendations, in landing order
+## 4. Historical recommendations, in landing order
 
 R1 and R2 change **zero emitted bytes**, need no golden re-bless, and are fully
 verifiable on a host without cmake.
