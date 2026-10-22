@@ -157,8 +157,9 @@ using FmhaTdmSchedScheduleFor = std::conditional_t<
 template <typename Problem, typename Policy>
 struct FmhaTdmSchedMode
 {
-    using SelectedPolicy = Policy;
-    using Geometry       = typename Policy::Geometry;
+    using SelectedProblem = Problem;
+    using SelectedPolicy  = Policy;
+    using Geometry        = typename Policy::Geometry;
 
     static constexpr bool kStreamOutputRescale =
         std::is_same_v<Geometry, FmhaTdmSchedBf16D192N128Geometry>;

@@ -458,13 +458,13 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     }
 
     // ---- vectorized KV layout issue (16-bit, x = 8) ----
-    // One descriptor per wave slice (two per P16 wave) visits the slice in row-major (token,
-    // column) order, so the LDS image - row stride and padding included - is the linear one
-    // and the LDS reads are unchanged:
-    //   K rank 3: dims (8, D/8, rows), strides (P*8, 8); the K pad chunk is out of bounds.
-    //   V rank 4: dims (1, D, 8, groups of 8 rows), strides (8, 1, D*8).
-    // V rows past the valid count inside the last group of 8 are read from the page: TDM can
-    // bound whole groups only.
+    // One descriptor per wave slice (two per P16 wave).
+    //   K rank 2: dims (rows*8, D/8), stride P*8: copies the page's column vectors of the
+    //     fragment as they are, into the [D/8][G][8] K LDS tile of the vectorized layout.
+    //   V rank 2: dims (D*8, groups of 8 rows), stride D*8: copies the page's groups as they
+    //     are, into the [rows/8][D][8] V LDS tile of the vectorized layout (plain b128 reads).
+    // V rows past the valid count never reach LDS: a partial last group is copied by a second,
+    // serialized descriptor (see the V branch).
     template <typename TDMConfig, typename LdsWindow>
     CK_TILE_DEVICE void tdm_issue_vectorized(const TDMConfig& config,
                                              const LdsWindow& lds_window) const
@@ -516,12 +516,14 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 pool_ptr_ + static_cast<long_index_t>(physical_page) * page_stride_;
             if constexpr(KVKind_ == FmhaPageTileKVKind::kVectorizedK)
             {
-                const uint32_t dims[3] = {
-                    kVec, static_cast<uint32_t>(HeadDim_ / kVec), static_cast<uint32_t>(rows)};
-                const uint64_t strides[3] = {static_cast<uint64_t>(PageSize_) * kVec, kVec, 0};
-                constexpr uint16_t box[3] = {kVec, kBoxCols / kVec, kFragmentRows};
+                // [D/8][rows][8]: per column vector, the fragment's tokens are contiguous in the
+                // page (rows*8 elements), so each descriptor row is a long contiguous run.
+                const uint32_t dims[2]    = {static_cast<uint32_t>(rows * kVec),
+                                             static_cast<uint32_t>(HeadDim_ / kVec)};
+                const uint64_t strides[2] = {static_cast<uint64_t>(PageSize_) * kVec, 1};
+                constexpr uint16_t box[2] = {kFragmentRows * kVec, HeadDim_ / kVec};
                 amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
-                    createTDMDescriptor<remove_cvref_t<DataType>, 3>(
+                    createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                         page_ptr + static_cast<long_index_t>(t0) * kVec,
                         lds_ptr,
                         dims,
@@ -531,20 +533,53 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             }
             else
             {
-                const uint32_t dims[4]    = {1,
-                                             static_cast<uint32_t>(HeadDim_),
-                                             kVec,
-                                             static_cast<uint32_t>((rows + kVec - 1) / kVec)};
-                const uint64_t strides[4] = {kVec, 1, static_cast<uint64_t>(HeadDim_) * kVec, 0};
-                constexpr uint16_t box[4] = {1, kBoxCols, kVec, kFragmentRows / kVec};
+                // Whole groups of 8 rows: [groups][D][8] in LDS (the V LDS tile of the
+                // vectorized layout). A partial last group (tail tile only) cannot be bounded by
+                // this descriptor: it is left out here (zero filled as out of bounds) and, once
+                // that transfer has landed, copied by a rank-3 descriptor whose token extent
+                // zero fills the rest of the group - V rows past seqlen_k never reach LDS.
+                static_assert(kBoxCols == HeadDim_, "the V box spans the head width");
+                const index_t full_groups = rows / kVec;
+                const index_t tail_rows   = rows % kVec;
+                const DataType* slice_ptr =
+                    page_ptr + static_cast<long_index_t>(t0 / kVec) * HeadDim_ * kVec;
+                const uint32_t dims[2]    = {static_cast<uint32_t>(HeadDim_ * kVec),
+                                             static_cast<uint32_t>(full_groups)};
+                const uint64_t strides[2] = {static_cast<uint64_t>(HeadDim_) * kVec, 1};
+                constexpr uint16_t box[2] = {HeadDim_ * kVec, kFragmentRows / kVec};
                 amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
-                    createTDMDescriptor<remove_cvref_t<DataType>, 4>(
-                        page_ptr + static_cast<long_index_t>(t0 / kVec) * HeadDim_ * kVec,
-                        lds_ptr,
-                        dims,
-                        strides,
-                        box,
-                        config));
+                    createTDMDescriptor<remove_cvref_t<DataType>, 2>(
+                        slice_ptr, lds_ptr, dims, strides, box, config));
+                if(tail_rows != 0)
+                {
+                    // Serialized after the group transfer (both write the tail group's LDS). The
+                    // schedule's partial tensor waits still hold: this transfer takes the group
+                    // transfer's place in issue order, and everything older has completed.
+                    s_wait_tensorcnt<0>();
+                    const uint32_t tail_dims[3] = {
+                        static_cast<uint32_t>(tail_rows), static_cast<uint32_t>(HeadDim_), 1};
+                    const uint64_t tail_strides[3] = {
+                        kVec, static_cast<uint64_t>(HeadDim_) * kVec, 0};
+                    constexpr uint16_t tail_box[3] = {kVec, HeadDim_, 1};
+                    // The page holds the groups unpadded; the LDS position comes from the
+                    // V LDS descriptor (which may pad).
+                    const long_index_t tail_offset =
+                        static_cast<long_index_t>(full_groups) * HeadDim_ * kVec;
+                    const auto tail_coord = make_tensor_coordinate(
+                        lds_view.get_tensor_descriptor(),
+                        make_multi_index(lds_origin.at(number<0>{}) +
+                                             Writer::fragment_destination_row(wave, kFragment) +
+                                             full_groups * kVec,
+                                         lds_origin.at(number<1>{})));
+                    amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                        createTDMDescriptor<remove_cvref_t<DataType>, 3>(
+                            slice_ptr + tail_offset,
+                            lds_view.get_buffer_view().p_data_ + tail_coord.get_offset(),
+                            tail_dims,
+                            tail_strides,
+                            tail_box,
+                            config));
+                }
             }
         });
     }

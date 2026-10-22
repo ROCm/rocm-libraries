@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_load.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
@@ -18,6 +19,20 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_affine_v_read.hpp"
 
 namespace ck_tile {
+
+namespace detail {
+// Vectorized KV cache problems (batch prefill VECTORIZED_LAYOUT); other problems have no layout.
+template <typename Problem, typename = void>
+struct fmha_tdm_is_vectorized_kv : std::false_type
+{
+};
+template <typename Problem>
+struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemoryLayout)>>
+    : bool_constant<Problem::kKVMemoryLayout ==
+                    BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT>
+{
+};
+} // namespace detail
 
 template <typename Geometry_,
           typename Tuning_,
@@ -163,14 +178,32 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         return make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
     }
 
+    // Waits until the WMMA that produced c has completed, and so has read its A/B operands.
+    // A gfx1250 WMMA can read its operands after later instructions have issued (for example
+    // while other waves of its SIMD hold the WMMA unit), and the hardware does not hold back an
+    // LDS load that overwrites an operand register of such a WMMA: the load can land first and
+    // the WMMA then multiplies the next stage's data. Reading the result makes the compiler
+    // insert the WMMA result wait before the instruction that follows.
+    template <typename CWarpTensor>
+    CK_TILE_DEVICE static void WaitWmmaOperandsRead(CWarpTensor& c)
+    {
+        auto x = c.get_thread_buffer()[number<0>{}];
+        asm volatile("v_mov_b32 %0, %0" : "+v"(x)::"memory");
+        c.get_thread_buffer()(number<0>{}) = x;
+    }
+
+    // FenceLastMIter: wait for the last M iteration's WMMA of each (n, k), the last reader of
+    // the shared K operand registers that the next K read refills (see WaitWmmaOperandsRead).
     template <index_t WmmaOrdinal,
               typename BlockGemm,
               typename CBlockTensor,
               typename ABlockTensor,
-              typename BBlockTensor>
+              typename BBlockTensor,
+              bool FenceLastMIter = false>
     CK_TILE_DEVICE static void RunQkSuWmma(CBlockTensor& c_block_tensor,
                                            const ABlockTensor& a_block_tensor,
-                                           const BBlockTensor& b_block_tensor)
+                                           const BBlockTensor& b_block_tensor,
+                                           bool_constant<FenceLastMIter> = {})
     {
         using WarpGemm    = typename BlockGemm::WarpGemm;
         using AWarpDstr   = typename WarpGemm::AWarpDstr;
@@ -215,6 +248,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
         WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+        if constexpr(FenceLastMIter && m_iter == BlockGemm::MIterPerWarp - 1)
+            WaitWmmaOperandsRead(c_warp_tensor);
         c_block_tensor.set_y_sliced_thread_data(
             merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
@@ -320,9 +355,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
+        // Vectorized KV only: the race (see WaitWmmaOperandsRead) was observed there; the
+        // linear layout's code is left as it is.
+        constexpr bool kFenceLastMIter =
+            detail::fmha_tdm_is_vectorized_kv<typename Mode::SelectedProblem>::value;
         auto emit_wmma = [&](auto, auto wmma) {
             RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                c_block_tensor, a_block_tensor, b_block_tensor);
+                c_block_tensor, a_block_tensor, b_block_tensor, bool_constant<kFenceLastMIter>{});
         };
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
         WaitQkStageTail<Stage>();
@@ -678,12 +717,42 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     {
         static_assert(IsSupportedProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
-        constexpr index_t kKPack = BasePolicy::template GetSmemKPackK<Problem>();
-        return make_naive_tensor_descriptor(
-            make_tuple(number<kLdsRows>{}, number<kKPhysicalStride>{}),
-            make_tuple(number<kKPhysicalStride>{}, number<1>{}),
-            number<kKPack>{},
-            number<1>{});
+        if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
+        {
+            // Vectorized KV: each TDM box (G rows: the P16 fragment or the 32-row wave slice)
+            // lands as the page stores it, [D/8][G][8]: 16-byte column vectors of G consecutive
+            // tokens one after another. A K read (8 columns of one token) is one aligned b128.
+            constexpr index_t kGroupRows = Problem::kPageBlockSize == 16 ? 16 : 32;
+            static_assert(kLdsRows % kGroupRows == 0 && kKValidWidth % 8 == 0);
+            constexpr auto grouped =
+                make_naive_tensor_descriptor(make_tuple(number<kLdsRows / kGroupRows>{},
+                                                        number<kKValidWidth / 8>{},
+                                                        number<kGroupRows>{},
+                                                        number<8>{}),
+                                             make_tuple(number<kGroupRows * kKValidWidth>{},
+                                                        number<kGroupRows * 8>{},
+                                                        number<8>{},
+                                                        number<1>{}),
+                                             number<8>{},
+                                             number<1>{});
+            return transform_tensor_descriptor(
+                grouped,
+                make_tuple(
+                    make_merge_transform(
+                        make_tuple(number<kLdsRows / kGroupRows>{}, number<kGroupRows>{})),
+                    make_merge_transform(make_tuple(number<kKValidWidth / 8>{}, number<8>{}))),
+                make_tuple(sequence<0, 2>{}, sequence<1, 3>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+        else
+        {
+            constexpr index_t kKPack = BasePolicy::template GetSmemKPackK<Problem>();
+            return make_naive_tensor_descriptor(
+                make_tuple(number<kLdsRows>{}, number<kKPhysicalStride>{}),
+                make_tuple(number<kKPhysicalStride>{}, number<1>{}),
+                number<kKPack>{},
+                number<1>{});
+        }
     }
 
     template <typename Problem, bool LoadOnce = true>
@@ -698,12 +767,44 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     {
         static_assert(IsSupportedProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
-        constexpr index_t kKPack = BasePolicy::template GetSmemKPackV<Problem>();
-        return make_naive_tensor_descriptor(
-            make_tuple(number<kLdsRows>{}, number<kVLogicalWidth>{}),
-            make_tuple(number<kVPhysicalStride>{}, number<1>{}),
-            number<kKPack>{},
-            number<1>{});
+        if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
+        {
+            // Vectorized KV: [rows/8][D][8], the 8 tokens of a column adjacent (the page
+            // layout; the TDM copies whole groups of 8 rows), with 16 padding elements after
+            // every 512 (the TDM pads each 1 KB it writes), so that the two half-waves of a read,
+            // which read neighbouring groups, start on different banks. Every read of this tile
+            // goes through the TDM-schedule V read helpers, which address it themselves with
+            // plain b128 loads (FmhaTdmVecVRead); the declared column vector of 8 is the
+            // transposed-read geometry they keep (the access count and the element groups of
+            // each access), not a property of this layout.
+            static_assert(kLdsRows % 8 == 0 && kVLogicalWidth % 64 == 0);
+            constexpr index_t kBlock       = 512 + 16; // one padded 1 KB block: 64 columns x 8
+            constexpr index_t kGroupStride = kVLogicalWidth / 64 * kBlock;
+            constexpr auto grouped         = make_naive_tensor_descriptor(
+                make_tuple(number<kLdsRows / 8>{},
+                           number<8>{},
+                           number<kVLogicalWidth / 64>{},
+                           number<64>{}),
+                make_tuple(number<kGroupStride>{}, number<1>{}, number<kBlock>{}, number<8>{}),
+                number<8>{},
+                number<1>{});
+            return transform_tensor_descriptor(
+                grouped,
+                make_tuple(
+                    make_merge_transform(make_tuple(number<kLdsRows / 8>{}, number<8>{})),
+                    make_merge_transform(make_tuple(number<kVLogicalWidth / 64>{}, number<64>{}))),
+                make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+        else
+        {
+            constexpr index_t kKPack = BasePolicy::template GetSmemKPackV<Problem>();
+            return make_naive_tensor_descriptor(
+                make_tuple(number<kLdsRows>{}, number<kVLogicalWidth>{}),
+                make_tuple(number<kVPhysicalStride>{}, number<1>{}),
+                number<kKPack>{},
+                number<1>{});
+        }
     }
 
     template <typename Problem>
@@ -842,7 +943,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     {
         static_assert(IsSupportedProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
-        return make_tuple(number<true>{}, number<kVPadAmount>{}, number<kVPadInterval>{});
+        if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
+            return make_tuple(number<true>{}, number<7>{}, number<7>{}); // 32 B every 1 KB
+        else
+            return make_tuple(number<true>{}, number<kVPadAmount>{}, number<kVPadInterval>{});
     }
 };
 

@@ -702,6 +702,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(number<0>{},
                                                                                 o_acc.at(wmma));
                     WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    // Vectorized KV: the last M iteration is the last reader of the V operand
+                    // registers that the next V read refills (see WaitWmmaOperandsRead).
+                    static_assert(Policy::OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter);
+                    if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+                                 m_iter == Geometry::kPvMIter - 1)
+                        Policy::WaitWmmaOperandsRead(c_warp_tensor);
                     o_acc.at(wmma) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
@@ -720,8 +726,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     if constexpr(kStage < Geometry::kPvStages - 1)
                     {
                         base = qk_v0_base;
-                        base.byte_address +=
-                            (kStage + 1) * kK1 * Policy::kVPhysicalStride * sizeof(VDataType);
+                        if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
+                        {
+                            // [rows/8][D][8] V tile: the row offset from the V LDS descriptor.
+                            constexpr index_t kRowOffset =
+                                Policy::template MakeVLdsBlockDescriptor<Problem>()
+                                    .calculate_offset(make_multi_index((kStage + 1) * kK1, 0));
+                            base.byte_address += kRowOffset * sizeof(VDataType);
+                        }
+                        else
+                            base.byte_address +=
+                                (kStage + 1) * kK1 * Policy::kVPhysicalStride * sizeof(VDataType);
                     }
                     Policy::template RunPvScheduledStageWithWmma<kStage, Mode>(
                         next_b_block_tensor,

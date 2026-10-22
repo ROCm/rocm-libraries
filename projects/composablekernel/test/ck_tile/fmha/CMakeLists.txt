@@ -415,6 +415,36 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             endforeach()
         endforeach()
     endforeach()
+    # Vectorized layout with the other features: one tuple each (name: extra definitions).
+    foreach(variant IN ITEMS
+            "p16_d64_causal_sink_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1"
+            "p128_d128_causal_sink_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1"
+            "p128_d128_causal_bias_vec:CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=1"
+            "p64_d128_causal_alibi_vec:CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=2"
+            "p128_d64_causal_softcap_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP=1"
+            "p128_d128_dense_lse_vec:CK_TILE_FMHA_PAGE_TILE_TEST_LSE=1"
+            "p16_d128_causal_sglang_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG=1"
+            "p64_d64_causal_sglang_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG=1")
+        string(REPLACE ":" ";" parts "${variant}")
+        list(GET parts 0 name)
+        list(GET parts 1 extra)
+        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)_" fields "${name}")
+        set(target test_ck_tile_fmha_batch_prefill_page_tile_${name})
+        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+        if(CMAKE_MATCH_3 STREQUAL "causal")
+            set(causal 1)
+        else()
+            set(causal 0)
+        endif()
+        target_compile_definitions(${target} PRIVATE
+            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${CMAKE_MATCH_1}
+            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${CMAKE_MATCH_2}
+            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+            CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
+            ${extra})
+        target_compile_options(${target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+    endforeach()
 
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
