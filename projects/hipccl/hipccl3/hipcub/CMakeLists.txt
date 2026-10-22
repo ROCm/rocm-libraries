@@ -218,6 +218,14 @@ include(VerifyCompiler)
 # Get dependencies (except rocm-cmake, included earlier)
 include(Dependencies)
 
+# TEMP: CMake's compiler probe reports <rocm>/include/libhipcxx as a built-in
+# include dir, so it drops libhipcxx::libhipcxx's -isystem from compile commands.
+# However, it appears that currently, the compiler does not actually include the
+# directory for some reason. This a temporary workaround to fix that.
+foreach(_lang CXX HIP)
+  list(FILTER CMAKE_${_lang}_IMPLICIT_INCLUDE_DIRECTORIES EXCLUDE REGEX "/libhipcxx/?$")
+endforeach()
+
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
