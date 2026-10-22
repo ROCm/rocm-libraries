@@ -31,4 +31,5 @@ OP_KERNEL_DIRS = {
     "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_rdna_dbias_reduce": ("attention_bwd_rdna",),
 }

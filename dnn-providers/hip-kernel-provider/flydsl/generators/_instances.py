@@ -3634,6 +3634,34 @@ def sdpa_bwd_dsink_reduce_instances(arch: str) -> list[Instance]:
     return _sdpa_bwd_instances("dsink_reduce", arch)
 
 
+# The RDNA backward smoke op: the dBias reduction built for the generic gfx11 target,
+# the same spec as the CDNA op's bf16 row (`dbias_reduce,bf16,32,plain,bk,0,0,tail,0,1`).
+SDPA_BWD_RDNA_TARGET = "gfx11-generic"
+
+
+def sdpa_bwd_rdna_dbias_reduce_instances(arch: str) -> list[Instance]:
+    if arch != SDPA_BWD_RDNA_TARGET:
+        return []
+    return [
+        Instance(
+            op="sdpa_bwd_rdna_dbias_reduce",
+            dtype="bf16",
+            priority=PRIORITY_SPECIALIZED,
+            knobs={
+                "head_dim": 32,
+                "head_dim_v": 32,
+                "causal": 0,
+                "has_bias": 0,
+                "dropout": 0,
+                "padded": 0,
+                "hints": 1,
+                "floor": "tail",
+                "dform": "bk",
+            },
+        )
+    ]
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
     "rmsnorm_bwd": rmsnorm_bwd_instances,
@@ -3649,14 +3677,19 @@ OPS = {
     "sdpa_bwd_merged": sdpa_bwd_merged_instances,
     "sdpa_bwd_dbias_reduce": sdpa_bwd_dbias_reduce_instances,
     "sdpa_bwd_dsink_reduce": sdpa_bwd_dsink_reduce_instances,
+    "sdpa_bwd_rdna_dbias_reduce": sdpa_bwd_rdna_dbias_reduce_instances,
 }
 # Ops whose table differs by target and so takes the arch.
-_PER_TARGET_OPS = {
-    "sdpa_cdna",
-    "sdpa_cdna_dualwave",
-    "sdpa_cdna_decode",
-    "sdpa_aiw",
-} | {f"sdpa_bwd_{kind}" for kind in SDPA_BWD_KINDS}
+_PER_TARGET_OPS = (
+    {
+        "sdpa_cdna",
+        "sdpa_cdna_dualwave",
+        "sdpa_cdna_decode",
+        "sdpa_aiw",
+    }
+    | {f"sdpa_bwd_{kind}" for kind in SDPA_BWD_KINDS}
+    | {"sdpa_bwd_rdna_dbias_reduce"}
+)
 
 
 def instances_for(op: str, arch: str | None = None) -> list[Instance]:
