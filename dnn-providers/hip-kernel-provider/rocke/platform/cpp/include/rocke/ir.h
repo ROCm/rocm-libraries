@@ -904,6 +904,9 @@ rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
@@ -912,6 +915,10 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* scale);
 /* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
 rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);

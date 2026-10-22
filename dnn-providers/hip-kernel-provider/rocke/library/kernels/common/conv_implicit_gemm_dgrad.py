@@ -126,6 +126,30 @@ def _dg_K(p: ConvProblem) -> int:
     return p.Y * p.X * p.kpg
 
 
+def dgrad_split_k_available(
+    p: ConvProblem, dtype_d: str, *, wave_size: int = 64
+) -> tuple[bool, str]:
+    """Can a dgrad kernel for ``p`` be built with ``split_k > 1``?
+
+    The same rule :meth:`DgradConvSpec.validate` and :func:`is_valid_dgrad_spec`
+    enforce on a concrete spec, asked before a degree is chosen so an auto
+    degree never lands on a spec the builder then rejects. The split partials
+    are atomic-added into dX: that needs the MFMA (wave64) path, an
+    fp32/bf16/fp16 dX, and -- for the packed ``<2 x dtype>`` 16-bit atomic --
+    an even channels-per-group so a pair never straddles two groups' slabs.
+    """
+    if wave_size != 64:
+        return False, "split_k > 1 is CDNA-only (wave64 MFMA path)"
+    if dtype_d not in ("fp32", "bf16", "fp16"):
+        return False, f"split_k > 1 requires dtype_d in fp32/bf16/fp16, got {dtype_d!r}"
+    if dtype_d in ("bf16", "fp16") and p.cpg % 2 != 0:
+        return False, (
+            f"split_k > 1 with dtype_d={dtype_d!r} requires even channels-per-group; "
+            f"got cpg={p.cpg}"
+        )
+    return True, "ok"
+
+
 def _floor_div(a: int, b: int) -> int:
     return a // b
 
@@ -1893,22 +1917,21 @@ def build_implicit_gemm_conv_dgrad(
     positions and the epilogue uses global_atomic_fadd.
     """
     if spec.split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
         from dataclasses import replace as _dc_replace
 
-        # Re-use the wgrad split-K selector: the formula is purely
-        # geometry-agnostic (grid tile count arithmetic), so passing
-        # dgrad GEMM dimensions under the wg_* parameter names is safe.
-        decision = select_split_k_wgrad(
-            wg_M=_dg_M(spec.problem),
-            wg_N=_dg_N(spec.problem),
-            wg_K=_dg_K(spec.problem),
+        from kernels.common.conv_split_k import resolve_conv_split_k
+
+        resolved = resolve_conv_split_k(
+            "dgrad",
+            spec.problem,
+            arch=arch,
+            dtype=spec.data.dtype_d,
             tile_m=spec.tile_m,
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
-            arch=arch,
+            block_size=spec.block_size,
         )
-        spec = _dc_replace(spec, split_k=decision.split_k)
+        spec = _dc_replace(spec, split_k=resolved.split_k)
 
     spec.validate()
     ok, why = is_valid_dgrad_spec(spec, arch=arch)
