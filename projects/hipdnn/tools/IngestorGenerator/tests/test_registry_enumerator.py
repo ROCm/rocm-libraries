@@ -582,6 +582,24 @@ def test_a_full_primary_may_carry_a_slice_also_section(probe):
     assert len([k for k in kernels if k["provenance"]["rocke_spec_id"] == "a"]) == 1
 
 
+def test_a_cell_two_sections_list_keeps_one_floor(probe):
+    """Two sections over the same cells (two geometries of one cell set): every kernel
+    ships, but each cell keeps exactly one ``default: true``, the primary section's."""
+    manifest = _with_also(
+        probe,
+        cells=copy.deepcopy(probe.manifest["enumerate"]["cells"]),
+        free_fields=["tile_n"],
+        # Same cells, different kernels: the dtype is fixed per section, not a cell.
+        fixed={"arch": synth.ARCH, "dtype": "fp16"},
+    )
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    defaults = [k for k in kernels if k.get("default")]
+    assert len(defaults) == 4  # the primary's two hdim x two mask cells
+    assert {k["provenance"]["rocke_spec_id"] for k in defaults} == {"grid"}
+    assert any(k["provenance"]["rocke_spec_id"] == "a" for k in kernels)
+
+
 def test_plan_space_counts_every_section(probe, capsys):
     """--plan-space's instance count is the catalog --out writes, ``also`` included."""
     manifest = _full(_with_also(probe))
