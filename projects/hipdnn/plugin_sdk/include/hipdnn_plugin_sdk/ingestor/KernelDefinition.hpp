@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -48,6 +49,11 @@ struct KernelDefinition
     /// initializer after it while still compiling -- the exact hazard the assertion below
     /// exists to catch.
     std::filesystem::path treeRoot;
+    /// Copied from KernelDescriptor::companions: the further code objects the pack launches
+    /// beside `source`, in launch order. Appended for the same reason `treeRoot` was: the
+    /// one positional construction of this type is extended to match, and nothing inserted
+    /// earlier can rebind it.
+    std::vector<KernelSource> companions;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -114,7 +120,7 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, ten initializers at a time, so its field count
+// KernelDefinition is built positionally, eleven initializers at a time, so its field count
 // is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
 // implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
 // would otherwise compile and silently rebind every initializer after it. Only the count
@@ -129,7 +135,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::vector<std::string>,
                                                std::filesystem::path,
                                                std::string,
-                                               std::filesystem::path>
+                                               std::filesystem::path,
+                                               std::vector<KernelSource>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -141,9 +148,31 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::filesystem::path,
                                                        std::string,
                                                        std::filesystem::path,
+                                                       std::vector<KernelSource>,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");
+
+/// @p kernel as if its @p index'th companion were its `source`, so the adapter that loads a
+/// kernel's own code object loads a companion by the same path, under the same containment
+/// and signature rules. The copy names itself as the companion, so a failure says which
+/// code object it was loading; it carries no companions of its own.
+///
+/// @throws std::out_of_range if @p index is not a companion of @p kernel.
+inline KernelDefinition companionDefinition(const KernelDefinition& kernel, size_t index)
+{
+    if(index >= kernel.companions.size())
+    {
+        throw std::out_of_range("kernel '" + toString(kernel.kernelId) + "' has "
+                                + std::to_string(kernel.companions.size())
+                                + " companion(s), none at index " + std::to_string(index));
+    }
+    KernelDefinition companion = kernel;
+    companion.source = kernel.companions[index];
+    companion.name = kernel.name + " (companion " + std::to_string(index) + ")";
+    companion.companions.clear();
+    return companion;
+}
 
 } // namespace hipdnn_plugin_sdk::ingestor
 

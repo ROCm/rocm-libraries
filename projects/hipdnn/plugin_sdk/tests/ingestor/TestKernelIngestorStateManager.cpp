@@ -1025,6 +1025,78 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
         << recorder.getRecordedLogsAsString();
 }
 
+/// A companion is launched by the same pack as the kernel's own source, so the definition
+/// a pack receives carries them, in order, and only as part of that one entry -- the tuple
+/// still selects exactly one kernel.
+TEST(TestKernelIngestorStateManager, CarriesCompanionsIntoTheDefinitionInOrder)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor kernel = makeKernel(testId(0x7C), "kernel_with_companions", 64, "FLOAT");
+    kernel.source = makeKpackSource();
+    KernelSource first = makeKpackSource();
+    first.symbol = "reduce_kernel";
+    KernelSource second = makeKpackSource();
+    second.symbol = "epilogue_kernel";
+    kernel.companions = {first, second};
+    pack.kernels = {kernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x7C));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    ASSERT_EQ(definitions.front().companions.size(), 2U);
+    EXPECT_EQ(definitions.front().companions[0].symbol, "reduce_kernel");
+    EXPECT_EQ(definitions.front().companions[1].symbol, "epilogue_kernel");
+    EXPECT_EQ(definitions.front().source.symbol, "TestKernel");
+}
+
+/// A kernel is whole or absent: one companion this build cannot load drops the kernel with
+/// the same named ERROR an unloadable `source` gets, rather than leaving an entry whose
+/// launch would fail halfway through.
+TEST(TestKernelIngestorStateManager, DropsAKernelWhoseCompanionHasAnUnadaptedKind)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor split = makeKernel(testId(0x7D), "kernel_split", 64, "FLOAT");
+    split.source = makeKpackSource();
+    KernelSource unadapted = makeKpackSource();
+    unadapted.kind = KernelSourceKind::HSACO_FILE;
+    split.companions = {unadapted};
+    pack.kernels = {split, makeKernel(testId(0x7E), "kernel_sibling", 256, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x7D));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kernel_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_split'"))
+        << recorder.getRecordedLogsAsString();
+}
+
 /// `source.library` is relative, so a definition is only usable together with the
 /// directory of the descriptor that declared it. The state manager carries the anchor
 /// through unchanged; the loader is what fills it.

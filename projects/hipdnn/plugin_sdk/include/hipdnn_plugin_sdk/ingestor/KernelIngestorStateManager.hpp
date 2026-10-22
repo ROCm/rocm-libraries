@@ -468,8 +468,12 @@ private:
             packDefinitions.reserve(pack.kernels.size());
             for(const auto& kernel : pack.kernels)
             {
-                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
-                   && kernel.source.kind != KernelSourceKind::KPACK)
+                const auto adaptable = [](const KernelSource& source) {
+                    return source.kind == KernelSourceKind::EMBEDDED_SOURCE
+                           || source.kind == KernelSourceKind::KPACK;
+                };
+                if(!adaptable(kernel.source)
+                   || !std::all_of(kernel.companions.begin(), kernel.companions.end(), adaptable))
                 {
                     // Dropped, not thrown: an unadaptable kernel costs only itself, so its
                     // pack keeps serving whichever siblings this build can dispatch.
@@ -522,7 +526,8 @@ private:
                                                            std::move(kernelArch),
                                                            kernel.originDirectory,
                                                            kernel.name,
-                                                           kernel.treeRoot});
+                                                           kernel.treeRoot,
+                                                           kernel.companions});
             }
             // Pushed even when every kernel was dropped: _definitions is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to

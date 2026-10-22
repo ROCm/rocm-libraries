@@ -369,6 +369,15 @@ struct KernelDescriptor
     /// it stays correct for a flat tree where the two coincide. Empty for a kernel built
     /// in memory. Filled by the loader, never authored.
     std::filesystem::path treeRoot;
+    /// Further code objects this kernel launches beside `source`, in launch order -- the
+    /// split-KV reduce that follows an attention segment kernel, say. Each resolves the
+    /// way `source` does (same `originDirectory`, same `treeRoot` boundary) and is
+    /// loaded and signature-checked by the pack that launches it.
+    ///
+    /// Companions are not catalog entries: they carry no metadata, arch or priority of
+    /// their own, so the kernel's tuple still picks exactly one entry. Appended rather
+    /// than grouped with `source`, so a descriptor that names none loads as it always did.
+    std::vector<KernelSource> companions;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over

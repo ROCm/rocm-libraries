@@ -95,6 +95,52 @@ TEST(TestIngestorKernelDefinition, CarriesTheKpackCoordinates)
     EXPECT_EQ(kernel.name, "kpack kernel");
 }
 
+KernelSource makeCompanionSource(const std::string& symbol)
+{
+    KernelSource source;
+    source.kind = KernelSourceKind::KPACK;
+    source.library = "kpack/hip_kernel_provider_gfx950.kpack";
+    source.tocKey = "toc-" + symbol;
+    source.symbol = symbol;
+    source.sha256 = std::string(64, 'c');
+    return source;
+}
+
+TEST(TestIngestorKernelDefinition, CompanionDefinitionSwapsInTheCompanionSource)
+{
+    auto kernel = makeKpackDefinition(testId(0x03), 64, "/descriptors/gfx950");
+    kernel.companions
+        = {makeCompanionSource("reduce_kernel"), makeCompanionSource("epilogue_kernel")};
+
+    const auto second = companionDefinition(kernel, 1);
+
+    EXPECT_EQ(second.source.symbol, "epilogue_kernel");
+    EXPECT_EQ(second.source.tocKey, "toc-epilogue_kernel");
+    // Everything the adapter resolves a path against is the kernel's own, so the companion
+    // is held to the same tree boundary.
+    EXPECT_EQ(second.originDirectory, kernel.originDirectory);
+    EXPECT_EQ(second.treeRoot, kernel.treeRoot);
+    EXPECT_EQ(toString(second.kernelId), toString(kernel.kernelId));
+    // A diagnostic must say which code object failed, and a companion has none of its own.
+    EXPECT_NE(second.name, kernel.name);
+    EXPECT_NE(second.name.find("companion 1"), std::string::npos);
+    EXPECT_TRUE(second.companions.empty());
+    // The original is not disturbed.
+    EXPECT_EQ(kernel.source.symbol, "TestKernel");
+    EXPECT_EQ(kernel.companions.size(), 2u);
+}
+
+TEST(TestIngestorKernelDefinition, CompanionDefinitionRejectsAnIndexPastTheList)
+{
+    auto kernel = makeKpackDefinition(testId(0x04), 64, "/descriptors/gfx950");
+
+    EXPECT_THROW(companionDefinition(kernel, 0), std::out_of_range);
+
+    kernel.companions = {makeCompanionSource("reduce_kernel")};
+    EXPECT_NO_THROW(companionDefinition(kernel, 0));
+    EXPECT_THROW(companionDefinition(kernel, 1), std::out_of_range);
+}
+
 // Throw matrix: each typed getter x field-absent/wrong-alternative.
 struct KernelDefinitionThrowCase
 {

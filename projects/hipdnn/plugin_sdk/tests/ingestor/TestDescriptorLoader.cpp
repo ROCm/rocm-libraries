@@ -2910,6 +2910,16 @@ void expectSameKernel(const KernelDescriptor& actual, const KernelDescriptor& ex
     EXPECT_EQ(actual.arch, expected.arch);
     EXPECT_EQ(actual.originDirectory, expected.originDirectory);
     EXPECT_EQ(actual.treeRoot, expected.treeRoot);
+    ASSERT_EQ(actual.companions.size(), expected.companions.size());
+    for(size_t i = 0; i < expected.companions.size(); ++i)
+    {
+        EXPECT_EQ(actual.companions[i].kind, expected.companions[i].kind);
+        EXPECT_EQ(actual.companions[i].library, expected.companions[i].library);
+        EXPECT_EQ(actual.companions[i].tocKey, expected.companions[i].tocKey);
+        EXPECT_EQ(actual.companions[i].symbol, expected.companions[i].symbol);
+        EXPECT_EQ(actual.companions[i].sha256, expected.companions[i].sha256);
+        EXPECT_EQ(actual.companions[i].signature.size(), expected.companions[i].signature.size());
+    }
 }
 
 void expectSamePack(const KernelDescriptorPack& actual, const KernelDescriptorPack& expected)
@@ -3925,6 +3935,130 @@ TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
     EXPECT_EQ(kernels.front().source.kind, KernelSourceKind::KPACK);
     EXPECT_EQ(kernels.front().source.symbol, "pointwise_add_kernel");
     EXPECT_EQ(kernels.front().source.sha256, std::string(64, 'b'));
+}
+
+namespace
+{
+
+/// A packaged `kpack` source for a companion: the same five coordinates a kernel's own
+/// source carries, distinguished from it by `symbol` and `toc_key`.
+nlohmann::json packagedCompanion(const std::string& symbol, char digestFill)
+{
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx950.kpack"},
+            {"toc_key", "toc-" + symbol},
+            {"symbol", symbol},
+            {"sha256", std::string(64, digestFill)},
+            {"signature", packagedSignature()}};
+}
+
+/// Writes a packaged kernel carrying @p companions beside its own source, so a rejection can
+/// only be something about the companions.
+void writePackagedKernelWithCompanions(const std::filesystem::path& where,
+                                       const nlohmann::json& companions)
+{
+    auto packaged = makeSetDocuments('1', "test:companions");
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = packagedCompanion("segment_kernel", 'a');
+    kernel["companions"] = companions;
+    writeDocuments(where, packaged);
+}
+
+} // namespace
+
+/// A kernel that launches a second code object after its own -- the split-KV reduce that
+/// follows an attention segment kernel. Every companion parses to a full source, and the
+/// list keeps its authored order, because that order is the launch order.
+TEST(TestDescriptorLoader, CarriesCompanionsInLaunchOrder)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("companions_order"));
+    writePackagedKernelWithCompanions(
+        dir.path(),
+        nlohmann::json::array(
+            {packagedCompanion("reduce_kernel", 'b'), packagedCompanion("epilogue_kernel", 'c')}));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    EXPECT_EQ(kernel.source.symbol, "segment_kernel");
+    ASSERT_EQ(kernel.companions.size(), 2u);
+    EXPECT_EQ(kernel.companions[0].kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(kernel.companions[0].symbol, "reduce_kernel");
+    EXPECT_EQ(kernel.companions[0].tocKey, "toc-reduce_kernel");
+    EXPECT_EQ(kernel.companions[0].sha256, std::string(64, 'b'));
+    ASSERT_EQ(kernel.companions[0].signature.size(), 3u);
+    EXPECT_EQ(kernel.companions[1].symbol, "epilogue_kernel");
+    EXPECT_EQ(kernel.companions[1].sha256, std::string(64, 'c'));
+}
+
+/// The loader must keep reading every descriptor written before the field existed, so
+/// absent and empty are both "no companions" and neither is an error.
+TEST(TestDescriptorLoader, ParsesAKernelWithoutCompanionsAsHavingNone)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory absentDir(
+        uniqueDirectory("companions_absent"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDir(uniqueDirectory("companions_empty"));
+    auto absent = makeSetDocuments('1', "test:no-companions");
+    writeDocuments(absentDir.path(), absent);
+    writePackagedKernelWithCompanions(emptyDir.path(), nlohmann::json::array());
+
+    const auto absentSets = loadFrom(absentDir.path());
+    const auto emptySets = loadFrom(emptyDir.path());
+
+    ASSERT_EQ(absentSets.size(), 1u);
+    for(const auto& kernel : absentSets.front().packs.front().kernels)
+    {
+        EXPECT_TRUE(kernel.companions.empty());
+    }
+    ASSERT_EQ(emptySets.size(), 1u);
+    EXPECT_TRUE(emptySets.front().packs.front().kernels.front().companions.empty());
+}
+
+/// One malformed companion costs the load, and the message names which one -- an index in
+/// a list of near-identical sources is the only locator the author has.
+TEST(TestDescriptorLoader, RejectsAMalformedCompanionNamingItsPosition)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("companions_bad_digest"));
+    auto broken = packagedCompanion("epilogue_kernel", 'c');
+    broken["sha256"] = std::string(63, 'c');
+    writePackagedKernelWithCompanions(
+        dir.path(), nlohmann::json::array({packagedCompanion("reduce_kernel", 'b'), broken}));
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "companions[1]"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, RejectsCompanionsThatAreNotAnArray)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("companions_object"));
+    writePackagedKernelWithCompanions(dir.path(), packagedCompanion("reduce_kernel", 'b'));
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "companions must be an array"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// A companion is held to the same gate as a kernel's own source: a kind no adapter can
+/// load is refused at load rather than advertised and then thrown at plan build.
+TEST(TestDescriptorLoader, RejectsACompanionOfAKindNoAdapterCanLoad)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("companions_hsaco"));
+    writePackagedKernelWithCompanions(
+        dir.path(), nlohmann::json::array({nlohmann::json{{"kind", "hsaco_file"}}}));
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "no implementation yet"))
+        << recorder.getRecordedLogsAsString();
 }
 
 /// The gate widened to `kpack`, not to anything: `hsaco_file` names a real kind with no

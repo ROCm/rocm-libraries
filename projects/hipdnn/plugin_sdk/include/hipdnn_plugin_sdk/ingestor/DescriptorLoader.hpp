@@ -1081,9 +1081,10 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
 inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
                                               const std::string& entryLabel)
 {
-    requireKnownKeys(root,
-                     {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"},
-                     entryLabel);
+    requireKnownKeys(
+        root,
+        {"version", "id", "name", "kernel_source", "companions", "metadata", "priority", "arch"},
+        entryLabel);
 
     KernelDescriptor kernel;
     kernel.id = requireId(root, "id", entryLabel);
@@ -1091,6 +1092,24 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
     const std::string where = "kernel '" + kernel.name + "'";
     kernel.source
         = parseKernelSource(requireKey(root, "kernel_source", where), where + " kernel_source");
+
+    // Optional, and an empty list is the same as absent. Each entry is a full source, so a
+    // companion that cannot be loaded fails here with its own locator rather than at the
+    // first plan that launches it.
+    if(const auto it = root.find("companions"); it != root.end())
+    {
+        if(!it->is_array())
+        {
+            fail(where + " companions must be an array of kernel sources");
+        }
+        size_t position = 0;
+        for(const auto& entry : *it)
+        {
+            kernel.companions.push_back(
+                parseKernelSource(entry, where + " companions[" + std::to_string(position) + "]"));
+            ++position;
+        }
+    }
 
     if(const auto it = root.find("metadata"); it != root.end())
     {
