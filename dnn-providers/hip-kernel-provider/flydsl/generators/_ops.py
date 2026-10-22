@@ -25,4 +25,10 @@ OP_KERNEL_DIRS = {
     "sdpa_cdna_dualwave": ("attention_cdna",),
     "sdpa_cdna_decode": ("attention_cdna",),
     "sdpa_aiw": ("attention_rdna4",),
+    "sdpa_bwd_prep": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_dkdv": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_dq": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
 }
