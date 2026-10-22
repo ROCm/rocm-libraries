@@ -25,6 +25,9 @@ TYPED_TEST_SUITE(TestCkTileGemmPipelineCompTDMProducerConsumerWmma,
 // must be rejected too. Argument validation only: nothing is allocated or launched.
 TEST(TestCkTileGemmPipelineCompTDMProducerConsumerWmmaArgs, SplitKRejectedForFloatOutput)
 {
+    // IsSupportedArgument rejects every problem without named barriers, so gate like the fixture.
+    CK_TILE_SKIP_UNLESS_GFX125();
+
     using Fixture =
         TestCkTileGemmPipelineCompTDMProducerConsumerWmma<std::tuple<Row,
                                                                      Col,
