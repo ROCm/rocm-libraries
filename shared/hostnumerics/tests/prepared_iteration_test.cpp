@@ -178,3 +178,26 @@ TEST(PreparedIteration, EncodedExponentIntervalSupportsFullIntRange) {
         GenerationRecipe::realOnly(GenerationRecipe::randomEncodedExponent(parameters));
     EXPECT_NO_THROW(generate(Tensor(ScalarType::Float32, Shape{64}), recipe));
 }
+
+TEST(PreparedIteration, EncodedExponentDecodersMatchTensorAccessForEveryFloatingType) {
+    for (size_t value = 0; value < scalarTypeCount; ++value) {
+        const auto type = static_cast<ScalarType>(value);
+        const auto& info = scalarTypeInfo(type);
+        if (info.category != ScalarCategory::FloatingPoint) continue;
+        SCOPED_TRACE(info.name);
+        const auto plan = detail::prepareEncodedExponent({}, type);
+        for (uint64_t raw :
+             {uint64_t{0}, uint64_t{1}, uint64_t{0x17}, std::numeric_limits<uint64_t>::max()}) {
+            const auto storage =
+                std::as_bytes(std::span(&raw, 1)).first((info.storageBits + 7) / 8);
+            const auto tensor =
+                Tensor::copyEncodedBackingStorage(type, Layout(Shape{}, {}), storage);
+            const double expected = tensor.loadAs<double>({});
+            const double decoded = plan.decode(raw);
+            if (std::isnan(expected))
+                EXPECT_TRUE(std::isnan(decoded));
+            else
+                EXPECT_EQ(decoded, expected);
+        }
+    }
+}
