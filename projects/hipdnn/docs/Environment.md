@@ -7,6 +7,7 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Backend Library Discovery](#backend-library-discovery)
   - [Plugin Discovery](#plugin-discovery)
+  - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
   - [Caching](#caching)
@@ -102,9 +103,37 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
 - Ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`
 
-### Kernel Ingestor
+### Kernel Ingestor Descriptors
 
-These variables apply only to builds with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default `OFF`). See [RFC 0017](rfcs/0017_UniversalKernelDescriptor.md) and [RFC 0020](rfcs/0020_UniversalEngineDescriptor.md).
+Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` (the hip-kernel-provider) build engines from descriptor trees: JSON descriptors and the model artifacts they name. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+
+#### HIPDNN_DESCRIPTOR_DIR
+
+Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses the `arch_content/hip-kernel-provider` directory beside the loaded provider library, else the configure-time install location |
+| `<path>`   | Loads this directory instead of the provider's own tree |
+
+A value that is not an existing directory is ignored with a warning, and the default tree is used.
+
+#### HIPDNN_DESCRIPTOR_RUNTIME_DIR
+
+An additional descriptor root loaded after the provider's tree (or `HIPDNN_DESCRIPTOR_DIR`). It adds descriptors beside the shipped ones and never replaces them. A value that is not an existing directory is ignored with a warning.
+
+#### HIPDNN_DESCRIPTOR_PATH
+
+A list of additional descriptor roots, loaded in order after `HIPDNN_DESCRIPTOR_RUNTIME_DIR`. Entries are separated by `:` on Linux and `;` on Windows; empty entries are skipped. Like `HIPDNN_DESCRIPTOR_RUNTIME_DIR` it is additive. Entries are not checked for existence: an entry that is not installed on this machine contributes nothing, without a warning.
+
+**Example:**
+```bash
+export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
+export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
+```
+
+**Notes:**
+- On Linux, all three variables are ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`: a descriptor can name a shared library (`custom_library`) that the provider then loads. Windows has no equivalent execution mode, so they are always honored there.
 
 #### HIPDNN_DISABLE_ENGINES
 
@@ -114,13 +143,6 @@ A comma-separated list of ingestor engines to skip before registration. Each ent
 export HIPDNN_DISABLE_ENGINES="hipkernel:SomeEngine,0x1A2B3C4D5E6F7080"
 ```
 
-#### HIPDNN_DESCRIPTOR_DIR
-
-Replaces the HIP kernel provider's descriptor tree. If the value names a directory, the provider reads descriptors from it instead of the copy installed beside the plugin. A value that is not a directory is ignored with a warning.
-
-#### HIPDNN_DESCRIPTOR_RUNTIME_DIR
-
-Adds a second descriptor tree after the first one. The tree is additive: it can add descriptors beside the shipped ones, but a file that redefines a shipped ID is refused and the shipped definition stands. A value that is not a directory is ignored with a warning.
 
 ### Heuristic Policy Selection
 
@@ -146,6 +168,23 @@ export HIPDNN_HEUR_POLICY_ORDER="SelectionHeuristic::Config,SelectionHeuristic::
 export HIPDNN_HEUR_POLICY_ORDER="-1234567890123456789,SelectionHeuristic::StaticOrdering"
 ```
 
+#### HIPDNN_HEUR_RANKING_METRIC
+
+Overrides the ranking metric the prediction policies (`SelectionHeuristic::ModeA` / `SelectionHeuristic::ModeB`) order engines by (RFC 0019 §4.4, §11.4). Read by every `EngineHeuristicDescriptor::finalize()` call, with the same precedence as `HIPDNN_HEUR_POLICY_ORDER`: this variable, then the descriptor's `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT` attribute, then the default.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset or empty) | Use the descriptor attribute if set; otherwise `tflops`. |
+| `tflops`   | Calibrated throughput in TFLOPS; higher ranks first. |
+| `time`     | Predicted device time in milliseconds; lower ranks first. |
+
+Any other value is logged as an error and ignored: the descriptor attribute, else `tflops`, applies as if the variable were unset. Engines are never ranked by a metric other than the effective one. The effective metric is stamped into every configuration in `HIPDNN_ATTR_ENGINEHEUR_RESULTS`, so the chosen engine picks its kernel by the same metric at plan build. It affects only engine heuristic descriptors; the per-query `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` and `HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT` attributes are not overridden.
+
+**Example:**
+```bash
+export HIPDNN_HEUR_RANKING_METRIC=time
+```
+
 #### HIPDNN_HEUR_CONFIG_PATH
 
 Path to a JSON rule file consumed by the `SelectionHeuristic::Config` built-in policy. The file maps convolution op + tensor-shape patterns to a preferred engine name; the policy walks conv-like nodes in the serialized graph and, on the first matching rule, reorders the candidate engines so the chosen one runs first. Re-read on every `Finalize` invocation — there is no process-wide cache.
@@ -164,7 +203,9 @@ export HIPDNN_HEUR_CONFIG_PATH=/etc/hipdnn/engine_overrides.json
 
 #### HIPDNN_HEUR_FALLBACK_ENGINE_ORDER
 
-Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list.
+Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`, `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list, however well a prediction policy would score it.
+
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` still rank the listed engines by prediction; unscored engines (and ties between equal scores) follow the order written here.
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
@@ -243,6 +284,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 
 **Notes:**
 - With benchmarking on and no matching ranking cached, the first `execute()` of a plan samples every knob-filtered candidate kernel, so it is slower than subsequent calls. The ingestor memoizes the ranking per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
+- For MIOpen convolution, forcing benchmarking on makes plans without `global.workspace_size_limit` use the maximum workspace MIOpen reports, which can be far larger than the default.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
@@ -421,6 +463,22 @@ This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 ```bash
 export HIPDNN_LOG_GRAPH_DIR=/tmp/hipdnn_graphs
 ```
+
+#### Execution plan run counts
+
+With `HIPDNN_LOG_LEVEL=info`, each successful `hipdnnBackendExecute` call writes one log line. The line identifies the execution plan and shows how many times that plan has been submitted:
+
+```text
+API success: [hipdnnBackendExecute] executionPlan=ExecutionPlanDescriptor: {planId=3, graphId=1b4e28ba-2fa1-4d3b-a3f5-ef19b5a7633b, workspaceSize=0, engineId=..., engineConfig=0x...}, executionCount=42
+```
+
+- `planId` is unique for each execution plan in the process.
+- `graphId` is the ID of the graph that the plan was finalized from. It matches the `graph_<id>.json` file name from `HIPDNN_LOG_GRAPH_DIR`. A plan loaded from a serialized plan shows `graphId=(none)`.
+- `executionCount` starts at 1 for each plan and increases by 1 for each successful submission of that plan. A call that returns an error does not increase the count.
+
+`hipdnnBackendExecute` queues the work on the handle's stream and can return before the GPU work finishes. `executionCount` therefore counts successful submissions, not completed GPU executions.
+
+To get the submission count for each plan, use the largest `executionCount` value for each `planId`.
 
 ### MIOpen Plugin Logging
 

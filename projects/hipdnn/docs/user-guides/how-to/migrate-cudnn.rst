@@ -66,7 +66,7 @@ This table provides a high-level overview of the differences between cuDNN and h
      - ``hipdnnDestroy(handle)``
    * - Heuristics modes
      - All cuDNN heuristic modes
-     - ``HeurMode_t::A``, ``B``, ``FALLBACK``, and ``OPENSOURCE`` are accepted; all currently map to the backend fallback heuristic
+     - ``HeuristicMode::A``, ``HeuristicMode::B``, and ``HeuristicMode::FALLBACK``
    * - Operation support
      - All cuDNN operations
      - See :ref:`plugin-support` for more information.
@@ -82,12 +82,31 @@ See the :ref:`dimension-layouts` section of the Operation Support doccument for 
 Troubleshooting
 ===============
 
-Error: Heuristic modes A, B, and OPENSOURCE do not change engine selection
---------------------------------------------------------------------------
+Prediction modes return no ranking
+----------------------------------
 
-hipDNN does not implement these heuristic modes yet. They map to the fallback heuristic.
+Mode A ranks engines by their graph-level UHD prediction. Mode B prefers a
+calibrated configuration prediction and falls back to the graph-level prediction
+for each engine. Neither mode benchmarks the graph. Install compatible trained
+models for the selected device architecture.
 
-To fix the problem, use a combination of ``Graph::get_ranked_engine_ids()`` and ``Graph::set_preferred_engine_id_ext()`` if you need more detailed control over engine selection.
+``HeuristicMode::A`` and ``HeuristicMode::B`` are not backend heuristic modes: the
+frontend turns them into the ``SelectionHeuristic::ModeA`` and
+``SelectionHeuristic::ModeB`` entries of the heuristic descriptor's ordered policy
+list, always preceded by ``SelectionHeuristic::Config`` and followed by
+``SelectionHeuristic::StaticOrdering``. If no applicable engine has a usable
+prediction, the prediction policy declines and ordinary static engine selection
+still runs, so ``graph.create_execution_plans({HeuristicMode::B})`` never fails for
+want of a model. Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
+
+Both modes rank by one *ranking metric*, ``tflops`` by default: calibrated
+throughput, highest first. ``graph.set_ranking_metric("time")`` ranks by predicted
+milliseconds, lowest first, and makes the chosen engine pick its kernel by predicted
+time too; ``graph.get_ranking_metric()`` reads the choice back. An unregistered name
+returns an ``Error`` and leaves the metric unchanged. An engine whose models do not
+cover the requested metric is ranked after those that do, never by another metric,
+so if no engine has a model for it the prediction policy declines exactly as above.
+``HIPDNN_HEUR_RANKING_METRIC`` overrides the Graph's choice for heuristic selection.
 
 Error: Different memory utilities for allocating device memory
 --------------------------------------------------------------

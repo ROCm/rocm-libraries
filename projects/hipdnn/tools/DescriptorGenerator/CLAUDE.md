@@ -27,6 +27,7 @@ Adding a new operation follows this sequence:
 9. **Review and build** — Compile, run tests, review generated code
 10. **Extract test constants** — Replace inline test literals with named constants (see Step 10 below)
 11. **Review integration test** — The generated integration test includes a lowering round-trip test and per-scalar preservation tests; add hand-written tests for auto-UIDs, multi-input variants, and multi-operation graphs as needed (see Step 11 below)
+12. **Add the work model** — Apply the schema annotations from `fragments/fbs_tensor_fields.txt`, regenerate the operand visitor, and give the op a FLOP formula or a "no counting convention" entry (see Step 12 below)
 
 ---
 
@@ -324,6 +325,26 @@ If these don't exist yet, the integration test cannot be compiled. In that case:
 
 ---
 
+## Step 12: Work Model (FLOPs and Operand Annotations)
+
+UHD heuristics publish each node's logical FLOPs (`graph.flops`, `graph.nodes[i].flops`) and its operands (`graph.nodes[i].*`). Both need per-op input; see `docs/AddingNewOperations.md`, "Work Model (FLOPs)" and "Operand Features".
+
+### 12a. Schema Annotations — `flatbuffers_sdk/schemas/<op>_attributes.fbs`
+
+`fragments/fbs_tensor_fields.txt` lists the op table's tensor-uid declarations with their annotations: `(cache_uid)` on every tensor reference, plus `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true`. Make the schema match, declare each attribute it uses at file scope, then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
+
+### 12b. FLOPs — `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp`
+
+Every `NodeAttributes` member is either counted or listed in `NO_COUNTING_CONVENTION`; `TestEngineFeatures.EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` fails for a member that is neither.
+
+| Fragment | Target | What to Add |
+|----------|--------|-------------|
+| `node_flops_overload.txt` | `EngineFeatures.hpp` | `nodeFlops` overload after the last one. The stub returns `std::nullopt` (uncounted); replace its TODO with the logical FLOP formula. |
+| `logical_flops_case.txt` | `EngineFeatures.hpp` | Case in the `logicalFlops()` switch, before `default:`. Its second snippet is the `NO_COUNTING_CONVENTION` entry to use instead of all three fragments when the op has no counting convention; give the reason on the line above it. |
+| `work_model_test_case.txt` | `plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` | Entry in the `cases` vector of `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`. Set the attributes the formula reads and the expected FLOPs (the generated `0.0` fails). |
+
+---
+
 ## Creating a YAML Config from an FBS Schema
 
 If a YAML config does not already exist for your operation, create one from the FBS schema. The YAML maps schema fields to hipDNN backend API concepts.
@@ -356,6 +377,17 @@ Apply these rules:
 | `field: long` (non-UID) | `data_fields` | `scalar_int64` |
 | `field: bool` | `data_fields` | `bool` |
 | `field: [long]` (array of UIDs) | `tensor_array_fields` | (for peer_stats etc.) |
+
+A tensor-uid field annotated `work_data_dependent` in the schema (`long (cache_uid, work_data_dependent)`) sets `work_data_dependent: true` on its `tensor_fields` or `tensor_array_fields` entry (default `false`). Set it when the tensor's contents, not its shape, decide how much work the node does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) stays `false`. The generator emits the annotation in `fragments/fbs_tensor_fields.txt` (Step 12a):
+
+```yaml
+tensor_fields:
+  - name: "first_token_offset"
+    fbs_field: "first_token_offset_tensor_uid"
+    attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
+    required: true
+    work_data_dependent: true   # Group boundaries decide how many rows are multiplied
+```
 
 ### Required YAML Fields
 
@@ -473,6 +505,7 @@ tensor_array_fields:
     required: false         # Whether the field must be set before finalize
     test_uids: [100, 101]   # UIDs for test tensor descriptors
     test_label: "PeerStats"  # Label used in test case names
+    work_data_dependent: false  # See "Mapping FBS Fields to YAML"
 ```
 
 ### Tips

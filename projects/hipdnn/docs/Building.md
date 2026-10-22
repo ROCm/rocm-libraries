@@ -351,7 +351,7 @@ By default, hipDNN includes JSON serialization support via [nlohmann_json](https
 ```bash
 cmake --preset release -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON
 ```
-This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
+This disables JSON-based graph serialization and deserialization. Binary serialization remains available. It also leaves the engine-query helpers `hipdnn_frontend/EngineQueryTypes.hpp` and `hipdnn_frontend/detail/EngineQueries.hpp` empty. In builds that keep them, `detail/EngineQueries.hpp` decodes FlatBuffers pages, so its consumers link `hipdnn_flatbuffers_sdk` themselves.
 
 ### Kernel packing (rocm_kpack)
 

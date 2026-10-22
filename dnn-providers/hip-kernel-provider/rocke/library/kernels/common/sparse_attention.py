@@ -46,13 +46,13 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from rocke.core.ir import I8, IRBuilder, KernelDef, Value
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
     mfma_attention_fwd_inner_body,
 )
 from rocke.helpers.spec import kernel_name_join
-from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from .fmha_arch import validate_fmha_mfma_atom
 

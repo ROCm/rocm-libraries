@@ -53,7 +53,7 @@ ninja
 | **Namespace** | cudnn_frontend | hipdnn_frontend |
 | **Handle Creation** | cudnnCreate(&handle) | hipdnnCreate(&handle) |
 | **Handle Destruction** | cudnnDestroy(handle) | hipdnnDestroy(handle) |
-| **Heuristics Modes** | All cuDNN heuristic modes | `HeurMode_t::A`, `B`, `FALLBACK`, and `OPENSOURCE` are accepted; all currently map to the backend fallback heuristic |
+| **Heuristics Modes** | All cuDNN heuristic modes | HeurMode_t::A, HeurMode_t::B, and HeurMode_t::FALLBACK |
 | **Operation Support** | All cuDNN operations | [Operation Support](./OperationSupport.md) |
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
@@ -152,13 +152,13 @@ broadcasting rules (dimensions compared right-to-left; compatible if equal or 1)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ```
 
-### 2. Lack of Heuristic Modes
+### 2. Prediction Modes Return No Ranking
 
-**Error**: Heuristic modes A, B, and OPENSOURCE do not change engine selection
+**Error**: `HeurMode_t::A` or `HeurMode_t::B` selects the same engines as `HeurMode_t::FALLBACK`
 
-**Cause**: hipDNN does not implement these heuristic modes yet. They map to the fallback heuristic.
+**Cause**: Mode A ranks engines by their graph-level UHD prediction; mode B prefers a calibrated configuration prediction and falls back to the graph-level prediction for each engine. Neither benchmarks the graph. The frontend turns them into the `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` entries of the heuristic descriptor's policy order, preceded by `SelectionHeuristic::Config` and followed by `SelectionHeuristic::StaticOrdering`. If no applicable engine has a usable prediction for the ranking metric (`tflops` by default, see `graph::set_ranking_metric()`), the prediction policy declines and static engine selection runs, so plan creation does not fail for want of a model. `HIPDNN_HEUR_POLICY_ORDER` overrides the whole policy order and `HIPDNN_HEUR_RANKING_METRIC` the ranking metric.
 
-**Fix**: Use a combination of `Graph::get_ranked_engine_ids()` and `Graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
+**Fix**: Install compatible trained models for the selected device architecture. For direct control over engine selection, combine `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()`.
 
 ### 3. Device Memory Utilities
 

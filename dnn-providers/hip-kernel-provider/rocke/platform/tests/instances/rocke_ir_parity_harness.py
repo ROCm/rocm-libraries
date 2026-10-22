@@ -575,6 +575,33 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
+
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.common.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -1176,6 +1203,48 @@ def build_direct_nongrouped(
         )
         spec = DirectNongroupedConvSpec(problem=p, name=name, **spec_kw)
         return build_direct_conv_nongrouped(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
+    """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
+    fold; ``problem`` overrides the DirectConvProblem fields (unused by the
+    fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
+    where the C++ engine is gated byte-identical by check_byte_identity.py."""
+
+    def _build():
+        from kernels.common import conv_direct_dw_wgrad as dw
+        from kernels.common import conv_direct_wgrad_gather as wg
+        from kernels.common import conv_direct_wgrad_tiled as wt
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        if kind == "fold":
+            return dw.build_dw_wgrad_fold(
+                dw.DwWgradFoldSpec(name=name, **spec_kw), arch=arch
+            )
+        kw = dict(
+            N=2,
+            H=16,
+            W=32,
+            groups=1,
+            cpg=64,
+            kpg=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        kw.update(problem)
+        p = DirectConvProblem(**kw)
+        spec_cls, build = {
+            "tiled": (wt.DirectWgradTiledSpec, wt.build_direct_wgrad_tiled),
+            "dw_lds": (dw.DwWgradLdsSpec, dw.build_dw_wgrad_lds),
+            "dw_cols": (dw.DwWgradColsSpec, dw.build_dw_wgrad_cols),
+            "gather": (wg.WgradGatherSpec, wg.build_wgrad_gather),
+        }[kind]
+        return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
 
     return _build
 
@@ -3419,6 +3488,21 @@ def cases():
                 **_kw,
             ),
         )
+    # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
+    # magic sum carries a real multiply-high term (a power-of-two ratio has multiplier 1).
+    for _dim, _three_d in (("2d", False), ("3d", True)):
+        add(
+            "attention",
+            f"attention/gfx950/scalar{_dim}_fp16_d128_q40_kv8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar{_dim}_q40_kv8",
+                "gfx950",
+                three_d=_three_d,
+                num_query_heads=40,
+                num_kv_heads=8,
+            ),
+        )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
     # 4-warp GQA V-transpose (gfx942) routes.
@@ -4032,6 +4116,62 @@ def cases():
             ),
         )
 
+    # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
+    # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
+    # depthwise partial-slot kernels and their fold, and the small-C gather.
+    # The full branch matrix (and the C++ twins) lives in
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 95+).
+    for _case_id, _kind, _prob, _over in (
+        ("tiled_bf16_c128", "tiled", dict(cpg=128, kpg=128, H=30), {}),
+        (
+            "tiled_qg2_pingpong",
+            "tiled",
+            {},
+            dict(
+                q_groups=2,
+                pingpong=True,
+                waves_k=2,
+                wave_k16=1,
+                rows_per_seg=12,
+                prefetch=3,
+            ),
+        ),
+        (
+            "tiled_fp16_unfold4",
+            "tiled",
+            dict(N=4, H=15, W=40, dtype="fp16"),
+            dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
+        ),
+        ("fold_t9", "fold", {}, dict(taps=9)),
+        (
+            "dw_cols_c3_7x7_s2",
+            "dw_cols",
+            dict(groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2, H=20),
+            {},
+        ),
+        ("dw_lds_c64", "dw_lds", dict(groups=64, cpg=1, kpg=1), {}),
+        (
+            "gather_c3_s2",
+            "gather",
+            dict(cpg=3, kpg=24, stride=2, H=32, W=64),
+            {},
+        ),
+        (
+            "gather_c24_tr",
+            "gather",
+            dict(cpg=24, kpg=96, stride=2, H=30, W=40),
+            dict(wave_k16=1, waves_k=6, rows_per_seg=8, target_blocks=256),
+        ),
+    ):
+        add(
+            "conv_direct_wgrad",
+            f"conv_direct_wgrad/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_wgrad(
+                f"irhash_direct_wgrad_{_case_id}", "gfx950", _kind, _prob, **_over
+            ),
+        )
+
     # --- conv_direct_depthwise_tiled: output-stationary depthwise direct conv ---
     # Runtime filter-row loop, sliding input-row window, one weight row in
     # registers. Mirrors library/tests/parity/conv_direct_grouped_emit.*
@@ -4179,6 +4319,73 @@ def cases():
         "gfx1201",
         build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
     )
+
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 

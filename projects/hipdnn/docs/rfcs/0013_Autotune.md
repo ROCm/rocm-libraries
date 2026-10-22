@@ -201,7 +201,9 @@ struct AutotuneResult {
     bool excludedByCaller = false;          // true if a caller filter or workspace budget held it out
     std::string errorMessage;
     int64_t workspaceSize = 0;
-    int64_t estimatedWorkspaceSize = 0;     // Pre-compile workspace estimate from engine config.
+    int64_t estimatedWorkspaceSize = 0;     // Pre-compile workspace estimate from engine config; covers
+                                            // the priming configuration when the engine exposes the
+                                            // benchmarking knob.
     int compiledPlanIndex = -1;             // Index into the compiled plans vector; used for
                                             // winner selection after benchmarking.
     TuneMode modeUsed = TuneMode::STANDARD;
@@ -247,7 +249,9 @@ struct EngineConfigInfo {
                                        // Ignored by add_engine_*() functions. Use add_engine_variants()
                                        // or add_engine() to set custom knobs on engines for autotune().
     bool supportsExhaustive = false;   // Informational. For filtering exhaustive-capable engines
-    int64_t estimatedWorkspaceSize = 0;// Informational, pre-compile workspace estimate, for filtering.
+    int64_t estimatedWorkspaceSize = 0;// Pre-compile workspace estimate, for filtering. Covers the priming
+                                  // configuration when the engine exposes the benchmarking knob, so it can
+                                  // exceed what a non-priming plan needs.
 };
 
 struct EngineVariant {
@@ -329,7 +333,7 @@ Error get_estimated_max_workspace_size(int64_t& maxSize) const;
 ```
 
 **Workspace sizing**:
-1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size; `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). To avoid compiling engines with large workspace estimates, filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
+1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. For an engine that exposes the benchmarking knob it covers the EXHAUSTIVE priming configuration (the larger of the default and the knob-on estimate), so a workspace of this size is enough for priming. It is reported in every autotune mode and can exceed what a non-priming plan needs; pass an explicit workspace if you want less. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size; `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). To avoid compiling engines with large workspace estimates, filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
 2. **Compiled-plan path**: Use `get_autotune_workspace_size()` for the accurate post-compile maximum.
 3. After autotuning, `execute()` only needs the winner's `workspaceSize`, which may be smaller.
 

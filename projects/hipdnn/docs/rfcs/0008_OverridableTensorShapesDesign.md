@@ -351,7 +351,7 @@ with the Phase 1 override flag set requires
 `K_OVERRIDE_EXECUTE_MIN_API_VERSION` (`1.1.0`). Other features use the
 next minor versions: `1.2.0` runtime pass-by-value (RFC 0016), `1.3.0`
 ragged tensors and non-default tensor alignment, `1.4.0` ragged offset
-multiplier. Phase 2 has no version assigned.
+multiplier. `1.5.0` adds the optional UHD prediction exports; it adds no graph requirement. Phase 2 has no version assigned.
 
 The backend reads each plugin's `MAJOR.MINOR.PATCH` via the existing
 `hipdnnPluginGetApiVersion(const char**)` symbol and compares it
@@ -765,7 +765,7 @@ until then engines that need them must either over-accept and report
 
 Phase 2's frontend/backend API additions are backwards-compatible
 extensions, so they ship as a **minor** plugin-SDK version bump. The
-version number is not assigned yet; `1.2.0` to `1.4.0` are taken by
+version number is not assigned yet; `1.2.0` to `1.5.0` are taken by
 other features (see [§4.5](#45-applicability-filtering)). The new
 schema field (`is_dynamic`) is additive
 (see [§4.1](#41-graph-flag)); the new optional execute symbol is
