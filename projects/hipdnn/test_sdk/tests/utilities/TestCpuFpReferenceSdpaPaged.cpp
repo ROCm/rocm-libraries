@@ -78,6 +78,8 @@ struct PagedCase
     bool interleavedKv = false;
     // One page-table tensor serves K and V (cuDNN allows the same uid for both).
     bool sharedPageTable = false;
+    // Attention sink per query head; empty means no sink.
+    std::vector<float> sinks;
     uint32_t seed = 1234;
 };
 
@@ -250,6 +252,11 @@ struct PagedProblem
         return static_cast<float>(1.0 / std::sqrt(static_cast<double>(c.headDim)));
     }
 
+    const std::vector<float>* sinkPerHead() const
+    {
+        return c.sinks.empty() ? nullptr : &c.sinks;
+    }
+
     void run(bool passSeqLenQ = true)
     {
         CpuFpReferenceSdpaRagged::forwardPaged<T, T, T, T, float>(*q,
@@ -266,7 +273,11 @@ struct PagedProblem
                                                                   c.leftBound,
                                                                   c.rightBound,
                                                                   c.topLeftAlignment,
-                                                                  lse.get());
+                                                                  lse.get(),
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  sinkPerHead());
     }
 
     // Gathers batch b's K or V rows through a page table into a dense [1, H_kv, seqKv, D] tensor.
@@ -341,13 +352,15 @@ struct PagedProblem
 
             if(seqKv == 0)
             {
-                // No keys: every live row is fully masked.
+                // No keys: every live row is fully masked. O = 0 and LSE = sink (-inf without).
                 for(int64_t s = 0; s < rows; ++s)
                 {
                     for(int64_t h = 0; h < c.numHeads; ++h)
                     {
-                        EXPECT_EQ(lse->getHostValue(std::vector<int64_t>{b, h, s, 0}),
-                                  -std::numeric_limits<float>::infinity());
+                        const float expectedLse = c.sinks.empty()
+                                                      ? -std::numeric_limits<float>::infinity()
+                                                      : c.sinks[static_cast<size_t>(h)];
+                        EXPECT_EQ(lse->getHostValue(std::vector<int64_t>{b, h, s, 0}), expectedLse);
                         for(int64_t d = 0; d < c.headDim; ++d)
                         {
                             EXPECT_EQ(static_cast<float>(
@@ -373,7 +386,11 @@ struct PagedProblem
                                                                        c.leftBound,
                                                                        c.rightBound,
                                                                        c.topLeftAlignment,
-                                                                       &lseDense);
+                                                                       &lseDense,
+                                                                       nullptr,
+                                                                       nullptr,
+                                                                       nullptr,
+                                                                       sinkPerHead());
 
             const float tolerance = sdpa::calculateSdpaFwdTolerance<T, T>(
                 -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, c.headDim, seqKv, scale());
@@ -755,5 +772,57 @@ TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnDenseOutputWithRaggedQ)
     std::vector<float> denseOut(static_cast<size_t>(oDims[0] * oDims[1] * oDims[2] * oDims[3]));
     problem.o
         = std::make_unique<ShallowTensor<float>>(denseOut.data(), oDims, generateStrides(oDims));
+    EXPECT_THROW(problem.run(), std::invalid_argument);
+}
+
+// Attention sinks: one logit per query head, compared with the dense reference given the same
+// sinks. A sequence with seq_len_kv == 0 must give O = 0 and LSE = sink.
+TEST(TestCpuFpReferenceSdpaPaged, SinksGqaDecodeWithEmptySequence)
+{
+    PagedCase c;
+    c.seqLenKv = {37, 0, 16, 70};
+    c.numHeads = 8;
+    c.numHeadsKv = 2;
+    c.sinks = {0.5f, -1.25f, 2.0f, -0.75f, 0.0f, 1.5f, -2.0f, 0.25f};
+    checkPagedVsGatheredDense<bfloat16>(c);
+    checkPagedVsGatheredDense<half>(c);
+    checkPagedVsGatheredDense<float>(c);
+}
+
+TEST(TestCpuFpReferenceSdpaPaged, SinksRaggedQSlidingWindow)
+{
+    PagedCase c;
+    c.raggedQ = true;
+    c.seqLenKv = {10, 7, 40, 0};
+    c.seqLenQ = {3, 0, 6, 2};
+    c.qGap = {1, 2, 0, 0};
+    c.numHeads = 4;
+    c.numHeadsKv = 2;
+    c.leftBound = 5;
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.sinks = {1.0f, -0.5f, 0.75f, -3.0f};
+    checkPagedVsGatheredDense<bfloat16>(c);
+}
+
+// A sink of -inf is exactly no sink.
+TEST(TestCpuFpReferenceSdpaPaged, NegativeInfinitySinkEqualsNoSink)
+{
+    PagedCase c = decodeCase(64);
+    c.seqLenKv = {37, 0, 16};
+    PagedProblem<float> plain(c);
+    plain.run();
+    c.sinks.assign(static_cast<size_t>(c.numHeads), -std::numeric_limits<float>::infinity());
+    PagedProblem<float> withSink(c);
+    withSink.run();
+    EXPECT_EQ(plain.oBuf, withSink.oBuf);
+    EXPECT_EQ(plain.lseBuf, withSink.lseBuf);
+}
+
+TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnSinkCountMismatch)
+{
+    PagedCase c = decodeCase(64);
+    c.sinks = {0.0f, 0.0f};
+    PagedProblem<float> problem(c);
     EXPECT_THROW(problem.run(), std::invalid_argument);
 }

@@ -29,6 +29,29 @@ struct NonDeduced
 class CpuFpReferenceSdpa
 {
 public:
+    /// Read an SDPA attention sink (sink_token) as one float per query head. The tensor must
+    /// have dims [1, numHeads, 1, 1] (any strides); FLOAT, HALF and BFLOAT16 sinks are widened
+    /// to float, as the sink math runs in fp32.
+    template <class SinkDataType>
+    static std::vector<float>
+        readSinkPerHead(const hipdnn_data_sdk::utilities::TensorBase<SinkDataType>& sink,
+                        int64_t numHeads)
+    {
+        const auto& dims = sink.dims();
+        if(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeads || dims[2] != 1 || dims[3] != 1)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa: sink_token must have dims [1, "
+                                        + std::to_string(numHeads) + ", 1, 1]");
+        }
+        std::vector<float> values(static_cast<size_t>(numHeads));
+        for(int64_t h = 0; h < numHeads; ++h)
+        {
+            values[static_cast<size_t>(h)]
+                = static_cast<float>(sink.getHostValue(std::vector<int64_t>{0, h, 0, 0}));
+        }
+        return values;
+    }
+
     /// SDPA forward: O = softmax(Q @ K^T * scale) @ V
     ///
     /// Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.
@@ -62,6 +85,11 @@ public:
     ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
     ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
     ///                         (descale_s / scale_o) are not modeled here.
+    /// @param sinkPerHead      Optional attention sink, one raw logit per query head (see
+    ///                         readSinkPerHead()). It joins the softmax max and denominator,
+    ///                         is not multiplied by the scale, has no value row, and is
+    ///                         included in the LSE. A row with no visible key then gives O = 0
+    ///                         and LSE = sink. Null means no sink.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -82,7 +110,8 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                        const std::vector<float>* sinkPerHead = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -167,6 +196,11 @@ public:
         validateDescaleShape(descaleQ, "descaleQ", batch, numHeadsK);
         validateDescaleShape(descaleK, "descaleK", batch, numHeadsK);
         validateDescaleShape(descaleV, "descaleV", batch, numHeadsV);
+        if(sinkPerHead != nullptr && static_cast<int64_t>(sinkPerHead->size()) != numHeads)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa: sinkPerHead must hold one value per "
+                                        "query head");
+        }
 
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
@@ -230,14 +264,21 @@ public:
                 }
             }
 
-            // Step 4: Numerically stable softmax over skv
-            const auto maxVal = *std::max_element(scores.begin(), scores.end());
+            // Step 4: Numerically stable softmax over skv. A sink joins the max and the
+            // denominator but has no value row.
+            const auto negInf = -std::numeric_limits<ComputeDataType>::infinity();
+            const auto sink
+                = sinkPerHead != nullptr
+                      ? static_cast<ComputeDataType>((*sinkPerHead)[static_cast<size_t>(h)])
+                      : negInf;
+            const auto maxVal = std::max(sink, *std::max_element(scores.begin(), scores.end()));
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
             auto sumExp = static_cast<ComputeDataType>(0.0);
 
             // If row is not all -inf, probs should be calculated normally
-            if(maxVal != -std::numeric_limits<ComputeDataType>::infinity())
+            if(maxVal != negInf)
             {
+                sumExp = std::exp(sink - maxVal);
                 for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
                     probs[static_cast<size_t>(skv)]
@@ -254,7 +295,8 @@ public:
             // Step 4b: Write LSE (log-sum-exp) if requested
             // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
             // probabilities without storing the full [B, H, Sq, Skv] attention matrix.
-            // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
+            // For fully masked rows (sumExp = 0), log(0) = -inf which is correct; with a sink
+            // such a row gives maxVal = sink and sumExp = 1, so LSE = sink.
             if(lse != nullptr)
             {
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));

@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
@@ -61,7 +62,8 @@ struct SdpaFwdPagedParams
                        const TensorAttributes* lseAttributes = nullptr,
                        const TensorAttributes* raggedOffsetQAttributes = nullptr,
                        const TensorAttributes* raggedOffsetOAttributes = nullptr,
-                       const TensorAttributes* raggedOffsetLseAttributes = nullptr)
+                       const TensorAttributes* raggedOffsetLseAttributes = nullptr,
+                       const TensorAttributes* sinkAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -79,6 +81,7 @@ struct SdpaFwdPagedParams
         , raggedOffsetQTensor(unpackOptional(raggedOffsetQAttributes))
         , raggedOffsetOTensor(unpackOptional(raggedOffsetOAttributes))
         , raggedOffsetLseTensor(unpackOptional(raggedOffsetLseAttributes))
+        , sinkTensor(unpackOptional(sinkAttributes))
     {
     }
 
@@ -101,6 +104,8 @@ struct SdpaFwdPagedParams
     std::optional<TensorAttributesT> raggedOffsetQTensor;
     std::optional<TensorAttributesT> raggedOffsetOTensor;
     std::optional<TensorAttributesT> raggedOffsetLseTensor;
+    // Attention sink [1, H_q, 1, 1] (FLOAT, HALF or BFLOAT16).
+    std::optional<TensorAttributesT> sinkTensor;
 };
 
 // Runs CpuFpReferenceSdpaRagged::forwardPaged on the variant-pack host buffers.
@@ -158,6 +163,13 @@ public:
                 _params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
+        std::optional<std::vector<float>> sinkPerHead;
+        if(_params.sinkTensor.has_value())
+        {
+            sinkPerHead
+                = readSdpaSinkPerHead(*_params.sinkTensor, variantPack, _params.qTensor.dims.at(1));
+        }
+
         utilities::CpuFpReferenceSdpaRagged::
             forwardPaged<QDataType, KDataType, VDataType, ODataType, float>(
                 *q,
@@ -173,7 +185,11 @@ public:
                 _params.leftBound,
                 _params.rightBound,
                 _params.topLeftAlignment,
-                lse.get());
+                lse.get(),
+                nullptr,
+                nullptr,
+                nullptr,
+                sinkPerHead.has_value() ? &*sinkPerHead : nullptr);
     }
 
 private:
@@ -208,8 +224,8 @@ private:
 // declines them). Also requires seq_len_kv and max_seq_len_kv, and seq_len_q when Q is ragged.
 // Supports the diagonal band mask, the scale operand, padding_mask either way (seq lens are always
 // honored) and an FLOAT LSE. Q, O and LSE may be ragged (Q and O together); K, V, the page tables
-// and the seq lens may not. No attention bias, alibi, dropout, block mask, sinks, descales,
-// softmax/output quantization or max / sum-exp outputs.
+// and the seq lens may not. Attention sinks follow the frontend contract. No attention bias,
+// alibi, dropout, block mask, descales, softmax/output quantization or max / sum-exp outputs.
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
@@ -308,8 +324,14 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Supported: an attention sink of the frontend-contract shape and data type. It is not
+        // ragged, so it never joins raggedIds.
+        if(!isSdpaSinkSupported(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -415,7 +437,8 @@ public:
                 lseAttr,
                 optionalAttr(qAttr->ragged_offset_tensor_uid()),
                 optionalAttr(oAttr->ragged_offset_tensor_uid()),
-                lseAttr != nullptr ? optionalAttr(lseAttr->ragged_offset_tensor_uid()) : nullptr));
+                lseAttr != nullptr ? optionalAttr(lseAttr->ragged_offset_tensor_uid()) : nullptr,
+                optionalAttr(nodeAttributes->sink_token_tensor_uid())));
     }
 
 private:

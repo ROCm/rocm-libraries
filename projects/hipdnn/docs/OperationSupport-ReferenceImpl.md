@@ -137,6 +137,7 @@ dimension must be reduced.
 | ALiBi | Not supported | Not supported | - |
 | Padding mask | Not supported | Either value (sequence lengths are always honored) | - |
 | Block-sparse attention | Not supported | Not supported | - |
+| Attention sinks (`sink_token`) | Supported (`[1, H_q, 1, 1]`, FLOAT or the Q data type when HALF/BFP16) | Supported (same rules; dense or ragged Q) | - |
 | Softmax max / sum-exp stats outputs | Not supported | Not supported | - |
 | Ragged tensors | Rejected | Q, O and `stats` only (Q and O together); K, V, page tables and sequence lengths rejected | Rejected |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | Not registered; descales rejected | - |
@@ -150,7 +151,8 @@ Paged K/V containers are `[num_blocks, H_kv, block_size, D]` with any strides; k
 is row `s % block_size` of block `page_table[b, 0, s / block_size, 0]`. Only the first
 `ceil(seq_len_kv[b] / block_size)` page-table entries are read, and each must be a valid block id.
 Query rows past `seq_len_q[b]` are not written; a live row with no unmasked key (including
-`seq_len_kv[b] = 0`) gets zero output and `-inf` log-sum-exp.
+`seq_len_kv[b] = 0`) gets zero output and `-inf` log-sum-exp, or the head's sink when a sink token
+is set. Sinks follow [the attention-sink contract](SdpaPagedAttention.md#attention-sinks).
 
 ### Resample Modes
 

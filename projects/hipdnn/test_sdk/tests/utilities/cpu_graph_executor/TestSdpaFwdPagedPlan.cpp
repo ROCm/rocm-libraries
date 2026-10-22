@@ -53,6 +53,7 @@ constexpr int64_t SEQ_LEN_Q_UID = 8;
 constexpr int64_t STATS_UID = 9;
 constexpr int64_t RAGGED_OFFSET_UID = 10;
 constexpr int64_t MASK_UID = 11;
+constexpr int64_t SINK_UID = 12;
 
 // B = 2, 2 query heads over 1 KV head, Sq (S_max for a ragged Q) 2, D 8, blocks of 4 keys, a
 // pool of 6 blocks, max_seq_len_kv 8 (2 blocks per sequence).
@@ -87,6 +88,9 @@ struct PagedGraphOptions
     bool stats = false;
     bool attnMask = false;
     bool paddingMask = false;
+    // Attention sink [1, H, 1, 1] of this data type; UNSET means no sink.
+    DataType sinkType = DataType::UNSET;
+    std::vector<int64_t> sinkDims = {1, HEADS, 1, 1};
 };
 
 std::unique_ptr<TensorAttributesT> makeTensor(int64_t uid,
@@ -169,6 +173,11 @@ flatbuffers::DetachedBuffer makePagedGraph(const PagedGraphOptions& opts)
         graph.tensors.push_back(
             makeTensor(MASK_UID, "MASK", DataType::FLOAT, maskDims, generateStrides(maskDims)));
     }
+    if(opts.sinkType != DataType::UNSET)
+    {
+        graph.tensors.push_back(makeTensor(
+            SINK_UID, "SINK", opts.sinkType, opts.sinkDims, generateStrides(opts.sinkDims)));
+    }
 
     SdpaAttributesT sdpa;
     sdpa.q_tensor_uid = Q_UID;
@@ -202,6 +211,10 @@ flatbuffers::DetachedBuffer makePagedGraph(const PagedGraphOptions& opts)
     if(opts.attnMask)
     {
         sdpa.attn_mask_tensor_uid = MASK_UID;
+    }
+    if(opts.sinkType != DataType::UNSET)
+    {
+        sdpa.sink_token_tensor_uid = SINK_UID;
     }
     sdpa.padding_mask = opts.paddingMask;
     sdpa.attn_scale_value = ATTN_SCALE;
@@ -264,7 +277,8 @@ struct PagedData
                 {SEQ_LEN_KV_UID, seqLenKv.data()},
                 {SEQ_LEN_Q_UID, seqLenQ.data()},
                 {STATS_UID, lseOut.data()},
-                {RAGGED_OFFSET_UID, raggedOffset.data()}};
+                {RAGGED_OFFSET_UID, raggedOffset.data()},
+                {SINK_UID, sink.data()}};
     }
 
     // A Q-shaped view [B, H, S, width] over buf, matching makeQueryShaped.
@@ -284,7 +298,10 @@ struct PagedData
     }
 
     // The reference called directly, as SdpaFwdPagedPlan should call it.
-    void runDirect(std::vector<float>& oOut, std::vector<float>* lseOut, bool sharedPageTable)
+    void runDirect(std::vector<float>& oOut,
+                   std::vector<float>* lseOut,
+                   bool sharedPageTable,
+                   const std::vector<float>* sinkPerHead = nullptr)
     {
         const std::vector<int64_t> kvDims = {NUM_BLOCKS, KV_HEADS, BLOCK_SIZE, HEAD_DIM};
         const std::vector<int64_t> tableDims = {BATCH, 1, MAX_BLOCKS, 1};
@@ -320,7 +337,11 @@ struct PagedData
             /*leftBound=*/-1,
             /*rightBound=*/0,
             /*topLeftAlignment=*/false,
-            lseTensor.get());
+            lseTensor.get(),
+            nullptr,
+            nullptr,
+            nullptr,
+            sinkPerHead);
     }
 
     bool raggedQ;
@@ -336,6 +357,8 @@ struct PagedData
     std::vector<int32_t> seqLenKv = {5, 3};
     std::vector<int32_t> seqLenQ = {2, 1};
     std::vector<int32_t> raggedOffset = {0, 2, 4};
+    // FLOAT sink per query head.
+    std::vector<float> sink = {0.9f, -0.4f};
 };
 
 constexpr float SENTINEL = 7.0f;
@@ -367,7 +390,10 @@ void expectPlanMatchesForwardPaged(const PagedGraphOptions& opts)
 
     auto oDirect = sentinelOutput();
     auto lseDirect = sentinelLse();
-    data.runDirect(oDirect, opts.stats ? &lseDirect : nullptr, opts.sharedPageTable);
+    data.runDirect(oDirect,
+                   opts.stats ? &lseDirect : nullptr,
+                   opts.sharedPageTable,
+                   opts.sinkType != DataType::UNSET ? &data.sink : nullptr);
 
     EXPECT_EQ(oPlan, oDirect);
     EXPECT_EQ(lsePlan, lseDirect);
@@ -557,4 +583,96 @@ TEST(TestSdpaFwdPagedPlan, GraphExecutorExecuteMatchesForwardPaged)
 
     EXPECT_EQ(oExec, oDirect);
     EXPECT_EQ(lseExec, lseDirect);
+}
+
+TEST(TestSdpaFwdPagedPlan, ApplicableWithFloatSink)
+{
+    PagedGraphOptions opts;
+    opts.sinkType = DataType::FLOAT;
+    EXPECT_TRUE(pagedBuilderApplicable(opts));
+}
+
+TEST(TestSdpaFwdPagedPlan, ApplicableWithSinkInQDataType)
+{
+    PagedGraphOptions opts;
+    opts.dataType = DataType::BFLOAT16;
+    opts.sinkType = DataType::BFLOAT16;
+    auto buffer = makePagedGraph(opts);
+    const GraphWrapper graph(buffer.data(), buffer.size());
+    const SdpaFwdPagedPlanBuilder<DataType::BFLOAT16,
+                                  DataType::BFLOAT16,
+                                  DataType::BFLOAT16,
+                                  DataType::BFLOAT16>
+        builder;
+    EXPECT_TRUE(builder.isApplicable(graph.getNode(0), graph.getTensorMap()));
+
+    // A HALF sink does not match a BFLOAT16 Q.
+    opts.sinkType = DataType::HALF;
+    auto halfBuffer = makePagedGraph(opts);
+    const GraphWrapper halfGraph(halfBuffer.data(), halfBuffer.size());
+    EXPECT_FALSE(builder.isApplicable(halfGraph.getNode(0), halfGraph.getTensorMap()));
+}
+
+TEST(TestSdpaFwdPagedPlan, NotApplicableWithInvalidSink)
+{
+    PagedGraphOptions int32Sink;
+    int32Sink.sinkType = DataType::INT32;
+    EXPECT_FALSE(pagedBuilderApplicable(int32Sink));
+
+    PagedGraphOptions kvHeadSink;
+    kvHeadSink.sinkType = DataType::FLOAT;
+    kvHeadSink.sinkDims = {1, KV_HEADS, 1, 1};
+    EXPECT_FALSE(pagedBuilderApplicable(kvHeadSink));
+
+    PagedGraphOptions flatSink;
+    flatSink.sinkType = DataType::FLOAT;
+    flatSink.sinkDims = {HEADS};
+    EXPECT_FALSE(pagedBuilderApplicable(flatSink));
+}
+
+TEST(TestSdpaFwdPagedPlan, ExecuteWithSinkMatchesForwardPaged)
+{
+    PagedGraphOptions opts;
+    opts.seqLenQ = true;
+    opts.stats = true;
+    opts.sinkType = DataType::FLOAT;
+    expectPlanMatchesForwardPaged(opts);
+}
+
+TEST(TestSdpaFwdPagedPlan, ExecuteRaggedQWithSinkMatchesForwardPaged)
+{
+    PagedGraphOptions opts;
+    opts.raggedQ = true;
+    opts.seqLenQ = true;
+    opts.stats = true;
+    opts.sinkType = DataType::FLOAT;
+    expectPlanMatchesForwardPaged(opts);
+}
+
+// The sink changes the result: the stats of a sink run exceed those of a plain run.
+TEST(TestSdpaFwdPagedPlan, SinkRaisesStats)
+{
+    PagedGraphOptions plainOpts;
+    plainOpts.seqLenQ = true;
+    plainOpts.stats = true;
+    PagedGraphOptions sinkOpts = plainOpts;
+    sinkOpts.sinkType = DataType::FLOAT;
+
+    const FloatPagedBuilder builder;
+    PagedData data(/*raggedQIn=*/false);
+    auto run = [&](const PagedGraphOptions& opts, std::vector<float>& lse) {
+        auto buffer = makePagedGraph(opts);
+        const GraphWrapper graph(buffer.data(), buffer.size());
+        auto o = sentinelOutput();
+        builder.buildNodePlan(graph, graph.getNode(0))->execute(data.variantPack(o, lse));
+    };
+    auto lsePlain = sentinelLse();
+    auto lseSink = sentinelLse();
+    run(plainOpts, lsePlain);
+    run(sinkOpts, lseSink);
+    // Live rows: batch 0 rows 0-1, batch 1 row 0 ([B, H, S] layout).
+    for(const size_t idx : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}, size_t{6}})
+    {
+        EXPECT_GT(lseSink[idx], lsePlain[idx]) << idx;
+    }
 }

@@ -29,8 +29,9 @@ namespace hipdnn_test_sdk::utilities
 // getHostValue({b, h, s, d}) starts at ragged_offset[b], and per-batch lengths come from
 // raggedIterationInfo().
 //
-// Supports GQA/MQA, causal and sliding-window masks, fp8 descales, and an optional LSE that is
-// ragged or dense [B, H, Sq_max, 1]. No bias, alibi or dropout, as on the ASM v3 path.
+// Supports GQA/MQA, causal and sliding-window masks, fp8 descales, an optional attention sink
+// (one float per query head, see CpuFpReferenceSdpa::readSinkPerHead), and an optional LSE that
+// is ragged or dense [B, H, Sq_max, 1]. No bias, alibi or dropout, as on the ASM v3 path.
 // Descales are scalar [1] or per KV head [B, H_kv, 1, 1]. Q and K descales are both indexed by
 // the KV head of the query head, as in CpuFpReferenceSdpa and AITER.
 //
@@ -60,7 +61,8 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                         hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                         hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                        const std::vector<float>* sinkPerHead = nullptr)
     {
         const auto qInfo = q.raggedIterationInfo();
         const auto kInfo = k.raggedIterationInfo();
@@ -108,6 +110,7 @@ public:
         const DescaleBinding dq = bindDescale(descaleQ, batch, numHeadsK, "Q");
         const DescaleBinding dk = bindDescale(descaleK, batch, numHeadsK, "K");
         const DescaleBinding dv = bindDescale(descaleV, batch, numHeadsV, "V");
+        validateSinks(sinkPerHead, numHeads);
 
         // An absent scale is 1.0 (no scaling), as in cuDNN and the dense reference.
         HeadParams params;
@@ -128,6 +131,7 @@ public:
                 const int64_t kvHeadK = h / headsPerHeadK;
                 const int64_t kvHeadV = h / headsPerHeadV;
                 params.head = h;
+                params.sink = sinkFor(sinkPerHead, h);
                 params.descaleQK = dq.value(b, kvHeadK) * dk.value(b, kvHeadK);
                 params.descaleV = dv.value(b, kvHeadV);
 
@@ -162,7 +166,7 @@ public:
     // [B, 1, 1, 1]. Batch b attends seqQ[b] = seqLenQ[b] query rows (Sq when seqLenQ is null, which
     // only a dense q allows) against seqKv[b] = seqLenKv[b] <= maxSeqLenKv keys. Rows past seqQ[b]
     // (dense padding rows or ragged gap rows) are not written. A live row that is fully masked,
-    // including seqKv[b] == 0, gets zero output and LSE = -inf.
+    // including seqKv[b] == 0, gets zero output and LSE = -inf (LSE = sink with a sink).
     //
     // Mask alignment uses the per-batch lengths. GQA, descales and LSE ([B, H, Sq, 1], dense or
     // ragged like q) are as in forward(). Every input is validated before any output is written.
@@ -187,7 +191,8 @@ public:
                              hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                              hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                              hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                             hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                             hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                             const std::vector<float>* sinkPerHead = nullptr)
     {
         validatePagedInput(q.dims(), kContainer.dims(), vContainer.dims(), o.dims());
 
@@ -258,6 +263,7 @@ public:
         const DescaleBinding dq = bindDescale(descaleQ, batch, numHeadsK, "Q");
         const DescaleBinding dk = bindDescale(descaleK, batch, numHeadsK, "K");
         const DescaleBinding dv = bindDescale(descaleV, batch, numHeadsV, "V");
+        validateSinks(sinkPerHead, numHeads);
 
         // Resolve and check every batch's lengths and used blocks before writing anything.
         const auto batchCount = static_cast<size_t>(batch);
@@ -324,6 +330,7 @@ public:
                 const int64_t kvHeadK = h / headsPerHeadK;
                 const int64_t kvHeadV = h / headsPerHeadV;
                 params.head = h;
+                params.sink = sinkFor(sinkPerHead, h);
                 params.descaleQK = dq.value(b, kvHeadK) * dk.value(b, kvHeadK);
                 params.descaleV = dv.value(b, kvHeadV);
 
@@ -364,12 +371,14 @@ private:
         float scale = 1.0F;
         float descaleQK = 1.0F; // Q descale * K descale
         float descaleV = 1.0F;
+        float sink = -std::numeric_limits<float>::infinity(); // -inf: no sink
     };
 
     // Attention for query rows [0, seqQ) of (batch, head) over seqKv keys. kAt(skv, d) and
     // vAt(skv, dv) return K and V as ComputeDataType, so ragged and paged K/V share this softmax.
-    // A fully masked row, including seqKv == 0, writes zero output and LSE = -inf. Rows at or past
-    // seqQ are not written.
+    // The sink joins the max and the denominator but has no value row. A row with no visible key,
+    // including seqKv == 0, writes zero output and LSE = sink (-inf without a sink). Rows at or
+    // past seqQ are not written.
     template <class ComputeDataType, class QDataType, class ODataType, class KAt, class VAt>
     static void attendHead(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
                            hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
@@ -406,7 +415,8 @@ private:
                 scores[static_cast<size_t>(skv)] = dot * descaleQK * scale;
             }
 
-            auto maxVal = negInf;
+            const auto sink = static_cast<ComputeDataType>(p.sink);
+            auto maxVal = sink;
             for(const auto s : scores)
             {
                 maxVal = std::max(maxVal, s);
@@ -414,7 +424,7 @@ private:
 
             if(maxVal == negInf)
             {
-                // Fully-masked row: output zero, LSE = -inf.
+                // Fully-masked row without a sink: output zero, LSE = -inf.
                 for(int64_t dvIdx = 0; dvIdx < headDimV; ++dvIdx)
                 {
                     o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(
@@ -429,7 +439,9 @@ private:
                 continue;
             }
 
-            auto sumExp = static_cast<ComputeDataType>(0);
+            auto sumExp
+                = (sink == negInf) ? static_cast<ComputeDataType>(0) : std::exp(sink - maxVal);
+
             std::vector<ComputeDataType> probs(static_cast<size_t>(p.seqKv));
             for(int64_t skv = 0; skv < p.seqKv; ++skv)
             {
@@ -463,6 +475,21 @@ private:
                                   std::vector<int64_t>{b, h, sq, 0});
             }
         }
+    }
+
+    static void validateSinks(const std::vector<float>* sinkPerHead, int64_t numHeads)
+    {
+        if(sinkPerHead != nullptr && static_cast<int64_t>(sinkPerHead->size()) != numHeads)
+        {
+            throw std::invalid_argument(std::string(WHO)
+                                        + ": sinkPerHead must hold one value per query head");
+        }
+    }
+
+    static float sinkFor(const std::vector<float>* sinkPerHead, int64_t head)
+    {
+        return sinkPerHead != nullptr ? (*sinkPerHead)[static_cast<size_t>(head)]
+                                      : -std::numeric_limits<float>::infinity();
     }
 
     // Token boundaries of a ragged SDPA tensor, which must be ragged along SDPA_SEQ_AXIS and use
