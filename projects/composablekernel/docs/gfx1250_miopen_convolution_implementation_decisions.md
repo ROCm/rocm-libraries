@@ -304,3 +304,520 @@ include held-out work-level/stride/channel controls, and reject regressions befo
 registration. Hardware change removes a historical performance veto, not correctness,
 precision, alias, determinism or specification requirements.
 
+
+## Continued production-hardware exploration after FP32 backward-data commit
+
+The measured FP32 backward-data change, tests and earlier evidence were committed
+as `02f67b3cce2` (`miopen: elide redundant gfx1250 FP32 3D backward-data staging`).
+Continued work used the same production gfx1250 device and serialized
+`ROCR_VISIBLE_DEVICES=2` runs. No unrelated dtype/operator or device was optimized.
+
+### Retained: 3D forward XDL-v3 output-copy elision
+
+The existing selected-output proof now accepts only ordinary unmerged no-D
+`DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3` and its `_WmmaPorted` variant
+for default-layout 3D forward. Exact type prefixes exclude merged groups,
+DirectLoad, Large_Tensor and unknown variants. Only the default PassThrough
+forward factory opts into the proof; Scale/Bilinear/fusion retain old-output
+staging. The runtime gate remains gfx1250, packed descriptors, alpha1/beta0,
+aligned disjoint operands and whole reserved workspace, and zero transposed
+output pads. CK arithmetic, selected kernel, precision, input/weight transposes,
+final output transpose and workspace size are unchanged.
+
+An isolated replacement plugin with uniquely named trial templates/predicate
+was measured before retention. Five AB/BA process pairs at FP32 N1/C64/K32,
+3x3x3/pad1/input64-cube/stride1 measured baseline/new 0.366672/0.353648 ms.
+Four pairs each measured FP16 N1/C32/K64/input48-cube/stride2 at
+0.033694/0.027823 ms and BF16 N1/C64/K64/input40-cube/stride1 at
+0.0526295/0.0412185 ms. All selected the same XDL-v3 kernel before/after and
+passed GPU-reference verification. Times are conversion-inclusive driver GPU
+kernel-time averages, not host wall time.
+
+**Prospective cohort, including unchanged controls.** Nine shapes were fixed
+before measurement: each precision FP32/FP16/BF16 at (N,C,K,input cube,stride)
+of (1,32,64,32,1), (2,64,32,48,2), and (2,64,64,24,1), all 3x3x3/pad1.
+Each baseline did fresh unrestricted Find, followed by three AB/BA cached
+process pairs with 30 driver iterations. All nine selected grouped 3D CK;
+the two unchanged FP32 controls selected legacy XDL, not XDL-v3.
+
+| Precision, three-shape cohort | Sum of baseline / changed shape medians, ms | Aggregate ratio |
+|---|---:|---:|
+| FP32 | 0.234190 / 0.229657 | 1.0197x |
+| FP16 | 0.121414 / 0.103940 | 1.1681x |
+| BF16 | 0.119890 / 0.100613 | 1.1916x |
+| All nine | 0.475494 / 0.434210 | 1.0951x |
+
+The unchanged FP32 controls varied -0.9% and approximately 0%; no shape-specific
+gate was added to fit them. These results are this prospective cohort's GPU
+latency ratio, not a 9,471-shape workload speedup. Every sample verified on GPU.
+Seven focused tests passed after retention: existing backward-data invariants,
+the extended selected-family/split/scalar predicate, and FP32/FP16/BF16 forward
+selected-invoker regressions. Forward tests cover G2 partial 5x7x9 volumes,
+3x3x3/pad1, stride1/2, changing signed weights, poisoned output/scratch,
+unchanged inputs/weights, repeated invocations and x/y alias fallback against
+an independent host convolution. No cross-device or exhaustive numerical
+coverage is claimed.
+
+### Actual-wavelet winner trials: not retained
+
+The BF16 DirectLoad wavelet winners use `loop_knm_v1`, not the Interwave
+`NumMacClusters` implementation. Importing Interwave workgroup barriers into
+math-only waves would violate load/math synchronization; no such change was
+attempted. Two independent actual-winner ablations were evaluated instead.
+
+**Redundant-tail loading.** A temporary native load-pipeline clone skipped only
+unused odd final A1/B1 loads and terminal coordinate precomputation, retaining
+the role barriers and math order. CPU-reference selected-row checks passed
+for C8/24/40/48/128 with 3x3, G3, K136 and partial 5x7 outputs (one/two/three/
+four/nine reduction blocks). Five AB/BA pairs on the existing S1 BF16
+N42/C=K128/input30x40 winner regressed 0.0188585 -> 0.0196863 ms; S2
+C48/K192/input120x160 regressed 0.148696 -> 0.153657 ms, 0/5 wins each.
+The variant was removed; modeled removed loads are not a latency benefit.
+
+**Transient operand compaction.** A uniquely named clone retained `(k,n,m)`
+accumulation order, source offsets, waits and WMMA modifiers while compacting
+the A/B staging descriptors to their live current-K/current-N regions.
+A selected CPU-reference G3/C40/K136/5x7 control passed. The matched BF16
+registrar's 155 kernel metadata records were identical before/after, with zero
+resource-field changes. The actual native S1 metadata retained 206/208 VGPRs
+depending on specialization, not the source buffer-size reduction. No
+performance promotion or register-pressure improvement is claimed; removed.
+
+### Additional scoped findings and stop gates
+
+FP16 NCHW pointwise/dilated probes selected already-copy-elided WMMA-v3 rows;
+a larger N8/C512/K1024/input96-square pointwise probe selected hipConv at
+0.125972 ms. A forward XDL-v3 copy proof would not improve those winners.
+
+BF16 dense WRW N2/C=K128/3x3/input256-square all-split raw CK enumeration
+found 208 configurations; the best was the native block512/M128/N128/K64 row
+at requested auto/effective split56, 0.0729589 ms. This is an existing-row
+single factory pass, not a new speedup. NCHW old-dW staging proof, FP16
+partitioned depthwise reductions, the XDL-v3 wave32 LDS query referencing
+GridwiseGemm64, and source-vector narrowing intended for DirectLoad remain
+source-backed next experiments. Do not relax Large_Tensor or DirectLoad
+hardware safety guards without a supported implementation and measured winner.
+
+New paired logs, commands, cohort samples and compiled-resource comparisons
+are in `/tmp/ck-uplift2-gpu2-ca53v5ij/`. The external investigation workbook
+records the continued cohort and trial decisions. Trial sources/objects were
+removed; original benchmark data and shared ROCm installation were unchanged.
+
+
+## Dense WRW, FP16 partitioned reduction, longest cases and Naive census
+
+All new GPU work remains serialized on `ROCR_VISIBLE_DEVICES=2`; evidence is in
+`/tmp/ck-wrw-gpu2-4nigx8s0/`. The independent read-only static-analysis agent
+returned four experiments: actual-wavelet CShuffle batching, one-step LDS
+lookahead, reduction-aware WRW split neighborhoods, and mixed-residue BWD
+range metadata. These are unmeasured hypotheses, not new speedups. It also
+identified process-static current-device occupancy/CU caching without device
+identity; that is a separate multi-device defect, not a measured device2 gain.
+
+### Retained: explicit split-one WMMA-v3 old-dW staging
+
+The existing selected-output proof now admits only ordinary packed 2D
+FP16/BF16 `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<...>` at explicit split1.
+Runtime copy elision is gfx1250-only, alpha1/beta0, aligned/disjoint packed
+operands and entire reserved workspace. Auto, split>1, 3D, FP32, two-stage,
+fused and unrecognized families keep staging. CK's own Set/clear behavior,
+math, precision, scratch size and final dW conversion are unchanged.
+
+Six AB/BA process pairs on FP16 N2/C=K512, 3x3/dilation4/pad4/input16-square
+gave baseline/new 0.036507/0.0288535 ms. Four pairs on N1/C256/K512,
+3x3/pad1/input8-square gave 0.025420/0.0208535 ms. Both unrestricted Find
+passes selected ordinary WMMA-v3 at explicit split1, with the same kernel
+and stored config in each comparison. Auto XDL-v3 and split8 WMMA controls
+were unchanged by the proof and showed only small timing variation.
+The rebuilt plugin verified the retained paths at 0.028553 and 0.020566 ms.
+FP16 and BF16 selected-invoker tests passed against an independent host WRW
+reference with G2, partial 5x7 outputs, signed changing dY, dirty dW/scratch,
+repeated calls, input/dW alias fallback, and unchanged source tensors.
+No BF16 default-selection or full-corpus performance gain is asserted.
+
+### FP16 partitioned depthwise trial: not retained
+
+A temporary dtype-correct FP16 Group16 producer/finalizer clone retained
+FP32 partial accumulation and one final FP16 conversion. All-split CK
+comparisons on three depthwise families gave:
+
+| G/N/input/stride, 3x3/pad1 | FP16 partitioned / best existing CK, ms |
+|---|---:|
+| G240/N128/28-square/stride2 | 0.045039 / 0.044502 |
+| G672/N128/14-square/stride1 | 0.086018 / 0.093603 |
+| G64/N128/128-square/stride2 | 0.306224 / 0.220800 |
+
+These are single all-family raw hot-reuse passes, not paired speedups.
+A selected G35/N2/7x9/stride2 CPU-reference control passed. A matching
+MIOpen trial plugin selected the partitioned CK type for G672, but unrestricted
+Find still chose hipConv (0.118937-ms driver execution). The marginal CK-only
+win did not establish default-solver uplift; other work regimes tied/lost.
+The trial was not registered in production.
+
+### XDL-v3 LDS/source-vector admission: no uplift demonstrated
+
+A throwaway resource census instantiated 30 existing 2D/3D FP16/BF16/FP32
+v2/v5 tuples. Twenty had legal wave32 geometry; every one had equal wave64
+and wave32 LDS byte counts. Invalid wave32 tuples were not instantiated.
+The wave32 admission query naming GridwiseGemm64 is a source mismatch, but
+this census found no newly eligible row or performance benefit. No admission
+change was retained. Ordinary source vectors already use the original width:
+GridwiseGemmBase passes `DirectLoad ? aligned_width : original_width` for
+both operands. Broadening the aligned-width helper would not alter ordinary
+convolution code generation. DirectLoad/Large_Tensor safety guards remain.
+
+### Longest-running cases
+
+The top 25 timed rows total 134.957008 ms; two are >4x Find/measurement
+timing anomalies rather than established kernel regressions. Original tuning
+logs and selected IDs were recorded for every case. The longest genuine
+family is FP32 N2/C64/K32/input160-cube/3x3x3: forward, WRW and BWD.
+Using the original tuned IDs, baseline/current driver measurements verified:
+forward 10.369306/10.063589 ms; WRW 10.356744/10.397013 ms; BWD
+6.934646/6.922801 ms. Both comparators already contain the committed BWD
+copy elision; these are single executions, not a new paired family claim.
+
+Current CK forward enumeration on that exact largest case found 15 supported
+rows; the existing XDL-v3 v2 M128/N16 row was best at 8.739070-ms complete
+internal-layout invocation. It was already the original selected type.
+WRW full enumeration timed out after 600 seconds; it is not reported as
+complete. Selected legal controls on the original small native-float legacy
+type gave auto/effective128 9.176040 ms, fixed32 13.298400, fixed64 11.173900,
+and fixed128 9.172280. An existing M256/N128/fixed128 tile was 50.472400 ms.
+Neither lower split nor larger tile improved this longest family. New work
+needs an actual addressing/operand-reuse bottleneck, not another registration
+sweep or a split increase beyond the existing numerical cap.
+
+### Complete Naive-winning classification
+
+All 218 Naive winners match between tuning and measurement records, and all
+218 original exhaustive tuning logs contain successfully timed non-Naive
+competitors. There are **zero Naive-only applicability cases**, **zero
+competitor-search-failure-only wins**, and no unresolved cases in this census.
+Each row records dtype, direction, family, successful competitor names/times,
+measurement and Find latency, errors and timing-anomaly status. Workspace
+logs saying `Skipped (no workspace required)` were not treated as
+inapplicability: that shortcut does not call IsApplicable.
+
+The largest Naive family remains FP16 NHWC C3/K24 3x3/stride2 BWD at
+N16/128 and 384/480-square: four rows sum 3.731732 ms. Naive-winning counts
+are 147 forward, 62 backward-data and 9 WRW. The workbook contains the full
+classification and longest25 inventory; raw classifications and selected
+measurements are JSON/CSV under the evidence directory above. Original
+benchmark inputs were unchanged. No blanket Naive exclusion was added.
+
+## Why Naive wins, NCHW layout tax and a rejected FP32 transpose kernel
+
+All runs used `ROCR_VISIBLE_DEVICES=2`; traces used `rocprofv3 --kernel-trace`
+with immediate-mode `-S <solver id>` so Find did not pollute steady state.
+Evidence is under `/tmp/ck-naive-trace-gpu2-sn_m96vj/`.
+
+### Naive winners
+
+The 218 Naive wins total 8 ms (0.63% of corpus latency). 157 are depthwise
+(`C == G`), median work is 5.4 MFLOP and median Naive latency is 11.8 us; the
+best CK competitor is a median 3.2x slower than Naive (1.01x-11.45x). Three
+mechanisms explain them:
+
+- **Depthwise maps to degenerate GEMMs.** FP16 NCDHW depthwise forward
+  (G128, 3x3x3/s2) runs the old WMMA grouped kernel at 117 us versus Naive's
+  46 us, before 4-5 transposes. Per-group GEMM N is 1, so a 16-wide WMMA tile
+  does one useful column. BF16 1x31 depthwise backward-data: CK kernel 60 us
+  plus two transposes and a fill versus Naive 42 us.
+- **Fixed NCHW conversion cost on tiny problems.** FP32 C128/K256 3x3 on a
+  3x3 image WRW: CK's kernel is 7.6 us, faster than Naive's 25 us, but one
+  fill and four transposes add about 21 us. 134 of 218 competitors include
+  transposes.
+- **Phase decomposition with tiny channel counts.** FP16 NHWC C3/K24 3x3/s2
+  backward-data launches four stride-phase kernels of about 83 us each with
+  N=C=3; one Naive kernel takes 258 us.
+
+All depthwise convolutions total 21.5 ms (1.68%), so even an ideal
+depthwise kernel is bounded near 1-2% corpus uplift.
+
+### NCHW layout tax
+
+NCHW/NCDHW grouped-CK winners are 830.5 ms (65% of corpus). Six selected
+FP16 NCHW CK configurations spent 21-54% (median 24%) of measured GPU
+kernel time in MIOpen transposes and fills. Extrapolating that share to every
+dtype and family is not a measured corpus estimate. The standalone
+70-transpose sample gave 3% savings from ideal existing-variant selection;
+it does not prove the heuristic is optimal for every consumer invocation.
+
+**Rejected: gfx1250 FP32 float4 64x64 transpose.** An offline microbenchmark
+suggested 1.66x on FP32 transposes, but its baseline kernels were compiled
+offline and ran 2x slower than MIOpen's runtime-compiled 32x32 kernel. In
+the real library both reach ~6.7 TB/s on large tensors. The 18-shape FP32
+NCHW/NCDHW FWD/BWD/WRW A/B, with pinned system DB, separate caches,
+alternating runs and GPU verification, gave 1.003x aggregate (0.954x-1.061x).
+The kernel, heuristic and test change were reverted. Comparisons must use a
+relocated baseline library with `MIOPEN_SYSTEM_DB_PATH` set; otherwise MIOpen
+loses the system perf DB and reports 7-225x false gains.
+
+Memset is not a lever: `hipMemsetAsync`, `hipMemsetD32Async` and a 16-byte
+zero kernel all write at ~4.6 TB/s on this device.
+
+### CK backward-data XDL-v1 clear
+
+`device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle_v1.hpp` computes a
+coverage condition (split 1, no dilation/stride gaps, stride <= filter) and
+then overrides it with `bwd_needs_zero_out = !if_d_is_output_mem` as a
+"temporary workaround", so every call memsets E, even at stride 1. XDL-v1
+wins 427 backward-data rows (138 ms); rows meeting the coverage condition
+would avoid about 5.9 ms (0.46%), mostly FP32. Lifting it requires proving
+slice coverage at image edges and updating MIOpen's selected-output proof,
+which currently assumes CK's full clear. Not attempted.
+
+### NCHW 1x1 as GEMM
+
+NCHW 1x1/s1/p0 needs no transposes: forward is batched `W x X[n]`.
+MIOpen's BLAS 1x1 solvers already do this and are within 1.1-1.4x of
+CK-with-transposes for FP16 forward/backward-data (they win 477 FP16
+forward rows), but 4-7x slower for WRW. CK-won FP16 NCHW pointwise is
+91 ms; a transpose-free CK batched-GEMM path is the remaining structural
+option and needs a gating CK batched-GEMM measurement first.
+
+### CDNA5 ISA features not used by the convolution winners
+
+From the CDNA5 ISA (section line numbers in the source document), mapped to
+CK source; all unmeasured:
+
+1. Cluster multicast (ISA 5806-5848) of shared operands in the DirectLoad
+   wavelet family; wrappers exist in `amd_cluster_load.hpp` and a cluster
+   launch overload in `kernel_launch.hpp`, with no callers.
+2. Tensor Data Mover (6004-6361) in the wavelet load wave, starting with
+   weights and 1x1/s1/p0 activations; the ck_tile TDM path assumes affine
+   views and does not express general im2col.
+3. Named/split barriers (2101-2243, 6532-6609) so load waves stop waiting on
+   `ASYNCcnt(0)` plus full workgroup barriers.
+4. L2 prefetch (5753-5772) two K tiles ahead; `UseDataCachePrefetch` is
+   hard-coded false in conv_v3.
+5. Asynchronous store-from-LDS epilogue and non-temporal output hints
+   (1621-1717); all conv buffers use default coherence.
+
+The ISA does not resolve the WMMA matrix-reuse sameness question
+(4287-4309, 4760-4763, 8171-8175), so WM2 stays blocked.
+
+## Transpose-free NCHW 1x1 batched GEMM and ISA feature trials (2026-10-21)
+
+Evidence is archived under
+`~/miopen_benchmarker/ck_investigation_artifacts_20261021/`.
+
+### NCHW data path
+
+MIOpen hands CK channels-last operands (`NHWGC`/`GKYXC`/`NHWGK`) for NCHW
+problems. Its batched transposes perform the global layout conversion;
+those CK instances do not repeat it. CK's NGCHW variants can instead own
+the conversion internally, but MIOpen does not register those variants.
+gfx125 LDS transpose loads rearrange an already-loaded matrix tile for
+WMMA, including selected WRW `LdsTranspose` instances. They are not a
+second whole-tensor layout conversion. Global transpose loads require full
+EXEC and fixed matrix tiles (ISA 5924-5951); CK's wave-tile transfer path is
+currently gated to gfx120, while LDS-transpose paths are gfx125-enabled.
+A native NCHW path can avoid the conversion read/write, but must preserve
+im2col indexing, padding validity and output-store contiguity. Its input
+loads may become scalar or strided; performance requires measurement.
+
+### Excluded NCHW 1x1 batched-GEMM experiment
+
+The previous session mistakenly implemented this despite the user's explicit
+instruction to avoid it. After reboot the implementation, registrations,
+heuristic overrides and tests were removed; sources remain only in the
+persistent investigation archive. CK's batched-GEMM LDS-transpose template
+extension was also removed. No end-to-end uplift or retained change is claimed
+for this excluded experiment.
+
+The separate 1x1 WRW proxy timed FP16 per-image GEMMs only. Its FP32
+reduction cost was estimated, not executed; those combined numbers are not
+measured convolution speedups. No WRW implementation was retained.
+
+### CDNA5 feature trials
+
+- **Cluster multicast** of weight tiles in the DirectLoad wavelet forward
+  family: GPU-verified; all timed shapes within +/-1% (cluster launch alone
+  costs 0-1.4%; small shapes -1 to -2%). Rejected.
+- **L2 prefetch** one tile ahead (`global_prefetch_b8`, one lane per 128 B
+  line, speculative SE scope): wavelet forward -5.5% FP32/FP16 and -13.4%
+  BF16 aggregate; XDL-v3-ported forward about -20%. A builtin-based first
+  version caused VGPR spills. Rejected; native WMMA-v3 not measured.
+- **Tensor Data Mover** weight loads and **split/named barriers** in the
+  wavelet load wave: implemented (barriers GPU-verified), not yet timed.
+- **Async store-from-LDS / non-temporal output hints**: interrupted.
+
+A `rocprofv3 --pmc` run wedged the amdgpu driver on this node during its
+startup power-profile switch, before any kernel launched; do not collect
+hardware counters on shared gfx1250 nodes.
+
+## Post-reboot non-pointwise native-layout and ISA measurements
+
+Evidence: `~/miopen_benchmarker/ck_resume_20261021/`. GPU allocation started
+with 1/2, then changed to GPU 3 only; every A/B pair stays on one device and
+each table records it. No hardware-counter collection was used.
+
+### Native NCHW/NCDHW prototype (not retained)
+
+Extended the existing input descriptor to map original NCHW/NCDHW through
+padding and filter/stride/dilation embeds directly into GEMM, with original
+KC[Z]YX weights and native output stores. Used native WMMA-v3 for FP16/BF16
+and the WMMA-ported XDL path for FP32. The prototype reserves zero CK
+workspace and performs no whole-tensor conversion. Grouped, padded,
+dilated, strided, odd-tail 2D/3D cases passed reference checks.
+
+Spatial vector loads require a contiguous stride-one, unpadded window and
+output spatial extent divisible by the vector width; output vector stores
+also require each channel's spatial product divisible by their width.
+Otherwise scalar transfers are required. Wider tiles reduce the penalty,
+but the prototype loses most measured padded corpus families to the tuned
+MIOpen path with conversions.
+
+Five-pair GPU-3 comparisons on four no-padding 3x3/3x3x3 family points per
+dtype, including complete MIOpen invocation versus native invocation:
+
+| Precision | 2D sum-of-medians speedup | 3D sum-of-medians speedup |
+|---|---:|---:|
+| FP32 | 1.363x | 0.934x |
+| FP16 | 1.008x | 0.595x |
+| BF16 | 1.040x | 0.579x |
+
+Small 2D points individually improved 1.48-1.65x, but larger low-precision
+and 3D points regressed. No global cutover, shape-specific registration or
+NCHW 1x1 batched-GEMM path is retained. Native candidates would need layout-
+aware transfer/tile selection alongside existing kernels, not a forced
+replacement merely because they remove transposes.
+
+### Completed rejected ISA mechanisms
+
+- Split/named barriers: all 24 forward winner-cohort shapes verified and
+  timed with five alternating pairs on GPU 1. Latency changed +0.30% FP32,
+  +31.20% FP16, +18.41% BF16. Epilogue-only early load-wave exit was neutral
+  (within 0.03%). Neither retained.
+- Native WMMA-v3 L2 prefetch: all 16 FP16/BF16 winner-cohort points verified
+  and timed on GPU 3. Aggregate speedups 0.992x FP16, 0.881x BF16. Rejected,
+  consistent with the previously rejected wavelet/XDL-v3 experiments.
+
+### Timing and failure attribution
+
+The original profiler's cache-flush helper later faulted in an unmodified
+baseline. New experiments use `time_kernel=0 --raw-invocation`, which
+brackets complete consumer invocations without cache flushing or timing
+subtraction; old cold-cache and new hot-reuse tables are not combined.
+
+A custom WRW assembly-atomic experiment faulted independently: a signed
+`readfirstlane` pointer word sign-extended when reconstructing a 64-bit
+address with low bit 31 set. Casting each word to uint32 fixes the address
+reconstruction, but does not establish a performance gain. The corrected
+variant and unmodified builtin both failed reference verification on one
+automatic-split shape. No assembly-store optimization is retained.
+
+### Retained TDM weight loads: consumer verification
+
+The retained change uses gfx1250 `TENSOR_LOAD_TO_LDS` for the B-weight tile
+in the existing double-buffered DirectLoad wavelet forward pipeline.
+Only unmerged packed GK[Z][Y]XC weight views qualify; unsupported LDS
+layouts and other architectures keep the previous transfer. One issue wave
+loads the tile with TDM padding matching the math-wave LDS descriptor;
+`TENSORcnt` is drained before each buffer-publish barrier and on retirement.
+Kernel arithmetic, type strings, global tensor layouts and workspace
+contracts are unchanged. This does not eliminate MIOpen's transposes.
+
+The compile-time LDS eligibility check validates every element offset with
+cached per-row constants, avoiding compiler constexpr-step-limit failures.
+The first simplified production transfer failed the new regression and
+consumer verification; restoring the independently verified transfer fixed
+all six regression cases. The failing-before/passing-after test is retained.
+
+Normal CK flags also exposed a numerical miscompilation with post-RA
+scheduling disabled. Controlled registration builds isolated
+`-enable-post-misched=0`: restoring post-RA scheduling fixed all seven
+wavelet tests; changing the other backend flags did not. The six affected
+registration sources receive `-mllvm -enable-post-misched=1` when the build
+contains gfx1250. A frontend-only `-Xarch_gfx1250` option routed correctly
+in `-###` output but did not fix final AMDGPU code generation; it was removed.
+In fat builds, this source-specific scheduling setting also affects the
+other architectures compiled into these six registration files. TDM itself
+remains gfx1250-gated; no other source files receive the setting.
+
+Final normal-codegen MIOpenDriver A/B, exact selected IDs, five alternating
+pairs on GPU 3, baseline/variant verification for all 24 cohort shapes.
+Seventeen shape comparisons completed before the second reboot; seven
+incomplete comparisons restarted afterward on the same reserved GPU:
+
+| Precision | Baseline sum ms | TDM sum ms | Speedup |
+|---|---:|---:|---:|
+| FP32 | 19.872103 | 19.725447 | 1.0074x |
+| FP16 | 6.267286 | 6.217948 | 1.0079x |
+| BF16 | 6.131975 | 5.796328 | 1.0579x |
+
+Every cohort point improved. These are selected-family results, not a
+post-change full-corpus or cross-device uplift claim. Larger BF16 cases
+improved 5.3-6.7%. The experimental CK-only GPU-1 table separately showed
+1.0167x FP32, 1.0158x FP16, 1.1022x BF16; it is not mixed with GPU-3 data.
+
+Evidence: `tdm-miopen/results-final-stock-gpu3.json`,
+`tdm-miopen/aggregate-final.json`, `final-ck-regression-source-option.log`,
+and `ResumeTdmBarriers/` under the persistent evidence directory.
+
+### Store-hint / async-store decisions
+
+All 24 wavelet-forward cohort points were verified/timed on GPU 3:
+non-temporal hints gave 0.9933x FP32, 0.9870x FP16, 0.9979x BF16;
+async-store variants were neutral/slower (0.9928-0.9986x). The FP32
+backward-data CK-only NT table improved 1.0173x, but a scoped MIOpen
+comparison gave 25.779941 -> 25.912318 ms (0.9949x). The scoped template
+extension was removed: no output-hint, async-store, or atomic-store patch
+is retained.
+
+## Native-output forward integration (2026-10-22)
+
+The retained integration removes only the forward output conversion. CK consumes
+packed `NHWGC/GKYXC` or `NDHWGC/GKZYXC` operands and writes packed `NGKHW` or
+`NGKDHW` directly through the existing `CTranspose` path. Input and weight
+conversions remain in MIOpen. The earlier fully native input prototype and
+global-transpose-load experiment are not integrated.
+
+Each dimension/precision factory has six candidates: 64x64x32, 128x128x32, and
+128x128x64 tiles, with output vector widths one and four. Their kernel IDs start
+with `NativeOutput:`; existing IDs and ranked defaults are unchanged. Find can
+select either native-output or converted-output candidates.
+
+Admission requires gfx1250, packed non-pointwise forward convolutions, FP16,
+BF16, or exact FP32, per-group C divisible by eight and K divisible by four,
+int32-fitting tensor extents, alpha exactly one, and beta exactly zero. Vector
+four additionally requires an aligned output spatial extent. TF32, channels-last
+caller layouts, fused operations, scale/bilinear cases, and backward operations
+do not use these candidates.
+
+The selected solution reserves only the input/weight conversion buffers, using
+the existing workspace alignment scheme; the solver-wide workspace query remains
+a conservative upper bound for all candidates. Before any writes, invocation
+checks exact descriptors, scalar values, pointer alignment, disjoint operand and
+workspace spans, and sufficient workspace. Invalid selected invocations fail
+rather than silently applying native strides to an incompatible buffer. The
+existing converted path remains available for ineligible problems.
+
+Six precision/dimension regression cases exercise every supported native ID,
+grouping, padding, stride/dilation, odd spatial tails, poisoned/reused outputs,
+changing operands on stable pointers, independent CPU convolution references,
+and rejection without writes for invalid descriptors, aliases, scalars, and
+workspace. FP32 reference data distinguishes full-precision from TF32 products.
+All six passed, as did nine adjacent existing invocation regressions.
+
+Production MIOpenDriver comparisons used actual Find searches of the existing
+CK solver with baseline/current plugins, two neighboring shapes per dimension
+and precision, GPU-reference verification of both arms, and five alternating
+pairs of complete invocations on reserved GPU 3:
+
+| Precision | 2D sum-of-medians speedup | 3D sum-of-medians speedup |
+|---|---:|---:|
+| FP32 | 1.373x | 1.246x |
+| FP16 | 1.449x | 1.149x |
+| BF16 | 1.300x | 1.125x |
+
+All twelve current-plugin winners were native-output candidates. This is
+selected-family, CK-solver evidence, not a full-corpus or fastest-all-solvers
+uplift claim. TDM and other existing candidates are unchanged.
+
+Reproducible source/build commands, selected IDs, raw logs, and paired results
+are under `~/miopen_benchmarker/ck_native_output_production_20261022/`;
+`paired-results.json` and `paired-summary.json` contain the consumer comparison.
+
