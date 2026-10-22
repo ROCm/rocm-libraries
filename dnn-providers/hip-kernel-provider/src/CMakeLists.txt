@@ -469,6 +469,50 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipkernel:Gfx950AttentionUnified2D is not shipped for gfx950 by this configuration - skipping gfx950-attention-unified-2d-external-integration-check")
     endif()
 
+    set(_gfx950_attention_unified_3d_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_attention_unified_3d_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-unified-3d-external-integration
+        )
+    endif()
+
+    # Same gating, routing and filter as the 2D engine above. Only the sweeps' decode
+    # (seqlen_q 1) cases are this engine's; it declines the rest.
+    set(_hkp_gfx950_attention_unified_3d FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_attention_unified_3d_available(_hkp_gfx950_attention_unified_3d)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND _hkp_gfx950_attention_unified_3d
+       AND TARGET hipdnn_integration_tests)
+        set(_gfx950_attention_unified_3d_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionUnified3D.toml")
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950
+            FILES "${_gfx950_attention_unified_3d_config}")
+        set(_gfx950_shard_args
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950)
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-unified-3d-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950AttentionUnified3D"
+            INSTALL_SUBDIR hip_kernel_provider
+            ${_gfx950_shard_args}
+            TEST_CONFIG    ${_gfx950_attention_unified_3d_config}
+            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_gfx950_attention_unified_3d_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-unified-3d-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx950AttentionUnified3D is not shipped for gfx950 by this configuration - skipping gfx950-attention-unified-3d-external-integration-check")
+    endif()
+
     # FlyDSL engines against the shared bundles, checked by the GPU reference executor.
     # One entry per engine and architecture it carries content for, routed into that
     # architecture's shard like the gfx950 entries above, so pruning an artifact to other

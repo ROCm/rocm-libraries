@@ -3219,6 +3219,261 @@
         "seed": 42,
         "reference_source": "c++ integration suite: Standard/IntegrationGpuSdpaFwdBshdFp16.Correctness_b1_hq32_kv4_sq512_skv2048_d128_fp16_bshd_causal_flag"
       }
+    },
+    {
+      "id": "3_32_1_256_bfp16_nhwc_decode_hkv8_skv1024_causal_br",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3,
+              8,
+              1024,
+              256
+            ],
+            "strides": [
+              2097152,
+              256,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              256,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              3,
+              32,
+              1,
+              256
+            ],
+            "strides": [
+              8192,
+              256,
+              8192,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              8,
+              1024,
+              256
+            ],
+            "strides": [
+              2097152,
+              256,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0625,
+          "attributes__causal_mask": false,
+          "attributes__diagonal_alignment": "BOTTOM_RIGHT",
+          "attributes__right_bound": 0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "reference_source": "single-token decode (seqlen_q 1) variant of case 1_10_512_64_bfp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right: b3 hq32 hkv8 skv1024 d256 bf16 causal_br, BSHD"
+      }
+    },
+    {
+      "id": "1_8_1_128_bfp16_nhwc_decode_hkv2_skv512_causal_tl",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              1,
+              128
+            ],
+            "strides": [
+              1024,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              512,
+              128
+            ],
+            "strides": [
+              131072,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__causal_mask": true,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "reference_source": "single-token decode (seqlen_q 1) variant of case 1_8_512_128_bfp16_nhwc_attn_scale_value0p08839_causal_mask_diagonal_alignmenttop_left: b1 hq8 hkv2 skv512 d128 bf16 causal_tl, BSHD"
+      }
+    },
+    {
+      "id": "2_16_1_128_fp16_nhwc_decode_hkv16_skv512_nomask",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              1,
+              128
+            ],
+            "strides": [
+              2048,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              512,
+              128
+            ],
+            "strides": [
+              1048576,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "attributes__attn_scale_value": 0.0883883461356163,
+          "attributes__causal_mask": false,
+          "attributes__diagonal_alignment": "TOP_LEFT",
+          "attributes__right_bound": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "generator_version": "1.0.0",
+        "seed": 42,
+        "reference_source": "single-token decode (seqlen_q 1) variant of case 1_32_512_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left: b2 hq16 hkv16 skv512 d128 fp16 nomask, BSHD"
+      }
     }
   ]
 }
