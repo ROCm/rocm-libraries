@@ -55,10 +55,8 @@ target_link_libraries( rocfft-internal-test PRIVATE
   ${ROCFFT_SQLITE_LIB}
 )
 
-# Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
-if( NOT BUILD_GTEST )
-  find_package( GTest 1.17 QUIET )
-endif()
+# Use installed GTest, or build from source.
+find_package( GTest 1.17 QUIET )
 if( GTest_FOUND )
   target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
 else()
