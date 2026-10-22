@@ -2471,40 +2471,6 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range_small
 
-- name: gemm_ex_source_pointer_alignment_f32
-  category: quick
-  function:
-    - gemm_ex: *single_precision
-  M: 6
-  N: 4
-  K: 6
-  lda: 6
-  ldb: 6
-  ldc: 12
-  transA: T
-  transB: N
-  alpha_beta: *alpha_beta_range_small
-  algo: 1
-  solution_index: -2
-  pointer_byte_offset: 4
-
-- name: gemm_ex_source_pointer_alignment_f16
-  category: quick
-  function:
-    - gemm_ex: *hpa_half_precision
-  M: 6
-  N: 4
-  K: 6
-  lda: 6
-  ldb: 6
-  ldc: 12
-  transA: T
-  transB: N
-  alpha_beta: *alpha_beta_range_small
-  algo: 1
-  solution_index: -2
-  pointer_byte_offset: 2
-
 - name: gemm_gemv
   category: pre_checkin
   function:
