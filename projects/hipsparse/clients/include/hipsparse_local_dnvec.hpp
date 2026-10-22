@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  Dense vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnVec
 {
@@ -43,6 +45,8 @@ public:
                 hipsparseDestroyDnVec(descr);
                 descr = nullptr;
             }
+            std::cerr << "hipsparseCreateDnVec failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -51,7 +55,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroyDnVec(descr);
+            const hipsparseStatus_t status = hipsparseDestroyDnVec(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnVec destructor");
+            }
         }
     }
 
@@ -63,5 +71,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseDnVecDescr_t. A leftover hipsparseDestroyDnVec(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalDnVec&) = delete;
 
 #endif // HIPSPARSE_LOCAL_DNVEC_HPP
