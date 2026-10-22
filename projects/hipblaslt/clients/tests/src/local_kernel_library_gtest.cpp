@@ -518,6 +518,19 @@ TEST(LocalKernelLibrary, smoke_ConcurrentReadersAndWriter)
 
     std::atomic<bool>        done{false};
     std::vector<std::thread> readers;
+    struct JoinReaders
+    {
+        std::atomic<bool>&        done;
+        std::vector<std::thread>& readers;
+
+        ~JoinReaders()
+        {
+            done.store(true);
+            for(auto& reader : readers)
+                reader.join();
+        }
+    } joinReaders{done, readers};
+
     for(int t = 0; t < 4; t++)
     {
         readers.emplace_back([&]() {
@@ -536,12 +549,10 @@ TEST(LocalKernelLibrary, smoke_ConcurrentReadersAndWriter)
         int index = library.addSolutions({makeSolution(problem)}).at(0);
         ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
     }
-    done.store(true);
-    for(auto& reader : readers)
-        reader.join();
-
     EXPECT_EQ(library.registeredCount(), 200u);
-    EXPECT_EQ(library.findExact(problem, gpu)->index, LocalKernelIndexBase + 199);
+    auto found = library.findExact(problem, gpu);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->index, LocalKernelIndexBase + 199);
 }
 
 // The master puts the mapped kernel first and asks the shipped library for one
