@@ -92,6 +92,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
+    # both bundles, GTEST_SKIPs off gfx950 (see the dense block above).
+    hkp_product_offers_engine(_hkp_unified_2d_bundle "hipkernel:Gfx950AttentionUnified2D")
+    hkp_product_offers_engine(_hkp_unified_3d_bundle "hipkernel:Gfx950AttentionUnified3D")
+    if(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx950 unified attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
