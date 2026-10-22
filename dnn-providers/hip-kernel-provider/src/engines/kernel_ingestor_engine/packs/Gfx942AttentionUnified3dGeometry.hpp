@@ -22,8 +22,13 @@
  * Scope: the problem `dispatch/attention/common.py::_problem` builds for a strided
  * single-token decode request: `total_q = num_seqs = batch`, `max_seqlen_q = 1`,
  * fp16/bf16 (no fp8 K/V), no sliding window, `target_ctas = 0`. The strided entry of
- * `run_unified_attention_torch` (`kernels/common/attention_unified.py`) refuses
- * everything else.
+ * `run_unified_attention_torch` (`kernels/common/attention_unified.py`) ALSO accepts
+ * sliding window, softcap and `target_ctas` (`dispatch/attention/strided_decode.py`
+ * lists `sliding_window`), but this header restates `_num_segments` only for
+ * `sliding_window == 0` and `target_ctas == 0`. With a sliding window rocKE returns the
+ * raw `select_3d` count instead (e.g. B4/Hq32/Hkv8/D128/block16/Skv8192 at 304 CUs:
+ * 32 there vs 38 here). The engine MUST refuse sliding-window graphs (v1 decision) and
+ * must not pass `target_ctas`.
  *
  * Header-only and dependency-light on purpose: pure functions, testable with no HIP
  * context and nothing to mock.
@@ -37,6 +42,10 @@ inline constexpr int64_t GFX942_UNIFIED_3D_WAVE_LANES = 64;
 
 /// Workspace region alignment, in bytes.
 inline constexpr int64_t GFX942_UNIFIED_3D_WORKSPACE_ALIGNMENT = 256;
+
+/// The fixed CU count the D128 decode pre-bump clamp targets, whatever the live count
+/// (`kernels/common/attention_unified.py::_PRE_BUMP_CUS`).
+inline constexpr int64_t GFX942_PRE_BUMP_CUS = 120;
 
 /**
  * @brief The KV tile override the gfx942 3D segment kernel is built with, or none.
@@ -185,8 +194,9 @@ inline int64_t gfx942SplitRuleSegments(int64_t batch,
     }
     if(headSize == 128 && seqlenK < 32768)
     {
-        // _pre_bump_segments: _PRE_BUMP_CUS = 120 -> target 480.
-        const int64_t preBump = detail::gfx942AiterSegments(batch, hq, hkv, blockSize, 120 * 4);
+        // _pre_bump_segments: target _PRE_BUMP_CUS * 4 = 480.
+        const int64_t preBump
+            = detail::gfx942AiterSegments(batch, hq, hkv, blockSize, GFX942_PRE_BUMP_CUS * 4);
         return segments < preBump ? segments : preBump;
     }
     return segments;
