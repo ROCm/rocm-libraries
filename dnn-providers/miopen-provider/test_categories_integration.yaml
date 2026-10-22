@@ -85,10 +85,23 @@ test_categories:
     description: "Complete external integration coverage"
     test_patterns:
       - "*"
-    exclude: *common_excludes
+    exclude:
+      - "*DISABLED*"
+      # dnn-benchmarking workloads run in their own category (too slow for full).
+      - "dnn_benchmarking_*"
     labels:
       - "full"
       - "all"
+
+  dnn-benchmarking:
+    description: "dnn-benchmarking workload graphs this engine runs (needs `dvc pull -R workloads` and a re-configure); hours on a GPU, so not part of full"
+    test_patterns:
+      - "dnn_benchmarking_conv_*"
+      - "dnn_benchmarking_bnorm_*"
+      - "dnn_benchmarking_rocke_conv.*"
+    exclude: *common_excludes
+    labels:
+      - "dnn_benchmarking"
 
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier: one bundle case per operation for rapid signal"
@@ -163,3 +176,7 @@ execution_settings:
     comprehensive: 7200
     full: 28800
     ffm-quick: 7200  # 2 hours
+    # dnn-benchmarking is one CTest entry that runs the whole suite. It must stay
+    # below TheRock's 180-minute step timeout (dnn_benchmarking_timeout_minutes in
+    # fetch_test_configurations.py) so a runaway fails in CTest with its logs.
+    dnn-benchmarking: 10200  # 170 minutes
