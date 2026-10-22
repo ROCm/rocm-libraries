@@ -425,26 +425,40 @@ The fast structure and generator units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
-current installed-artifact CI gains the reproduction coverage without adding the
-external process sweep to the quick or FFM pytest pools. Keeping one generator
-implementation behind two thin registrations preserves local coverage while
-avoiding duplicated test logic.
+installed-artifact CI can schedule the reproduction result without adding the
+external process sweep to the quick or FFM pytest pools. A named skip is not
+reproduction coverage: check the CTest result and reason, especially when the
+compiler's exact major differs from rocKE's resolved flavor or no committed
+column exists. Keeping one generator implementation behind two thin
+registrations preserves local coverage while avoiding duplicated test logic.
+
+**Kernel-author routing.** Ordinary kernel work does not need a separate focused
+run beyond the full pre-merge `tests/run_all.py`; once that runner has configured
+and built native tests, its unfiltered CTest phase includes this sweep. Run the
+focused CTest while iterating on intrinsic declarations, architecture-domain
+data or generation, LLVM discovery/classification, or this test's CMake/install
+wiring. A skip confirms orchestration only, not the committed measurements.
 
 ---
 
 ## 5. Execution tiers & gating
 
-Four distinct things run here; **do not conflate them**:
+The execution classes below have different selectors and verdicts; **do not
+conflate registration, CI enrollment, hardware selection, and a test actually
+performing comparisons**:
 
-| Tier | What | Gated? |
+| Execution class | Environment and oracle | Verdict |
 |---|---|---|
-| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → arch-domain gate → pytest (`platform/tests`) → ctest | ✅ blocking |
-| **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
-| **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
-| **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
+| **Developer pre-merge gate** | `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. |
+| **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
+| **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
+| **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
+| **Diagnostics and demos** | IR diff/fuzz tools, per-config golden checks, hand-compiled CLIs, and demos | Opt-in and non-gating. |
 
 **Two entrypoints with different environments and selection.** [`run_all.py`](platform/tests/run_all.py) is
-the **developer** runner (guard → gate → IR validity → arch domain → pytest → ctest). **CI does not run
+the **developer** runner (guard → byte identity → IR validity → arch-domain
+warning gate → platform pytest → differential pytest when `rocke_engine` is
+importable → CTest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
@@ -695,17 +709,27 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Orphaned `library/` behavioral pytest** | Attention *platform behavior* (builds, dispatch wiring, golden IR) runs in no gated tier — only its parity emitters ride the gate | Gate a `library` pytest tier |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
 
 ### 7.3 What "green" does and does not mean today
 
-A green gate proves: the two engine implementations agree byte-for-byte across the
-enumerated parity corpus (both trees), IR roundtrips, the platform pytest suite
-passes, and the copyability contract holds. A green gate does **not** prove: that
-the **kernels are correct** on hardware (Question A — needs Tier 3, which itself has
-the holes in G1–G5), that the **kernels are fast** (G8), that attention *platform
-behavior* is correct (G6), or that any arch beyond the enumerated configs works.
+A green **developer pre-merge gate** proves: the two engine implementations agree
+byte-for-byte across the enumerated parity corpus (both trees), emitted IR passes
+the host-toolchain validity gate where available, arch-domain warnings match the
+allowlist, platform pytest passes, configured build-tree CTests pass or report an
+accepted named skip, and the copyability contract holds. If `rocke_engine` was
+not importable, GREEN also does not prove that the differential pytest pass ran;
+its explicit skip must be reviewed. A green developer gate does not prove that
+kernels are numerically correct on hardware, that they are fast (G8), that every
+`library/tests/` file is enrolled (G6), or that an architecture absent from the
+enumerated configs works.
+
+A green **matching installed pinned-reference lane** additionally proves the
+enrolled operation/architecture cases matched their independent qualified
+reference under that lane's numerical contract. A green installed host lane or a
+GPU lane that selected no matching test, skipped, or performed zero comparisons
+does not make that claim. The remaining numerical holes are G1–G5.
 
 ---
 

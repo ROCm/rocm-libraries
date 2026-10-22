@@ -13,7 +13,7 @@
 #
 # Stages, selected with --steps (default: all, in this order):
 #   guard    -- relative-path guard        (platform tests/run_all.py)
-#   gate     -- byte-identity gate         (BOTH llvm20 and llvm22 unless --flavor pins one)
+#   gate     -- byte-identity gate         (all supported flavors unless --flavor pins one)
 #   parity   -- platform instance .py/.c parity emitters
 #   pytest   -- auto-globs platform/tests + library/tests; the pinned GPU
 #               reference suites run as their own step and report when skipped
@@ -52,7 +52,7 @@ LIBRARY = ROCKE / "library"
 PLATFORM_PYROOT = PLATFORM / "python"
 EMIT_COMMON_DIR = PLATFORM / "tests" / "instances" / "parity"
 
-FLAVORS = ("llvm20", "llvm22")
+FLAVORS = ("llvm20", "llvm22", "llvm23")
 STAGES = ("guard", "gate", "parity", "pytest", "numeric")
 
 
@@ -154,7 +154,7 @@ def main() -> int:
         "--flavor",
         choices=FLAVORS,
         default="",
-        help="pin one LLVM flavor (default: both)",
+        help="pin one LLVM flavor (default: all supported flavors)",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_checks")
@@ -207,19 +207,26 @@ def main() -> int:
 
     status = 0
 
-    # guard -- relative-path guard (fast, no build)
+    # guard -- relative-path guard (fast, no build). Disable every other
+    # run_all stage and point CTest discovery at an empty temporary directory,
+    # so a stale default build cannot turn this stage into a toolchain sweep.
     if "guard" in steps:
-        status |= _run(
-            "relative-path guard",
-            [
-                sys.executable,
-                str(PLATFORM / "tests" / "run_all.py"),
-                "--no-gate",
-                "--no-pytest",
-            ],
-            env,
-            cwd=PLATFORM,
-        )
+        with tempfile.TemporaryDirectory(prefix="rocke_guard_") as guard_root:
+            status |= _run(
+                "relative-path guard",
+                [
+                    sys.executable,
+                    str(PLATFORM / "tests" / "run_all.py"),
+                    "--no-gate",
+                    "--no-ir-validity",
+                    "--no-arch-domain",
+                    "--no-pytest",
+                    "--build-root",
+                    guard_root,
+                ],
+                env,
+                cwd=PLATFORM,
+            )
 
     # gate -- byte-identity gate at each flavor (builds the C++ engine)
     if "gate" in steps:

@@ -16,9 +16,11 @@ tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
 that validation rather than count as successful coverage.
 
 ```
-python tests/run_all.py            # relative-path guard + byte-identity gate + pytest (+ctest if built)
-python tests/run_all.py --only gemm
-python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (llvm20/llvm22)
+python tests/run_all.py              # complete developer pre-merge gate; see stages below
+python tests/run_all.py --only gemm   # scopes byte identity only, not pytest/CTest
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 ```
 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
@@ -45,7 +47,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 |---|---|---|
 | `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
-| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 65 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
+| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
@@ -56,21 +58,29 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > gate, not a `test_`-prefixed pytest module. The pybind **`rocke_engine` module
 > has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
 > owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
-> 65 `*_emit.c` outputs to `*_emit.py`), and the binding itself by the
+> 81 matched `*_emit.c`/`*_emit.py` pairs), and the binding itself by the
 > consistency proof documented in `cpp/bindings/README.md`.
 
 ## Execution categories
 
 Four distinct things run here; don't conflate them:
 
-1. **Default runner** (`python tests/run_all.py`): relative-path guard -> byte-identity
-   gate (`tools/check_byte_identity.py`) -> `pytest` (the `test_*.py` modules
-   above) -> `ctest` when any registered test executable is built in `--build-root`
-   for the selected `--config`. CTest supplies the executable paths, including
-   configuration directories and platform suffixes. The entire registered suite
-   runs, including the build-tree `rocke_arch_domain_reproducibility` toolchain
-   gate, so a partial build exposes missing tests as failures. No configured test
-   build or no built registered tests is reported explicitly as a skipped stage.
+1. **Default developer pre-merge runner** (`python tests/run_all.py`):
+   relative-path guard -> byte-identity gate (`tools/check_byte_identity.py`) ->
+   emitted-IR validity (`tools/check_ir_validity.py`) -> arch-domain warning gate
+   (`tools/check_arch_domain.py`) -> platform pytest -> `ROCKE_BACKEND=both`
+   differential pytest when `rocke_engine` is importable -> `ctest` when any
+   registered native test executable is built in `--build-root` for the selected
+   `--config`. CTest supplies executable
+   paths, including configuration directories and platform suffixes. The entire
+   registered suite runs, including the build-tree
+   `rocke_arch_domain_reproducibility` toolchain gate, so a partial build exposes
+   missing tests as failures. This is the complete pre-merge gate, not a fast
+   smoke; the `standard` label controls installed CI selection and does not filter
+   this local CTest phase. If `rocke_engine` is unavailable, the differential
+   pytest stage reports a skip and GREEN does not imply that it ran. No configured
+   test build or no built registered native tests is reported explicitly as a
+   skipped stage.
 2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
    diff), `fuzz_diff.py`, `ir_artifact_diff.py`.
 3. **GPU / manual numeric lanes** (need a HIP device; skipped/not-collected
@@ -111,6 +121,26 @@ Run it from a configured platform build with:
 ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V
 ```
 
+#### When kernel authors need this gate
+
+Ordinary kernel work should run the complete `tests/run_all.py` pre-merge gate;
+when its native build is ready, that runner includes this CTest. Run the focused
+command above during iteration when changing intrinsic declarations,
+architecture-domain data or generation, LLVM discovery/classification, or this
+test's CMake/install wiring. Inspect a named skip rather than counting it as
+measurement validation.
+
+The runner has two independent selectors, neither of which scopes pytest or
+CTest:
+
+| Change or intent | Focused route |
+|---|---|
+| One parity emitter family | `python tests/run_all.py --only <family>`; scopes byte identity only |
+| One representative emitted-IR corpus case | `python tests/run_all.py --only-ir <family/arch/variant>`; scopes IR validity and the arch-domain warning gate only |
+| One Python behavior | invoke its pytest module or node ID directly |
+| Arch-domain artifact reproduction | use the focused `ctest -R` command above |
+| Full pre-merge validation | run `python tests/run_all.py` with no selectors |
+
 #### CI enrollment and known limitations
 
 This move exposes the sweep as one independently schedulable CTest in both local
@@ -122,8 +152,10 @@ builds and installed provider CI.
   verifies the exact relocated data consumed by CI. The build-tree gate resolves
   the same resource from the source package.
 - Standard-tier categorization keeps the external compiler sweep out of quick and
-  FFM lanes. Registration itself is pinned by the source runner contract test;
-  installed CI then exercises the generated CTest entry end to end.
+  FFM installed-CI lanes. The local developer runner invokes unfiltered CTest and
+  therefore includes it. Registration itself is pinned by the source runner
+  contract test; only a selected, non-skipped CI result supplies reproduction
+  evidence.
 - Exit code 77 is an orchestration adapter preserving the old pytest skip
   behavior, not yet a typed semantic outcome from the generator.
 - Flavor auto-detection can fail before a skip result when COMGR evidence is
@@ -139,10 +171,10 @@ rejecting** an unsupported `(spec, arch)` (the harness counts "both reject" as
 parity-faithful, SKIP). So arch coverage is just a matter of which `(spec, arch)`
 pairs the emitters enumerate - there is no global arch override.
 
-- Of the 65 `*_emit` families, 16 are arch-prefixed: 12 cover gfx942/RDNA
-  directly (`gfx942_*` x3, `gfx1151_*` x6, `gfx1201_*` x3) and 4 are `gfx950_*`;
-  each such emitter config returns `(spec, arch)`. The remaining ~49 common
-  families default to gfx950.
+- Of the 81 matched `*_emit` families, 20 are arch-prefixed; each such emitter
+  config returns `(spec, arch)`. The remaining 61 common families default to
+  gfx950. These counts are an inventory snapshot; the emitter configs, not the
+  totals, are authoritative.
 - The common families default to `gfx950`. To cover a common family on another
   arch, add a `(spec, arch="gfx942")` (etc.) config to that family's
   `*_emit.py` and `*_emit.c` - the normal gate (`run_diff` /
@@ -163,7 +195,7 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
   covered by `run_diff.py` (`--mode ll` / `--mode ir`) and
   `tools/check_byte_identity.py`. The micro-kernel harness was ported to
   `parity/run_parity.py` (cross-platform).
-- NOT duplicates (kept): the 65 `*_emit.py` / `*_emit.c` pairs are the two
+- NOT duplicates (kept): the 81 matched `*_emit.py` / `*_emit.c` pairs are the two
   oracles of the differential gate; `core/test_ir_serialize.py` (Python) and
   `core/ir_serialize_roundtrip.cpp` (C++) each validate their own engine.
 - OVERLAP (consolidation is a tracked follow-up, not done here because it needs
@@ -179,7 +211,7 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
   package) and `test_rocke_examples.py` (drives the external `example/ck_tile/dsl`
   tree, not part of rocKE) stay in `composablekernel/python/test`.
 
-### Native parity binaries in the standard runner
+### Native parity binaries in the default developer runner
 
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
