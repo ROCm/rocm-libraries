@@ -1,0 +1,4818 @@
+{
+  "version": "1.0",
+  "id": "1f1678e0-cce5-4d0f-9f98-3b7b9e5a95e6",
+  "name": "hipkernel:attention_paged_unified_gfx950",
+  "matchers": [
+    "f5baea64-2961-4555-9a77-6576fc1ec21b",
+    "2af4cb01-70e7-485f-9f09-da2d3aa55fd2"
+  ],
+  "engine": "c9af5aa1-86fc-4186-aa3c-307b929710af",
+  "dispatch": "b4085b75-ea3b-4d38-878d-9998a03e15c7",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "c9af5aa1-86fc-4186-aa3c-307b929710af",
+          "kmd_id": "29593010-20c8-41e6-9197-d4d617e1d25b",
+          "metadata_fields": [
+            "dtype",
+            "head_size",
+            "block_size",
+            "num_query_heads",
+            "num_kv_heads",
+            "num_warps",
+            "block_m_per_warp"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "head_size": {
+              "field": "head_size"
+            },
+            "block_size": {
+              "field": "block_size"
+            },
+            "num_query_heads": {
+              "field": "num_query_heads"
+            },
+            "num_kv_heads": {
+              "field": "num_kv_heads"
+            },
+            "num_warps": {
+              "field": "num_warps"
+            },
+            "block_m_per_warp": {
+              "field": "block_m_per_warp"
+            }
+          },
+          "vocabulary": {
+            "dtype": {
+              "bf16": "BF16",
+              "fp16": "FP16"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "e0e1aa28-a902-47e9-a32a-256b4e0f6e19",
+      "name": "paged_unified.fp16_d64_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d603a5f4-b38d-4c94-956f-d1e266f93f00",
+      "name": "paged_unified.fp16_d64_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "075e1fd7-75f1-4926-a899-d9b86770f963",
+      "name": "paged_unified.fp16_d64_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2486bd1b-be6c-48ab-bac7-13e324f45d47",
+      "name": "paged_unified.fp16_d64_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "04df86ad-ba56-49b9-8aed-91f535bc7928",
+      "name": "paged_unified.fp16_d64_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "95ce7f9f-c3e7-43f6-b4a4-8a95e2b14b1f",
+      "name": "paged_unified.fp16_d64_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d5a4cd73-2493-401f-a084-bb91e65f9612",
+      "name": "paged_unified.fp16_d64_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f22afe8d-bf17-4482-86f6-dd96e70f443f",
+      "name": "paged_unified.fp16_d64_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e7c89c4a-000a-4a88-9936-237b1a2ae509",
+      "name": "paged_unified.bf16_d64_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "63aef063-cba9-41f7-8192-d60563e21d03",
+      "name": "paged_unified.bf16_d64_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a447f5eb-3deb-401d-8c1e-f896f95cfa26",
+      "name": "paged_unified.bf16_d64_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "54fe06a7-598e-4e41-8734-e49fe1081fcc",
+      "name": "paged_unified.bf16_d64_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1ec90bc4-6a59-48a0-a916-f3842f999fd6",
+      "name": "paged_unified.bf16_d64_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "03b5b732-ac75-421f-b12d-d94b23507f4b",
+      "name": "paged_unified.bf16_d64_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3468bdcd-aaed-4be3-b882-dfc8e9fd5a3d",
+      "name": "paged_unified.bf16_d64_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f7011f88-1704-4148-989e-79ae67e35c97",
+      "name": "paged_unified.bf16_d64_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 2,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 2,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3c57294e-aa86-4d8e-a977-63836834b3fb",
+      "name": "paged_unified.fp16_d64_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6d50865e-ec9f-47af-b1d9-e3cea05e075b",
+      "name": "paged_unified.fp16_d64_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "96ce9b03-3d22-4075-82c4-8c6f470308dd",
+      "name": "paged_unified.fp16_d64_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "32dc0320-1390-4058-a5aa-7b41a4feb34c",
+      "name": "paged_unified.fp16_d64_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7b80b955-5731-42b9-a50f-b0b818068b6c",
+      "name": "paged_unified.fp16_d64_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "388eb1ae-26dc-445d-b7c4-beb93c5d24ce",
+      "name": "paged_unified.fp16_d64_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a5b94936-29d4-4677-88df-ee64c61c9e33",
+      "name": "paged_unified.fp16_d64_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a8c9b734-110c-4002-b81d-abdcd80a726c",
+      "name": "paged_unified.fp16_d64_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8b8b5d9f-a4a6-4419-b898-e1a989bfebaa",
+      "name": "paged_unified.fp16_d64_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5876e267-e08f-43f1-b288-86674bc939f1",
+      "name": "paged_unified.fp16_d64_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2705c668-49f4-436e-8ef4-1bf57fba9cbf",
+      "name": "paged_unified.fp16_d64_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "141b573a-62cd-4771-a286-3df9c4632638",
+      "name": "paged_unified.fp16_d64_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c65accd0-999f-4a35-a81b-771ca9be1828",
+      "name": "paged_unified.fp16_d64_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7f6021f2-0ff2-4688-8ecd-5c483823108a",
+      "name": "paged_unified.fp16_d64_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e46d369e-a7d1-40c2-9cce-d54036c0aeda",
+      "name": "paged_unified.fp16_d64_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "720796fa-4f4a-4f8e-bdbc-c09578cf37b1",
+      "name": "paged_unified.fp16_d64_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d3673551-1e87-4273-a6bc-7f3a03d7075a",
+      "name": "paged_unified.bf16_d64_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "41e45ba3-2cf2-464c-b0fe-0fc90cb08c1a",
+      "name": "paged_unified.bf16_d64_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "12aba46e-ebf1-4731-8bef-bf89e65e1d18",
+      "name": "paged_unified.bf16_d64_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b9217fa4-ff5e-4047-a4c3-dda52c8b0396",
+      "name": "paged_unified.bf16_d64_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6b4bfb42-5697-4ade-85d9-27f0d9ff6afd",
+      "name": "paged_unified.bf16_d64_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d1529ffe-c165-4d07-8a38-9fcdd1192965",
+      "name": "paged_unified.bf16_d64_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b463eb65-5f6d-4e68-bcbb-2ac01cb2fcca",
+      "name": "paged_unified.bf16_d64_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f707aade-0291-4874-9333-40f9057b901d",
+      "name": "paged_unified.bf16_d64_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "63085891-7778-4a61-94c3-e0a9fa74c121",
+      "name": "paged_unified.bf16_d64_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3b13cc9c-d7d0-4c09-b93d-1626e8afac0e",
+      "name": "paged_unified.bf16_d64_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f0caa26e-b447-4500-8178-5cc1e2198662",
+      "name": "paged_unified.bf16_d64_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0800e3b4-a7a8-480c-aed3-637c9678fbd1",
+      "name": "paged_unified.bf16_d64_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e73b9c43-0b14-42b8-941f-bbd12be9c1c7",
+      "name": "paged_unified.bf16_d64_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0552bb5f-565d-4691-beee-8bb13599a25c",
+      "name": "paged_unified.bf16_d64_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "20a29bf6-de20-4f06-8738-dffd43a0e8dc",
+      "name": "paged_unified.bf16_d64_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d53a6276-2868-496f-a389-9b4859449ac2",
+      "name": "paged_unified.bf16_d64_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 64,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5cdd41ab-3aef-45bb-8703-9dcb85cab0ca",
+      "name": "paged_unified.fp16_d128_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6cc64843-166e-4bd8-8fbd-51f0d4151236",
+      "name": "paged_unified.fp16_d128_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "91d01894-8216-428d-8530-839baaba14a7",
+      "name": "paged_unified.fp16_d128_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0a4f89b0-b385-4fe7-93b3-3795d358b0aa",
+      "name": "paged_unified.fp16_d128_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ab8c2b08-e5e9-4808-b440-34c73fb76857",
+      "name": "paged_unified.fp16_d128_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1d446be9-dce1-44f7-a4a1-f1f763e5a473",
+      "name": "paged_unified.fp16_d128_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "58e82185-fdd9-4cd8-b5e5-bef8a18c6184",
+      "name": "paged_unified.fp16_d128_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fe2be135-c4e3-4c31-a7a1-1ce826615e97",
+      "name": "paged_unified.fp16_d128_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae667f2a-398f-4756-8c1c-dab9ec357ae5",
+      "name": "paged_unified.fp16_d128_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2acc9f68-9c32-46b3-8a24-7fe02eece8b3",
+      "name": "paged_unified.fp16_d128_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "50eb5d30-b66a-4c8d-b81d-514109d4ede7",
+      "name": "paged_unified.fp16_d128_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c6c5da58-a5a3-4701-bc0d-45893fcf857f",
+      "name": "paged_unified.fp16_d128_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "615b49c5-95fc-465d-bf1f-adcbb6897c23",
+      "name": "paged_unified.fp16_d128_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6a72e374-f7f0-4271-8d77-4c824a839da9",
+      "name": "paged_unified.fp16_d128_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d9c89124-2bd0-4bef-b164-4820bc78dcf5",
+      "name": "paged_unified.fp16_d128_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6fe2e2b2-9ba0-47a9-a771-312e8c42443d",
+      "name": "paged_unified.fp16_d128_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a8658448-58d9-4a21-af14-c772630b7af5",
+      "name": "paged_unified.fp16_d128_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ce4906d8-b10e-4883-9703-d033c650dfcd",
+      "name": "paged_unified.fp16_d128_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "65e687fa-7307-47aa-8450-91c648ff04a3",
+      "name": "paged_unified.fp16_d128_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "32ef65bd-0c74-406b-8579-4443d1b9ecf5",
+      "name": "paged_unified.fp16_d128_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "81ad98d6-542d-4954-aaf2-c4778b6c1a18",
+      "name": "paged_unified.fp16_d128_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "87d0050b-4319-4163-9c72-a277e38ec71a",
+      "name": "paged_unified.fp16_d128_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "345d5868-b3ec-43e8-bea0-7d21920607da",
+      "name": "paged_unified.fp16_d128_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2bdc88d4-6288-4ce6-be67-c264a7c7f416",
+      "name": "paged_unified.fp16_d128_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "212e2c5b-a4fa-49be-8591-01bad9ce2e51",
+      "name": "paged_unified.fp16_d256_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0e0716c8-916e-4662-8740-8b8f12c7156e",
+      "name": "paged_unified.fp16_d256_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c8776003-b78a-49ce-9984-72bf5539347d",
+      "name": "paged_unified.fp16_d256_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "12d560a0-3087-4e3e-b463-a534c1144c20",
+      "name": "paged_unified.fp16_d256_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3a950075-7baa-4a59-b8b2-2e040fe7726a",
+      "name": "paged_unified.fp16_d256_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "57a3c2ca-aefc-4c8c-a82a-805d9d045179",
+      "name": "paged_unified.fp16_d256_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cd5fe387-1c55-4259-81f8-96b92fc6dfcf",
+      "name": "paged_unified.fp16_d256_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "74c22353-32ce-4987-91d3-f5f93c483290",
+      "name": "paged_unified.fp16_d256_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e71e3205-6ddd-4c48-acdc-abdee8ef25a6",
+      "name": "paged_unified.fp16_d256_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "83f435ff-c4e1-41eb-b181-653964b5e0a7",
+      "name": "paged_unified.fp16_d256_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1211fee3-7b28-4b3f-8281-59a2e8b2e72f",
+      "name": "paged_unified.fp16_d256_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "35d744c2-bb64-4b18-a676-ced7fed9c37b",
+      "name": "paged_unified.fp16_d256_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "80787923-e0e5-4c81-83dd-9bf0e6bd5245",
+      "name": "paged_unified.fp16_d256_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e0250241-14e3-4afe-9b93-a177b9463e72",
+      "name": "paged_unified.fp16_d256_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6ea257a0-cb99-4a9a-aeff-25c711d35c1f",
+      "name": "paged_unified.fp16_d256_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2abafb51-1dc8-477b-8590-3d3da623682c",
+      "name": "paged_unified.fp16_d256_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "367682ef-d49d-402a-8fc5-5c2a8c62ccf3",
+      "name": "paged_unified.fp16_d256_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02811807-31c2-4dde-bd76-a115cad59a14",
+      "name": "paged_unified.fp16_d256_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8feb86cd-9438-4df6-b54f-9cf25fa3f61d",
+      "name": "paged_unified.fp16_d256_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5fa6ab9c-3b33-4f72-8c20-8f6f71e5cc7b",
+      "name": "paged_unified.fp16_d256_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bc333d48-114b-4562-bbe1-300e2c7546a7",
+      "name": "paged_unified.fp16_d256_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e17f0c38-26ee-4ef8-8696-a39b1358ece8",
+      "name": "paged_unified.fp16_d256_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "93e6c2ec-1223-44a2-b0f1-a376dda4f3f4",
+      "name": "paged_unified.fp16_d256_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5e25702f-6c55-42f8-bdf6-2762c9751a29",
+      "name": "paged_unified.fp16_d256_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "fp16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "258b21d7-84f6-4763-8456-a9f5eef1f0f9",
+      "name": "paged_unified.bf16_d128_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7da0b28b-d3e1-42b2-b639-4e6d68a9edfd",
+      "name": "paged_unified.bf16_d128_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ed30ea7f-e65a-4cfd-ab85-59f6f434bc4c",
+      "name": "paged_unified.bf16_d128_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7edd94cf-1bc0-4ebe-9119-690a7c220a69",
+      "name": "paged_unified.bf16_d128_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cba0a8fa-bedf-4fab-b897-e6ec325982a1",
+      "name": "paged_unified.bf16_d128_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0ec0503d-7072-4601-a1f3-4f3d9f034adc",
+      "name": "paged_unified.bf16_d128_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9bf7d181-7aad-4890-be52-98717c69a02c",
+      "name": "paged_unified.bf16_d128_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "82f69d9c-31ef-48d2-bd8c-0a3222e0f44a",
+      "name": "paged_unified.bf16_d128_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "699fd5c5-2c5f-4bdc-aa76-a358ef187fea",
+      "name": "paged_unified.bf16_d128_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a7662c5f-4864-4eae-a627-96016eeae194",
+      "name": "paged_unified.bf16_d128_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2ee0cd45-4b51-4727-98b0-b9dbefe6ee38",
+      "name": "paged_unified.bf16_d128_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4b724bcf-57ef-43e2-9033-106094af8a8c",
+      "name": "paged_unified.bf16_d128_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "24b9c183-75d9-48bd-8ffe-c30558a6e6a7",
+      "name": "paged_unified.bf16_d128_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5fccd6f1-e517-40f9-bdcd-68d19f1413f1",
+      "name": "paged_unified.bf16_d128_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8d227a60-c5c8-461a-9199-06b114559418",
+      "name": "paged_unified.bf16_d128_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "69e2888d-bf79-4b0f-9ced-9b1b5bcde74b",
+      "name": "paged_unified.bf16_d128_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "075fcfd4-a09d-4e07-8ada-d25091b84ec0",
+      "name": "paged_unified.bf16_d128_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2247b974-9cc4-4acb-9541-b891a71001fb",
+      "name": "paged_unified.bf16_d128_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3d9e1e93-287c-43b8-8ae0-0288c521457d",
+      "name": "paged_unified.bf16_d128_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6ff9caa4-a548-4a28-8c36-20b79334724e",
+      "name": "paged_unified.bf16_d128_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2ff04cdc-827b-4bdb-80bf-1b1f00381986",
+      "name": "paged_unified.bf16_d128_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02f9702a-a0df-4acf-93f6-cea88ee1d62e",
+      "name": "paged_unified.bf16_d128_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a97cf320-07f7-45f4-8ec7-b5e43dfb5494",
+      "name": "paged_unified.bf16_d128_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4aa3f44b-7d26-4570-b0d0-56af35a46aa0",
+      "name": "paged_unified.bf16_d128_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 128,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5dcbc493-fd56-4e70-8d1b-8be3578d0a64",
+      "name": "paged_unified.bf16_d256_bs16_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1b167790-ad72-43e9-b69d-39d2d03e2982",
+      "name": "paged_unified.bf16_d256_bs16_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "43259880-c763-4787-8c99-e7c97cab2ed1",
+      "name": "paged_unified.bf16_d256_bs16_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "eb8c6681-9561-454c-a31c-aac0af6afea3",
+      "name": "paged_unified.bf16_d256_bs16_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d19948cb-313c-4c5a-b955-456dd822405b",
+      "name": "paged_unified.bf16_d256_bs16_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a08db64c-9962-4abc-87b6-00f8fc3073a0",
+      "name": "paged_unified.bf16_d256_bs16_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f635af58-729f-4c9f-b8ed-70c4857378e8",
+      "name": "paged_unified.bf16_d256_bs16_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7e358fe4-43f0-46d7-8be0-4660c77247b0",
+      "name": "paged_unified.bf16_d256_bs16_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 16,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8352754f-ece1-4ba6-9c35-398768cf41b7",
+      "name": "paged_unified.bf16_d256_bs32_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5885853c-e7c6-4834-b065-25d49a139056",
+      "name": "paged_unified.bf16_d256_bs32_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6729cecc-1077-4605-9695-b8dfb3843526",
+      "name": "paged_unified.bf16_d256_bs32_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "45eae18e-aac5-460b-a1dd-615b433ca8eb",
+      "name": "paged_unified.bf16_d256_bs32_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "723d1174-3d03-4a21-98aa-4d4c3cc5fabc",
+      "name": "paged_unified.bf16_d256_bs32_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5c4e2d08-0659-4131-8125-b217367e338a",
+      "name": "paged_unified.bf16_d256_bs32_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2aab1fe6-4b4a-4e67-972f-cad674985bc4",
+      "name": "paged_unified.bf16_d256_bs32_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "de53e03a-fbcc-405a-84f8-a42f071fe89c",
+      "name": "paged_unified.bf16_d256_bs32_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 32,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b553b247-2f2b-4b24-8d18-2e038d353462",
+      "name": "paged_unified.bf16_d256_bs64_g1.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 1,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e666ef18-dfd2-4112-8859-b78f0c2a47e0",
+      "name": "paged_unified.bf16_d256_bs64_g2.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 2,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3ccdbb49-02c7-4f0d-a20d-d50f31a01528",
+      "name": "paged_unified.bf16_d256_bs64_g4.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 4,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9564ff74-d7b3-452d-bfa1-1098adbdf84c",
+      "name": "paged_unified.bf16_d256_bs64_g5.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 5,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 5,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4718b8a9-1eaa-46f9-a7ef-906f07358d1b",
+      "name": "paged_unified.bf16_d256_bs64_g6.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 6,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "914620ee-0cbe-48c2-8b89-946a28cdfe47",
+      "name": "paged_unified.bf16_d256_bs64_g7.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 7,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 7,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d7d550e4-1012-4034-9dda-0cd4f82a4f60",
+      "name": "paged_unified.bf16_d256_bs64_g8.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 8,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5fe3a4a9-7cdc-4855-bf39-7c0b3a1aff30",
+      "name": "paged_unified.bf16_d256_bs64_g16.gfx950",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx950/attention_tiled_2d.py",
+        "builder": "build_unified_attention_2d_tiled",
+        "spec": {
+          "head_size": 256,
+          "block_size": 64,
+          "num_query_heads": 16,
+          "num_kv_heads": 1,
+          "dtype": "bf16",
+          "use_sinks": false,
+          "sliding_window": 0,
+          "has_softcap": false,
+          "num_warps": 4,
+          "block_m_per_warp": 16,
+          "runtime_layout": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 256,
+        "block_size": 64,
+        "num_query_heads": 16,
+        "num_kv_heads": 1,
+        "num_warps": 4,
+        "block_m_per_warp": 16
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx950"
+  ]
+}

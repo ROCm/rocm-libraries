@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "id": "29593010-20c8-41e6-9197-d4d617e1d25b",
+  "name": "AttentionPagedUnified variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "block_size",
+      "type": "int"
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int"
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "num_warps",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "block_m_per_warp",
+      "type": "int",
+      "default_value": 16
+    }
+  ]
+}

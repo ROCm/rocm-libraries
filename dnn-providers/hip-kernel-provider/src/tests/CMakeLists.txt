@@ -328,6 +328,38 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
             "any RDNA arch, so its census is not registered.")
     endif()
+
+    # hipkernel:AttentionPagedUnified ships one arch-specific pack per CDNA shard.
+    set(_hkp_paged_unified_arches "")
+    foreach(_arch IN ITEMS gfx942 gfx950)
+        hkp_product_ships_engine_for_arch(
+            _hkp_ships "hipkernel:AttentionPagedUnified" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_paged_unified_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_paged_unified_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_paged_unified_arches}
+            SUITES TestAttentionPagedUnifiedPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                ShipsNoHeuristicAndRegistersNoScoreSymbol
+                CarriesOneGraphScopedMatcherPerPack
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:AttentionPagedUnified for "
+            "gfx942 or gfx950, so its census is not registered.")
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
