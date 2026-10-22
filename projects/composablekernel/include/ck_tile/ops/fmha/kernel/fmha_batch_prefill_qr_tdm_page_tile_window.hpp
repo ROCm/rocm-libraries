@@ -18,12 +18,22 @@ namespace ck_tile {
 // PageSize is the physical allocation page; the logical tile remains N128. The
 // window holds only this wave's owned page metadata, never all fragments.
 
+// KV cache layout of a page-tile window: linear [page][token][D] rows, or the vectorized
+// (16-bit, 8-wide) K page-head [D/8][P][8] / V page-head [P/8][D][8].
+struct FmhaPageTileKVKind
+{
+    static constexpr index_t kLinear      = 0;
+    static constexpr index_t kVectorizedK = 1;
+    static constexpr index_t kVectorizedV = 2;
+};
+
 template <typename DataType_,
           typename WindowLengths_,
           typename Distribution_,
           index_t Alignment_,
           index_t PageSize_,
-          index_t HeadDim_>
+          index_t HeadDim_,
+          index_t KVKind_ = FmhaPageTileKVKind::kLinear>
 struct FmhaBatchPrefillQrTdmPageTileWindow
 {
     using DataType          = DataType_;
@@ -34,6 +44,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
 
     static constexpr index_t kPageSize = PageSize_;
     static constexpr index_t kHeadDim  = HeadDim_;
+    static constexpr index_t kKVKind   = KVKind_;
     static constexpr index_t kWaves = FmhaBatchPrefillPageTileTraits<PageSize_, HeadDim_>::kWaves;
     static constexpr index_t kFragmentsPerWave = PageIds::kFragmentsPerWave;
     static constexpr index_t kFragmentRows =
@@ -446,6 +457,98 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             __builtin_trap();
     }
 
+    // ---- vectorized KV layout issue (16-bit, x = 8) ----
+    // One descriptor per wave slice (two per P16 wave) visits the slice in row-major (token,
+    // column) order, so the LDS image - row stride and padding included - is the linear one
+    // and the LDS reads are unchanged:
+    //   K rank 3: dims (8, D/8, rows), strides (P*8, 8); the K pad chunk is out of bounds.
+    //   V rank 4: dims (1, D, 8, groups of 8 rows), strides (8, 1, D*8).
+    // V rows past the valid count inside the last group of 8 are read from the page: TDM can
+    // bound whole groups only.
+    template <typename TDMConfig, typename LdsWindow>
+    CK_TILE_DEVICE void tdm_issue_vectorized(const TDMConfig& config,
+                                             const LdsWindow& lds_window) const
+    {
+        static_assert(KVKind_ == FmhaPageTileKVKind::kVectorizedK ||
+                      KVKind_ == FmhaPageTileKVKind::kVectorizedV);
+        static_assert(!std::is_void_v<Distribution>);
+        static_assert(sizeof(DataType) == 2, "the vectorized layout is 8 x 16-bit wide");
+        using Writer           = FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>;
+        constexpr index_t kVec = 8;
+        constexpr auto raw_box =
+            to_sequence(Distribution{}.get_ys_to_d_descriptor().get_lengths()).reverse();
+        static_assert(raw_box.size() == 2);
+        constexpr index_t kBoxCols = raw_box[number<0>{}];
+        static_assert(kBoxCols % kVec == 0 && HeadDim_ % kVec == 0 && PageSize_ % kVec == 0 &&
+                      kFragmentRows % kVec == 0);
+
+        const index_t wave = get_warp_id();
+        if(wave >= kWaves)
+            return;
+        const long_index_t tile_origin = logical_tile_origin_of(0, origin_[0]);
+        const auto lds_view            = lds_window.get_bottom_tensor_view();
+        const auto lds_origin          = lds_window.get_window_origin();
+
+        static_for<0, kFragmentsPerWave, 1>{}([&](auto i_fragment) {
+            constexpr index_t kFragment = decltype(i_fragment)::value;
+            // Same P16 fragment serialization as the linear writer.
+            if constexpr(PageSize_ == 16 && kFragment != 0)
+            {
+                s_wait_tensorcnt<0>();
+                s_wait_dscnt<0>();
+                block_sync_lds<0>();
+            }
+            const index_t rows          = Writer::fragment_valid_rows(wave, kFragment, page_id_);
+            const index_t physical_page = rows > 0 ? page_id_.owned[kFragment].physical_page : 0;
+            // First page-local token of the fragment.
+            index_t t0 = 0;
+            if constexpr(PageSize_ == 64)
+                t0 = (kSliceRows * wave) % PageSize_;
+            else if constexpr(PageSize_ >= 128)
+                t0 = static_cast<index_t>(tile_origin % PageSize_) + kSliceRows * wave;
+            const auto lds_coord = make_tensor_coordinate(
+                lds_view.get_tensor_descriptor(),
+                make_multi_index(lds_origin.at(number<0>{}) +
+                                     Writer::fragment_destination_row(wave, kFragment),
+                                 lds_origin.at(number<1>{})));
+            auto* lds_ptr = lds_view.get_buffer_view().p_data_ + lds_coord.get_offset();
+            const DataType* page_ptr =
+                pool_ptr_ + static_cast<long_index_t>(physical_page) * page_stride_;
+            if constexpr(KVKind_ == FmhaPageTileKVKind::kVectorizedK)
+            {
+                const uint32_t dims[3] = {
+                    kVec, static_cast<uint32_t>(HeadDim_ / kVec), static_cast<uint32_t>(rows)};
+                const uint64_t strides[3] = {static_cast<uint64_t>(PageSize_) * kVec, kVec, 0};
+                constexpr uint16_t box[3] = {kVec, kBoxCols / kVec, kFragmentRows};
+                amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                    createTDMDescriptor<remove_cvref_t<DataType>, 3>(
+                        page_ptr + static_cast<long_index_t>(t0) * kVec,
+                        lds_ptr,
+                        dims,
+                        strides,
+                        box,
+                        config));
+            }
+            else
+            {
+                const uint32_t dims[4]    = {1,
+                                             static_cast<uint32_t>(HeadDim_),
+                                             kVec,
+                                             static_cast<uint32_t>((rows + kVec - 1) / kVec)};
+                const uint64_t strides[4] = {kVec, 1, static_cast<uint64_t>(HeadDim_) * kVec, 0};
+                constexpr uint16_t box[4] = {1, kBoxCols, kVec, kFragmentRows / kVec};
+                amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                    createTDMDescriptor<remove_cvref_t<DataType>, 4>(
+                        page_ptr + static_cast<long_index_t>(t0 / kVec) * HeadDim_ * kVec,
+                        lds_ptr,
+                        dims,
+                        strides,
+                        box,
+                        config));
+            }
+        });
+    }
+
     // ---- lean whole-tile TDM issue (P >= 64) ----
     // The per-wave inputs of a page-tile TDM descriptor that do not change between tiles: the
     // wave's (row, column) origin inside the 128-row tile and its LDS element offset. The
@@ -488,6 +591,12 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                        const LeanIssueState& state) const
     {
         static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
+        if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
+        {
+            (void)state;
+            tdm_issue_vectorized(config, lds_window);
+            return;
+        }
         constexpr auto raw_box =
             to_sequence(Distribution{}.get_ys_to_d_descriptor().get_lengths()).reverse();
         static_assert(raw_box.size() == 2);
@@ -543,6 +652,11 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         static_assert(is_null_tile_window_v<remove_cvref_t<GatherIndexView>>,
                       "page tile writer supports the ordinary linear page path only");
         (void)gather_index_view;
+        if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
+        {
+            tdm_issue_vectorized(config, lds_window);
+            return;
+        }
 
         static_assert(WindowLengths{}.at(number<0>{}) <= 128);
         static_assert(WindowLengths{}.at(number<1>{}) <= 64);
@@ -607,13 +721,15 @@ template <typename T,
           index_t Alignment,
           index_t PageSize,
           index_t HeadDim,
+          index_t KVKind,
           typename NewDistribution>
 CK_TILE_DEVICE auto make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                                                Lengths,
                                                                                OldDistribution,
                                                                                Alignment,
                                                                                PageSize,
-                                                                               HeadDim>& source,
+                                                                               HeadDim,
+                                                                               KVKind>& source,
                                      const array<index_t, 2>& origin,
                                      const NewDistribution&)
 {
@@ -622,15 +738,16 @@ CK_TILE_DEVICE auto make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T
                                                NewDistribution,
                                                Alignment,
                                                PageSize,
-                                               HeadDim>{source.pool_ptr_,
-                                                        source.seqlen_k_,
-                                                        source.token_stride_,
-                                                        source.page_row_,
-                                                        source.page_stride_,
-                                                        source.page_capacity_,
-                                                        source.total_pages_,
-                                                        source.page_id_,
-                                                        origin};
+                                               HeadDim,
+                                               KVKind>{source.pool_ptr_,
+                                                       source.seqlen_k_,
+                                                       source.token_stride_,
+                                                       source.page_row_,
+                                                       source.page_stride_,
+                                                       source.page_capacity_,
+                                                       source.total_pages_,
+                                                       source.page_id_,
+                                                       origin};
 }
 
 template <typename T,
@@ -638,16 +755,23 @@ template <typename T,
           typename Distribution,
           index_t Alignment,
           index_t PageSize,
-          index_t HeadDim>
+          index_t HeadDim,
+          index_t KVKind>
 CK_TILE_DEVICE void move_tile_window(
-    FmhaBatchPrefillQrTdmPageTileWindow<T, Lengths, Distribution, Alignment, PageSize, HeadDim>&
-        window,
+    FmhaBatchPrefillQrTdmPageTileWindow<T,
+                                        Lengths,
+                                        Distribution,
+                                        Alignment,
+                                        PageSize,
+                                        HeadDim,
+                                        KVKind>& window,
     const typename FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                        Lengths,
                                                        Distribution,
                                                        Alignment,
                                                        PageSize,
-                                                       HeadDim>::BottomTensorIndex& step)
+                                                       HeadDim,
+                                                       KVKind>::BottomTensorIndex& step)
 {
     window.move(step);
 }
@@ -659,7 +783,8 @@ template <typename TDMConfig,
           typename Distribution,
           index_t Alignment,
           index_t PageSize,
-          index_t HeadDim>
+          index_t HeadDim,
+          index_t KVKind>
 CK_TILE_DEVICE void load_tile_tdm(const TDMConfig& config,
                                   LdsWindow&& lds_window,
                                   const FmhaBatchPrefillQrTdmPageTileWindow<T,
@@ -667,10 +792,16 @@ CK_TILE_DEVICE void load_tile_tdm(const TDMConfig& config,
                                                                             Distribution,
                                                                             Alignment,
                                                                             PageSize,
-                                                                            HeadDim>& source)
+                                                                            HeadDim,
+                                                                            KVKind>& source)
 {
-    using WindowType =
-        FmhaBatchPrefillQrTdmPageTileWindow<T, Lengths, Distribution, Alignment, PageSize, HeadDim>;
+    using WindowType = FmhaBatchPrefillQrTdmPageTileWindow<T,
+                                                           Lengths,
+                                                           Distribution,
+                                                           Alignment,
+                                                           PageSize,
+                                                           HeadDim,
+                                                           KVKind>;
     source.tdm_load_to_lds(config,
                            lds_window,
                            make_null_tile_window(WindowType{}.get_window_lengths()),

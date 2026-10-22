@@ -394,6 +394,28 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     add_qr_tdm_sched_gtest(test_ck_tile_fmha_batch_prefill_page_tile_tdm_vectorized
         test_batch_prefill_page_tile_tdm_vectorized.cpp)
 
+    # Vectorized KV cache layout (K [page][head][D/8][P][8], V [page][head][P/8][D][8]).
+    foreach(page IN ITEMS 16 64 128 256 1024)
+        foreach(head_dim IN ITEMS 64 128)
+            foreach(mask IN ITEMS dense causal)
+                set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask}_vec)
+                add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+                if(mask STREQUAL "causal")
+                    set(causal 1)
+                else()
+                    set(causal 0)
+                endif()
+                target_compile_definitions(${target} PRIVATE
+                    CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+                    CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                    CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                    CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1)
+                target_compile_options(${target} PRIVATE -Wno-float-equal
+                    -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+            endforeach()
+        endforeach()
+    endforeach()
+
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
     # mask).

@@ -68,6 +68,13 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static constexpr index_t kBlockSize  = Base::kBlockSize;
 
     static_assert(kIsGroupMode);
+    // Vectorized KV cache: K page-head [D/8][P][8], V page-head [P/8][D][8] (16-bit, 8 wide).
+    static constexpr bool kVectorizedKV =
+        FmhaPipeline::kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
+    static constexpr index_t kKWindowKind =
+        kVectorizedKV ? FmhaPageTileKVKind::kVectorizedK : FmhaPageTileKVKind::kLinear;
+    static constexpr index_t kVWindowKind =
+        kVectorizedKV ? FmhaPageTileKVKind::kVectorizedV : FmhaPageTileKVKind::kLinear;
     static constexpr bool kSglangTable =
         kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
     static_assert(kSglangTable ||
@@ -182,8 +189,9 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         require(kargs.hdim_q == FmhaPipeline::kQKHeaddim, "hdim_q differs from the compiled D");
         require(kargs.hdim_v == FmhaPipeline::kN1, "hdim_v differs from the compiled V width");
         require(kargs.nhead_ratio_qk > 0, "nhead_ratio_qk must be positive");
-        require(kargs.stride_k >= kargs.hdim_q && kargs.stride_v >= kargs.hdim_v,
-                "K/V token stride smaller than the head dimension");
+        if constexpr(!kVectorizedKV)
+            require(kargs.stride_k >= kargs.hdim_q && kargs.stride_v >= kargs.hdim_v,
+                    "K/V token stride smaller than the head dimension");
         if constexpr(kSglangTable)
         {
             require(kargs.page_table.kv_indptr != nullptr, "kv_indptr is null");
@@ -198,14 +206,33 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         require(kargs.seqstart_q_ptr != nullptr, "seqstart_q_ptr is null");
         if constexpr(kStoreLSE)
             require(kargs.lse_ptr != nullptr, "lse_ptr is null");
-        require(static_cast<long_index_t>(kargs.batch_stride_k) >=
+        if constexpr(kVectorizedKV)
+        {
+            // The token stride is implied by the layout (stride_k/stride_v are not read, but
+            // must stay positive); a page-head holds P x D elements.
+            require(kargs.stride_k > 0 && kargs.stride_v > 0, "K/V token stride not positive");
+            require(static_cast<long_index_t>(kargs.batch_stride_k) >=
+                            static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) *
+                                kargs.hdim_q &&
+                        static_cast<long_index_t>(kargs.batch_stride_v) >=
+                            static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.hdim_v,
+                    "page stride smaller than one vectorized page-head");
+            require(kargs.batch_stride_k % 8 == 0 && kargs.batch_stride_v % 8 == 0 &&
+                        kargs.nhead_stride_k % 8 == 0 && kargs.nhead_stride_v % 8 == 0,
+                    "vectorized K/V page or head stride not a multiple of 8 elements");
+        }
+        else
+        {
+            require(
+                static_cast<long_index_t>(kargs.batch_stride_k) >=
                         static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.stride_k &&
                     static_cast<long_index_t>(kargs.batch_stride_v) >=
                         static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.stride_v,
                 "page stride smaller than page_block_size token rows");
-        require(kargs.stride_k % FmhaPipeline::kAlignmentK == 0 &&
-                    kargs.stride_v % FmhaPipeline::kAlignmentV == 0,
-                "K/V token stride not a multiple of the vector alignment");
+            require(kargs.stride_k % FmhaPipeline::kAlignmentK == 0 &&
+                        kargs.stride_v % FmhaPipeline::kAlignmentV == 0,
+                    "K/V token stride not a multiple of the vector alignment");
+        }
         if constexpr(FmhaMask::IsMasking)
         {
             // Any left/right window (a negative size is unbounded); the corner follows
@@ -341,7 +368,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   void,
                                                                   FmhaPipeline::kAlignmentK,
                                                                   FmhaPipeline::kPageBlockSize,
-                                                                  FmhaPipeline::kQKHeaddim>{
+                                                                  FmhaPipeline::kQKHeaddim,
+                                                                  kKWindowKind>{
             k_ptr,
             kargs.seqlen_k,
             kargs.stride_k,
@@ -356,7 +384,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   void,
                                                                   FmhaPipeline::kAlignmentV,
                                                                   FmhaPipeline::kPageBlockSize,
-                                                                  FmhaPipeline::kN1>{
+                                                                  FmhaPipeline::kN1,
+                                                                  kVWindowKind>{
             v_ptr,
             kargs.seqlen_k,
             kargs.stride_v,

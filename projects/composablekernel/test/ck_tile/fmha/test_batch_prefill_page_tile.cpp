@@ -41,6 +41,9 @@
 #endif
 // 0: vLLM 2D block table (default); 1: SGLang 1D page list (kv_indptr / kv_page_indices /
 // kv_last_page_lens), built from the same per-sequence pages.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED
+#define CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED 0
+#endif
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG
 #define CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG 0
 #endif
@@ -79,10 +82,16 @@ constexpr int kMantissaBits = kFp16 ? 10 : 7;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 64 || kPage == 128 || kPage == 256 || kPage == 1024);
-constexpr bool kSglang  = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
-constexpr bool kLse     = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
-constexpr bool kSink    = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
-constexpr bool kSoftcap = CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP != 0;
+constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
+// Vectorized KV cache (K page-head [D/8][P][8], V page-head [P/8][D][8]). The host problem and
+// the reference keep the linear pool; the device pools are its vectorized permutation.
+constexpr bool kVectorized = CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED != 0;
+constexpr auto kKVLayout   = kVectorized
+                                 ? ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT
+                                 : ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+constexpr bool kLse        = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
+constexpr bool kSink       = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
+constexpr bool kSoftcap    = CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP != 0;
 // Scaled scores of the random inputs are about N(0, 1), so a cap of 1.5 bends most of them.
 constexpr float kSoftcapValue = 1.5f;
 constexpr int kBias           = CK_TILE_FMHA_PAGE_TILE_TEST_BIAS;
@@ -122,7 +131,7 @@ struct Model
             false,
             kSink,
             static_cast<int>(kPage),
-            ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
+            kKVLayout,
             kLookupTable,
             ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>;
     using Problem = ck_tile::BlockFmhaBatchPrefillPipelineProblem<
@@ -259,7 +268,7 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.nhead_k                  = l.kv_heads;
     a.num_total_pages          = l.num_total_pages;
     a.page_block_size          = kPage;
-    a.kv_memory_layout         = ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+    a.kv_memory_layout         = kKVLayout;
     a.kv_lookup_table          = kLookupTable;
     a.batch_stride_block_table = l.table_stride;
     a.scale_s                  = 1.0f / std::sqrt(static_cast<float>(D));
@@ -268,8 +277,8 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.stride_v                 = l.kv_heads * D;
     a.stride_o                 = l.q_heads * D;
     a.nhead_stride_q           = D;
-    a.nhead_stride_k           = D;
-    a.nhead_stride_v           = D;
+    a.nhead_stride_k           = kVectorized ? kPage * D : D;
+    a.nhead_stride_v           = kVectorized ? kPage * D : D;
     a.nhead_stride_o           = D;
     a.batch_stride_k           = kPage * l.kv_heads * D;
     a.batch_stride_v           = kPage * l.kv_heads * D;
@@ -413,22 +422,32 @@ TYPED_TEST(PageTileContract, CheckLaunch)
         expect_refused("lse_ptr is null", need, [](Kargs& k) { k.lse_ptr = nullptr; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_k = k.stride_k; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
-    expect_refused("not a multiple of the vector alignment", need, [](Kargs& k) {
-        k.stride_k += 1;
-        k.batch_stride_k = kPage * k.stride_k;
-    });
-    expect_refused("not a multiple of the vector alignment", need, [](Kargs& k) {
-        k.stride_v += 1;
-        k.batch_stride_v = kPage * k.stride_v;
-    });
-    expect_refused("token stride smaller than the head dimension", need, [](Kargs& k) {
-        k.stride_k       = k.hdim_q / 2;
-        k.batch_stride_k = kPage * k.stride_k;
-    });
-    expect_refused("token stride smaller than the head dimension", need, [](Kargs& k) {
-        k.stride_v       = k.hdim_v / 2;
-        k.batch_stride_v = kPage * k.stride_v;
-    });
+    if constexpr(kVectorized)
+    {
+        // The token stride is implied by the layout; page and head strides keep 8-wide vectors.
+        expect_refused("stride not a multiple of 8", need, [](Kargs& k) { k.nhead_stride_k += 1; });
+        expect_refused("stride not a multiple of 8", need, [](Kargs& k) { k.batch_stride_v += 4; });
+        expect_refused("token stride not positive", need, [](Kargs& k) { k.stride_k = 0; });
+    }
+    else
+    {
+        expect_refused("not a multiple of the vector alignment", need, [](Kargs& k) {
+            k.stride_k += 1;
+            k.batch_stride_k = kPage * k.stride_k;
+        });
+        expect_refused("not a multiple of the vector alignment", need, [](Kargs& k) {
+            k.stride_v += 1;
+            k.batch_stride_v = kPage * k.stride_v;
+        });
+        expect_refused("token stride smaller than the head dimension", need, [](Kargs& k) {
+            k.stride_k       = k.hdim_q / 2;
+            k.batch_stride_k = kPage * k.stride_k;
+        });
+        expect_refused("token stride smaller than the head dimension", need, [](Kargs& k) {
+            k.stride_v       = k.hdim_v / 2;
+            k.batch_stride_v = kPage * k.stride_v;
+        });
+    }
     if constexpr(TypeParam::kCausal)
     {
         // Any window and corner is accepted; only a missing mask type is refused.
@@ -694,6 +713,26 @@ struct DeviceProblem
         return kSglang ? l.kv_page_indices : l.block_table;
     }
 
+    // Linear pool [page][token][head][D] -> vectorized page-heads: K [page][head][D/8][P][8],
+    // V [page][head][P/8][D][8]. The page stride is unchanged.
+    static std::vector<Data>
+    Vectorize(const HostProblem& h, const std::vector<Data>& linear, bool is_k)
+    {
+        const std::size_t H = h.layout.kv_heads, D = h.head_dim, P = kPage;
+        std::vector<Data> out(linear.size());
+        for(std::size_t page = 0; page < static_cast<std::size_t>(h.layout.num_total_pages); ++page)
+            for(std::size_t t = 0; t < P; ++t)
+                for(std::size_t head = 0; head < H; ++head)
+                    for(std::size_t d = 0; d < D; ++d)
+                    {
+                        const std::size_t base = (page * H + head) * P * D;
+                        const std::size_t dst  = is_k ? base + ((d / 8) * P + t) * 8 + d % 8
+                                                      : base + ((t / 8) * D + d) * 8 + t % 8;
+                        out[dst]               = linear[((page * P + t) * H + head) * D + d];
+                    }
+        return out;
+    }
+
     // page_shift > 0 places every page page_shift pages further into a larger pool (and shifts the
     // page ids to match), so the same logical problem is addressed through large page offsets.
     static std::size_t PoolBytes(const HostProblem& h, std::int64_t page_shift)
@@ -729,7 +768,12 @@ struct DeviceProblem
         if(!h.sink_logits.empty())
             sink.ToDevice(h.sink_logits.data());
         const std::size_t shift_bytes = PoolBytes(h, page_shift) - h.k.size() * sizeof(Data);
-        for(auto [pool, host] : {std::pair{&k, &h.k}, std::pair{&v, &h.v}})
+        const std::vector<Data> k_pool =
+            kVectorized ? Vectorize(h, h.k, true) : std::vector<Data>{};
+        const std::vector<Data> v_pool =
+            kVectorized ? Vectorize(h, h.v, false) : std::vector<Data>{};
+        for(auto [pool, host] : {std::pair{&k, kVectorized ? &k_pool : &h.k},
+                                 std::pair{&v, kVectorized ? &v_pool : &h.v}})
             EXPECT_EQ(hipMemcpy(static_cast<char*>(pool->GetDeviceBuffer()) + shift_bytes,
                                 host->data(),
                                 host->size() * sizeof(Data),
