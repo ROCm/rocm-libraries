@@ -27,7 +27,7 @@ function display_help()
   echo "    [--compiler] compiler to build with"
   echo "    [--verbose] print additional cmake build information"
   echo "    [--address-sanitizer] Build with address sanitizer enabled. Uses amdclang++ as compiler"
-  echo "    [--codecoverage] build with code coverage profiling enabled"
+  echo "    [--codecoverage] build with code coverage profiling enabled. Uses amdclang++ as compiler"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -344,6 +344,7 @@ while true; do
         shift ;;
     --codecoverage)
         build_codecoverage=true
+        compiler=amdclang++
         shift ;;
     --mpi)
         mpi_dir=${2}

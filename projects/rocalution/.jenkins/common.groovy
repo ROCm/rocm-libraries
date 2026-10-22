@@ -63,19 +63,11 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     export ROCALUTION_CODE_COVERAGE=1
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocm-libraries --flags rocALUTION --sha ${commitSha}
+                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocALUTION --sha ${commitSha}
                 """
 
         platform.runCommand(this, command)
     }
-
-    publishHTML([allowMissing: false,
-                alwaysLinkToLastBuild: false,
-                keepAll: false,
-                reportDir: "${project.paths.project_build_prefix}/build/${dirmode}/lcoverage",
-                reportFiles: "index.html",
-                reportName: "Code coverage report",
-                reportTitles: "Code coverage report"])
 }
 
 def runPackageCommand(platform, project, jobName, label='')
