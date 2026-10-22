@@ -165,15 +165,26 @@ static void _op_tile_wave_ballot(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_wave_all(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* wave_all(p) = (ballot(p) == -1). */
+    /* wave_all(p) = (ballot(p) == full-wave mask): -1 on wave64, 0xffffffff on
+     * wave32 (ballot.i64 sets only the low wave_size bits). Mirrors Python. */
     const rocke_value_t* pred = op->operands[0];
+    const rocke_arch_target_t* target;
     const char* b_name;
     const char* eq_name;
     rocke_ll_need(L, "ballot.i64");
     b_name = rocke_ll_fresh(L, "ballot");
     rocke_ll_emit_wave_ballot(L, pred, b_name);
+    target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    }
     eq_name = rocke_ll_fresh(L, "all_eq");
-    rocke_ll_emitf(L, "  %s = icmp eq i64 %s, -1", eq_name, b_name);
+    rocke_ll_emitf(L,
+                   "  %s = icmp eq i64 %s, %s",
+                   eq_name,
+                   b_name,
+                   target->wave_size == 64 ? "-1" : "4294967295");
     rocke_ll_emitf(L, "  %s = zext i1 %s to i32", ll_result_name(op), eq_name);
 }
 
@@ -880,8 +891,11 @@ static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, "ds.read.tr16.b64");
     raw = rocke_ll_fresh(L, "tr.raw");
-    rocke_ll_emitf(
-        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)%s",
+                   raw,
+                   base,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_smem_global_name(L, op->operands[0], NULL)));
     elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
     rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }

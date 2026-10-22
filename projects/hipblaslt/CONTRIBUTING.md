@@ -126,7 +126,7 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). At test time, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is skipped via `GTEST_SKIP()` and counted in the `[ SKIPPED ]` summary; the test still appears in the test list. Entries with no `known_bug_platforms` are treated as known-bug on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is left out before registration. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. Entries with no `known_bug_platforms` are left out on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---
@@ -157,7 +157,7 @@ If your change makes a characterization test fail, do **not** run a blanket `pyt
 | TensileCreateLibrary fails with `ModuleNotFoundError` (e.g. `yaml`, `msgpack`) | Use a Python venv, `pip install -r tensilelite/requirements.txt`, and configure with `-DPython_EXECUTABLE=/path/to/venv/bin/python`. |
 | `hipblaslt_gtest.data` doesn't exist | Build `hipblaslt-test` or `hipblaslt-test-data`. If the generator failed (e.g. missing PyYAML), use the venv and `pip install -r tensilelite/requirements.txt`, then rebuild. |
 | Test can't find test data | Run from `build/clients/` (same directory as the executable and `hipblaslt_gtest.data`). |
-| Test skipped on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. |
+| Test missing from the test list on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. Matching cases are not registered. |
 
 ---
 

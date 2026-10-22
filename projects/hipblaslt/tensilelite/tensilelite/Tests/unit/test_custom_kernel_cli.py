@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """CLI-entrypoint coverage for the custom-kernel tooling: the ``main()``
-functions of ``Tensile.AddCustomConfig`` and ``Tensile.ValidateMetadata``.
+functions of ``tensilelite.AddCustomConfig`` and ``tensilelite.ValidateMetadata``.
 
 Both are driven by argparse over ``sys.argv`` and terminate via ``sys.exit``;
 these tests monkeypatch ``sys.argv`` and assert exit codes + stdout/stderr,
@@ -14,8 +14,8 @@ from textwrap import dedent, indent
 
 import pytest
 
-import Tensile.AddCustomConfig as acc
-import Tensile.ValidateMetadata as vm
+import tensilelite.AddCustomConfig as acc
+import tensilelite.ValidateMetadata as vm
 
 pytestmark = pytest.mark.unit
 

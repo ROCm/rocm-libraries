@@ -106,12 +106,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD carrying `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -128,7 +131,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
@@ -733,10 +737,14 @@ class IngestorGenerator:
         ddir = config.descriptor_dir
         (output_dir / ddir).mkdir(parents=True, exist_ok=True)
 
-        def write_json(rel: str, obj: dict) -> None:
-            path = output_dir / rel
-            path.write_text(_dump(obj), encoding="utf-8")
+        def write_text(rel: str, text: str) -> None:
+            # LF on every platform: committed descriptors and sources are LF, and
+            # text mode would write CRLF on Windows.
+            (output_dir / rel).write_text(text, encoding="utf-8", newline="\n")
             written.append(rel)
+
+        def write_json(rel: str, obj: dict) -> None:
+            write_text(rel, _dump(obj))
 
         kdp_documents = build_kdp_documents(config, ids)
         emitted = emitted_inventory(config, kdp_documents)
@@ -767,29 +775,26 @@ class IngestorGenerator:
         tests_dir.mkdir(parents=True, exist_ok=True)
 
         native_rel = f"packs/{config.native_class_name}Native.cpp"
-        (output_dir / native_rel).write_text(
+        write_text(
+            native_rel,
             self._render_template("native.cpp.j2", config, ids=ids, emitted=emitted),
-            encoding="utf-8",
         )
-        written.append(native_rel)
 
         packs_test_rel = f"tests/Test{config.engine.pascal_name}Packs.cpp"
-        (output_dir / packs_test_rel).write_text(
+        write_text(
+            packs_test_rel,
             self._render_template(
                 "test_packs.cpp.j2", config, ids=ids, emitted=emitted
             ),
-            encoding="utf-8",
         )
-        written.append(packs_test_rel)
 
         matchers_test_rel = f"tests/Test{config.engine.pascal_name}Matchers.cpp"
-        (output_dir / matchers_test_rel).write_text(
+        write_text(
+            matchers_test_rel,
             self._render_template(
                 "test_matchers.cpp.j2", config, ids=ids, emitted=emitted
             ),
-            encoding="utf-8",
         )
-        written.append(matchers_test_rel)
 
         # --- fragments ---
         fragments_dir = output_dir / "fragments"
@@ -798,8 +803,7 @@ class IngestorGenerator:
             content = self._render_template(
                 template_name, config, ids=ids, emitted=emitted
             )
-            (fragments_dir / out_name).write_text(content, encoding="utf-8")
-            written.append(f"fragments/{out_name}")
+            write_text(f"fragments/{out_name}", content)
 
         return written
 

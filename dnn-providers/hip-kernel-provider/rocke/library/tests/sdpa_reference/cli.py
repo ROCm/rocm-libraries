@@ -23,6 +23,7 @@ import numpy as np
 
 from reference_common.source import snapshot
 from reference_common.runner import run_worker
+from reference_common.targets import processor_from_target_id
 
 from .architectures import ARCHITECTURES, baseline_lock, get_architecture
 
@@ -60,6 +61,25 @@ def _worker(
     )
 
 
+def _freeze_runner(destination: Path) -> None:
+    """Copy the replay runner and its implementation dependencies into a bundle."""
+    runner = destination / "sdpa_reference"
+    runner.mkdir(parents=True)
+    for name in ("__init__.py", "contract.py", "worker.py"):
+        shutil.copy2(_PACKAGE / name, runner / name)
+    for name in ("architectures", "implementations"):
+        shutil.copytree(
+            _PACKAGE / name,
+            runner / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
+        )
+    shutil.copytree(
+        _PACKAGE.parent / "reference_common",
+        destination / "reference_common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+
+
 def qualify(
     baseline: Path, output: Path, repetitions: int, architecture: str = "gfx942"
 ) -> None:
@@ -79,20 +99,7 @@ def qualify(
         payload / "runtime/rocke",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    runner = payload / "runner/sdpa_reference"
-    runner.mkdir(parents=True)
-    for name in ("__init__.py", "contract.py", "worker.py"):
-        shutil.copy2(_PACKAGE / name, runner / name)
-    shutil.copytree(
-        _PACKAGE / "architectures",
-        runner / "architectures",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
-    )
-    shutil.copytree(
-        _PACKAGE.parent / "reference_common",
-        payload / "runner/reference_common",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
+    _freeze_runner(payload / "runner")
     entries = {}
     for case in target.CASES:
         case_dir = payload / "cases" / case.id
@@ -202,8 +209,14 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
     for case in target.CASES:
         entry = manifest["cases"][case.id]
-        if entry["device_target"].split(":", 1)[0] != architecture:
+        if processor_from_target_id(entry["device_target"]) != architecture:
             raise ValueError(f"SDPA bundle targets a different architecture: {case.id}")
+        compiler_target = getattr(target, "COMPILER_TARGET", None)
+        if (
+            compiler_target is not None
+            and entry["kernel"].get("compiler_target") != compiler_target
+        ):
+            raise ValueError(f"SDPA bundle has a different compiler target: {case.id}")
         if entry["case"] != asdict(case):
             raise ValueError(f"SDPA case contract changed: {case.id}")
         budget = ErrorBudget(**entry["budget"])
