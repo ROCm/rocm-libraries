@@ -1645,5 +1645,44 @@ class ValiditySkipListTest(unittest.TestCase):
                     self.assertTrue(reason.strip())
                     self.assertNotIn(cid, V.KNOWN_BAD)
 
+
+class ValidityArchSummaryTest(unittest.TestCase):
+    """The gate reports validated, failed and unvalidated counts for each arch."""
+
+    def test_each_verdict_counts_under_its_arch(self):
+        import check_ir_validity as V
+
+        results = {
+            "a": ("OK", ""),
+            "b": ("OK", ""),
+            "c": ("UNVALIDATED", ""),
+            "d": ("L1-COMPILE", "boom"),
+            "e": ("L0-VERIFY", "bad"),
+        }
+        arch_of = {"a": "gfx942", "b": "gfx942", "c": "gfx1250", "d": "gfx942"}
+        self.assertEqual(
+            V._arch_summary(results, arch_of),
+            {
+                "gfx942": {"validated": 2, "failed": 1, "unvalidated": 0},
+                "gfx1250": {"validated": 0, "failed": 0, "unvalidated": 1},
+                "-": {"validated": 0, "failed": 1, "unvalidated": 0},
+            },
+        )
+
+    def test_the_counts_add_up_to_the_corpus(self):
+        """Every case lands in exactly one cell, so no case drops from the report."""
+        import check_ir_validity as V
+
+        V._bootstrap_sys_path()
+        from rocke_ir_parity_harness import cases
+
+        keep = list(cases())
+        arch_of = {c["case_id"]: c["arch"] for c in keep}
+        results = {cid: ("OK", "") for cid in arch_of}
+        table = V._arch_summary(results, arch_of)
+        self.assertEqual(sum(sum(row.values()) for row in table.values()), len(keep))
+        self.assertEqual(set(table), set(arch_of.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

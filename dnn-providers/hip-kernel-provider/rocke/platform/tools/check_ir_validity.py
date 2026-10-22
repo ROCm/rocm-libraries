@@ -133,6 +133,28 @@ def _skip_list_verdict(
     return unexpected, stale
 
 
+def _arch_summary(
+    results: dict[str, tuple[str, str]], arch_of: dict[str, str]
+) -> dict[str, dict[str, int]]:
+    """Count validated, failed and unvalidated cases for each arch.
+
+    `failed` includes the cases listed in KNOWN_BAD. A case with no arch in
+    `arch_of` counts under "-".
+    """
+    table: dict[str, dict[str, int]] = {}
+    for cid, (verdict, _diag) in results.items():
+        row = table.setdefault(
+            arch_of.get(cid, "-"), {"validated": 0, "failed": 0, "unvalidated": 0}
+        )
+        if verdict == "OK":
+            row["validated"] += 1
+        elif verdict == "UNVALIDATED":
+            row["unvalidated"] += 1
+        else:
+            row["failed"] += 1
+    return table
+
+
 def _llvm_tool(name: str) -> str | None:
     """Locate an LLVM tool, preferring the ROCm install rocke itself loads.
 
@@ -568,6 +590,14 @@ def main() -> int:
             f"{len(unvalidated) - len(not_lowerable)} an untargetable arch)"
         )
     print(f"   NEW failures: {len(new_bad)}")
+
+    print("\n== per arch ==")
+    print(f"   {'arch':<14}{'validated':>10}{'failed':>8}{'unvalidated':>13}")
+    for arch, row in sorted(_arch_summary(results, arch_of).items()):
+        print(
+            f"   {arch:<14}{row['validated']:>10}{row['failed']:>8}"
+            f"{row['unvalidated']:>13}"
+        )
 
     if new_bad:
         print("\n== NEW failures ==")
