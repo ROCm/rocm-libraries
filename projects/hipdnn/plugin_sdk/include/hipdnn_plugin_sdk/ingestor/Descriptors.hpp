@@ -477,6 +477,18 @@ struct KernelDescriptor
     std::filesystem::path treeRoot;
 };
 
+/// The launch names of a kernel's @c sources map: the set a native dispatch handler must
+/// declare to launch the kernel. Empty for a single-launch kernel, which keeps `source`.
+inline std::set<std::string> launchNamesOf(const std::map<std::string, KernelSource>& sources)
+{
+    std::set<std::string> names;
+    for(const auto& launch : sources)
+    {
+        names.insert(launch.first);
+    }
+    return names;
+}
+
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
 /// a vector of child kernels.
 struct KernelDescriptorPack
