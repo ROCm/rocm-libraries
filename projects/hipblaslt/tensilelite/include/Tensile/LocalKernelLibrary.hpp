@@ -276,6 +276,8 @@ namespace TensileLite
          * only solutions with no index yet (a negative one). A solution the
          * shipped library, a JIT library or this one has already indexed is
          * shared with that library and is rejected, not renumbered.
+         * `ContractionSolution::index` starts at 0, so a caller that builds or
+         * parses a solution sets its index to -1 before registering it.
          *
          * Callers must finish initializing metadata and predicates and have
          * exclusive access to the incoming objects during registration.
