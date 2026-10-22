@@ -6,15 +6,21 @@
 
 Merges <out>/shard-*/results.jsonl (the latest row per case wins, so a rerun replaces earlier
 results) and writes <out>/summary.json, <out>/summary.md and one single-case YAML per failing
-case under <out>/repro/, runnable with hipblaslt-test --yaml.
+case under <out>/repro/, runnable with hipblaslt-test --yaml. Failures that match the known-bugs
+list (known_bugs.py) are reported as known_fail with their ticket.
 
     report.py --out corpus-gfx90a
+
+The exit code is 1 when a case failed outside the known-bugs list or the list needs attention
+(an entry's cases all passed, or its review date has passed), 2 when the list is malformed, and
+0 otherwise.
 """
 
 from __future__ import annotations
 
 import argparse
 import collections
+import datetime
 import json
 import os
 import re
@@ -25,12 +31,15 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import corpus_index  # noqa: E402
+import known_bugs  # noqa: E402
 import plan  # noqa: E402
 
 FAILING = ("fail", "crash", "timeout")
+REPRODUCED = FAILING + ("known_fail",)
 STATUS_ORDER = (
     "pass",
     "fail",
+    "known_fail",
     "crash",
     "timeout",
     "refused",
@@ -107,7 +116,14 @@ def failure_reason(row: dict) -> str:
     return first_line(message) or row["status"]
 
 
-def summarize(results: dict[str, dict], corpus: list[dict]) -> dict:
+def summarize(
+    results: dict[str, dict],
+    corpus: list[dict],
+    verdicts: Optional[list[known_bugs.Verdict]] = None,
+    today: Optional[datetime.date] = None,
+) -> dict:
+    today = today or datetime.date.today()
+    verdicts = verdicts or []
     status_counts = collections.Counter(r["status"] for r in results.values())
     by_kernel: dict[int, dict] = {}
     for row in results.values():
@@ -118,6 +134,8 @@ def summarize(results: dict[str, dict], corpus: list[dict]) -> dict:
     def kernel_outcome(statuses: collections.Counter) -> str:
         if any(statuses[s] for s in FAILING):
             return "failing"
+        if statuses["known_fail"]:
+            return "known failing"
         if statuses["pass"]:
             return "passing" if statuses["pass"] == sum(statuses.values()) else "partly passing"
         if statuses["refused"] and not statuses["skip"]:
@@ -169,10 +187,18 @@ def summarize(results: dict[str, dict], corpus: list[dict]) -> dict:
             }
             for r in failing_rows
         ],
+        "known_failing_cases": status_counts["known_fail"],
+        "known_bugs": [v.as_dict(today) for v in verdicts],
+        "known_bug_problems": sum(v.status in known_bugs.FAILING_STATUSES for v in verdicts),
         "by_problem_type": {k: dict(v) for k, v in sorted(by_type.items())},
         "skip_reasons": dict(skip_reasons.most_common(20)),
         "not_run_reasons": dict(not_run_reasons.most_common(20)),
     }
+
+
+def run_failed(summary: dict) -> bool:
+    """A case failed outside the known-bugs list, or an entry in the list needs attention."""
+    return bool(summary["failing_cases"] or summary.get("known_bug_problems"))
 
 
 def markdown(summary: dict) -> str:
@@ -181,7 +207,12 @@ def markdown(summary: dict) -> str:
         "",
         f"Device {summary.get('device', '?')}, hipBLASLt {summary.get('hipblaslt_git_version', '?')}. "
         f"{summary['solutions_with_results']} of {summary['solutions_in_corpus']} solutions have "
-        f"results; {summary['failing_solutions']} solutions fail {summary['failing_cases']} cases.",
+        f"results; {summary['failing_solutions']} solutions fail {summary['failing_cases']} cases"
+        + (
+            f", not counting {summary['known_failing_cases']} known failures."
+            if summary.get("known_failing_cases")
+            else "."
+        ),
         "",
         "| Case outcome | Count |",
         "| --- | --- |",
@@ -209,6 +240,24 @@ def markdown(summary: dict) -> str:
             "The `hipblaslt-bench` command for each is in summary.json; add `-v` to check it "
             "against the host reference.",
         ]
+    if summary.get("known_bugs"):
+        lines += [
+            "",
+            "## Known bugs",
+            "",
+            f"{summary['known_failing_cases']} cases failed as the known-bugs list expects. "
+            "An entry whose matching cases all passed, or whose review date has passed, fails "
+            "the run.",
+            "",
+            "| Ticket | Kernel | Known failures | Passes | Added (days ago) | Review by | Status |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for k in summary["known_bugs"]:
+            lines.append(
+                f"| {k['ticket']} | {k['label']} | {k['known_fail_cases']} | "
+                f"{k['passing_cases']} | {k['added']} ({k['age_days']}) | {k['review_by']} | "
+                f"{k['status']} |"
+            )
     lines += ["", "## By problem type", "", "| Problem type | Outcomes |", "| --- | --- |"]
     for key, counts in summary["by_problem_type"].items():
         lines.append(f"| {key} | " + ", ".join(f"{s} {n}" for s, n in counts.items()) + " |")
@@ -224,7 +273,7 @@ def markdown(summary: dict) -> str:
 def write_repros(results: dict[str, dict], out: Path, common_yaml: Optional[Path]) -> None:
     repro = out / "repro"
     for row in results.values():
-        if row["status"] not in FAILING:
+        if row["status"] not in REPRODUCED:
             continue
         case = case_from_row(row)
         if case is None:
@@ -240,11 +289,19 @@ def write_atomically(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def write_reports(out: Path, common_yaml: Optional[Path] = None) -> dict:
+def write_reports(
+    out: Path,
+    common_yaml: Optional[Path] = None,
+    known: Optional[list[known_bugs.Entry]] = None,
+    today: Optional[datetime.date] = None,
+) -> dict:
+    today = today or datetime.date.today()
     results = load_results(out)
     corpus_path = out / "corpus.jsonl"
     corpus = corpus_index.read_jsonl(corpus_path) if corpus_path.exists() else []
-    summary = summarize(results, corpus)
+    records = {r["index"]: r for r in corpus}
+    verdicts = known_bugs.apply(known or [], results, records, FAILING, today)
+    summary = summarize(results, corpus, verdicts, today)
     write_atomically(out / "summary.json", json.dumps(summary, indent=2) + "\n")
     write_atomically(out / "summary.md", markdown(summary))
     if common_yaml is None:
@@ -258,12 +315,50 @@ def write_reports(out: Path, common_yaml: Optional[Path] = None) -> dict:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__.split("\n\n", 1)[1],
+    )
     parser.add_argument("--out", type=Path, required=True, help="Results directory of run.py")
+    add_known_bugs_argument(parser)
     args = parser.parse_args(argv)
-    summary = write_reports(args.out)
+    try:
+        known = load_known_bugs(args)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    summary = write_reports(args.out, known=known)
     print((args.out / "summary.md").read_text())
-    return 1 if summary["failing_cases"] else 0
+    return 1 if run_failed(summary) else 0
+
+
+def add_known_bugs_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--known-bugs",
+        type=Path,
+        default=known_bugs.DEFAULT_PATH,
+        help="Known-bugs YAML (default: clients/tests/data/kernel_corpus_known_bugs.yaml next "
+        "to this script's source tree)",
+    )
+    parser.add_argument(
+        "--no-known-bugs",
+        action="store_true",
+        help="Report every failure as a failure, ignoring the known-bugs list",
+    )
+
+
+def load_known_bugs(args: argparse.Namespace) -> list[known_bugs.Entry]:
+    """The entries the arguments name. A default list missing from an install tree is empty; a
+    list named explicitly must exist."""
+    if args.no_known_bugs:
+        return []
+    path = args.known_bugs
+    if not path.exists():
+        if path == known_bugs.DEFAULT_PATH:
+            return []
+        raise ValueError(f"no known-bugs file {path}")
+    return known_bugs.load(path)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime
 import io
 import json
 import os
@@ -21,6 +22,7 @@ import msgpack
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import corpus_index  # noqa: E402
+import known_bugs  # noqa: E402
 import plan  # noqa: E402
 import report  # noqa: E402
 import run  # noqa: E402
@@ -383,7 +385,10 @@ def fake_rocm(
 
 
 def corpus_argv(rocm: Path, out: Path, *extra: str) -> list[str]:
-    # Explicit device facts keep the test from reading the real GPU through rocminfo.
+    # Explicit device facts keep the test from reading the real GPU through rocminfo, and the
+    # bundled known-bugs list, whose review dates pass, stays out unless a test names a list.
+    if "--known-bugs" not in extra:
+        extra += ("--no-known-bugs",)
     return [
         "--rocm-dir",
         str(rocm),
@@ -478,6 +483,168 @@ class ReportTests(unittest.TestCase):
         message = "fast_check does not support data type 4"
         self.assertEqual(report.classify_failure(message, fault=True), "fail")
         self.assertEqual(report.classify_failure("NO solution found!"), "refused")
+
+
+TODAY = datetime.date(2026, 11, 1)
+
+
+def known_entry(name: str, **fields) -> dict:
+    return {
+        "arch": "gfx90a",
+        "solution_name": name,
+        "ticket": "ROCM-1",
+        "added": "2026-10-01",
+        "review_by": "2027-01-31",
+        "reason": "wrong answers",
+        **fields,
+    }
+
+
+class KnownBugsParseTests(unittest.TestCase):
+    def test_bad_entries_are_rejected_with_the_reason(self):
+        bad = [
+            ({"ticket": None}, "missing ticket"),
+            ({"review_by": None}, "missing review_by"),
+            ({"owner": "me"}, "unknown field owner"),
+            ({"ticket": "fix later"}, "not a tracker key"),
+            ({"added": "Oct 1"}, "added must be a date"),
+            ({"review_by": "2026-09-01"}, "review_by is before added"),
+        ]
+        for fields, message in bad:
+            with self.subTest(fields=fields):
+                with self.assertRaisesRegex(ValueError, message):
+                    known_bugs.parse({"entries": [known_entry("k", **fields)]})
+
+    def test_a_duplicate_entry_is_rejected(self):
+        entry = known_entry("k", shape="ktail")
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            known_bugs.parse({"entries": [entry, {**entry, "ticket": "ROCM-2"}]})
+        # The same kernel narrowed to another shape is a different entry.
+        self.assertEqual(
+            len(known_bugs.parse({"entries": [entry, {**entry, "shape": "exact"}]})), 2
+        )
+
+    def test_the_bundled_list_parses(self):
+        entries = known_bugs.load(known_bugs.DEFAULT_PATH)
+        self.assertTrue(entries)
+        self.assertTrue(all(e.ticket.startswith("ROCM-") for e in entries))
+
+
+class KnownBugsReportTests(unittest.TestCase):
+    """report.write_reports on hand-made shard results: two solutions with the same name that
+    differ only in split-K, as custom-GSU solutions do, and one other solution."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+        recs = [record(solution(1, gsu=19)), record(solution(2, gsu=7)), record(solution(3))]
+        recs[0]["name"] = recs[1]["name"] = "Cijk_custom_gsu"
+        corpus_index.write_jsonl(recs, self.out / "corpus.jsonl")
+        self.names = {r["index"]: r["name"] for r in recs}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def results(self, statuses: dict[str, str]) -> None:
+        shard = self.out / "shard-1-of-1"
+        shard.mkdir(exist_ok=True)
+        rows = []
+        for case_id, status in statuses.items():
+            index, shape = case_id.split(":")
+            rows.append(
+                {
+                    "case_id": case_id,
+                    "index": int(index),
+                    "shape": shape,
+                    "status": status,
+                    "arch": "gfx90a",
+                    "device": "AMD Instinct MI210",
+                    "name": self.names[int(index)],
+                    "problem_type": "Float/Float/Float/Float/Float/Float/NN",
+                    "types": {"a_type": "f32_r"},
+                    "trans": "NN",
+                    "m": 64,
+                    "n": 64,
+                    "k": 64,
+                    "message": "fast_check: 3 elements of D are wrong",
+                }
+            )
+        (shard / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    def report(self, *entries: dict) -> dict:
+        known = known_bugs.parse({"entries": list(entries)})
+        return report.write_reports(self.out, Path("common.yaml"), known, TODAY)
+
+    def test_a_listed_failure_is_known_and_does_not_fail_the_run(self):
+        self.results({"1:exact": "fail", "1:ktail": "fail", "3:exact": "pass"})
+        summary = self.report(known_entry("Cijk_custom_gsu", global_split_u=19))
+        self.assertEqual(summary["case_status"], {"pass": 1, "known_fail": 2})
+        self.assertEqual((summary["failing_cases"], summary["known_failing_cases"]), (0, 2))
+        self.assertEqual(summary["known_bugs"][0]["status"], known_bugs.KNOWN)
+        self.assertEqual(summary["known_bugs"][0]["age_days"], 31)
+        self.assertFalse(report.run_failed(summary))
+        self.assertTrue((self.out / "repro" / "1_exact.yaml").exists())
+        self.assertIn("ROCM-1", (self.out / "summary.md").read_text())
+
+    def test_global_split_u_and_shape_narrow_the_match(self):
+        # Solution 2 shares the name but not the split-K value; its failure is not covered.
+        # Solution 1's exact failure is outside the entry's ktail shape.
+        self.results({"1:ktail": "fail", "1:exact": "fail", "2:ktail": "fail"})
+        summary = self.report(known_entry("Cijk_custom_gsu", global_split_u=19, shape="ktail"))
+        self.assertEqual(summary["case_status"], {"fail": 2, "known_fail": 1})
+        self.assertEqual({f["case_id"] for f in summary["failures"]}, {"1:exact", "2:ktail"})
+        self.assertTrue(report.run_failed(summary))
+
+    def test_an_entry_whose_cases_all_pass_fails_the_run(self):
+        self.results({"3:exact": "pass", "3:ktail": "pass"})
+        summary = self.report(known_entry(self.names[3]))
+        self.assertEqual(summary["case_status"], {"pass": 2})
+        self.assertEqual(summary["known_bugs"][0]["status"], known_bugs.FIXED)
+        self.assertTrue(report.run_failed(summary))
+
+    def test_an_entry_past_its_review_date_fails_the_run_even_while_failing(self):
+        self.results({"3:exact": "fail"})
+        summary = self.report(known_entry(self.names[3], review_by="2026-10-31"))
+        self.assertEqual(summary["case_status"], {"known_fail": 1})
+        self.assertEqual(summary["known_bugs"][0]["status"], known_bugs.EXPIRED)
+        self.assertTrue(report.run_failed(summary))
+
+    def test_an_entry_with_no_results_is_reported_but_does_not_fail_the_run(self):
+        # A shard that never reached the kernel, or a retune that renamed it, says nothing about
+        # the bug. Entries for another architecture are left out of this report entirely.
+        self.results({"3:exact": "pass"})
+        summary = self.report(
+            known_entry("Cijk_retuned_away"), known_entry("Cijk_other", arch="gfx942")
+        )
+        self.assertEqual(
+            [(k["solution_name"], k["status"]) for k in summary["known_bugs"]],
+            [("Cijk_retuned_away", known_bugs.NOT_SEEN)],
+        )
+        self.assertFalse(report.run_failed(summary))
+
+    def test_report_main_exits_2_on_a_malformed_list(self):
+        self.results({"3:exact": "pass"})
+        bad = self.out / "bad.yaml"
+        bad.write_text("entries:\n  - arch: gfx90a\n")
+        with mock.patch("sys.stderr", io.StringIO()) as stderr:
+            self.assertEqual(report.main(["--out", str(self.out), "--known-bugs", str(bad)]), 2)
+        self.assertIn("missing solution_name", stderr.getvalue())
+
+
+class KnownBugsEndToEndTests(unittest.TestCase):
+    def test_a_listed_faulting_kernel_runs_and_is_reported_as_known(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d))
+            listed = Path(d) / "known.yaml"
+            # run.main judges review dates against the real date, so this one never passes.
+            entry = known_entry(solution(4)["name"], review_by="9999-12-31")
+            listed.write_text(f"entries:\n  - {json.dumps(entry)}\n")
+            out = Path(d) / "out"
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(corpus_argv(rocm, out, "--known-bugs", str(listed)))
+            self.assertEqual(code, 0)
+            summary = json.loads((out / "summary.json").read_text())
+            self.assertEqual(summary["case_status"], {"pass": 28, "known_fail": 4, "deferred": 1})
 
 
 if __name__ == "__main__":

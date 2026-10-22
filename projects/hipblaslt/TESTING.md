@@ -690,15 +690,16 @@ A flaky test is not an accepted final state, and neither is an aging quarantine 
 
 ### Known Bugs and Expected Failures
 
-hipBLASLt suppresses or records known-bad behavior in nine different places. They accumulated
+hipBLASLt suppresses or records known-bad behavior in ten different places. They accumulated
 independently, they use different formats, and they are not governed as one thing. Anyone reasoning
-about "what do we currently know is broken" has to check all nine.
+about "what do we currently know is broken" has to check all ten.
 
 | Mechanism | What it suppresses | Ticket linkage | Detects its own fix? |
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
 | [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| [`clients/tests/data/kernel_corpus_known_bugs.yaml`](clients/tests/data/kernel_corpus_known_bugs.yaml) | Kernel corpus failures, keyed on architecture plus solution name, optionally narrowed to a split-K value, device, shape or profile. Matching failures are reported as `known_fail` instead of failing the run | Required `ticket:` field, plus required `added` and `review_by` dates | **Yes.** Listed kernels still run; if every matching case passes, or the review date passes, the run fails until the entry is removed or renewed |
 | Filename-driven marks in `tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **Partly.** An `xfail` or `wip` path is strict, because `tensilelite/pytest.ini` sets `xfail_strict = True`, so an unexpected pass fails the run. A `disabled` path is a plain skip |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
@@ -706,7 +707,7 @@ about "what do we currently know is broken" has to check all nine.
 | Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
 | `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
-This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
+This last mechanism is a different shape from the other nine: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
 quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
 this precondition checks for never exists by design (see
@@ -743,8 +744,20 @@ it, and the excluded case never runs again. The TensileLogic list has the weaker
 better structure: a real `ticket:` field, keys chosen so they survive library re-tuning, and a check
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
-**Known gaps.** Only one mechanism records its ticket somewhere a tool could read, and none records a
-review date. Nothing reports what is currently suppressed across all nine places, or for how long.
+The kernel corpus list combines the two and adds what both lack. Each entry names the kernel by its
+solution name, which survives retuning, and carries a ticket, the date it was added, a review date
+and a one-line reason as fields a tool reads. The corpus tester
+([`clients/scripts/kernel_corpus/`](clients/scripts/kernel_corpus/)) still runs every listed kernel
+and reports matching failures as known, with their tickets, so one tracked defect does not fail
+every pass. An entry whose matching cases all pass fails the run with "remove the entry", so the
+fixing PR has to delete it, and an entry past its review date fails the run until someone renews it
+with a reason or removes it. The report lists every entry with its age. The corpus does not run in
+CI yet ([AIHPBLAS-3894](https://amd-hub.atlassian.net/browse/AIHPBLAS-3894)), so for now these
+failures surface on cluster runs, not on pull requests.
+
+**Known gaps.** Only two mechanisms record a ticket somewhere a tool could read, and only the kernel
+corpus list records a review date. Nothing reports what is currently suppressed across all ten
+places, or for how long.
 The filename-driven marks in `config_helpers.py` are the weakest link by construction, since a path
 substring cannot carry a ticket or a reason at all. TensileLite's `xfail_strict = True` means a
 fix at least fails loudly, but the mechanism now has users (a few gfx1250 TDM-split configs), so
@@ -1177,7 +1190,7 @@ including the characterization-to-unit migration and mutation testing, are in
    [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, and
    [docs/gardening.md](../../docs/gardening.md) has a list, but it has already drifted. This belongs
    somewhere it cannot drift from the repository ruleset itself.
-2. **Govern known-bug entries as one thing** (AIHPBLAS-5031). Nine mechanisms suppress or record
+2. **Govern known-bug entries as one thing** (AIHPBLAS-5031). Ten mechanisms suppress or record
    known-bad behavior and none of them share a convention. The proposal, which needs team agreement
    before it becomes policy, is four rules:
 
@@ -1190,7 +1203,8 @@ including the characterization-to-unit migration and mutation testing, are in
    - A fix fails the build, so the entry deletes itself.
 
    Two mechanisms cannot satisfy the third rule today, so adopting this means changing them or
-   accepting a stated exception. Start by splitting flaky from known-failing in the client quarantine
+   accepting a stated exception. The kernel corpus list follows all four rules, so it can serve as a
+   working example. Start by splitting flaky from known-failing in the client quarantine
    list, which is the largest and blindest surface.
 
 ### Structural changes
@@ -1273,7 +1287,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
 | No flaky-test tagging or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | AIHPBLAS-5031 |
-| Known-bad behavior is suppressed in nine places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total | AIHPBLAS-5031 |
+| Known-bad behavior is suppressed in ten places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total | AIHPBLAS-5031 |
 
 ### Static analysis and type checking
 
