@@ -80,6 +80,15 @@ a request to run the class. See the
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle \
     --force
+
+# Do not generate. Report unfilled stub markers in the files this config's
+# engine emits. --emitted-root is repeatable and defaults to --output-dir.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle \
+    --check-placeholders \
+    --emitted-root <provider-engine-dir> \
+    --emitted-root <provider-tests-dir>
 ```
 
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
@@ -521,6 +530,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
+| `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/gfx950_attention_dense.profile.yaml` | Not a generator config: the gfx950 dense attention profile that the `tools/` scripts read through `--profile` |
 
 ## Generated variant sets: `variants`
 
@@ -756,17 +767,20 @@ Run, in this order, **before any UUID is minted**:
 Configs accept generic `arch` targets under the
 [packaging rules](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#generic-gpu-targets).
 `build_kdp` refuses a tuple shared by two kernels only at the same arch tier
-([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate)). The generated census gives every member of
+([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine)). The generated census gives every member of
 a generic row the generic's descriptors.
 
 ## Source adapters (`codegen/sources/`)
 
-One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
+One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), three
 implementations:
 
 - `InteractiveAdapter` -- no inference; a human or the driving skill fills every field.
 - `HiprtcAdapter` -- scans `.cpp`/`.hip` files for `extern "C" __global__` entry points and
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
+- `RockeAdapter` -- introspects a rocKE builder (`source`/`builder` pair) and reports its
+  spec dataclass fields as candidate KMD fields. rocKE is imported lazily; an
+  unreadable builder raises `RockeIntrospectionError`.
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
 producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
@@ -822,7 +836,19 @@ matcher-test stubs with `g++`/`clang++`, plus an intentionally broken source con
 plugin/data/flatbuffers SDK and provider sources beside this checkout plus
 `flatbuffers/array.h` under `/opt/rocm/include`, and generates stand-ins for the
 CMake-configured `version.h`/`CacheRootDefaults.h` headers. Missing prerequisites skip
-explicitly.
+explicitly, so a checkout with no compiler or ROCm headers still runs green. Setting
+`HIPDNN_INGESTOR_STUB_INCLUDE_FILE` to a file of include directories (one per line,
+containing `flatbuffers/array.h` and `hip/hip_runtime.h`) replaces the
+`/opt/rocm/include` probe, and a bad value then fails rather than skips.
+
+Under `HIPDNN_ENABLE_TOOLING_TESTS` the hipDNN build runs this suite with the
+`tools/pytest_plugins/hipdnn_strict_skips.py` plugin (`-p hipdnn_strict_skips`), which turns
+every skip into a failure, so a missing compiler, validator binary, `hkp_pack` or
+`rocm_kpack` fails CI instead of passing by not running. A skip that is correct by design
+(an author-supplied input such as `HIPDNN_INGESTOR_SHAPES` or an authoring profile, or the
+POSIX-only sweep tests on Windows) carries `@pytest.mark.allow_skip(reason="...")` beside the
+skip. Run by hand, the plugin is not loaded: `python -m pytest -p hipdnn_strict_skips` (with
+`tools/pytest_plugins` on `PYTHONPATH`) reproduces the CI behavior.
 
 ### Fragment contracts (`tests/test_fragment_contracts.py`)
 

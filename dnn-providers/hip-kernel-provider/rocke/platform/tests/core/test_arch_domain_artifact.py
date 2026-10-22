@@ -456,6 +456,51 @@ class ClassifyTest(unittest.TestCase):
                 self.assertEqual(evidence, expected)
 
 
+class AssemblerCheckTest(unittest.TestCase):
+    """A probe that links is assembled for its target before it counts as ok.
+
+    The backend can select an intrinsic for a target that lacks the instruction
+    and write the encoding into the object without complaint; only the target's
+    text assembler checks every instruction against the target.
+    """
+
+    def test_the_rejection_names_the_instruction_not_the_scratch_file(self):
+        # llvm-mc's diagnostic carries the scratch path; the evidence must not,
+        # or the committed column would change from host to host.
+        diag = (
+            "/tmp/probe-x1y2/k.s:14:2: error: instruction not supported on this GPU\n"
+            "\tv_cvt_scalef32_pk_f32_fp8 v[2:3], v1, v0\n"
+            "\t^\n"
+        )
+        self.assertEqual(
+            G._assembler_rejection(diag),
+            "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        )
+
+    def test_an_instruction_the_target_lacks_is_arch_absent_though_it_links(self):
+        # The fused scale-and-convert links for gfx942 once its flag operand is
+        # a constant, and the object then holds a gfx950-only instruction.
+        from check_ir_validity import _llvm_tool
+
+        clang = _llvm_tool("clang")
+        if clang is None or not G._llvm_mc_beside(clang).is_file():
+            self.skipTest("no clang with an llvm-mc beside it on this host")
+        decl = G._decl_table(_resolve_llvm_flavor())["amdgcn.cvt.scalef32.pk.f32.fp8"]
+        module, why = G._probe_module(decl, "", literal_ints=G._LITERAL_PROBE_VALUES[0])
+        self.assertFalse(why)
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "probe.ll"
+            path.write_text(module)
+            results = {
+                arch: G._probe(clang, path, arch, Path(scratch) / f"{arch}.o")
+                for arch in ("gfx942", "gfx950")
+            }
+        self.assertEqual(results["gfx950"], (G.STATUS_OK, ""))
+        status, evidence = results["gfx942"]
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT, evidence)
+        self.assertTrue(evidence.startswith("assembler: "), evidence)
+
+
 class DeclareParseTest(unittest.TestCase):
     """Every probe is built from a declare, so the parse is the whole table.
 
