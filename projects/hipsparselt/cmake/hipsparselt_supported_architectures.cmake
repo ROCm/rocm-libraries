@@ -7,8 +7,8 @@ set(BASE_ARCHITECTURES "")
 # All supported architectures including xnack variants - used for validation of GPU_TARGETS
 set(SUPPORTED_ARCHITECTURES "")
 
-if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER)
-    # For address sanitizer builds, base and supported are the same
+if(HIPSPARSELT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
+    # Device ASAN requires xnack+; host ASAN uses the regular GPU targets.
     list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250" "gfx1250-strict")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 else()

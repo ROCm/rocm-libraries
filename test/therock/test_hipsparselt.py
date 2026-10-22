@@ -31,6 +31,8 @@ test_type = os.getenv("TEST_TYPE", "full")
 test_filter = []
 if test_type == "quick":
     test_filter.append("--gtest_filter=*smoke*")
+elif test_type == "standard":
+    test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
 elif test_type == "full":
     test_filter.append("--gtest_filter=*quick*")
 

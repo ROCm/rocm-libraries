@@ -339,8 +339,9 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
 CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
-get `comprehensive`. The hipBLASLt ASAN lane is the exception: it still drives `hipblaslt-test`
-directly through `test/therock/test_hipblaslt.py` at the `quick` tier.
+get `comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
+`test/therock/test_hipblaslt.py`: `quick` selects `*smoke*` on gfx90a, and `standard` selects
+`*smoke*:*quick*:*pre_checkin*-*known_bug*` on gfx942/gfx950.
 
 **Test size and shape expectations.** The suite leans heavily on many small problem sizes rather
 than few large ones, which is the right default: most correctness bugs are in tiling, edge handling,
@@ -610,7 +611,7 @@ the C++ build and test.
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
-| AddressSanitizer build and quick test | **No** | Component team | The hipBLASLt ASAN lane runs on every hipBLASLt PR, but its summary check is not required. Keep it green anyway |
+| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests on gfx90a and standard tests on gfx942/gfx950 for relevant PRs, but its summary check is not required. Keep it green anyway |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
@@ -647,8 +648,9 @@ tracked as a gap.
 
 **Informational.** Worth reading, cannot block a merge.
 
-- The hipBLASLt ASAN lane (host-only ASAN on gfx90a) and Multi-Arch CI ASAN (host-only ASAN on gfx94X
-  and gfx950). Both run on every pull request, and neither is a required check
+- The hipBLASLt ASAN lane (host-only ASAN: quick on gfx90a, standard on gfx942/gfx950) runs on
+  relevant pull requests. Multi-Arch CI ASAN (host-only ASAN on gfx94X and gfx950) runs on every
+  pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
@@ -831,7 +833,8 @@ the set of architectures the library supports or builds for.
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
-| Linux, gfx90a | Partial | PR (host-only ASAN, quick tier, not a required check), TheRock nightly | The hipBLASLt ASAN lane's only architecture |
+| Linux, gfx90a | Partial | PR (host-only ASAN, quick tier, not a required check), TheRock nightly | Existing hipBLASLt ASAN smoke coverage |
+| Linux, gfx942 / gfx950 | Partial | PR (host-only ASAN, standard tier, not a required check) | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
@@ -854,16 +857,17 @@ red sanitizer run does not block a merge.
 
 **What runs.** The `hipBLASLt ASAN CI` workflow
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
-on any pull request touching `projects/hipblaslt/**` or the hipBLASLt test driver. It builds
-hipBLASLt through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset) for gfx90a, and then runs the quick tier of `hipblaslt-test` under
-the sanitizer runtime on real hardware. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
+on pull requests touching either library, either test driver, the suppression file, or the workflow.
+It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
+`linux-release-host-asan` preset), retains hipBLASLt quick tests on gfx90a, and runs standard tests
+for both libraries on gfx942/gfx950. Each architecture has one build and each library has a separate
+GPU job. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
 request to this repository with host-only ASAN, and builds full ASAN for its nightly and
 manually dispatched runs.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
-| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a, quick tier, via `hipBLASLt ASAN CI` | No. `hipBLASLt ASAN CI Summary` is not a required check |
+| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Relevant PRs via `hipBLASLt ASAN CI`: hipBLASLt quick on gfx90a; both libraries standard on gfx942/gfx950 | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
 | **TSAN** | Data races | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
@@ -892,7 +896,8 @@ in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) 
 
 **Explicitly not covered:** thread safety (no TSAN lane yet, despite the build option existing);
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and, in the
-hipBLASLt ASAN lane, any test outside the quick tier. None of these lanes can block a merge today.
+hipBLASLt ASAN lane, tests outside the standard tier on gfx942/gfx950 or the quick tier on gfx90a.
+None of these lanes can block a merge today.
 
 ## Static Analysis
 
