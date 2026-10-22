@@ -437,6 +437,13 @@ endforeach()
                 "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
             )
 
+            # test_verify_variant_sets_multi_launch_rocke.py packs with the real compiler and
+            # fails without one. Name the hipcc find_package(hip) resolved, as the packaging
+            # suite's own ctest entries do: the ROCm bin directory is not on every lane's PATH.
+            if(HIP_HIPCC_EXECUTABLE)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
+            endif()
+
             # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
             # follow ALIAS targets, so resolve to the real target.
             set(_hipdnn_stub_include_exprs "")

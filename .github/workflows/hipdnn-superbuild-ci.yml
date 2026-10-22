@@ -578,6 +578,30 @@ jobs:
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
+      # The full support matrix is too large to commit (only its overview is,
+      # in dnn-providers/integration-tests/), so publish it from every run.
+      # Both renderers read the committed support-claim sidecars, not the
+      # build, so this runs even when the build or tests failed.
+      - name: Render support matrix
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          scripts=dnn-providers/integration-tests/scripts
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX.md
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" --overview-only \
+            --output build/support-matrix/SUPPORT_MATRIX_GRAPH_OVERVIEW.md
+          "$VENV_PYTHON" "$scripts/support_features/feature_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
+
+      - name: Upload support matrix
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hipdnn-support-matrix
+          path: build/support-matrix/
+          if-no-files-found: error
+
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
       # That spelling is retired: it is now the hipdnn_golden_data_tests binary,

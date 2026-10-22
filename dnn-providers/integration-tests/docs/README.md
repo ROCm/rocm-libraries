@@ -11,6 +11,7 @@ developer who must run the suite, read its output, or add to it.
 | [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
 | [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, or add a C++ test when a bundle cannot express it. |
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
+| [Support Matrix and Feature Coverage](support-matrix.md) | Render the human-readable matrix of which engine supports which graph on which GPU and OS, validate the sidecars it is built from, see the pre-commit and CI checks around it, and measure per-op feature coverage. |
 
 Tool references are next to the tools:
 [`migration-scripts/README.md`](../migration-scripts/README.md) (the bulk
