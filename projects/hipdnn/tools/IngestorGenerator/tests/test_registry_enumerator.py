@@ -111,7 +111,10 @@ def test_manifest_launches_reach_every_generated_kernel_source(probe):
 
     probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
     assert _run_probe(probe) == 0
-    raw = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    text = probe.out.read_text()
+    # One shared object would dump as a YAML anchor and aliases, not per-kernel copies.
+    assert "&id" not in text and "*id" not in text
+    raw = yaml.safe_load(text)["packs"][0]["kernels"]
     assert all(k["kernel_source"]["launches"] == _LAUNCHES for k in raw)
     kernels = [k for p in load_config(probe.out).packs for k in p.kernels]
     assert len(kernels) == len(raw) > 0
@@ -120,6 +123,15 @@ def test_manifest_launches_reach_every_generated_kernel_source(probe):
         assert list(launches) == ["segment", "reduce"]
         assert launches["reduce"].role == "reduce"
         assert launches["segment"].builder == kernel.kernel_source.builder
+
+
+def test_each_generated_kernel_owns_its_launches(probe):
+    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    config = re_.build_config(probe.manifest, warn=lambda message: None)
+    sources = [k["kernel_source"]["launches"] for k in config["packs"][0]["kernels"]]
+    owners = [probe.manifest["launches"], *sources]
+    assert len({id(s) for s in owners}) == len(owners)
+    assert len({id(s["reduce"]) for s in owners}) == len(owners)
 
 
 def _run_both_ways(tmp: Path, manifest: dict, capsys, *argv) -> list:

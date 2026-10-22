@@ -663,6 +663,7 @@ provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported f
 source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
 builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
+launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source
 
 enumerate:
   candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
@@ -707,7 +708,10 @@ fields and name slots the spec lacks are read from the request. A field sits in 
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
-`launch_surface:` block feeds `tools/launch_surface.py`.
+`launch_surface:` block feeds `tools/launch_surface.py`. An optional
+`launches: {<name>: {<overrides>}}` mapping is copied verbatim into every generated
+kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
+config's `launches` rules below, checked when the generated config loads.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard
