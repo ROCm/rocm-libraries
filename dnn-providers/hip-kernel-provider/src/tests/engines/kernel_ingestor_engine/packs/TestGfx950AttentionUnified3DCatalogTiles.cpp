@@ -23,10 +23,11 @@
  *        judged by the checks the engine itself applies.
  *
  * The engine launches a loaded kernel only when its candidateFor() accepts the record: a
- * buildable decode geometry and exactly one companion. A kernel it declines ships but never
- * runs. This suite reads the kernels through the descriptor loader -- the packed tree, where
- * `kind: rocke` has become `kind: kpack` -- and requires every one to pass, and every one to
- * carry its two code objects, each signed with the argument list its own builder declares.
+ * buildable decode geometry launched as exactly `segment` and `reduce`. A kernel it declines
+ * ships but never runs. This suite reads the kernels through the descriptor loader -- the
+ * packed tree, where `kind: rocke` has become `kind: kpack` -- and requires every one to
+ * pass, and every one to carry its two launches, each signed with the argument list its own
+ * builder declares.
  *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx950AttentionUnified3DPacks, and is registered with its own
@@ -89,12 +90,14 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryShippedKernelsGeometryIsOneT
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
 }
 
-/// Each catalog entry is two code objects: the segment kernel as its source and the reduce
-/// kernel as its one companion, both packed into this shard's archive and each signed with
-/// its own builder's argument list. An entry that lost its companion would load, be declined
-/// by the engine, and never run; one whose companion was the segment kernel again would pass
-/// a count check and fail only on a device.
-TEST(TestGfx950AttentionUnified3DCatalogTiles, CarriesTwoKernelSourcesPerEntry)
+/// Each catalog entry is two launches of one module: `segment`, the segment kernel, and
+/// `reduce`, the reduce kernel, both resolved out of the same packed code object (one library
+/// and toc key) and each signed with its own builder's argument list. These are exactly the
+/// launch names the engine's handler declares (launchNames(), pinned by
+/// TestGfx950AttentionUnified3DDispatch), so the state manager keeps every entry. An entry
+/// that lost its reduce launch would be dropped and never run; one whose reduce launch named
+/// the segment kernel again would pass a count check and fail only on a device.
+TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndReduceKernels)
 {
     const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
 
@@ -105,14 +108,16 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, CarriesTwoKernelSourcesPerEntry)
         {
             ++checked;
             SCOPED_TRACE("kernel '" + kernel.name + "'");
-            ASSERT_EQ(kernel.companions.size(), 1U);
-            const auto& segment = kernel.source;
-            const auto& reduce = kernel.companions.front();
+            ASSERT_EQ(kernel.sources.size(), 2U);
+            ASSERT_EQ(kernel.sources.count("segment"), 1U);
+            ASSERT_EQ(kernel.sources.count("reduce"), 1U);
+            const auto& segment = kernel.sources.at("segment");
+            const auto& reduce = kernel.sources.at("reduce");
             EXPECT_EQ(segment.kind, ingestor::KernelSourceKind::KPACK);
             EXPECT_EQ(reduce.kind, ingestor::KernelSourceKind::KPACK);
             EXPECT_EQ(reduce.library, segment.library);
+            EXPECT_EQ(reduce.tocKey, segment.tocKey);
             EXPECT_NE(reduce.symbol, segment.symbol);
-            EXPECT_NE(reduce.tocKey, segment.tocKey);
             EXPECT_EQ(segment.sha256.size(), 64U);
             EXPECT_EQ(reduce.sha256.size(), 64U);
             ASSERT_EQ(segment.signature.size(), SEGMENT_ARGUMENTS);
@@ -123,31 +128,6 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, CarriesTwoKernelSourcesPerEntry)
         }
     }
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
-}
-
-/// head_size 256 is the d256_decode section: bf16 only, nine GQA rows x two causal masks.
-TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryHeadSize256KernelIsTheD256DecodeKernel)
-{
-    const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
-
-    std::size_t d256Kernels = 0;
-    for(const auto& pack : set.packs)
-    {
-        for(const auto& kernel : pack.kernels)
-        {
-            if(integerField(kernel, "head_size") != 256)
-            {
-                continue;
-            }
-            ++d256Kernels;
-            const auto dtype = kernel.metadata.find("dtype");
-            ASSERT_NE(dtype, kernel.metadata.end()) << kernel.name;
-            const auto* dtypeName = std::get_if<std::string>(&dtype->second);
-            ASSERT_NE(dtypeName, nullptr) << kernel.name;
-            EXPECT_EQ(*dtypeName, "BF16") << "kernel '" << kernel.name << "'";
-        }
-    }
-    EXPECT_EQ(d256Kernels, 18U);
 }
 
 } // namespace

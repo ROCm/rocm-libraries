@@ -36,7 +36,10 @@ def catalog_head_configs(kdp_path):
     kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
     configs = set()
     for kernel in kdp["kernelDescriptors"]:
-        spec = kernel["kernel_source"]["spec"]
+        # A multi-launch kernel carries `sources` (segment + reduce) in place of
+        # `kernel_source`; the segment launch's spec is the kernel's.
+        source = kernel.get("kernel_source") or kernel["sources"]["segment"]
+        spec = source["spec"]
         configs.add((spec["head_size"], spec["num_query_heads"], spec["num_kv_heads"]))
     return configs
 

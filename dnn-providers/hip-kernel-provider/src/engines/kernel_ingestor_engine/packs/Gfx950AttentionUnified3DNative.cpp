@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -41,6 +42,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
 
 /**
@@ -49,17 +51,20 @@
  *        dispatch.
  *
  * The kernels are `rocke/library/kernels/gfx950/attention_tiled_3d.py`'s split-KV pair,
- * packaged (kind: rocke -> kpack) for gfx950 only: `build_unified_attention_3d_tiled`, the
- * segment kernel each descriptor names as its source, and
- * `build_unified_attention_reduce_tiled`, the reduce kernel it carries as its one companion.
- * Every shipped kernel is built for DECODE (one query token per sequence, the decode grid);
- * prefill is Unified2D's. Like Unified2D, a graph's contiguous BSHD K/V is served as a paged
- * cache with an identity block table, staged in the workspace ahead of the segment scratch
- * (see Gfx950AttentionUnified3DGeometry.hpp).
+ * packaged (kind: rocke -> kpack) for gfx950 only as one code object built by
+ * `build_unified_attention_3d_tiled_module`: the segment kernel and the reduce kernel that
+ * combines its partial results. Each descriptor carries them as two launches of a
+ * multi-launch kernel (UKD `sources`), named `segment` and `reduce`; this handler declares
+ * exactly those (launchNames), loads each through launchKernelDefinition and launches the
+ * segment kernel, then always the reduce. Every shipped kernel is built for DECODE (one
+ * query token per sequence, the decode grid); prefill is Unified2D's. Like Unified2D, a
+ * graph's contiguous BSHD K/V is served as a paged cache with an identity block table,
+ * staged in the workspace ahead of the segment scratch (see
+ * Gfx950AttentionUnified3DGeometry.hpp).
  *
- * Two registry candidates share the pack: head_size 64 and 128 at 16 segments, both data
- * types; head_size 256 at bf16 only (rocKE's d256_decode cohort), with the split rule's
- * segment count.
+ * Three registry candidates share the pack: head_size 64 and 128, both data types, at 16,
+ * 32 and 64 segments with a one-page KV tile. The matcher also accepts the bf16 head_size
+ * 256 decode geometry (rocKE's d256_decode cohort), which no shipped catalog carries yet.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -77,6 +82,11 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL
     = "hipkernel.gfx950_attention_unified_3d.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_unified_3d.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified_3d.dispatch";
+
+// The launch names every descriptor's `sources` carries (the module's primary kernel and its
+// `reduce` companion), which the state manager requires to equal launchNames().
+constexpr const char* SEGMENT_LAUNCH = "segment";
+constexpr const char* REDUCE_LAUNCH = "reduce";
 
 // KMD fields. Fields a shipped variant holds at one value across the whole catalog
 // (waves_per_eu, the tile, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches) are
@@ -859,9 +869,11 @@ struct AttentionUnified3DCandidate
  * Validated against isSupportedGfx950Unified3DGeometry, so a record the Python builders
  * would refuse is declined like any other unbuildable one. Declined as well: a record that
  * is not a decode-grid kernel (this engine launches no other grid), one whose mask key is
- * not a causal kind (decode carries no NO_MASK kernel; see decodeMaskKey), and one that does
- * not carry exactly one companion, the reduce kernel -- without it the segment kernel's
- * partial results are never combined and the output is left unwritten. An absent field is
+ * not a causal kind (decode carries no NO_MASK kernel; see decodeMaskKey), and one whose
+ * launches are not exactly the segment and reduce kernels -- without the reduce the segment
+ * kernel's partial results are never combined and the output is left unwritten. The state
+ * manager already drops such a kernel against launchNames(); this repeats it for a caller
+ * that builds a definition by hand. An absent field is
  * declined rather than defaulted: a substituted geometry launches a binary with another
  * binary's grid.
  */
@@ -880,7 +892,8 @@ std::optional<AttentionUnified3DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
-    if(*useDecodeGrid != 1 || kernel.companions.size() != 1)
+    if(*useDecodeGrid != 1 || kernel.sources.size() != 2
+       || kernel.sources.count(SEGMENT_LAUNCH) != 1 || kernel.sources.count(REDUCE_LAUNCH) != 1)
     {
         return std::nullopt;
     }
@@ -1157,8 +1170,8 @@ AttentionUnified3DCandidate requireCandidate(const KernelDefinition& kernel)
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "gfx950 attention_unified_3d: kernel '" + toString(kernel.kernelId)
-                + "' declares no supported decode geometry, or does not carry exactly one "
-                  "companion (the reduce kernel)");
+                + "' declares no supported decode geometry, or its launches are not exactly '"
+                + SEGMENT_LAUNCH + "' and '" + REDUCE_LAUNCH + "'");
     }
     return *candidate;
 }
@@ -1208,6 +1221,12 @@ public:
     {
     }
 
+    /// The segment kernel, then the reduce kernel: one module, two launches.
+    std::set<std::string> launchNames() const override
+    {
+        return {SEGMENT_LAUNCH, REDUCE_LAUNCH};
+    }
+
     /// The identity paged-KV metadata, then the segment scratch; each section 256-byte
     /// aligned.
     size_t workspaceBytes(const MatchContext& context,
@@ -1253,22 +1272,26 @@ public:
                     + "' cannot stage paged-KV metadata for this graph");
         }
 
-        // Each code object is loaded through the same adapter and checked against its own
-        // signature; the companion resolves under the kernel's own tree boundary. The
-        // companion's recorded signature is checked here as well, before either load, so a
+        // Each launch is loaded through the same adapter and checked against its own
+        // signature; both resolve out of the one module the descriptor names. The reduce
+        // launch's recorded signature is checked here as well, before either load, so a
         // descriptor whose reduce kernel disagrees with this pack is refused without opening
         // an archive -- the adapter would otherwise only reach it after the segment loaded.
-        const auto reduceDefinition = companionDefinition(kernel, 0);
+        // A launch's definition keeps the kernel's name, so the labels add the launch.
+        const auto segmentDefinition = launchKernelDefinition(kernel, SEGMENT_LAUNCH);
+        const auto reduceDefinition = launchKernelDefinition(kernel, REDUCE_LAUNCH);
         if(reduceDefinition.source.kind == hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
         {
             requireSignatureMatch(reduceDefinition.source.signature,
                                   unified3DReduceSignature(),
                                   reduceDefinition.source.symbol,
                                   hipdnn_plugin_sdk::ingestor::describeDescriptor(
-                                      "kernel", reduceDefinition.name, reduceDefinition.kernelId));
+                                      "kernel",
+                                      reduceDefinition.name + " (launch '" + REDUCE_LAUNCH + "')",
+                                      reduceDefinition.kernelId));
         }
-        auto segment
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, unified3DSegmentSignature());
+        auto segment = buildIngestorKernelCode(
+            _kpackLoader, context, segmentDefinition, unified3DSegmentSignature());
         auto reduce = buildIngestorKernelCode(
             _kpackLoader, context, reduceDefinition, unified3DReduceSignature());
 

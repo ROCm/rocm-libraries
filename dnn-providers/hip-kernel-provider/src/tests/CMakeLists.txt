@@ -514,7 +514,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
 
         # Hand-written companion census over the same shard: every shipped kernel is a decode
-        # geometry the engine launches and carries its segment and reduce code objects.
+        # geometry the engine launches and carries its segment and reduce launches.
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
@@ -522,8 +522,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestGfx950AttentionUnified3DCatalogTiles
             EXPECTED_CASES
                 EveryShippedKernelsGeometryIsOneTheEngineLaunches
-                CarriesTwoKernelSourcesPerEntry
-                EveryHeadSize256KernelIsTheD256DecodeKernel
+                EveryEntryLaunchesItsSegmentAndReduceKernels
         )
     else()
         message(STATUS
