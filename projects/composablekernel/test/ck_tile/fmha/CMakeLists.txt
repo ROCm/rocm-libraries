@@ -273,6 +273,27 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
+    # LSE output: P128 at both head dimensions and masks (the LSE store does not depend on the
+    # page size).
+    foreach(head_dim IN ITEMS 64 128)
+        foreach(mask IN ITEMS dense causal)
+            set(target test_ck_tile_fmha_batch_prefill_page_tile_p128_d${head_dim}_${mask}_lse)
+            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+            if(mask STREQUAL "causal")
+                set(causal 1)
+            else()
+                set(causal 0)
+            endif()
+            target_compile_definitions(${target} PRIVATE
+                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=128
+                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                CK_TILE_FMHA_PAGE_TILE_TEST_LSE=1)
+            target_compile_options(${target} PRIVATE -Wno-float-equal
+                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        endforeach()
+    endforeach()
+
     # SGLang 1D page list: the page-size boundary (P16 fragments vs one id per tile) at both head
     # dimensions, causal only (the table lookup does not depend on the mask).
     foreach(page IN ITEMS 16 128)

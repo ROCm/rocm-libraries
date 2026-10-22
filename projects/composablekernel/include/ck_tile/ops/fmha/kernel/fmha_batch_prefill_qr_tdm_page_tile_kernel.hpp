@@ -21,10 +21,10 @@ namespace ck_tile {
 // the QR M128/N128 compute layout.
 //
 // Experimental, gfx1250 only: BF16, group mode, linear [page, token, kv_head, dim] K/V pools,
-// D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window), no LSE,
-// sink, dropout or bias. Build each instance in its own translation unit with the scheduled-TDM
-// FMHA flags (-mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the
-// launch contract below rests on measurements of that generated code, and the generated code
+// D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window), optional
+// LSE output, no sink, dropout or bias. Build each instance in its own translation unit with the
+// scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero):
+// the launch contract below rests on measurements of that generated code, and the generated code
 // was observed to change when several instances share a translation unit.
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaBatchPrefillQrTdmPageTileKernel
@@ -40,6 +40,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     using VDataType           = typename FmhaPipeline::VDataType;
     using ODataType           = typename FmhaPipeline::ODataType;
     using SaccDataType        = typename FmhaPipeline::SaccDataType;
+    using LSEDataType         = typename FmhaPipeline::LSEDataType;
     using FmhaMask            = typename FmhaPipeline::FmhaMask;
     using Policy              = typename FmhaPipeline::Policy;
 
@@ -49,6 +50,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     using Base::MakeKargs;
 
     static constexpr bool kIsGroupMode   = Base::kIsGroupMode;
+    static constexpr bool kStoreLSE      = Base::kStoreLSE;
     static constexpr auto kKVLookupTable = Base::kKVLookupTable;
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
     static constexpr index_t kBlockSize  = Base::kBlockSize;
@@ -181,6 +183,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             require(kargs.page_table.block_table_ptr != nullptr, "block_table_ptr is null");
         }
         require(kargs.seqstart_q_ptr != nullptr, "seqstart_q_ptr is null");
+        if constexpr(kStoreLSE)
+            require(kargs.lse_ptr != nullptr, "lse_ptr is null");
         require(static_cast<long_index_t>(kargs.batch_stride_k) >=
                         static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.stride_k &&
                     static_cast<long_index_t>(kargs.batch_stride_v) >=
@@ -342,7 +346,24 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
 
         auto bias_window = make_null_tile_window(
             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{}));
-        auto lse_window = make_null_tile_window(make_tuple(number<FmhaPipeline::kM0>{}));
+        // LSE [nhead, total_q] (group mode), one value per query row, bounded by seqlen_q like O.
+        auto lse_window = [&]() {
+            constexpr auto lse_lengths = make_tuple(number<FmhaPipeline::kM0>{});
+            if constexpr(kStoreLSE)
+            {
+                auto* lse_ptr = reinterpret_cast<LSEDataType*>(kargs.lse_ptr) +
+                                static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_lse +
+                                query_start;
+                const auto lse_naive = make_naive_tensor_view<address_space_enum::global>(
+                    lse_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{});
+                const auto lse_view = pad_tensor_view(lse_naive, lse_lengths, sequence<true>{});
+                return make_tile_window(lse_view, lse_lengths, {i_m0});
+            }
+            else
+            {
+                return make_null_tile_window(lse_lengths);
+            }
+        }();
         // FmhaFwdMaskKargs is only part of Kargs when the problem actually masks.
         // A dense instance therefore must not read the window from Kargs, exactly as
         // the generic batch-prefill kernel guards this with kHasMask.

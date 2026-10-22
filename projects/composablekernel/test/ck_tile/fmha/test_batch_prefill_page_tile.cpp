@@ -43,6 +43,10 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG
 #define CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG 0
 #endif
+// 1: the kernel also writes the per-row LSE ([Hq, total_q] floats), checked against the reference.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_LSE
+#define CK_TILE_FMHA_PAGE_TILE_TEST_LSE 0
+#endif
 
 namespace {
 
@@ -53,6 +57,7 @@ using Data = ck_tile::bf16_t;
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 128 || kPage == 256 || kPage == 1024);
 constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
+constexpr bool kLse    = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
@@ -78,7 +83,7 @@ struct Model
             false,
             ck_tile::BlockAttentionBiasEnum::NO_BIAS,
             false,
-            false,
+            kLse,
             false,
             ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
             1,
@@ -130,7 +135,7 @@ struct ModelNames
     static std::string GetName(int)
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
-               (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "");
+               (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "");
     }
 };
 
@@ -146,6 +151,7 @@ struct Pointers
     const void* block_table       = nullptr; // vLLM block table, or the SGLang kv_page_indices
     const void* kv_indptr         = nullptr;
     const void* kv_last_page_lens = nullptr;
+    void* lse                     = nullptr;
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
@@ -214,6 +220,9 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, bool top_le
     a.nhead_stride_o           = D;
     a.batch_stride_k           = kPage * l.kv_heads * D;
     a.batch_stride_v           = kPage * l.kv_heads * D;
+    a.lse_ptr                  = d.lse;
+    a.nhead_stride_lse         = l.seqstart_q.back(); // LSE is [Hq, total_q]
+    a.batch_stride_lse         = 0;
     a.window_size_left         = -1;
     a.window_size_right        = M::kCausal ? 0 : -1;
     a.mask_type                = static_cast<int>(
@@ -278,7 +287,8 @@ TYPED_TEST(PageTileContract, CheckLaunch)
                      fake(0x70000),
                      fake(0x60000),
                      fake(0x80000),
-                     fake(0x90000)};
+                     fake(0x90000),
+                     fake(0xa0000)};
     const auto [base, grids] =
         fmha_batch_prefill_create_kargs_and_grids<Kernel>(MakeArgs<TypeParam>(l, d));
     const index_t need = Kernel::GetLaunchDynamicSmemSize();
@@ -336,6 +346,8 @@ TYPED_TEST(PageTileContract, CheckLaunch)
         });
     }
     expect_refused("seqstart_q_ptr is null", need, [](Kargs& k) { k.seqstart_q_ptr = nullptr; });
+    if constexpr(kLse)
+        expect_refused("lse_ptr is null", need, [](Kargs& k) { k.lse_ptr = nullptr; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_k = k.stride_k; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
     expect_refused("not a multiple of the vector alignment", need, [](Kargs& k) {
@@ -566,7 +578,8 @@ HostProblem MakeProblem(const Case& s,
 
 struct DeviceProblem
 {
-    ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens;
+    ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
+        lse;
 
     // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
     static const std::vector<int32_t>& Pages(const Layout& l)
@@ -584,7 +597,10 @@ struct DeviceProblem
           block_table(std::max<std::size_t>(Pages(h.layout).size(), 1) * sizeof(int32_t)),
           kv_indptr(h.layout.kv_indptr.size() * sizeof(int32_t)),
           kv_last_page_lens(std::max<std::size_t>(h.layout.kv_last_page_lens.size(), 1) *
-                            sizeof(int32_t))
+                            sizeof(int32_t)),
+          lse(std::max<std::size_t>(
+                  static_cast<std::size_t>(h.layout.q_heads) * h.layout.seqstart_q.back(), 1) *
+              sizeof(float))
     {
         q.ToDevice(h.q.data());
         k.ToDevice(h.k.data());
@@ -608,18 +624,27 @@ struct DeviceProblem
                 seqlen_k.GetDeviceBuffer(),
                 block_table.GetDeviceBuffer(),
                 kv_indptr.GetDeviceBuffer(),
-                kv_last_page_lens.GetDeviceBuffer()};
+                kv_last_page_lens.GetDeviceBuffer(),
+                lse.GetDeviceBuffer()};
     }
 };
 
-// Runs one checked launch on a NaN-filled output and returns the output.
+// Runs one checked launch on a NaN-filled output (and LSE) and returns the output; with an LSE
+// kernel the [Hq, total_q] LSE is returned through lse_out when given.
 template <typename M>
-std::vector<Data> Run(const HostProblem& h, DeviceProblem& d, bool top_left = false)
+std::vector<Data> Run(const HostProblem& h,
+                      DeviceProblem& d,
+                      bool top_left               = false,
+                      std::vector<float>* lse_out = nullptr)
 {
     using Kernel = typename M::Kernel;
     std::vector<Data> o(h.q.size(),
                         ck_tile::type_convert<Data>(std::numeric_limits<float>::quiet_NaN()));
     d.o.ToDevice(o.data());
+    std::vector<float> lse(static_cast<std::size_t>(h.layout.q_heads) * h.layout.seqstart_q.back(),
+                           std::numeric_limits<float>::quiet_NaN());
+    if(kLse && !lse.empty())
+        d.lse.ToDevice(lse.data());
     const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(
         MakeArgs<M>(h.layout, d.pointers(), top_left));
     ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
@@ -627,6 +652,12 @@ std::vector<Data> Run(const HostProblem& h, DeviceProblem& d, bool top_left = fa
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     d.o.FromDevice(o.data());
+    if(kLse && lse_out != nullptr)
+    {
+        if(!lse.empty())
+            d.lse.FromDevice(lse.data());
+        *lse_out = std::move(lse);
+    }
     return o;
 }
 
@@ -636,7 +667,8 @@ reference::Metrics CompareWithReference(const HostProblem& h,
                                         const std::vector<Data>& o,
                                         bool causal,
                                         const std::vector<std::size_t>& sampled_rows = {},
-                                        bool top_left                                = false)
+                                        bool top_left                                = false,
+                                        const std::vector<float>* lse                = nullptr)
 {
     const auto& l          = h.layout;
     const std::size_t D    = h.head_dim;
@@ -690,7 +722,15 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         if(!sampled_rows.empty() && s.sampled_query_rows.empty())
             s.sampled_query_rows.push_back(0);
         sequences.push_back(std::move(s));
-        outputs.push_back({{o_float.data(), o_float.size(), q_offset, D, qrow, 1}, std::nullopt});
+        std::optional<reference::FloatView> lse_view;
+        if(lse != nullptr)
+            lse_view = reference::FloatView{lse->data(),
+                                            lse->size(),
+                                            static_cast<std::size_t>(l.seqstart_q[b]),
+                                            static_cast<std::size_t>(l.seqstart_q.back()),
+                                            1,
+                                            1};
+        outputs.push_back({{o_float.data(), o_float.size(), q_offset, D, qrow, 1}, lse_view});
     }
     const auto expected = reference::Compute(sequences);
     return reference::Compare(
@@ -738,8 +778,10 @@ TYPED_TEST(PageTileForward, MatchesReference)
                 const auto h = MakeProblem(
                     shape, mapping, TypeParam::kHeadDim, TypeParam::kCausal, seed, values);
                 DeviceProblem d(h);
-                const auto o       = Run<TypeParam>(h, d);
-                const auto metrics = CompareWithReference(h, o, TypeParam::kCausal);
+                std::vector<float> lse;
+                const auto o       = Run<TypeParam>(h, d, false, &lse);
+                const auto metrics = CompareWithReference(
+                    h, o, TypeParam::kCausal, {}, false, kLse ? &lse : nullptr);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
                           << (TypeParam::kCausal ? " causal " : " dense ")
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
