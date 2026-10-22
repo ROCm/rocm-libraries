@@ -239,9 +239,9 @@ class KernelSource:
     #: module's kernels. Empty takes the builder's primary kernel. Only a launch
     #: entry carries it; a single-launch ``kernel_source`` never does.
     role: str = ""
-    #: ``packaged`` / ``rocke``: the launches of a multi-stage kernel, each a
-    #: FULL ``rocke`` source (this source with the launch's overrides merged
-    #: on), keyed by launch name. Non-empty makes this source a template: the
+    #: ``packaged`` / ``rocke``, ``hip`` or ``hsaco``: the launches of a
+    #: multi-stage kernel, each a FULL source of this source's kind (this source
+    #: with the launch's overrides merged on), keyed by launch name. Non-empty makes this source a template: the
     #: UKD carries ``sources`` in place of ``kernel_source`` and this source's
     #: own fields are never emitted. A launch carries no launches of its own.
     launches: dict = field(default_factory=dict)
@@ -288,7 +288,7 @@ class KernelSource:
                 f"launch {name!r} drops {dropped} from its base kernel_source; an "
                 f"override can only set a key, not remove one"
             )
-        # An override never states `kind`: a launch is a rocke source.
+        # An override never states `kind`: a launch has its base source's kind.
         return {k: v for k, v in own.items() if k != "kind" and base.get(k) != v}
 
     def as_document(self) -> dict:
