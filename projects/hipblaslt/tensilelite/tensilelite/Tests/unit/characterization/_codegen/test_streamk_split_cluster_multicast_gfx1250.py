@@ -4,6 +4,7 @@
 """Assemble real split-K spatial-cluster kernels on gfx1250 without a device."""
 
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -13,6 +14,82 @@ from config_harness import assert_assembles, assert_real_gfx1250_kernels, emit_k
 pytestmark = pytest.mark.unit
 
 _CONFIG = Path(__file__).parent / "data/test_data/_designed/gfx1250/streamk_split_cluster_multicast.yaml"
+
+
+def _assembly_code(src):
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return "\n".join(code for line in src.splitlines()
+                     if (code := line.split("//", 1)[0].strip()))
+
+
+def _assert_scc0_jump_to_close(code):
+    # Check the emitted long branch's polarity, PC operands and actual target.
+    # No instruction execution: SCC==1 skips the jump; SCC==0 reaches loop close.
+    branch = re.match(
+        r"s_cbranch_scc1 (?P<skip>label_\w+)\n"
+        r"s_getpc_b64 s\[(?P<lo>\d+):(?P<hi>\d+)\]\n"
+        r"s_add_i32 (?P<offset>s\d+), label_PersistentLoopClose, 4\n"
+        r"s_add_u32 s(?P=lo), s(?P=lo), (?P=offset)\n"
+        r"s_addc_u32 s(?P=hi), s(?P=hi), 0\n"
+        r"s_setpc_b64 s\[(?P=lo):(?P=hi)\]\n"
+        r"(?P=skip):\n", code)
+    assert branch, "SCC==0 must branch to PersistentLoopClose"
+    return branch.end()
+
+
+def _assert_phantom_completion(src):
+    code = _assembly_code(src)
+    gate = re.search(r"^s_cmp_eq_u32 s\[sgprPersistentPhantomTile\], 0\n", code, re.M)
+    assert gate
+    after_gate = gate.end() + _assert_scc0_jump_to_close(code[gate.end():])
+    close = code.index("\nlabel_PersistentLoopClose:")
+    # Subtile epilogues can put store bodies after loop close. Every entry
+    # reference must remain in the guarded completion interval, and loop close
+    # must jump over those bodies rather than falling through into them.
+    deferred = list(re.finditer(r"^(label_GW_\w+_Deferred):\n", code, re.M))
+    kernel_end = code.index("\nlabel_KernelEnd:")
+    if deferred:
+        assert close < deferred[0].start() < kernel_end
+        for label in deferred:
+            entries = list(re.finditer(rf"^.*\b{label[1]}(?:,|$).*$", code, re.M))
+            assert entries and all(after_gate <= entry.start() < close for entry in entries)
+        assert re.search(
+            r"s_getpc_b64 s\[(?P<lo>\d+):(?P<hi>\d+)\]\n"
+            r"s_add_i32 (?P<offset>s\d+), label_KernelEnd, 4\n"
+            r"s_add_u32 s(?P=lo), s(?P=lo), (?P=offset)\n"
+            r"s_addc_u32 s(?P=hi), s(?P=hi), 0\n"
+            r"s_setpc_b64 s\[(?P=lo):(?P=hi)\]\n$", code[close:deferred[0].start()])
+    # Check concrete stores and workspace reads, including partial publication
+    # and flag updates. Deferred bodies are covered by their guarded entries.
+    completion = list(re.finditer(
+        r"^(?:(?:buffer|global)_store_\w+ .*|buffer_load_\w+ .*sgprSrdWS.*)$", code, re.M))
+    assert completion
+    assert all(after_gate <= op.start() < close or
+               (deferred and deferred[0].start() < op.start() < kernel_end)
+               for op in completion)
+
+
+def _assert_multicast_completion(src):
+    code = _assembly_code(src)
+    owner = re.search(
+        r"^s_cmp_eq_u32 s\[sgprStreamKLocalStart\], 0\n"
+        r"s_cbranch_scc1 (?P<owner>label_SKClusterAlphaOwner\w*)\n"
+        r"s_barrier_wait -3\n", code, re.M)
+    assert owner, "alpha-zero nonowners must consume their cluster arrival"
+    end = owner.end() + _assert_scc0_jump_to_close(code[owner.end():])
+    assert code[end:].startswith(owner["owner"] + ":\n")
+    assert end < code.index("s_barrier_wait -3", end) < code.index("label_PersistentLoopClose:")
+    close = re.search(
+        r"^label_PersistentLoopClose:\n"
+        r"s_cmp_ge_u32 s\[sgprPersistentIteration\], s\[sgprPersistentIterationEnd\]\n"
+        r"s_cbranch_scc1 (?P<done>label_\w+)\n", code, re.M)
+    assert close
+    # Delimit the next-tile arrival by its actual no-next-tile branch target.
+    arrival = code[close.end():code.index(close["done"] + ":", close.end())]
+    assert arrival.startswith("s_wait_dscnt 0\ns_barrier_signal -1\ns_barrier_wait -1\n")
+    signal = re.search(r"s_cbranch_scc0 (?P<skip>label_\w+)\n"
+                       r"s_barrier_signal -3\n(?P=skip):\n", arrival)
+    assert signal, "only wave zero signals after the LDS drain and workgroup barrier"
 
 
 def _check_kernel(base, src):
@@ -38,23 +115,13 @@ def _check_kernel(base, src):
     assert "PersistentMC_SkipPrefetchSignal" not in src
     assert "DP fold: rank" not in src
     assert "global_wb" in src and "global_inv" in src
-    # The phantom completion gate dominates both the reduction dispatch and
-    # every possible partial publication, not just the final D store.
-    phantom = src.index("phantom tiles skip the store")
-    reduction = src.index("flag offset based on physical partial slot")
-    assert phantom < reduction
+    _assert_phantom_completion(src)
     if multicast:
         # Empty-worker validation precedes the sole prologue arrival.
         initial_check = src.index("Make sure there's work to do")
         initial_arrive = src.index("cluster B-multicast: elect wave 0")
         assert initial_check < initial_arrive
-        # Alpha-zero nonowners leave before the first-load wait. Their dedicated
-        # wait lies immediately on that path before its persistent-loop exit.
-        alpha_wait = src.index("alpha-zero nonowner consumes cluster arrive")
-        assert "label_PersistentLoopClose" in src[alpha_wait:alpha_wait + 700]
-        close = src.index("label_PersistentLoopClose:")
-        close_text = src[close:close + 2000]
-        assert close_text.index("s_wait_dscnt 0") < close_text.index("s_barrier_signal -3")
+        _assert_multicast_completion(src)
     else:
         assert "MulticastMask" not in src
         assert "s_barrier_signal -3" not in src
