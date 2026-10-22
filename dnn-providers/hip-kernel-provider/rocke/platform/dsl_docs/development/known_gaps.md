@@ -18,7 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -200,7 +202,28 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 ---
 
-## 5. gfx942 MLA prefill — Python-only kernel builder
+## 5. Library attention — additive bias (Python engine only)
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, gfx950 tiled 2D / 3D split-KV instances
+
+The gfx950 unified tiled 2D and 3D split-KV kernels accept `use_additive_bias`
+in the Python engine only (`library/kernels/common/_attention_additive_bias.py`).
+With the flag off (the default) nothing is emitted, so every bias-off kernel is
+byte-identical and the gate is unaffected. With it on, the C++ engine has no
+equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
+cannot request bias either, so Python and C++ selection agree on every problem
+the provider can express.
+
+| Area | What's missing | Why blocked / what unblocks it |
+|---|---|---|
+| Problem and spec structs | `use_additive_bias` on the unified problem and the gfx950 tiled 2D / 3D spec structs, with the spec validator's rejections (mask-limit, invariant hoist, mask-once, non-transposed 32x32, grouped-kv2, register-PV, strided KV). | Scoped out of the Python feature change. Unblocked by adding the field to the public instance headers and mirroring the validators. |
+| Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
+| Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
+| Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+
+---
+
+## 6. gfx942 MLA prefill — Python-only kernel builder
 
 **Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
 

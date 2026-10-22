@@ -98,7 +98,10 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
+    DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_dgrad_weight_transforms,
+    direct_wgrad_fold_knobs,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
     make_direct_spec as make_spec,
@@ -417,6 +420,8 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
 
     if isinstance(spec, (DirectNongroupedConvSpec, DirectDgradWmmaSpec)):
         grid, block = spec.grid(), (spec.threads_per_block, 1, 1)
+    elif hasattr(spec, "launch_geometry"):
+        grid, block = spec.launch_geometry()
     else:
         grid, block = direct_launch_geometry(spec)
     return DirectStep(
@@ -519,6 +524,45 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "y")
         )
         return DirectPlan(identity, (step,)), "ok"
+    if identity.direction == "direct_wgrad" and variant in _WGRAD_FOLDED:
+        # The pass stores one partial slot per partition into the scratch
+        # ``ws``; the fold sums them into dW (written whole, no zeroing).
+        from kernels.common.conv_direct_dw_wgrad import (
+            DW_WGRAD_FOLD_ARGS,
+            dw_wgrad_fold_signature,
+        )
+
+        caps = _caps_of(identity)
+        fold_knobs = direct_wgrad_fold_knobs(variant, caps.KH, caps.KW, caps.cpg)
+        fold_id = _helper_identity(
+            identity.arch,
+            identity.wave_size,
+            _WGRAD_FOLD,
+            caps,
+            fold_knobs,
+            identity.dtype_a,
+        )
+        entry = cache.get(fold_id)
+        if entry is None:
+            return None, "missing cached wgrad fold (rebuild the cache)"
+        fold_spec = make_spec(_WGRAD_FOLD, problem, fold_knobs)
+        channels = (
+            spec.fold_channels() if hasattr(spec, "fold_channels") else problem.groups
+        )
+        grid, block = fold_spec.launch_geometry(channels)
+        main = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "ws")
+        )
+        fold = DirectStep(
+            kernel_name=entry[1]["kernel_name"],
+            hsaco_path=cache.hsaco_path(fold_id),
+            signature=dw_wgrad_fold_signature(fold_spec),
+            grid=grid,
+            block=block,
+            buffers=("ws", None, "dw"),
+            scalars=tuple(zip(DW_WGRAD_FOLD_ARGS, (spec.n_partitions(), channels))),
+        )
+        return DirectPlan(identity, (main, fold), {"ws": spec.workspace_bytes()}), "ok"
     if identity.direction == "direct_wgrad":
         # dY rides A, X rides B, and D is the fp32 dW the kernel accumulates
         # into atomically (the caller zeroes it).
