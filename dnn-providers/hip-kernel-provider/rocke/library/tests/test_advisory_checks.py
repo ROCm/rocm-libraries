@@ -5,9 +5,13 @@
 
 That script is the non-blocking pre-push wrapper around pyright, radon and vulture.
 These tests pin down its contract: it covers ALL rocke Python, it never fails a
-push, and its radon report lists nested functions (radon scores them separately
-from their parent). The radon tests skip when radon is not installed.
+push, its radon report lists nested functions (radon scores them separately from
+their parent), and vulture counts uses across all of rocke but reports only the
+requested non-test files. Tests that run radon or vulture skip when that tool is
+not installed.
 """
+
+from __future__ import annotations
 
 import importlib.util
 import json
@@ -67,7 +71,8 @@ def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
         str(outside),  # python, but outside rocke
         str(adv.ROCKE / "AGENTS.md"),  # inside rocke, but not python
         str(adv.ROCKE / "no_such_file.py"),  # does not exist
-        str(_SCRIPT),
+        # python inside rocke, spelled via "..": kept, as its resolved path
+        str(adv.ROCKE / "library" / ".." / "tools" / _SCRIPT.name),
     ]
     assert adv._rocke_files(requested) == [_SCRIPT]
 
@@ -105,12 +110,34 @@ def test_pyright_includes_the_same_trees(adv):
     assert json.loads(text)["include"] == list(adv.TREES)
 
 
+def test_pyright_gets_names_no_longer_than_pre_commit_passed(adv, monkeypatch):
+    # pre-commit sizes each batch for repo-relative names; absolute names are
+    # longer, so a full Windows batch would overflow its 32,767-character limit.
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(cmd=cmd, cwd=kwargs.get("cwd"))
+        report = {
+            "generalDiagnostics": [],
+            "summary": {"errorCount": 0, "warningCount": 0},
+        }
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adv.run_pyright([_SCRIPT], whole=False)
+    assert seen["cmd"][-1] == str(Path("tools", "advisory_checks.py"))
+    assert seen["cwd"] == adv.ROCKE
+
+
 @pytest.mark.parametrize(
     ("failure", "reported"),
     [
         (RuntimeError("tool exploded"), "crashed"),
+        # vulture's file collection sys.exit()s when a listed file has vanished.
+        (SystemExit("Error: gone.py could not be found."), "crashed"),
         (ImportError("No module named 'vulture'"), "not installed"),
     ],
+    ids=["exception", "sys-exit", "not-installed"],
 )
 def test_a_broken_tool_never_fails_a_push(adv, monkeypatch, capsys, failure, reported):
     def runner(files, whole):
@@ -130,6 +157,93 @@ def test_nothing_runs_when_no_file_is_in_rocke(adv, monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon", str(outside)])
     assert adv.main() == 0
     assert calls == []
+
+
+@pytest.fixture
+def mini_rocke(adv, monkeypatch, tmp_path):
+    """Point ``adv.ROCKE`` at a rocke-shaped tree small enough to scan quickly."""
+    pytest.importorskip("vulture")
+    tree = {
+        "platform/helpers.py": (
+            "def cross_tree_helper():\n    return 1\n\n\n"
+            "def orphan_in_platform():\n    return 2\n"
+        ),
+        "library/kernel.py": (
+            "from helpers import cross_tree_helper\n\n\n"
+            "def build():\n    return cross_tree_helper()\n\n\n"
+            "def orphan_in_library():\n    return 3\n"
+        ),
+        "library/tests/test_kernel.py": (
+            "from kernel import build\n\n\n"
+            "def test_build():\n    assert build() == 1\n\n\n"
+            "def orphan_in_tests():\n    return 4\n"
+        ),
+    }
+    for rel, source in tree.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    monkeypatch.setattr(adv, "ROCKE", tmp_path)
+    return tmp_path
+
+
+def test_vulture_counts_uses_across_trees_and_tests(adv, mini_rocke, capsys):
+    adv.run_vulture(adv._all_files(), whole=True)
+    out = capsys.readouterr().out
+    # cross_tree_helper is used from another tree and build() only from a test:
+    # neither is dead. Nothing is reported from inside the tests.
+    assert re.findall(r"unused \w+ '(\w+)'", out) == [
+        "orphan_in_library",
+        "orphan_in_platform",
+    ]
+    assert "vulture: 2 finding(s)" in out
+
+
+def test_vulture_reports_only_the_requested_files(adv, mini_rocke, monkeypatch, capsys):
+    # Paths as typed (relative, through ".."), while vulture reports resolved
+    # ones: if the two spellings did not match, the report would silently be
+    # empty. A requested test file is still not reported on.
+    monkeypatch.chdir(mini_rocke / "library")
+    helpers = str(Path("..", "platform", "helpers.py"))
+    test_file = str(Path("tests", "test_kernel.py"))
+    adv.run_vulture(adv._rocke_files([helpers, test_file]), whole=False)
+    out = capsys.readouterr().out
+    assert re.findall(r"unused \w+ '(\w+)'", out) == ["orphan_in_platform"]
+    # Located relative to the cwd, with its line, so an editor can jump to it.
+    assert f"{helpers}:5: unused function 'orphan_in_platform' (60% confidence)" in out
+    assert "vulture: 1 finding(s)" in out
+
+
+def test_vulture_skips_a_dangling_py_symlink(adv, mini_rocke, capsys):
+    # Emacs marks a file with unsaved edits by a dangling `.#<name>` symlink. It
+    # matches *.py, and vulture aborts the whole scan on a path that does not exist.
+    try:
+        (mini_rocke / "library" / ".#kernel.py").symlink_to("no-such-file")
+    except OSError:
+        pytest.skip("cannot create symlinks here")
+    adv.run_vulture(adv._all_files(), whole=True)
+    assert "vulture: 2 finding(s)" in capsys.readouterr().out
+
+
+def test_vulture_scan_launches_no_child_process(adv, mini_rocke, monkeypatch, capsys):
+    # The real tree is ~1,150 files; as arguments to a child process their names
+    # make a ~62,000-character command line, past Windows' 32,767-character limit.
+    def no_process(*args, **kwargs):
+        raise AssertionError("vulture must not be launched as a child process")
+
+    monkeypatch.setattr(subprocess, "Popen", no_process)
+    adv.run_vulture(adv._all_files(), whole=True)
+    # The scan really ran: a launch whose error was swallowed reports nothing.
+    assert "vulture: 2 finding(s)" in capsys.readouterr().out
+
+
+def test_a_missing_vulture_is_reported_not_silently_empty(adv, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "vulture", None)  # `import vulture` fails
+    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "vulture", str(_SCRIPT)])
+    assert adv.main() == 0
+    out = capsys.readouterr().out
+    assert "not installed" in out
+    assert "finding(s)" not in out
 
 
 def test_radon_scores_nested_functions_separately(adv):
