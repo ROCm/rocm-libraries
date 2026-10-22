@@ -192,8 +192,11 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
     for (_, ks, _), kernel in zip(enumeration.rows, kernels):
         if _registry_key(kernel, fields) not in shipped:
             continue
+        # A kernel's own spec keys, not the selection's union: a field only some kernels
+        # carry (a section's codegen knobs) must still sit at its default on the rest.
+        carried = kernel["kernel_source"]["spec"]
         for f in dataclasses.fields(ks):
-            if f.name in fields:
+            if f.name in carried:
                 continue
             default = _field_default(f)
             if default is dataclasses.MISSING or getattr(ks, f.name) != default:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import json
 import os
 import re
 import subprocess
@@ -460,3 +461,98 @@ def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registr
     for kernel in kernels:
         assert kernel["provenance"]["rocke_spec_id"] == "gfx950_dense_grid"
         assert kernel["provenance"]["rocke_tuning_id"]
+
+
+# ---------------------------------------------------------------------------
+# enumerate.also: one pack drawn from more than one registry candidate
+# ---------------------------------------------------------------------------
+
+
+def _also(**overrides) -> dict:
+    """A second section over the probe family's `persist`/`a` candidate, on a cell
+    the primary section does not list."""
+    section = {
+        "pin": {"algorithm": "persist", "spec_id": "a"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": [
+            {"fields": ["hdim", "heads"], "values": [[128, 16]]},
+            {"fields": ["mask"], "values": ["CAUSAL"]},
+        ],
+        "free_fields": [],
+        "spec_fields": ["dtype", "tile_m", "tile_n", "causal", "order"],
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_also(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_also(**overrides)]
+    return manifest
+
+
+def test_an_also_section_adds_its_kernels_after_the_primary_sections(probe):
+    """The pack is one list: primary kernels first, then each section's, each section
+    traced to its own pin."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_also(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert [k["name"] for k in both[: len(primary)]] == [k["name"] for k in primary]
+    extra = both[len(primary) :]
+    assert len(extra) == 1
+    assert extra[0]["provenance"]["rocke_spec_id"] == "a"
+    assert {k["provenance"]["rocke_spec_id"] for k in primary} == {"grid"}
+
+
+def test_an_also_section_projects_only_its_own_spec_fields(probe):
+    """`spec_fields` is per section: the primary's narrower list must not decide what a
+    later section's kernel spec carries, or its kernels would compile at defaults."""
+    manifest = _with_also(probe)
+    manifest["enumerate"]["spec_fields"] = ["dtype", "tile_m", "tile_n", "causal"]
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert "order" not in kernels[0]["kernel_source"]["spec"]
+    assert "order" in kernels[-1]["kernel_source"]["spec"]
+
+
+def test_an_also_section_has_its_own_max_kernels(probe):
+    assert _run_probe(probe, _with_also(probe, max_kernels=1)) == 0
+    assert _run_probe(probe, _with_also(probe, max_kernels=0)) == 2
+
+
+def test_an_also_section_may_not_repeat_a_kernel_name(probe):
+    """Two sections naming one kernel would collide in the descriptor catalog."""
+    manifest = _with_also(
+        probe,
+        cells=[
+            {"fields": ["hdim", "heads"], "values": [[64, 8]]},
+            {"fields": ["mask"], "values": ["CAUSAL"]},
+        ],
+        free_fields=["tile_n"],
+    )
+    assert _run_probe(probe, manifest) == 2
+
+
+def test_an_also_section_must_cross_the_same_cell_fields(probe):
+    manifest = _with_also(probe, cells=[{"fields": ["hdim"], "values": [[128]]}])
+    assert _run_probe(probe, manifest) == 2
+
+
+def test_also_is_slice_only(probe):
+    manifest = _with_also(probe)
+    manifest["enumerate"]["space"] = "full"
+    assert _run_probe(probe, manifest) == 2
+
+
+def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
+    """Coverage is by every section's cells: a shape the primary declines or leaves a
+    GAP is covered when a later section lists it."""
+    shape = {"hdim": 128, "heads": 16, "dtype": "bf16", "mask": 1}
+    shapes = probe.tmp / "shapes.json"
+    shapes.write_text(json.dumps([shape]))
+    for manifest, gaps in ((probe.manifest, True), (_with_also(probe), False)):
+        assert _run_probe(probe, manifest, "--shapes", str(shapes), "--strict") == (
+            1 if gaps else 0
+        )
+    assert "covered: 1 shapes" in capsys.readouterr().out
