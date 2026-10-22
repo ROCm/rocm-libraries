@@ -29,10 +29,10 @@ from textwrap import dedent, indent
 import pytest
 import yaml
 
-import Tensile
-from Tensile.resources import custom_kernel_text
-import Tensile.TensileLogic.HandleCustomKernel as hck_mod
-from Tensile.AddCustomConfig import (
+import tensilelite
+import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.resources import custom_kernel_text
+from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
     _fmt_yaml_scalar,
@@ -41,13 +41,13 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from Tensile.Common.ValidParameters import (
+from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -57,8 +57,8 @@ from Tensile.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
-from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
-from Tensile.ValidateMetadata import validate_all
+from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
+from tensilelite.ValidateMetadata import validate_all
 
 pytestmark = pytest.mark.unit
 
@@ -959,6 +959,18 @@ def test_build_from_metadata_numworkgroups_grid():
     assert ck["grid"][0] == "TilesXYBatchGSU"
 
 
+@pytest.mark.parametrize("segment, padding", [(16, 4), (12, None)])
+def test_build_from_metadata_pads_trailing_group_size(segment, padding):
+    """The kernarg segment can end past the trailing groupSize; the gap is padding."""
+    full = _kernel_yaml([dict(_D_ARG, **{".offset": 0}),
+                         {".name": "groupSize", ".size": 4, ".offset": 8,
+                          ".value_kind": "by_value"}])
+    full["amdhsa.kernels"][0][".kernarg_segment_size"] = segment
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+    assert ck["args"][-1]["semantic"] == "ScaleBlockSizeA"
+    assert ck["args"][-1].get("padding") == padding
+
+
 def test_build_from_metadata_default_multidim_grid():
     # Version 0 split-K kernels need one work group per GSU slice along Y.
     ck = _buildCustomKernelFromMetadata(
@@ -1246,7 +1258,7 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
 
@@ -1345,7 +1357,7 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
 
-    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     for name, key in ranges.items():
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):

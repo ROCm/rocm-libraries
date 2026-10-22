@@ -104,6 +104,7 @@
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
 /projects/hiptensor/                                @ROCm/hiptensor-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
+/projects/rocalution/                               @ROCm/sparses-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
 /projects/rocfft/                                   @ROCm/fft-reviewers
 /projects/rocprim/                                  @ROCm/prims-rands-reviewers
@@ -226,6 +227,11 @@
 /projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+
+/projects/rocalution/**/*.md                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/**/*.rst                       @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/**/.readthedocs.yaml           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/docs/                          @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 
 /projects/rocblas/**/*.md                           @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/**/*.rst                          @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
