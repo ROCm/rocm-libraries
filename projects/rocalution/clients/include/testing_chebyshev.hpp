@@ -27,6 +27,16 @@
 
 #include <rocalution/rocalution.hpp>
 
+static bool check_residual(float res)
+{
+    return (res < 1e-3f);
+}
+
+static bool check_residual(double res)
+{
+    return (res < 1e-4);
+}
+
 template <typename T>
 bool testing_chebyshev(Arguments argus)
 {
@@ -47,8 +57,6 @@ bool testing_chebyshev(Arguments argus)
     // rocALUTION structures
     LocalMatrix<T> A;
     LocalVector<T> x;
-    LocalVector<T> b;
-    LocalVector<T> b_old;
     LocalVector<T> e;
     LocalVector<T> rhs;
 
@@ -210,9 +218,11 @@ bool testing_chebyshev(Arguments argus)
     T error = e.Norm();
     std::cout << "Chebyshev iteration ||e - x||_2 = " << error << std::endl;
 
+    bool success = check_residual(error);
+
     // Stop rocALUTION platform
     stop_rocalution();
     disable_accelerator_rocalution(false);
 
-    return true;
+    return success;
 }

@@ -155,7 +155,6 @@ bool testing_bicgstab(Arguments argus)
 
     ls.Init(1e-8, 0.0, 1e+8, 0, 10000);
     ls.RecordResidualHistory();
-    ls.GetIterationCount();
     ls.Build();
 
     // Matrix format

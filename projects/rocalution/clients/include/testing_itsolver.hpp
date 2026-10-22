@@ -27,6 +27,16 @@
 
 #include <rocalution/rocalution.hpp>
 
+static bool check_residual(float res)
+{
+    return (res < 1e-3f);
+}
+
+static bool check_residual(double res)
+{
+    return (res < 1e-6);
+}
+
 template <typename T>
 bool testing_itsolver(Arguments argus)
 {
@@ -100,6 +110,7 @@ bool testing_itsolver(Arguments argus)
     p.SetMaxIter(50);
 
     p.SetAlgorithm(ItILU0Algorithm::SyncSplit);
+    p.SetOptions(ItILU0Option::ConvergenceHistory);
 
     // Set up iterative triangular solve
     SolverDescr descr;
@@ -136,7 +147,10 @@ bool testing_itsolver(Arguments argus)
 
     fp.InitMinIter(1);
     fp.InitMaxIter(1000);
-    fp.InitTol(1e-8, 1e-8, 1e-8);
+    fp.InitTol(1e-8, 1e-8, 1e+8);
+
+    // Use the Linf norm, which also provides the index of the largest residual entry
+    fp.SetResidualNorm(3);
 
     // Print matrix info
     A.Info();
@@ -144,14 +158,29 @@ bool testing_itsolver(Arguments argus)
     // Solve A x = b
     fp.Solve(b, &x);
 
-    int niter_preconditioner;
-    p.GetConvergenceHistory(&niter_preconditioner);
+    // The initial guess is zero, so the initial residual is the Linf norm of b
+    T init_res;
+    b.Amax(init_res);
 
-    fp.GetCurrentResidual();
-    //auto res_init      = fp.GetInitialResidual();
-    //auto niter         = fp.GetNumIterations();
-    fp.GetSolverStatus();
-    fp.GetAmaxResidualIndex();
+    int     status = fp.GetSolverStatus();
+    double  res    = fp.GetCurrentResidual();
+    int     iter   = fp.GetIterationCount();
+    int64_t index  = fp.GetAmaxResidualIndex();
+
+    // The solver has to stop on the absolute or the relative tolerance
+    bool success = (status == 1 && res <= 1e-8)
+                   || (status == 2 && res / static_cast<double>(init_res) <= 1e-8);
+
+    success = success && iter >= 1 && iter <= 1000;
+    success = success && index >= 0 && index < A.GetM();
+
+    int           niter_preconditioner;
+    const double* history = p.GetConvergenceHistory(&niter_preconditioner);
+
+    // On the host, ItILU0 falls back to ILU0 and reports zero iterations
+    success = success && history != nullptr;
+    success = success && niter_preconditioner >= 0 && niter_preconditioner <= 50;
+
     // Clear solver
     fp.Clear();
 
@@ -160,9 +189,11 @@ bool testing_itsolver(Arguments argus)
     T error = e.Norm();
     std::cout << "||e - x||_2 = " << error << std::endl;
 
+    success = success && check_residual(error);
+
     // Stop rocALUTION platform
     stop_rocalution();
     disable_accelerator_rocalution(false);
 
-    return true;
+    return success;
 }

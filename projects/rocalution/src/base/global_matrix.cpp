@@ -3531,7 +3531,7 @@ namespace rocalution
         {
             LOG_VERBOSE_INFO(
                 2,
-                "*** warning: GlobalMatrix::AMGSmoothedAggregation() is performed in CSR format");
+                "*** warning: GlobalMatrix::AMGUnsmoothedAggregation() is performed in CSR format");
         }
 
 #ifdef DEBUG_MODE
