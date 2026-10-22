@@ -1167,6 +1167,7 @@ class TestSdpaExtract:
         [
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
+            (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
         ],
@@ -1303,6 +1304,7 @@ class TestSdpaExtract:
             {},
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 1, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "dtype": "fp8_e4m3",
                 "o_dtype": "bfloat16",
@@ -1441,6 +1443,7 @@ class TestSdpaBackwardExtract:
             {},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "strides": _bshd_strides,
                 "causal_mask": True,
