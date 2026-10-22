@@ -331,7 +331,7 @@ void testing_preconditioner_all(Arguments argus)
     b.MoveToAccelerator();
     e.MoveToAccelerator();
 
-    if(precond != "ILUT" && precond != "IC")
+    if(precond != "IC")
     {
         e.Ones();
         matrix.Apply(e, &b);
@@ -359,7 +359,7 @@ void testing_preconditioner_all(Arguments argus)
     T error_host = e.Norm();
     std::cout << "error_host = " << error_host << std::endl;
 
-    if(precond != "ILUT" && precond != "IC")
+    if(precond != "IC")
     {
         x_host.ScaleAdd(-1.0, x_acc);
         T diff = x_host.Norm();
@@ -445,4 +445,110 @@ void testing_itilu0_convergence_history(Arguments argus)
         p.GetConvergenceHistory(&niter);
         EXPECT_EQ(niter, 0);
     }
+}
+
+template <typename T>
+void testing_preconditioner_repeated_move(const std::string& name, TriSolverAlg alg)
+{
+    Arguments argus;
+    argus.size = 7;
+
+    LocalMatrix<T> matrix;
+    getLaplacianTestMatrix<T>(argus, matrix);
+
+    Solver<LocalMatrix<T>, LocalVector<T>, T>* s = NULL;
+
+    if(name == "GS")
+    {
+        s = new GS<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "SGS")
+    {
+        s = new SGS<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ILU")
+    {
+        s = new ILU<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ILUT")
+    {
+        s = new ILUT<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ItILU0")
+    {
+        ItILU0<LocalMatrix<T>, LocalVector<T>, T>* p
+            = new ItILU0<LocalMatrix<T>, LocalVector<T>, T>;
+        p->SetAlgorithm(ItILU0Algorithm::Default);
+        p->SetMaxIter(10);
+        p->SetTolerance(1e-6);
+        s = p;
+    }
+    else if(name == "LU")
+    {
+        s = new LU<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else
+    {
+        FAIL() << "Unknown solver: " << name;
+    }
+
+    // The iterative triangular solves start from the previous solution, so they
+    // have to converge for the solutions to agree
+    SolverDescr descr;
+    descr.SetTriSolverAlg(alg);
+    descr.SetIterativeSolverMaxIteration(200);
+    descr.SetIterativeSolverTolerance(1e-14);
+
+    s->SetSolverDescriptor(descr);
+    s->SetOperator(matrix);
+    s->Build();
+
+    LocalVector<T> e, b, x_once, x_twice;
+
+    e.Allocate("e", matrix.GetN());
+    b.Allocate("b", matrix.GetM());
+    x_once.Allocate("x_once", matrix.GetN());
+    x_twice.Allocate("x_twice", matrix.GetN());
+
+    e.Ones();
+    matrix.Apply(e, &b);
+
+    T tol = std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+
+    s->MoveToAccelerator();
+    b.MoveToAccelerator();
+    x_once.MoveToAccelerator();
+    x_twice.MoveToAccelerator();
+
+    x_once.Zeros();
+    s->Solve(b, &x_once);
+
+    s->MoveToAccelerator();
+
+    x_twice.Zeros();
+    s->Solve(b, &x_twice);
+
+    x_twice.ScaleAdd(static_cast<T>(-1), x_once);
+    EXPECT_LE(x_twice.Norm(), tol * x_once.Norm())
+        << name << " after moving to the accelerator a second time";
+
+    s->MoveToHost();
+    b.MoveToHost();
+    x_once.MoveToHost();
+    x_twice.MoveToHost();
+
+    x_once.Zeros();
+    s->Solve(b, &x_once);
+
+    s->MoveToHost();
+
+    x_twice.Zeros();
+    s->Solve(b, &x_twice);
+
+    x_twice.ScaleAdd(static_cast<T>(-1), x_once);
+    EXPECT_LE(x_twice.Norm(), tol * x_once.Norm())
+        << name << " after moving to the host a second time";
+
+    s->Clear();
+    delete s;
 }
