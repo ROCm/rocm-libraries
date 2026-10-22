@@ -5463,6 +5463,23 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
     EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
 }
 
+/// The selector revision digests every launch's code object, so a pack whose launch is
+/// rebuilt does not keep a revision a ranker was trained against.
+TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
+{
+    const auto revisionWith = [&](const std::string& mergeSymbol, const std::string& label) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
+        auto documents = makeSetDocuments('1', "test:" + label);
+        spellAsMultiLaunch(documents).at("sources")["merge"]["symbol"] = mergeSymbol;
+        writeDocuments(dir.path(), documents);
+        return engineSelectorRevision(loadFrom(dir.path()).at(0));
+    };
+
+    EXPECT_EQ(revisionWith("rocke_merge", "revision_a"), revisionWith("rocke_merge", "revision_a"));
+    EXPECT_NE(revisionWith("rocke_merge", "revision_a"),
+              revisionWith("rocke_merge_v2", "revision_a"));
+}
+
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
 /// part of the name.
 TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
