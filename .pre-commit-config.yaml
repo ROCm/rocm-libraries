@@ -45,8 +45,6 @@ exclude: |
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
-    # Preserve the pinned upstream header byte-for-byte.
-    shared/hostnumerics/include/roc/hostnumerics/compat/tl/expected\.hpp|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
