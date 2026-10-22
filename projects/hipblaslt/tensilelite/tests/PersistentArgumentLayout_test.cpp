@@ -916,3 +916,69 @@ TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
     const auto irregular = streamKStaticSplit(3, 65, 7, 1, false);
     EXPECT_FALSE(streamKStaticSplitRowUniform(irregular, 3, 65, 7, false, true));
 }
+
+TEST(PersistentArgumentLayout, ClusterStreamKWholeTileGridDoesNotCreateResidentTreeSplits)
+{
+    // Reproduce the 4096-square regression: 4096 whole tiles were clamped to
+    // 1536 resident WGs, creating 24 MiB of tree partials in the 2x1 case.
+    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{{2, 1}, {2, 2}, {4, 2}})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        auto device = persistentDevice(4096);
+        device.computeUnitCount = 256;
+        auto problem = clusterProblem(4096, 4096, 1024, 1);
+        problem.setWorkspaceSize(0);
+
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.selectedGrid, 4096u);
+        EXPECT_EQ(launch.clusterSchedule.physicalGrid, 4096u);
+        EXPECT_EQ(launch.grid, 4096u / (cs * cn));
+        EXPECT_TRUE(launch.clusterSchedule.wholeBlocksOnly);
+        EXPECT_FALSE(launch.clusterSchedule.workspaceFallback);
+        EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+        EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
+        EXPECT_EQ(launch.workspaceBytes, 0u);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+
+        auto inputs = clusterInputs();
+        inputs.ws = nullptr;
+        const auto call = solution.generateSingleCall<true>(
+            problem, inputs, device, launch, GSUSettings{});
+        EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, 4096u);
+
+        // A genuine K-split request must still respect the cooperative limit.
+        problem = clusterProblem(128, 128, 8192, 1);
+        const auto split = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(split.clusterSchedule.physicalGrid, 1536u);
+        EXPECT_GT(split.clusterSchedule.partialSlots, 0u);
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 8, 1);
+    solution.sizeMapping.macroTile = {64, 64, 1};
+    solution.sizeMapping.workGroupSize = {128, 1, 1};
+    solution.sizeMapping.CUOccupancy = 6;
+    auto device = persistentDevice(0);
+    device.computeUnitCount = 8;
+    auto problem = clusterProblem(128, 128, 1024, 1);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.selectedGrid, 8u);
+    ASSERT_EQ(launch.totalTiles, 4u);
+    ASSERT_EQ(launch.clusterSchedule.blocks, 2u);
+    EXPECT_EQ(launch.grid, 2u);
+    EXPECT_EQ(launch.clusterSchedule.physicalGrid, 16u);
+    EXPECT_TRUE(launch.clusterSchedule.wholeBlocksOnly);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+
+    device.persistentFixedGrid = 8;
+    const auto fixed = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(fixed.grid, 1u);
+    EXPECT_EQ(fixed.clusterSchedule.physicalGrid, 8u);
+}

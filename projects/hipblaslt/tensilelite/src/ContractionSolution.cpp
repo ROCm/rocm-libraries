@@ -6482,7 +6482,20 @@ namespace TensileLite
         launch.selectedGrid = getPersistentGridImpl(*this, problem, hardware,
             launch.totalTiles, origami::reduction_t::tree, nullptr,
             &cluster.fixedGridUsed, nullptr, nullptr, nullptr);
-        size_t physicalBudget = launch.selectedGrid;
+        // A whole-tile grid has no inter-cluster reduction dependencies. Keep
+        // that decision before applying residency limits for cooperative splits,
+        // padding boundary blocks so every cluster has all of its peers.
+        const bool wholeTileGrid = launch.selectedGrid == launch.totalTiles;
+        size_t physicalBudget = wholeTileGrid
+            ? checkedMultiply(cluster.blocks, cluster.clusterSize) : launch.selectedGrid;
+        if(!cluster.fixedGridUsed && launch.selectedGrid > launch.totalTiles)
+        {
+            // A tree predictor asking for K splits already has enough useful
+            // workers for every real tile. Padding must not serialize whole
+            // spatial blocks; preserve at least that independent parallelism.
+            physicalBudget = std::max(physicalBudget,
+                checkedMultiply(cluster.blocks, cluster.clusterSize));
+        }
         const size_t threads = checkedMultiply(
             checkedMultiply(sizeMapping.workGroupSize.x, sizeMapping.workGroupSize.y),
             sizeMapping.workGroupSize.z);
@@ -6491,9 +6504,10 @@ namespace TensileLite
         const size_t residentBudget = checkedMultiply(
             static_cast<size_t>(gpu->computeUnitCount),
             static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1)));
-        const size_t maxPhysical = std::min({size_t{StreamKFlagElements},
-                                           std::numeric_limits<uint32_t>::max() / threads,
-                                           residentBudget});
+        const size_t launchLimit = std::numeric_limits<uint32_t>::max() / threads;
+        // Whole blocks neither publish partials nor use synchronizer entries.
+        const size_t maxPhysical = wholeTileGrid ? launchLimit
+            : std::min({launchLimit, size_t{StreamKFlagElements}, residentBudget});
         if(maxPhysical < cluster.clusterSize)
             throw std::runtime_error("StreamK cluster cannot fit the physical grid limits");
         physicalBudget = std::max(physicalBudget, cluster.clusterSize);
@@ -6513,6 +6527,8 @@ namespace TensileLite
             wholeBlocks("zero-k");
         else if(Debug::Instance().useStreamKDataParrallel())
             wholeBlocks("debug-data-parallel");
+        else if(wholeTileGrid)
+            wholeBlocks("whole-blocks");
         else
         {
             // Saturate the debug full-tile multiplier before the legacy helper's
