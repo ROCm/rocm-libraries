@@ -174,13 +174,20 @@ GraphShape makeShape(DataType dataType,
     return {dataType, headSize, queryHeads, kvHeads, mask, window, batch, seqQ, seqKv};
 }
 
-/// The catalog's tiles at each head size (supports_attention_dense with the gfx942
-/// policy pads; D64 also builds 256/128).
+/// The catalog's tiles at each head size. D128 256/128 fits the LDS budget only with
+/// lds_row_pad 0, so the catalog builds it at that pad alone.
 const std::vector<Tile>& tilesFor(int64_t headSize)
 {
     static const std::vector<Tile> s_d64{{64, 64}, {128, 64}, {256, 32}, {256, 64}, {256, 128}, {512, 64}};
-    static const std::vector<Tile> s_d128{{64, 64}, {128, 64}, {256, 32}, {256, 64}, {512, 64}};
+    static const std::vector<Tile> s_d128{{64, 64}, {128, 64}, {256, 32}, {256, 64}, {256, 128}, {512, 64}};
     return headSize == 64 ? s_d64 : s_d128;
+}
+
+/// The lds_row_pad of the kernel the score ranks first for a tile: the policy pad, except
+/// where the catalog carries the tile at another pad only.
+int64_t rankZeroLdsRowPad(int64_t headSize, const Tile& tile)
+{
+    return headSize == 128 && tile.blockM == 256 && tile.blockN == 128 ? 0 : POLICY_LDS_ROW_PAD;
 }
 
 /// The catalog's mask cells: causal, unmasked, and causal windows of these sizes.
@@ -469,7 +476,7 @@ int64_t catalogCausal(Mask mask)
     return mask == Mask::NO_MASK ? 0 : 1;
 }
 
-/// The id of the one policy-arm kernel this engine's gfx942 packs carry for @p shape's
+/// The id of the one rank-zero kernel this engine's gfx942 packs carry for @p shape's
 /// semantic fields and @p tile, as the selection line spells it.
 std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
 {
@@ -488,7 +495,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"sliding_window", shape.window},
         {"block_m", tile.blockM},
         {"block_n", tile.blockN},
-        {"lds_row_pad", POLICY_LDS_ROW_PAD},
+        {"lds_row_pad", rankZeroLdsRowPad(shape.headSize, tile)},
         {"pv_priority", POLICY_PV_PRIORITY},
     };
 

@@ -33,7 +33,7 @@ Generated from the committed support claims (11174 graphs, 486 catalogued option
 
 | Op group (options) | [gfx942-linux](#gpu-gfx942-linux) | [gfx90a-linux](#gpu-gfx90a-linux) | [gfx950-linux](#gpu-gfx950-linux) |
 |---|---|---|---|
-| **[Attention](#group-attention)** (61) | 🟡 16% | ❌ | 🟡 22% |
+| **[Attention](#group-attention)** (61) | 🟡 26% | ❌ | 🟡 22% |
 | **[Batchnorm](#group-batchnorm)** (54) | 🟡 79% | 🟡 79% | 🟡 79% |
 | **[Block scale](#group-block-scale)** (39) | ❌ | ❌ | ❌ |
 | **[Convolution](#group-convolution)** (51) | 🟡 76% | 🟡 76% | 🟡 76% |
@@ -48,7 +48,7 @@ Generated from the committed support claims (11174 graphs, 486 catalogued option
 
 ## By engine
 
-**Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense)
+**Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx942AttentionDense](#hipkernelgfx942attentiondense) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense)
 
 - **Op (options)**: the number is how many options the op offers in the API, listed in [Options per op](#options-per-op).
 - **GPU columns**: share of the op's options that a graph this engine claims on that GPU and OS uses. `✅` all · `🟡 72%` 72% · `❌` none. L = Linux, W = Windows.
@@ -104,6 +104,12 @@ An op appears under an engine that claims at least one of its graphs somewhere.
 | **[ConvolutionFwd](#op-convolutionfwd)** (17) | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
 | **[ConvolutionWrw](#op-convolutionwrw)** (17) | 🟡 70% | 🟡 70% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 76% | ❌ | ❌ |
 | **[Pointwise](#op-pointwise)** (58) | ❌ | 🟡 12% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 12% | ❌ | ❌ |
+
+### hipkernel:Gfx942AttentionDense
+
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** (36) | ❌ | 🟡 38% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### hipkernel:Gfx950AttentionDense
 
