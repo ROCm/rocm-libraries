@@ -3,6 +3,12 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.2 for ROCm 10.3.0
+
+### Resolved Issues
+* [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
+  one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
