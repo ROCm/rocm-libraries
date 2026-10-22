@@ -2,13 +2,17 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
+## hipTensor 2.6.0 for ROCm 10.3
+
+### Added
+* Added support for the following new GPU targets:
+  * gfx11-7: gfx1170, gfx1171.
+
 ## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added
 * Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
 * Added `gfx1250-strict` as a supported offload target and classified its device pass as `gfx1250`.
-* Added support for the following new GPU targets:
-  * gfx11-7: gfx1170, gfx1171.
 
 ### Changed
 * Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_INVALID_VALUE` when a mode shared by an input tensor and the output tensor has a different extent in each, and `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is repeated within one tensor. An input tensor that carries a mode the output tensor doesn't carry is still rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`, since that would have to be reduced away rather than broadcast.
