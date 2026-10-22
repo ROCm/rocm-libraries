@@ -214,6 +214,16 @@ CASES = {
         layout="paged", ps=32, lens_q=(4, 40), gaps=(2, 0), lens_k=(70, 200),
         Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="sut",
     ),
+    # gpt-oss decode through hipDNN's paged graph: a dense Q with sinks. Rows of
+    # a sequence with no keys write O = 0 and LSE = the sink.
+    "gptoss_denseq_paged16_sinks_decode": dict(
+        layout="paged", ps=16, lens_q=(1, 1, 1), lens_k=(37, 0, 300), br=1,
+        flags="ds", **_GPTOSS,
+    ),
+    "denseq_used_paged32_sinks_window": dict(
+        layout="paged", ps=32, lens_q=(4, 0, 2), gaps=(0, 4, 2), lens_k=(70, 0, 33),
+        Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="dsu",
+    ),
     # A stale seqused_k past seqlen_k (the longest sequence's keys) is clamped
     # to seqlen_k: unclamped, the lookup would walk into the poisoned row padding
     # and the next sequence's block_table row.

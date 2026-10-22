@@ -817,6 +817,12 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         ("fp16", 128, 128, "none", None, "u", "ragged", 0, 32, None),
         ("bf16", 256, 256, "causal", None, "du", "paged", 16, 32, None),
     )
+    # Shipped paged catalog objects (causal, block_n 32) not reached above.
+    shipped_paged = (
+        ("bf16", 128, 128, "causal", None, "sdu", "paged", 64, 32, None),
+        ("fp16", 64, 64, "causal", None, "su", "paged", 32, 32, None),
+        ("fp16", 96, 96, "causal", None, "u", "paged", 16, 32, None),
+    )
 
     def feat(row):
         dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
@@ -848,6 +854,9 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
     out.append((feat(feats[8]), "gfx1201"))
     for arch in archs:
         for row in query_lengths:
+            out.append((feat(row), arch))
+    for arch in archs:
+        for row in shipped_paged:
             out.append((feat(row), arch))
     return out
 
