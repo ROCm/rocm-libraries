@@ -1597,6 +1597,7 @@ namespace rocalution
         copy_h2h(end - start, values, this->vec_ + start);
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HostVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                   BaseVector<ValueType>* values)
@@ -1627,6 +1628,7 @@ namespace rocalution
             }
         }
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // LCOV_EXCL_START
     template <typename ValueType>
