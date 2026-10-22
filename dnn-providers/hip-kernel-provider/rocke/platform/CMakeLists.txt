@@ -645,7 +645,8 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
-    # stride kernarg, and the 2D/3D mask_type spec fields.
+    # stride kernarg, the 2D/3D mask_type spec fields, and the 3D
+    # segment+reduce module's pairing.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -656,7 +657,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
-        "tests/library/tests/test_attention_tiled_3d_mask_type.py")
+        "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
