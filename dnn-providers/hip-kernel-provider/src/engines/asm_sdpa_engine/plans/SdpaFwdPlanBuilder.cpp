@@ -579,8 +579,15 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 batchMode,
                                 &cfg_fmha_fwd);
 
-    HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
-                               "Could not find matching kernel for parameter combination");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        key.empty(),
+        "Could not find matching kernel for parameter combination. "
+        " dataType = "
+            + dataTypeId + " qDim = " + std::to_string(qTensor->dims()->Get(3))
+            + " vDim  = " + std::to_string(vTensor->dims()->Get(3))
+            + " mask = " + std::to_string(static_cast<int>(maskType)) + " rounding = "
+            + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
+            + " batch = " + std::to_string(static_cast<int>(batchMode)));
 
     HIP_KERNEL_RETURN_FALSE_IF(
         !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
