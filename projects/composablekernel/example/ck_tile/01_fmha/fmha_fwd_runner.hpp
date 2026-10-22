@@ -123,11 +123,13 @@ auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
     return ck_tile::make_tuple(rtol, atol);
 }
 
-int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
+int num_splits_heuristic(int batch_nhead_mblocks,
+                         int num_SMs,
+                         int max_splits,
+                         float fill_threshold = 0.8f)
 {
-    // If we have enough to almost fill the SMs, then just use 1 split.
-    // num_SMs counts 4 blocks per CU, so 0.5f cuts over at 2 workgroups per CU.
-    if(batch_nhead_mblocks >= 0.5f * num_SMs)
+    // If we have enough to almost fill the SMs, then just use 1 split
+    if(batch_nhead_mblocks >= fill_threshold * num_SMs)
     {
         return 1;
     }
@@ -190,16 +192,30 @@ int override_num_splits_if_necessary(int batch,
         // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
         const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
 
-        // Cap the split count so every split keeps enough KV tiles to amortise
-        // its prologue and the combine pass. kN0 matches generate.py, as kM0 does.
-        constexpr int kN0               = 64;
-        constexpr int kMinTilesPerSplit = 8;
-        const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
-        const int max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
+        // Both tweaks below are measured on gfx1250 only. They also assume the
+        // bn0 64 that every gfx125 split-kv tile uses, while gfx9/gfx12 also
+        // emit bn0 128. Leave other targets on the original behaviour.
+        const bool is_gfx125 = std::string{props.gcnArchName}.compare(0, 6, "gfx125") == 0;
+
+        int max_splits      = 128;
+        float fill_threshold = 0.8f;
+        if(is_gfx125)
+        {
+            // Cap the split count so every split keeps enough KV tiles to
+            // amortise its prologue and the combine pass.
+            constexpr int kN0               = 64;
+            constexpr int kMinTilesPerSplit = 8;
+            const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
+            max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
+            // num_SMs counts 4 blocks per CU, so this stops splitting at 2
+            // workgroups per CU instead of 3.2.
+            fill_threshold = 0.5f;
+        }
 
         return num_splits_heuristic(batch * nhead * num_m_blocks,
                                     props.multiProcessorCount * num_blocks_per_SM,
-                                    max_splits);
+                                    max_splits,
+                                    fill_threshold);
     }
 
     return num_splits;
