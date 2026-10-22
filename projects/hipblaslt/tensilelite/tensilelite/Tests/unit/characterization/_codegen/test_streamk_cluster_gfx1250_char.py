@@ -11,7 +11,7 @@ rank in WorkGroup0/1/2; the reread would overwrite it, so the enableCluster
 guard skips it.
 
 Uses StreamK/StaticGrid with ClusterDim=[2, 1] and tree reduction. The same
-geometry also selects cooperative loads and the spatial cluster schedule.
+geometry uses independent tensor loads with the spatial cluster schedule.
 """
 
 import os
@@ -61,5 +61,7 @@ def test_streamk_cluster_gfx1250_emits_assembly():
         assert "PersistentLoopArgsVersion: 2" in src
         assert "logical StreamK worker = hardware cluster" in src
         assert "physical partial slot = cluster * peers + peer" in src
-        assert "s[sgprMulticastMaskB]" in src
+        assert "tensor_load_to_lds" in src
+        assert "s[sgprMulticastMaskA]" not in src
+        assert "s[sgprMulticastMaskB]" not in src
         assert "phantom tiles skip the store" in src
