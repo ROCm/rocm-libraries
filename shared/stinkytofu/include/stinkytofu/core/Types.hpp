@@ -153,11 +153,23 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// The GIR frame pipeline owns synchronization and materializes its fences after
+        /// scheduling. Keep the DAG unconstrained, but let candidate selection avoid orders that
+        /// the final InsertWaitAluPass would have to repair.
+        bool girFramePipeline = false;
+        /// GIR-frame-only minimum modeled distance from a RAW publication point to the
+        /// tensor-load group bracketed by that RAW and the next one. 0 disables.
+        int clusterBarrierTensorLoadDelayCycles = 0;
         /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
         /// share a PSEUDO memory token are chained into dsReadPriority order.
         /// Loads on different tokens are not ordered against each other. Set
         /// false to leave a ready lower-priority ds_load free to issue first.
         bool lockDsReadOrder = true;
+        /// Mirrors ModuleOptions::LockWmmaOrder. Defaults off: the WMMA ready queue is
+        /// ranked by data-ready latency, so a WMMA still waiting on its ds_load is
+        /// overtaken. Set true to issue WMMAs in program order; the loads around them
+        /// still move, and a not-yet-ready WMMA is forced after its wait elapses.
+        bool lockWmmaOrder = false;
         /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
         /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
         bool enableESM2TrackValuVsrc = false;

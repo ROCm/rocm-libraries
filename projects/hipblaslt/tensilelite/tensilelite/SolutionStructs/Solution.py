@@ -54,10 +54,12 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
-from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
+from ..Components.TDMFuse import tdmBothTensors, tdmFusedGroups, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
+from ..Components.LoopModel import Order, Registers
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
+from ..Components import TDMSplit
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -248,6 +250,15 @@ def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
       return False
 
   return True
+
+def localReadPair(state, base):
+  """`(decoupled, a, b)` for PrefetchLocalRead/ClusterLocalRead, falling back to the scalar."""
+  scalar = state.get(base, 0)
+  a, b = state.get(base + "A"), state.get(base + "B")
+  if a is None and b is None:
+    return False, scalar, scalar
+  return True, scalar if a is None or int(a) == -1 else a, \
+      scalar if b is None or int(b) == -1 else b
 
 
 def _disableRuntimeStaggerU(state):
@@ -906,6 +917,119 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    if state.pop("TDMSplit", 0):
+      if int(state.get("TDMSplitA", 0) or 0) or int(state.get("TDMSplitB", 0) or 0):
+        reject(state, printRejectionReason,
+               "TDMSplit is shorthand for TDMSplitA=1 and TDMSplitB=1, so it cannot be combined "
+               "with an explicit TDMSplitA=%s/TDMSplitB=%s -- set one spelling or the other."
+               % (state.get("TDMSplitA"), state.get("TDMSplitB")))
+        return
+      state["TDMSplitA"] = 1
+      state["TDMSplitB"] = 1
+
+    if "LoopOrder" not in state:
+      try:
+        Order.calculate(state)
+      except (RuntimeError, ValueError) as error:
+        reject(state, printRejectionReason, str(error))
+        return
+
+    # The traversal order is only meaningful on the LoopModel path.  Naming a non-default one off
+    # that path is a no-op that would spawn redundant, mis-deduped baseline kernels, so reject it.
+    if (int(state.get("WmmaInnerOrder", 1) or 1) != 1
+        or int(state.get("WmmaOuterOrder", 0) or 0) != 0) \
+        and not state.get("UseLoopModel", False):
+      reject(state, printRejectionReason,
+             "WmmaInnerOrder/WmmaOuterOrder require UseLoopModel (the traversal order is a "
+             "LoopModel-only knob)")
+      return
+
+    # Same for the extra axis: only the LoopModel nest has one to add.
+    _statedFactors = [_name for _name in Order.FACTOR_PARAM.values()
+                      if int(state.get(_name, 1) or 1) > 1]
+    if _statedFactors and not state.get("UseLoopModel", False):
+      reject(state, printRejectionReason,
+             "%s require UseLoopModel (the extra wmma axis is a LoopModel-only knob)"
+             % "/".join(_statedFactors))
+      return
+
+    # UseLoopModel routes the inner-loop body through the LoopModel
+    if state.get("UseLoopModel", False):
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason, "UseLoopModel is only supported on gfx1250")
+        return
+
+      def _ulm_reject(state, p):
+        reject(state, printRejectionReason, f"UseLoopModel not supported with {p}")
+        return None
+
+      _macA = state["ProblemType"]["MacDataTypeA"]
+      _macB = state["ProblemType"]["MacDataTypeB"]
+      if not all((t.isBFloat16() or t.is8bitFloat()) for t in (_macA, _macB)):
+        reject(state, printRejectionReason,
+               "UseLoopModel supports only bf16 and 8-bit-float inputs (got %s/%s)"
+               % (_macA.toChar(), _macB.toChar()))
+        return
+      _mxA = int(state["ProblemType"]["MXBlockA"] or 0)
+      _mxB = int(state["ProblemType"]["MXBlockB"] or 0)
+      if _mxA and _mxB and _mxA != _mxB:
+        reject(state, printRejectionReason,
+               "UseLoopModel: MXBlockA=%d != MXBlockB=%d — the WMMA carries one block modifier "
+               "for both scale operands" % (_mxA, _mxB))
+        return
+      if bool(_mxA) != bool(_mxB):
+        reject(state, printRejectionReason,
+               "UseLoopModel does not support one-sided MX (MXBlockA=%d MXBlockB=%d): the absent "
+               "side needs the scaffold's ValuMXSDummy, whose width follows the present side's "
+               "block size" % (_mxA, _mxB))
+        return
+
+      if state["_ScheduleIterAlg"] != 0:
+        reject(state, printRejectionReason,
+               "UseLoopModel supports only ScheduleIterAlg 0 or 4 (Stinkytofu)")
+        return
+
+      if state["HalfPLR"]:
+        reject(state, printRejectionReason,
+               "UseLoopModel does not support HalfPLR: under theta `VgprGroup` IS the prefetch "
+               "unit, so halving it also halves what PrefetchLocalRead counts and HalfPLR's own "
+               "PLR==1 requirement no longer describes the same schedule.  Say the shape "
+               "directly -- VgprGroupA/B=2 with VgprAllocA/B=3 is HalfPLR's 1.5 buffers.")
+        return
+
+      if (state.get("UseSubtileImpl", False) or
+          state["InnerUnroll"] != 1 or
+          (state.get("TDMInst", 0) & 0x3) != 0x3 or
+          not state.get("EnableMatrixInstruction", False) or
+          state.get("StreamK", 0) != 0):
+        return _ulm_reject(state, "")
+
+      # TDMSplit factors either the operand's free axis or its shared-K axis.
+      _split = TDMSplit.split_factors(state)
+      if _split is not None:
+        _aMT, _bMT, _aDU, _bDU = _split
+        for _tc, _wt, _n in (("A", state["MIWaveTile"][0], _aMT), ("B", state["MIWaveTile"][1], _bMT)):
+          try:
+            TDMSplit.factor_axis(_wt, _n, "MIWaveTile%s" % _tc)
+          except ValueError as exc:
+            reject(state, printRejectionReason, "UseLoopModel requires %s" % exc)
+            return
+
+          # Wave placement is a separate physical fact.  It controls which region aliases a read
+          # across waves, but never changes the split or inner axis extents.
+          _vw = state.get("VectorWidth%s" % _tc) or 1
+          try:
+            _span = max(1, min(_n, int(TDMSplit.wave_region_span(state, _tc)) or _n))
+          except Exception:
+            _span = _n
+          _per = _wt // _span if _span else _wt
+          if _n > 1 and (_wt % _span or _vw > _per):
+            reject(state, printRejectionReason,
+                   "UseLoopModel: VectorWidth%s=%d does not fit the physical TDMSplit wave span "
+                   "(MIWaveTile=%d / wave-region-span=%d = %d tile(s))"
+                   % (_tc, _vw, _wt, _span, _per))
+            return
 
     # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
     # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
@@ -1659,8 +1783,11 @@ class Solution(collections.abc.Mapping):
         if not Solution.isVgprForLocalReadPackingDoable(state, isaInfoMap):
           reject(state, printRejectionReason, "Does not meet the requirement for DirectToVgpr%c + TLU%c + numByte < 4"%(tc, tc))
           return False
-        # force ClusterLocalRead=1 for DTV + pack
+        # force ClusterLocalRead=1 for DTV + pack -- the pair follows, so one answer stands
         state["ClusterLocalRead"] = 1
+        for _tc in ("A", "B"):
+          if "ClusterLocalRead" + _tc in state:
+            state["ClusterLocalRead" + _tc] = 1
     else:
       # numBytes >= 4 case
       if state["ProblemType"]["TLU%c"%tc] and state["MIInputPerThread"] > 1:
@@ -2154,7 +2281,35 @@ class Solution(collections.abc.Mapping):
           % (state["PrefetchGlobalRead"], dcpPgrA, dcpPgrB, dcpPinned))
       state["PrefetchGlobalRead"] = dcpPinned
 
+    try:
+      Order.calculate(state)
+    except (RuntimeError, ValueError) as error:
+      reject(state, printRejectionReason, str(error))
+      return
+
+    statedLoopModelRegisters = [
+        name
+        for side in ("A", "B")
+        for name in ("VgprGroup" + side, "VgprAlloc" + side)
+        if state.get(name) is not None and int(state[name]) != -1
+    ]
+    if statedLoopModelRegisters and not state.get("UseLoopModel"):
+      reject(state, printRejectionReason,
+             "%s is UseLoopModel-only: leave it at -1"
+             % ", ".join(statedLoopModelRegisters))
+      return
+    if statedLoopModelRegisters:
+      state["SuppressNoLoadLoop"] = True
+
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
+    # A REJECTION IN THE CALL ABOVE MUST STOP US HERE.  It signals one by returning early, and 49
+    # of its reject sites sit above the `UseDotInstruction` assignment -- falling through then
+    # reads a key that was never written and raises `KeyError: 'UseDotInstruction'`, which
+    # BenchmarkProblems swallows into a one-line "Error processing permutation", losing the reason.
+    # GUARD ON THE CALLEE'S COMPLETION FLAG, not on `Valid`: `Valid` is False for a solution any
+    # earlier stage refused, and those have finished assigning.
+    if not state["AssignedProblemIndependentDerivedParameters"]:
+      return
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
@@ -2889,7 +3044,11 @@ class Solution(collections.abc.Mapping):
     #  - The "NoLoad" loop is only generated if PrefetchGlobalRead>0
     #  - And Suppress does not work if GSU>1 for some reason
     if state["SuppressNoLoadLoop"]:
-      if not (bufferLoad and state["PrefetchGlobalRead"] == 1 and (state["GlobalSplitU"]==1 or state["GlobalSplitU"]==-1)):
+      _vgprLoopModel = state.get("UseLoopModel", False)
+      _supportedPgr = state["PrefetchGlobalRead"] == 1 or (
+          _vgprLoopModel and state["PrefetchGlobalRead"] > 0)
+      if not (bufferLoad and _supportedPgr
+              and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1)):
         state["SuppressNoLoadLoop"] = False
 
     #print("PackedC0IdxChars", state["PackedC0IdxChars"])
@@ -2978,6 +3137,23 @@ class Solution(collections.abc.Mapping):
     # Element sizes that have a ds_load_tr* read: ds_load_tr4_b64, tr6_b96,
     # tr8_b64 and tr16_b128. Keep in step with the arms of isLDSTrEnabled below.
     _LDS_TR_READ_BYTES = (0.5, 0.75, 1, 2)
+    # VW vs ONE TDMSPLIT REGION -- the check lives at the earlier TDMSplit block, NOT here.
+    #
+    # It belongs at that site, in that form, for two reasons:
+    #
+    #  * The read ADDRESS is already right.  `LraTileAssignment` folds the wave offset into the
+    #    local-read address (`wOffset = wtid0 * strideWave`, `strideWave = numTileInInst *
+    #    matrixInstT * VectorWidth`), and an MT split under unroll-major leaves the regions
+    #    CONTIGUOUS, so wave `w` starting at row `w*strideWave` lands at region `w`'s base with no
+    #    separate region term.  The gate's wording ("its reads address the wrong one") does not
+    #    hold for this layout.
+    #  * Ordering uses the exact per-agent frame address, not a unioned memory token:
+    #    `theta.Hop.region_agent_relative` says the explicit region term is zero because the wave
+    #    offset already selected this agent's region. Other agents are symmetric.
+    #
+    # Moving the check here so it also fired for an auto `VectorWidth` would REJECT the fp8
+    # split cells, which is coverage loss for a shape whose address is correct.  Leaving the
+    # check where it was keeps behaviour exactly as it was before this work.
 
     def isLDSTrEnabled(asmCaps: Dict, hasLDSTrans: bool, unrollMajorLDS: bool, dtv: bool, numBytes: int):
       if unrollMajorLDS:
@@ -3095,6 +3271,9 @@ class Solution(collections.abc.Mapping):
     _applySubIterSetting(_canEnableSubIter())
     if state["ForceUnrollSubIter"]:
       state["ClusterLocalRead"] = 1
+      for _tc in ("A", "B"):
+        if "ClusterLocalRead" + _tc in state:
+          state["ClusterLocalRead" + _tc] = 1
       state["TailloopInNll"] = False
 
     if state["VectorWidthA"] == -1:
@@ -3322,6 +3501,62 @@ class Solution(collections.abc.Mapping):
                "(DepthU=%d * 0.25 // 2)=%d < NumWaves//2=%d)" % (state["DepthU"], metadataKMajorDimension, numComp))
         return
 
+    # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
+    tdmFuse: int = state.get("TDMFuse", 0)
+    # A single wave shares no descriptor, so an unfused row is already TDMFuse=0.
+    if tdmFuse == 1 and state["NumWaves"] <= 1 and tdmGroupingName(state) == "unfused":
+      state["TDMFuse"] = tdmFuse = 0
+    if tdmFuse:
+      if not tdmBothTensors(state):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d needs the TDM on both tensors (TDMInst=3); got TDMInst=%d"
+               % (tdmFuse, state["TDMInst"]))
+        return
+      if tdmFuse in (2, 3):
+        if state["NumWaves"] != 4:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d requires NumWaves=4 for its 2/1/1 split; got %d"
+                 % (tdmFuse, state["NumWaves"]))
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d requires UseSubtileImpl=0" % tdmFuse)
+          return
+        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d requires MX scales on both tensors" % tdmFuse)
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d does not support sparse metadata" % tdmFuse)
+          return
+      if tdmFuse == 1:
+        if state["NumWaves"] <= 1:
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 requires NumWaves > 1 for parity grouping; got %d"
+                 % state["NumWaves"])
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 requires UseSubtileImpl=0")
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 does not support sparse metadata")
+          return
+      # Catch a row declined by a precondition no arm checks.
+      if not tdmGroupingAccepted(state):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
+        return
+
+    # Check PAP after TDMFuse-specific errors.
+    if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
+      papGroupingReason = tdmPapRejectReason(state)
+      if papGroupingReason:
+        reject(state, printRejectionReason, papGroupingReason)
+        return
+
     if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
       if not (state["enableTDMA"] and state["enableTDMB"]):
         reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires TDMInst == 3 (enableTDMA and enableTDMB)")
@@ -3345,7 +3580,12 @@ class Solution(collections.abc.Mapping):
 
     # TDMSplit is disabled: it has unresolved read-token/tensorcnt races under
     # the decoupled load-vs-compute wave layout. Reject any solution requesting it.
-    if state["TDMSplit"]:
+    #
+    # SCOPED TO THE SCAFFOLD PATH.  The races are in the scaffold's own split walk, which is the
+    # part GIR replaces: under UseLoopModel the region walk, its tokens and its fences are all
+    # GIR's, so the disable does not apply there.  `TDMSplit` is per-operand now, so the
+    # truthiness test on the old scalar becomes `any_split`.
+    if TDMSplit.any_split(state) and not state["UseLoopModel"]:
       reject(state, printRejectionReason, "TDMSplit is currently disabled")
       return
 
@@ -3419,10 +3659,6 @@ class Solution(collections.abc.Mapping):
         if state.get("UseSubtileImpl"):
           reject(state, printRejectionReason,
                  "TDMFuse=1 requires UseSubtileImpl=0")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires MX scales on both tensors")
           return
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
@@ -3785,8 +4021,11 @@ class Solution(collections.abc.Mapping):
     # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic. The MX
     # TileSpan halving is deliberately not modelled: leaving it out overstates R,
     # which understates k, and only the understating direction is safe here.
-    numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
-                    else state["PrefetchLocalRead"] + 1
+    # Registers.py already calculated each operand's VA from CLR/PLR/VG.
+    # Re-deriving it here was a second owner and could price a different ring.
+    def _localReadBuffers(tc):
+      return int(state["VgprAlloc" + tc])
+    numVgprBuffer = max(_localReadBuffers("A"), _localReadBuffers("B"))
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
     residentPerKTile = numVgprBuffer * (
@@ -4014,7 +4253,7 @@ class Solution(collections.abc.Mapping):
         numComponents = state["NumWaves"] // 2
         du = state["_DepthU%s" % tc]
         sparse = state["ProblemType"]["Sparse"]
-        dim1Divisor = 2 if state["TDMSplit"] and not sparse else 1
+        dim1Divisor = 2 if state["TDMSplit%s" % tc] and not sparse else 1
 
         # _DepthU{tc} is the effective A/B storage depth: it equals DepthU for
         # dense tensors and already accounts for the compressed sparse operand.
@@ -4622,7 +4861,7 @@ class Solution(collections.abc.Mapping):
         # If the LRVW is set by the user, validate the configuration and rejects if,
         #   - state["LocalReadVectorWidth{tc}"] * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 if not sparse
         #   - state["LocalReadVectorWidth{tc}"] // 2 * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 is sparse
-        #   - state["LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and LDS is not transposed 
+        #   - state["LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and LDS is not transposed
         def isAutoLRVW(tc) -> bool:
           autoLRVW = False
           if state[f"LocalReadVectorWidth{tc}"] != -1:
@@ -5437,6 +5676,53 @@ class Solution(collections.abc.Mapping):
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
 
+    if state.get("UseLoopModel", 0):
+      _noRead = [tc for tc in ("A", "B")
+                 if not (state["LDSTrInst"] or state["UnrollMajorLDS%s" % tc])]
+      if _noRead:
+        reject(state, printRejectionReason,
+               "UseLoopModel: operand(s) %s have UnrollMajorLDS=0 and LDSTrInst=False, so the read "
+               "leaf has no path for them (it implements the LDS-transpose and the general "
+               "unroll-major reads only, #91).  A tile-major layout is not unroll-major -- pin "
+               "LDSTrInst=True for it." % ("+".join(_noRead)))
+        return
+
+    if tdmFusedGroups(state):
+      _regions = {"A": TDMSplit.split_of(state, "A")[0], "B": TDMSplit.split_of(state, "B")[0]}
+      _mxBoth = bool(state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"])
+      if _mxBoth:
+        _regions["MXSA"] = 1        # scales are never split — `TDMSplitA/B` name the data only
+        _regions["MXSB"] = 1
+      for _g in tdmFusedGroups(state):
+        _counts = {_m: _regions[_m] for _m in _g if _m in _regions}
+        # An unsplit member rides region 0 and is nulled for the rest of the walk, so {1, R} is
+        # supported; two different splits in one group still are not.
+        if len({_c for _c in _counts.values() if _c > 1}) > 1:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d groups %s into ONE cooperative tensor_load, but its members have "
+                 "DIFFERENT REGION COUNTS (%s) under TDMSplitA=%s/TDMSplitB=%s.  A fused movement "
+                 "walks one region sequence, so two members split DIFFERENT ways cannot pair "
+                 "by index (an unsplit member is fine -- it rides region 0).  Give the split "
+                 "members the same number of regions -- the two AXES may differ, TDMSplitA=1 with "
+                 "TDMSplitB=2 is two regions each and is allowed."
+                 % (state["TDMFuse"], "+".join(_g),
+                    ", ".join("%s=%d" % kv for kv in sorted(_counts.items())),
+                    state.get("TDMSplitA"), state.get("TDMSplitB")))
+          return
+
+    _quantumSplit = TDMSplit.split_factors(state)
+    if _quantumSplit is not None and (_quantumSplit[2] > 1 or _quantumSplit[3] > 1):
+      _mik = state["MatrixInstK"]
+      for _tc, _n in (("A", _quantumSplit[2]), ("B", _quantumSplit[3])):
+        if _n > 1 and (_mik <= 0 or (state["DepthU"] // _n) % _mik != 0):
+          reject(state, printRejectionReason,
+                 "TDMSplit%s=2 (DU split by %d) leaves %d unroll elements per storage region, "
+                 "which is not a multiple of MatrixInstK=%d.  A region is a separately packed LDS "
+                 "block, so a K slab straddling the boundary would need a per-lane region term "
+                 "that neither read path derives."
+                 % (_tc, _n, state["DepthU"] // _n, _mik))
+          return
+
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
       # Disable TailloopInNll
@@ -5551,9 +5837,13 @@ class Solution(collections.abc.Mapping):
     if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
       #1LDS buffer must be 0 for DirectToLdsA
       state["1LDSBuffer"] = 0
-    # MX case
+    # MX case.  `DirectToLdsMXS*` is only assigned for a side that HAS a scale, so a problem
+    # carrying one on A alone compares the live side and leaves the absent one out.
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+      if (state["ProblemType"]["MXBlockA"]
+          and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
+          or (state["ProblemType"]["MXBlockB"]
+              and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
       if state["DirectToLdsA"] != state["DirectToLdsB"]:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
@@ -5903,7 +6193,7 @@ class Solution(collections.abc.Mapping):
           and state["enableTDM%s" % tc]
           and state["NumWaves"] > 1
           and not state.get("UseSubtileImpl", False)
-          and not state["TDMSplit"]
+          and not state["TDMSplit%s" % tc]
           and state["UnrollMajorLDS%s" % tc]
           and pad != 0
           and block != 0)
@@ -6429,6 +6719,15 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
+    if state.get("UseLoopModel", False) and state["PrefetchGlobalRead"] > numLdsBlk:
+      reject(state, printRejectionReason,
+             "UseLoopModel requires the LDS ring to be at least as deep as the prefetch: "
+             "PrefetchGlobalRead=%d > NumLdsBlk=%d, so the prologue's chunk %d overwrites the "
+             "buffer chunk 0 is still waiting to be read from (paper 2.4 S >= delta).  TDM writes "
+             "LDS directly, so unlike the G2L path these two depths are the same quantity."
+             % (state["PrefetchGlobalRead"], numLdsBlk, numLdsBlk))
+      return
+
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
@@ -6478,6 +6777,20 @@ class Solution(collections.abc.Mapping):
           _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
             if _segRes2["applicable"] else _segRes2["reason"]
           reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
+
+    # AFTER both resolution points, so the final value is the one tested.  LDSSI's components
+    # partition the FREE axis, so it can only express a free-axis split; a DU split's regions are
+    # K-ranges inside a component and the segment stride is not their step.
+    _segSplit = TDMSplit.split_factors(state)
+    if state["LDSSegmentInterleave"] == 1 and _segSplit is not None \
+       and (_segSplit[2] > 1 or _segSplit[3] > 1):
+      reject(state, printRejectionReason,
+             "LDSSegmentInterleave=1 with a DU split (TDMSplitA=%d/TDMSplitB=%d) is not supported: "
+             "the interleave lays components out along the FREE axis, so its port/component "
+             "placement cannot express a reduction-axis partition and `tdmSplitLdsBoundary` would "
+             "return the component jump where the region step is the packed half-tile."
+             % (state.get("TDMSplitA", 0), state.get("TDMSplitB", 0)))
+      return
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
@@ -6876,13 +7189,23 @@ class Solution(collections.abc.Mapping):
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
-    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
+    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] \
+            and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"] \
+            and not state.get("UseLoopModel", False):
       # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
       if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
         reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
         return
       state["ClusterLocalRead"] = 0
       state["PrefetchLocalRead"] = 0
+    if state.get("UseLoopModel", False):
+      try:
+        # LoopIters is known only here, so this is also where WmmaFactorK is checked to
+        # divide it -- Order.axes factors every axis and raises ValueError when one does not.
+        Registers.calculate(state)
+      except (RuntimeError, ValueError) as error:
+        reject(state, printRejectionReason, str(error))
+        return
     if not state["EnableMatrixInstruction"]:
       state["ClusterLocalRead"] = 0
       # dot2: allow PLR=1
@@ -7010,6 +7333,9 @@ class Solution(collections.abc.Mapping):
     # support LocalReadVectorWidth > MIInputPerThread.
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
+      for _tc in ("A", "B"):
+        if "ClusterLocalRead" + _tc in state:
+          state["ClusterLocalRead" + _tc] = 0
       state["SuppressNoLoadLoop"] = True
       state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):

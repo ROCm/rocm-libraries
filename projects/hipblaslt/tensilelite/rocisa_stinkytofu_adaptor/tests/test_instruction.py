@@ -48,7 +48,7 @@ _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
+from rocisa_stinkytofu_adaptor.code import Module, _forward_gir_action  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     RegisterContainer,
     SMEMModifiers,
@@ -2748,6 +2748,43 @@ class TestSSchedulingFence(unittest.TestCase):
         inst = SSchedulingFence()
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
 
+    def test_carries_complete_gir_action(self):
+        inst = SSchedulingFence()
+        accesses = [{
+            "is_write": False,
+            "operand": 3,
+            "ring": 2,
+            "gen": 1,
+            "gdelta": -1,
+            "absolute": -1,
+            "cross_agent": True,
+        }]
+        inst.setGirActionData(17, 9, 3, accesses)
+        expected = {
+            "action_id": 17,
+            "anchor_action": 9,
+            "kind": 3,
+            "accesses": accesses,
+        }
+        self.assertEqual(inst.getGirActionData(), expected)
+
+        class Logical:
+            def set_gir_action(self, data):
+                self.gir_action = data
+
+        logical = Logical()
+        _forward_gir_action(inst, logical)
+        self.assertEqual(logical.gir_action, expected)
+
+    def test_rejects_narrowed_gir_action_id(self):
+        class Narrowed:
+            @staticmethod
+            def getGirActionData():
+                return 17
+
+        with self.assertRaisesRegex(TypeError, "bare action id"):
+            _forward_gir_action(Narrowed(), object())
+
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_to_stinky_logical(self):
         inst = SSchedulingFence(comment="test fence")
@@ -2757,7 +2794,17 @@ class TestSSchedulingFence(unittest.TestCase):
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_collected_by_module(self):
         m = Module()
-        m.add(SSchedulingFence())
+        inst = SSchedulingFence()
+        inst.setGirActionData(17, 9, 3, [{
+            "is_write": False,
+            "operand": 3,
+            "ring": 2,
+            "gen": 1,
+            "gdelta": -1,
+            "absolute": -1,
+            "cross_agent": True,
+        }])
+        m.add(inst)
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 

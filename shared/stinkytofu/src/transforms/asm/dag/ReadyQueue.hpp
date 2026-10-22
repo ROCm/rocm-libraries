@@ -130,6 +130,10 @@ struct DAGNode {
     bool sccChainDef = false;
     // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
     int earliestClock = INT_MIN;
+    // GIR frame cluster lead: this tensor load may issue only after the named RAW placement has
+    // accumulated tensorLoadDelayCycles of real scheduler time. UINT_MAX = no delay.
+    unsigned tensorLoadDelayAnchorId = UINT_MAX;
+    int tensorLoadDelayCycles = 0;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };

@@ -31,19 +31,19 @@ class ClusterLoadTDM(ClusterLoad):
     # -- topology decision ---------------------------------------------------
 
     def usesCombinedMask(self, kernel: Mapping) -> bool:
-        """True when the single-parity combined ``MulticastMask`` applies.
+        """True when A and B share one descriptor selected by WAVE PARITY.
 
-        Subtile and persistent cluster multicast both need the split A/B masks
-        (subtile issues A and B on every wave; the persistent cluster broadcasts A
-        and B along different cluster axes), so the combined parity mask applies
-        only to the wave-separated dense case whose TDMFuse grouping keeps each
-        wave on one cluster axis.
+        Only A and B have masks -- a scale borrows its parent's (`removeprefix('MXS')`), and
+        `computeMasks` never builds one for it. Subtile and persistent cluster multicast both
+        need the split names (subtile issues A and B on every wave; the persistent cluster
+        broadcasts A and B along different cluster axes), so the combined form applies only to
+        the wave-separated dense case whose TDMFuse row keeps each wave on one cluster axis.
         """
-        if persistentSpatialCluster(kernel):
+        if persistentSpatialCluster(kernel) or kernel.get("UseSubtileImpl"):
             return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
-        if not (tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")):
+        if not (tdmA and tdmB and kernel["NumWaves"] > 1):
             return False
         return self.waveParityMatchesMaskAxis(kernel)
 
@@ -60,16 +60,15 @@ class ClusterLoadTDM(ClusterLoad):
                 return False
         return True
 
-    def maskSgprName(self, kernel: Mapping, tc: str, *, subtile: bool = False,
-                     waveSeparated: bool = False) -> str:
-        """Resolve the multicast-mask SGPR name.
+    def maskSgprName(self, kernel: Mapping, tc: str, *, subtile: bool = False) -> str:
+        """Resolve the multicast-mask SGPR name; a scale borrows its parent tensor's.
 
-        Wave-separated (non-subtile) uses the combined ``"MulticastMask"`` when
-        ``usesCombinedMask`` holds; everything else uses the split
-        ``f"MulticastMask{tc}"`` (any ``MXS`` prefix stripped) so B never resolves
-        to the never-declared combined SGPR.
+        `subtile` is the caller's own statement that it issues A and B on every wave, so no
+        descriptor is parity-shared and the split names always apply. Wave separation is not a
+        caller's claim here: `usesCombinedMask` already decides it, so B never resolves to the
+        never-declared combined SGPR.
         """
-        if waveSeparated and not subtile and self.usesCombinedMask(kernel):
+        if not subtile and self.usesCombinedMask(kernel):
             return "MulticastMask"
         return f"MulticastMask{tc.removeprefix('MXS')}"
 
@@ -223,8 +222,7 @@ class ClusterLoadTDM(ClusterLoad):
     # -- descriptor attach ---------------------------------------------------
 
     def applyToDescriptor(self, writer: "KernelWriterAssembly", kernel: Mapping,
-                          group1: int | str, tc: str, *, subtile: bool = False,
-                          waveSeparated: bool = False) -> Module:
+                          group1: int | str, tc: str, *, subtile: bool = False) -> Module:
         """OR the multicast mask into descriptor ``Group1[word0]``.
 
         Folds the ``Multicast and enableCluster`` gate, mask-name choice, and the
@@ -233,7 +231,7 @@ class ClusterLoadTDM(ClusterLoad):
         from .TensorDataMover import TensorDataMoverLoad
         mod = Module()
         if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
-            mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+            mask = self.maskSgprName(kernel, tc, subtile=subtile)
             # A persistent self-only A-side mask SGPR is freed (see
             # persistentDropsSelfOnlyMaskA): with Ck == 1 the A mask carries no
             # multicast peers, so re-applying it is a no-op. Skip it so the freed
