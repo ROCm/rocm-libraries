@@ -41,9 +41,10 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocsparse
-# -c builds samples + tests + benchmarks; -d installs distro build dependencies (not googletest)
-# Pull the SuiteSparse test matrices once, from the rocm-libraries root:
-#   dvc pull -R projects/rocsparse/clients/matrices
+# Test matrices; in a sparse checkout, run `git sparse-checkout add .dvc` first
+dvc pull -R clients/matrices
+# -c builds samples + tests + benchmarks; -d installs distro packages but not googletest
+# (install libgtest-dev or gtest-devel first)
 ./install.sh -dc -a gfx942
 # equivalently, out-of-source from this directory:
 cmake -B build/release -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \

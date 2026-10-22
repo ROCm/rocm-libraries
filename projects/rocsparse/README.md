@@ -58,7 +58,7 @@ ROCm CMake, GoogleTest and the test matrices when they're missing.
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
     cd rocm-libraries
     git sparse-checkout init --cone
-    git sparse-checkout set projects/rocsparse # add projects/rocprim and projects/rocblas to include dependencies
+    git sparse-checkout set projects/rocsparse .dvc # add projects/rocprim and projects/rocblas to include dependencies
     git checkout develop # or use the branch you want to work with
     ```
 
@@ -82,7 +82,7 @@ ROCm CMake, GoogleTest and the test matrices when they're missing.
     # Command line options:
     #   -h|--help         - prints help message
     #   -i|--install      - install after build
-    #   -d|--dependencies - install build dependencies
+    #   -d|--dependencies - install distro build dependencies (not GoogleTest)
     #   -c|--clients      - build library clients too (combines with -i & -d)
     #   -g|--debug        - build with debug flag
     ./install.sh -dci

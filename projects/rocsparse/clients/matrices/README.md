@@ -5,6 +5,14 @@ converts for the rocSPARSE tests. Run `dvc pull -R projects/rocsparse/clients/ma
 root of the rocm-libraries repository to download them. Reading the DVC remote (`sparse-matrices`)
 doesn't require credentials.
 
+DVC reads its configuration from the `.dvc` directory at the repository root. A sparse checkout of
+`projects/rocsparse` omits that directory, and `dvc pull` then fails with
+`you are not inside of a DVC repository`. Add it to the checkout first:
+
+```shell
+git sparse-checkout add .dvc
+```
+
 ## Source and license
 
 The matrices are from the [SuiteSparse Matrix Collection](https://sparse.tamu.edu), formerly the

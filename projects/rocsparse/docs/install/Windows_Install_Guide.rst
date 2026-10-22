@@ -40,6 +40,13 @@ Building rocSPARSE from source also requires the following components and depend
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
 
+The tests need 24 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+Before building the tests, run ``dvc pull -R projects/rocsparse/clients/matrices`` from the root of the rocm-libraries repository.
+Reading from the DVC storage doesn't require credentials.
+In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
+``git sparse-checkout add .dvc`` first.
+Alternatively, configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
+
 When building rocSPARSE from source, select supported versions of the math library
 dependencies (:doc:`rocPRIM <rocprim:index>` and optionally :doc:`rocBLAS <rocblas:index>`). Given a version of rocSPARSE,
 you must use a version of rocPRIM (and optionally rocBLAS) that is the same or later. For example, it's
@@ -73,14 +80,15 @@ Use the following commands for a sparse checkout:
 .. note::
 
    To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
-   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas .dvc``.
+   The ``.dvc`` directory is needed to download the test matrices with ``dvc pull``.
 
 .. code-block:: shell
 
    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries
    git sparse-checkout init --cone
-   git sparse-checkout set projects/rocsparse
+   git sparse-checkout set projects/rocsparse .dvc
    git checkout release/rocm-rel-x.y  # or use the branch you want to work with
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
@@ -154,6 +162,15 @@ The client executables (``.exe`` files) are listed in the table below:
    "rocsparse_axpyi","Example C code that calls the ``rocsparse_axpyi`` function"
 
 The following table lists the common ways to use ``rmake.py`` to build the rocSPARSE library and client.
+
+.. note::
+
+   The tests need the SuiteSparse test matrices. Before running these commands, pull them with
+   ``dvc pull -R clients/matrices`` from the ``projects\rocsparse`` directory.
+   ``rmake.py`` downloads missing matrices only when you pass ``--matrices-dir``.
+   The clients also need GoogleTest. Pass ``--gtest-path`` with the directory that contains
+   ``GTestConfig.cmake``, or pass ``--cmake-darg ALLOW_FETCH_DEPS=ON`` to download GoogleTest and any missing
+   matrices during configuration.
 
 .. csv-table::
    :header: "Command","Description"
