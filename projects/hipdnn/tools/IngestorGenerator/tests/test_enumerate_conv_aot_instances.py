@@ -37,7 +37,7 @@ def _rocke_on_path():
 
 
 def _identity(**knobs):
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     fields = dict(
         arch="gfx950",
@@ -91,7 +91,7 @@ def synthetic_grid():
 
 
 def _label(identity):
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     return KernelIdentity.from_dict(identity).label()
 
@@ -178,7 +178,7 @@ def test_read_labels_refuses_a_malformed_label(tmp_path):
     ids=["defaults", "kept-knobs", "layout-knobs", "replicas", "empty-flavor"],
 )
 def test_compact_identity_round_trips_to_the_same_hash(change):
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     full = _identity(**change)
     compact = tool.compact_identity(full)
@@ -302,7 +302,7 @@ def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
     """The shipped catalog's lists are the tool's output for the committed labels and
     the rocKE tree beside them: a change to either has to regenerate the lists (and
     the bundle make_conv_aot_config.py builds from them)."""
-    from benchmarks.common.kernel_cache import current_llvm_flavor
+    from kernels.conv.kernel_identity import current_llvm_flavor
 
     committed = {
         dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)

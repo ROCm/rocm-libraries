@@ -1001,7 +1001,7 @@ const std::vector<AotGraph>& aotGraphs()
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
         {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 200, 200},
         {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 4, 200, 200},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 4, 0, 200, 200},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 0, 200, 200},
         {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 200, 200},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
         {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 36, 36},
@@ -1021,7 +1021,7 @@ const std::vector<AotGraph>& aotGraphs()
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
         {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
         {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 200, 200},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 39, 200, 200},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 53, 200, 200},
         // Each selects a seed width pair that no row above selects: 2/2/2, 4/4/2, 8/8/4,
         // 1/1/4, the default epilogue's 4/4/1 and cshuffle 2/2/1. The shipped catalog builds
         // no 4/4/2, 1/1/8, 4/4/1 or 2/2/1, so for C12K6, C3K8, C12K5 and C6K5 it runs every
@@ -1092,13 +1092,13 @@ const std::vector<AotSeedGraph>& aotSeedDirectGraphs()
         // Non-grouped: output widths every swept tile width divides, row and channel tails,
         // stride 2 and the swept dilations.
         {"NongroupedC64K96", {1, 64, 96, 10, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
-        {"NongroupedC32K64", {2, 32, 64, 7, 48, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 7, 4},
+        {"NongroupedC32K64", {2, 32, 64, 7, 48, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
         {"NongroupedC128K32", {1, 128, 32, 5, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
         {"NongroupedWo192", {1, 32, 32, 3, 192, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 14, 4},
         {"NongroupedWo160", {2, 64, 64, 2, 160, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 4},
         {"NongroupedWo128", {1, 64, 128, 4, 128, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 4},
         {"NongroupedWo384", {1, 16, 32, 2, 384, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 11, 4},
-        {"NongroupedWo80", {2, 32, 64, 3, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
+        {"NongroupedWo80", {2, 32, 64, 3, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
         {"NongroupedWo320", {1, 16, 32, 2, 320, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
         {"NongroupedC64K64Strided", {1, 64, 64, 13, 191, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 4},
         {"NongroupedC48K96Strided", {2, 48, 96, 9, 95, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 4},

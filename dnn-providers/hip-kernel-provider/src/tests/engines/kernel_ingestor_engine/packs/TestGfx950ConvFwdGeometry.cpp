@@ -910,22 +910,13 @@ TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsLaunchWhereAndHowTheAdapterDoes
 TEST(TestGfx950ConvFwdGeometry, NongroupedTileWidthsAreTheOnesASweepOfWoTries)
 {
     // tile_w_candidates in conv_direct_nongrouped.py: the exact divisors of Wo among one
-    // to six atoms, else the first width with the least waste.
+    // to six atoms, else every width with the least waste.
     for(const auto [tileW, wo, atom, fits] : std::vector<std::tuple<int, int, int, bool>>{
-            {32, 96, 32, true},
-            {96, 96, 32, true},
-            {64, 96, 32, false},
-            {48, 96, 16, true},
-            {80, 96, 16, false},
-            {32, 93, 32, true},
-            {64, 93, 32, false},
-            {16, 7, 16, true},
-            {32, 7, 16, false},
-            {16, 48, 16, true},
-            {32, 48, 16, false},
-            {32, 48, 32, true},
-            {192, 192, 32, true},
-            {224, 224, 32, false},
+            {32, 96, 32, true},  {96, 96, 32, true},  {64, 96, 32, false},  {48, 96, 16, true},
+            {80, 96, 16, false}, {32, 93, 32, true},  {96, 93, 32, true},   {64, 93, 32, false},
+            {16, 7, 16, true},   {32, 7, 16, false},  {16, 17, 16, true},   {32, 17, 16, true},
+            {48, 17, 16, false}, {16, 48, 16, true},  {32, 48, 16, false},  {32, 48, 32, true},
+            {64, 48, 32, true},  {96, 48, 32, false}, {192, 192, 32, true}, {224, 224, 32, false},
         })
     {
         SCOPED_TRACE(std::to_string(tileW) + " " + std::to_string(wo));

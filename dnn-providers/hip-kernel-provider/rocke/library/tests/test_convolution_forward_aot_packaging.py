@@ -4,11 +4,13 @@
 """CPU tests for the shape-generic AOT forward instances (hipkernel:Gfx950ConvFwdAot).
 
 An instance is packaged from a rocKE ``KernelIdentity``; these tests hold the adapter to
-the sweep it comes from. Implicit GEMM: the same kernel IR as ``kernel_sweep.build_kernel``
-and the same served-problem predicate as ``KernelCache.supports_problem``. Direct, every
-forward algorithm of the direct sweep: the same probe and IR as
-``direct_kernel_sweep.build_direct_job``, the served problems of ``supports_problem`` plus
-the per-shape re-validation ``plan_for`` runs, and ``plan_for``'s launch.
+the sweep it comes from. Implicit GEMM: the same kernel IR as ``kernel_for_job`` and the
+same served-problem predicate as ``KernelCache.supports_problem``. Direct, every
+forward algorithm of the direct sweep the packaged launch runs: the same probe and IR as
+``direct_kernel_for_job``, the served problems of ``supports_problem`` plus the
+per-shape re-validation ``plan_for`` runs, and ``plan_for``'s launch. Identity features
+the packaged launch does not model (group-merged implicit GEMM, grouped-halo and
+split-C direct kernels) are refused with their reason.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from benchmarks.common import direct_kernel_sweep, kernel_sweep
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
     AOT_DIRECT_ALGORITHMS,
+    AOT_REFUSED_GROUPED_HALO,
+    AOT_REFUSED_SPLIT_REDUCE,
     DIRECT_VARIANT_GROUPED,
     DIRECT_VARIANT_NONGROUPED,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
@@ -36,10 +40,11 @@ from builders.common.convolution_forward import (
     gfx950_conv_fwd_aot_problem_for_request,
     gfx950_conv_fwd_aot_runtime_candidates,
     gfx950_conv_fwd_aot_serves,
+    gfx950_conv_fwd_aot_spec_for_identity,
     supports_gfx950_conv_fwd_aot,
     supports_gfx950_conv_fwd_aot_problem,
 )
-from dispatch.grouped_convolution import ConvGroupedRequest
+from dispatch.grouped_convolution import ConvGroupedRequest, _admits
 from kernels.common.conv_abi import conv_direct_args_signature
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -50,7 +55,19 @@ _SEED = 2026
 _SAMPLE_PER_K_LOOP = 3
 
 
+def _packaged(identity: KernelIdentity) -> bool:
+    """Whether the packaged launch models ``identity``'s features: no group merging,
+    no grouped-halo or split-C direct kernel."""
+    if identity.is_direct:
+        knobs = json.loads(identity.knobs) if identity.knobs else {}
+        return identity.algorithm in AOT_DIRECT_ALGORITHMS and "split_c" not in knobs
+    return identity.group_merge == 1
+
+
 def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
+    """The implicit-GEMM instance of ``identity``, without the adapter's checks (the
+    whole sweep is converted below); :func:`test_the_adapter_converts_identities_as_the_tests_do`
+    holds it to ``gfx950_conv_fwd_aot_spec_for_identity``."""
     return Gfx950ConvFwdAotSpec(
         dtype=identity.dtype_a,
         tile_m=identity.tile_m,
@@ -85,7 +102,7 @@ def sweep_jobs():
     for dtype in ("fp16", "bf16"):
         jobs = kernel_sweep._direction_jobs("fwd", "gfx950", dtype, target, (2,), 64)
         by_loop: dict = {}
-        for job in jobs:
+        for job in filter(lambda j: _packaged(j.identity), jobs):
             key = (job.identity.unroll_k, job.identity.async_dma)
             by_loop.setdefault(key, []).append(job)
         for key in sorted(by_loop):
@@ -140,7 +157,9 @@ def knob_class_jobs():
         for job in kernel_sweep._direction_jobs(
             "fwd", "gfx950", dtype, target, (2,), 64
         ):
-            if kernel_sweep._spec_is_valid(job, "gfx950", dtype):
+            if _packaged(job.identity) and kernel_sweep._spec_is_valid(
+                job, "gfx950", dtype
+            ):
                 by_class.setdefault(_knob_class(job.identity), []).append(job)
         for key in sorted(by_class, key=repr):
             sample.append((dtype, rng.choice(by_class[key])))
@@ -165,7 +184,7 @@ def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
         spec = _spec(job.identity)
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = kernel_sweep.build_kernel(job, "gfx950", dtype)
+        theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         ours_ir = _lower_kernel_to_llvm_python(
             ours, arch="gfx950", llvm_flavor="llvm22"
         )
@@ -182,11 +201,63 @@ def test_every_sampled_sweep_identity_is_packageable(sweep_jobs):
         assert supports_gfx950_conv_fwd_aot(_spec(job.identity)) == (True, "ok")
 
 
+def test_the_adapter_converts_identities_as_the_tests_do(sweep_jobs):
+    for _, job in sweep_jobs:
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
+        assert (spec, reason) == (_spec(job.identity), ""), job.identity.label()
+        assert spec.identity() == job.identity
+
+
+def test_group_merged_identities_are_refused():
+    """The sweep's group-merged depthwise kernels launch another grid and record
+    builder-derived widths as 0; the packaged launch models neither."""
+    target = ArchTarget.from_gfx("gfx950")
+    merged = [
+        job.identity
+        for job in kernel_sweep._direction_jobs(
+            "fwd", "gfx950", "fp16", target, (2,), 64
+        )
+        if job.identity.group_merge > 1
+    ]
+    assert merged
+    for identity in merged[:: max(1, len(merged) // 50)]:
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        assert spec is None
+        assert f"group_merge={identity.group_merge} is not packaged" in reason
+
+
+def test_identities_off_the_sweep_or_with_unmodeled_fields_are_refused(sweep_jobs):
+    identity = next(
+        job.identity
+        for _, job in sweep_jobs
+        if not (job.identity.unroll_k or job.identity.async_dma)
+    )
+    for change, reason in (
+        ({"split_k": 2}, "split_k=2 is not packaged"),
+        ({"chiplet_swizzle": True}, "chiplet_swizzle=True is not packaged"),
+        ({"is_3d": True}, "is_3d=True is not packaged"),
+        ({"streamk": "dp_sk"}, "streamk='dp_sk' is not packaged"),
+        ({"direction": "dgrad"}, "not a gfx950 forward"),
+        ({"arch": "gfx942"}, "not a gfx950 forward"),
+        ({"dtype_b": "bf16"}, "mixed operand dtypes"),
+        # Valid for the builder, but the AOT sweep never builds it: "basic" emits
+        # the code of "mem".
+        ({"pipeline": "basic"}, "not an identity of rocKE's gfx950 forward AOT sweep"),
+    ):
+        spec, why = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, **change))
+        assert spec is None and reason in why, (change, why)
+    # The instance_id must be the hash of the identity the fields spell.
+    spec = _spec(identity)
+    other = _spec(replace(identity, epilogue="default", vector_size_c=1))
+    ok, why = supports_gfx950_conv_fwd_aot(replace(spec, instance_id=other.instance_id))
+    assert not ok and "is not the stable_hash()" in why, why
+
+
 def test_packaged_ir_is_the_sweep_kernel_up_to_its_symbol(sweep_jobs):
     for dtype, job in sweep_jobs:
         spec = _spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = kernel_sweep.build_kernel(job, "gfx950", dtype)
+        theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         ours_ir = _lower_kernel_to_llvm_python(
             ours, arch="gfx950", llvm_flavor="llvm22"
@@ -370,7 +441,8 @@ _SELECTION_GRID = (
 
 @pytest.fixture(scope="module")
 def full_sweep():
-    """Every valid gfx950 forward identity of the AOT sweep, per dtype, in rocKE's order."""
+    """Every valid gfx950 forward identity of the AOT sweep the packaged launch models,
+    per dtype, in rocKE's order: the sweep without its group-merged kernels."""
     target = ArchTarget.from_gfx("gfx950")
     jobs = max(1, min(os.cpu_count() or 1, 32))
     return {
@@ -383,15 +455,17 @@ def full_sweep():
                 directions=("fwd",),
                 jobs=jobs,
             )
+            if _packaged(job.identity)
         ]
         for dtype in ("fp16", "bf16")
     }
 
 
 def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
-    """Over the whole sweep, the instances selected for a problem are exactly the ones
-    rocKE's --run-from-cache benchmark runs by default: KernelCache.compatible, then
-    _widest_vector_sizes. Both functions are rocKE's own, called on the identities."""
+    """Over the whole packaged sweep, the instances selected for a problem are exactly
+    the ones rocKE's --run-from-cache benchmark runs by default from a cache holding
+    them: KernelCache.compatible, then _widest_vector_sizes. Both functions are rocKE's
+    own, called on the identities."""
     from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
 
     narrowed = kept_default = 0
@@ -457,12 +531,19 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
 
 #: Direct identities per (dtype, algorithm) in the sweep's forward grid.
 _DIRECT_COUNTS = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
     "direct_nongrouped": 3058,
+}
+#: Forward direct identities per dtype the packaged launch refuses: grouped-halo,
+#: split-C non-grouped and the split-C fold.
+_REFUSED_DIRECT_COUNTS = {
+    "direct_grouped_halo": 2850,
+    "direct_nongrouped": 1816,
+    "direct_split_reduce": 4,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -475,10 +556,43 @@ def _direct_spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
     return replace(_spec(identity), **aot_direct_instance_fields(identity))
 
 
+def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
+    """Grouped-halo kernels, split-C kernels and their fold need a launch the packaged
+    pack does not have, so the adapter refuses them, each with its reason."""
+    refused: dict = {}
+    for dtype, job in all_direct_jobs:
+        if _packaged(job.identity):
+            continue
+        key = job.identity.algorithm
+        refused[dtype, key] = refused.get((dtype, key), 0) + 1
+        if refused[dtype, key] > 40:
+            continue
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
+        assert spec is None, job.identity.label()
+        if key == "direct_grouped_halo":
+            assert reason == AOT_REFUSED_GROUPED_HALO
+        elif key == "direct_split_reduce":
+            assert reason == AOT_REFUSED_SPLIT_REDUCE
+        else:
+            split_c = json.loads(job.identity.knobs)["split_c"]
+            assert reason.startswith(f"split_c={split_c} is not packaged"), reason
+    assert refused == {
+        (dtype, algorithm): count
+        for dtype in ("fp16", "bf16")
+        for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+    }
+
+
 @pytest.fixture(scope="module")
-def direct_jobs():
+def direct_jobs(all_direct_jobs):
     """Every forward job of the direct sweep that the AOT engine packages, both
     dtypes, in the sweep's order."""
+    return [(dtype, job) for dtype, job in all_direct_jobs if _packaged(job.identity)]
+
+
+@pytest.fixture(scope="module")
+def all_direct_jobs():
+    """Every forward job of the direct sweep, both dtypes, in the sweep's order."""
     target = ArchTarget.from_gfx("gfx950")
     return [
         (dtype, job)
@@ -486,7 +600,6 @@ def direct_jobs():
         for job in direct_kernel_sweep.enumerate_direct_jobs(
             arch="gfx950", target=target, directions=("fwd",), dtype=dtype
         )
-        if job.identity.algorithm in AOT_DIRECT_ALGORITHMS
     ]
 
 
@@ -512,11 +625,12 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
             counts.get((dtype, job.identity.algorithm), 0) + 1
         )
         spec = _direct_spec(job.identity)
-        assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
+        assert gfx950_conv_fwd_aot_spec_for_identity(job.identity) == (spec, "")
+        assert spec.identity() == job.identity
         assert spec.direct_variant == AOT_DIRECT_ALGORITHMS[job.identity.algorithm]
         caps = direct_kernel_sweep.DirectCaps(**job.caps)
         assert spec.probe_problem() == direct_kernel_sweep.probe_problem(
-            caps, dtype, job.identity.algorithm
+            caps, dtype, job.identity.algorithm, json.loads(job.identity.knobs)
         )
         assert spec.direct_knobs() == json.loads(job.identity.knobs)
     assert counts == {
@@ -532,7 +646,7 @@ def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
     for dtype, job in sample:
         spec = _direct_spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = direct_kernel_sweep.build_direct_job(job, "gfx950", dtype)
+        theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         assert ours.name == spec.kernel_name()
         ours_ir = _lower_kernel_to_llvm_python(
@@ -706,6 +820,10 @@ def test_direct_served_problems_agree_with_the_direct_benchmarks_offer(direct_jo
         for problem in problems:
             ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
             theirs, why = _rocke_direct_serves(identity, problem)
+            if problem.sH == problem.sW and problem.pH == problem.pW:
+                # rocKE's dispatcher admits exactly what its AOT benchmark runs.
+                admitted, _ = _admits(identity, spec.request(problem))
+                assert admitted == theirs, (job.identity.label(), problem, why)
             if _known_difference(spec, problem, ours, reason, theirs):
                 continue
             assert ours == theirs, (job.identity.label(), problem, reason, why)

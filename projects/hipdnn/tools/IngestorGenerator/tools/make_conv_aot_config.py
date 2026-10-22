@@ -3,21 +3,27 @@
 # SPDX-License-Identifier: MIT
 """Turn rocKE AOT forward-conv instances into a hipkernel:Gfx950ConvFwdAot config.
 
-An instance is one rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
+An instance is one rocKE ``KernelIdentity`` (``kernels/conv/kernel_identity.py``):
 a compiled configuration with no problem extents, which serves every problem its
 capabilities admit. The input is a JSON list whose entries are either an identity
 dict (``KernelIdentity.to_dict()``) or an object carrying one under ``"identity"``;
 other keys of such an object are ignored here.
 
 Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
-launch supports: an implicit-GEMM identity of the AOT sweep, or a forward identity of
-the direct sweep (``benchmarks/common/direct_kernel_sweep.py``), any of its algorithms
-(``PACKAGED_DIRECT_ALGORITHMS``). Anything else is listed with its reason and the tool
-exits non-zero, unless ``--skip-unsupported`` is given. Entries
+launch supports: an implicit-GEMM identity of the AOT sweep
+(``kernels/conv/aot_jobs.py``), or a forward identity of the direct sweep
+(``kernels/conv/direct_aot_jobs.py``) of an algorithm the packaged launch runs
+(``PACKAGED_DIRECT_ALGORITHMS``). The rocKE adapter decides
+(``gfx950_conv_fwd_aot_spec_for_identity`` in
+``builders/common/convolution_forward.py``); it refuses, with a reason, every identity
+feature the packaged launch does not model: group-merged implicit GEMM, the
+grouped-halo and split-C direct kernels and any other field off its default.
+Anything refused is listed with its reason and the tool exits non-zero, unless
+``--skip-unsupported`` is given. Entries
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
 key that ties a packaged kernel back to the identity it was built from.
 
-The shipped catalog is rocKE's full forward sweep, one list per dtype
+The shipped catalog is a curated subset of rocKE's forward sweeps, one list per dtype
 (``configs/gfx950_conv_fwd_aot_<dtype>.instances.json``), written by
 ``tools/enumerate_conv_aot_instances.py``; ``--instances`` takes them all as one
 catalog. ``--engine-name`` emits the same instances as another engine over the
@@ -65,7 +71,9 @@ PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
-#: Identity fields the packaged forward launch takes from the identity.
+#: Identity fields the packaged forward launch takes from the identity
+#: (``AOT_IMPLICIT_GEMM_CARRIED`` of the rocKE adapter). Every other field must hold
+#: its KernelIdentity default; the adapter refuses the identity otherwise.
 _CARRIED = (
     "tile_m",
     "tile_n",
@@ -86,38 +94,6 @@ _CARRIED = (
     "async_chunk_a",
     "async_chunk_b",
     "grouped",
-)
-#: Identity fields that are not carried; each must hold its KernelIdentity default
-#: (they select emission the packaged launch or matcher does not model).
-_CONSTANT = (
-    "chiplet_swizzle",
-    "lds_layout",
-    "lds_k_pad",
-    "lds_k_outer",
-    "waves_per_eu",
-    "acc_epilogue",
-    "split_k",
-    "two_stage",
-    "ws_replicas",
-    "group_merge",
-    "num_load_waves",
-    "cshuffle_no_alias",
-    "is_3d",
-    "is_pointwise",
-    "filter_h",
-    "filter_w",
-    "filter_d",
-    "stride_h",
-    "stride_w",
-    "dilation_h",
-    "dilation_w",
-    "pad_h",
-    "pad_w",
-    "cpg",
-    "kpg",
-    "block_h",
-    "max_sub_gemms",
-    "knobs",
 )
 #: Spec field order of an implicit-GEMM Gfx950ConvFwdAotSpec; also its descriptor
 #: spec order.
@@ -279,13 +255,23 @@ def spec_order(spec) -> tuple:
 
 
 def instance_spec(identity_dict: dict):
-    """``(Gfx950ConvFwdAotSpec, "")`` for a supported identity, else ``(None, reason)``."""
-    from benchmarks.common.kernel_cache import KernelIdentity
+    """``(Gfx950ConvFwdAotSpec, "")`` for a supported identity, else ``(None, reason)``.
 
-    identity = KernelIdentity.from_dict(identity_dict)
-    if identity.direction == "direct_fwd":
-        return _direct_instance_spec(identity)
-    return _implicit_instance_spec(identity)
+    The rocKE adapter's ``gfx950_conv_fwd_aot_spec_for_identity``: the identity must
+    be one rocKE's forward sweeps build (``job_for_identity`` /
+    ``direct_job_for_identity``) and use no feature the packaged launch does not
+    model.
+    """
+    from builders.common.convolution_forward import (
+        gfx950_conv_fwd_aot_spec_for_identity,
+    )
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    try:
+        identity = KernelIdentity.from_dict(identity_dict)
+    except TypeError as exc:
+        return None, f"not a KernelIdentity: {exc}"
+    return gfx950_conv_fwd_aot_spec_for_identity(identity)
 
 
 def instance_specs(identities: list, jobs: int = 1) -> list:
@@ -300,107 +286,6 @@ def instance_specs(identities: list, jobs: int = 1) -> list:
     chunk = max(1, len(identities) // (jobs * 8))
     with multiprocessing.get_context("fork").Pool(jobs) as pool:
         return pool.map(instance_spec, identities, chunksize=chunk)
-
-
-def _carried_values(identity) -> dict:
-    values = {name: getattr(identity, name) for name in _CARRIED}
-    for name in ("unroll_k", "async_dma", "grouped"):
-        values[name] = int(values[name])
-    return values
-
-
-def _checked(spec):
-    from builders.common.convolution_forward import supports_gfx950_conv_fwd_aot
-
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
-    return (spec, "") if ok else (None, reason)
-
-
-def _implicit_instance_spec(identity):
-    from benchmarks.common.kernel_cache import KernelIdentity
-    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
-
-    defaults = KernelIdentity(
-        arch=identity.arch,
-        direction=identity.direction,
-        algorithm=identity.algorithm,
-        dtype_a=identity.dtype_a,
-        dtype_b=identity.dtype_b,
-        dtype_d=identity.dtype_d,
-        tile_m=0,
-        tile_n=0,
-        tile_k=0,
-        warp_m=0,
-        warp_n=0,
-        warp_tile_m=0,
-        warp_tile_n=0,
-        warp_tile_k=0,
-        pipeline="",
-        epilogue="",
-        wave_size=0,
-        vector_size_a=0,
-        vector_size_b=0,
-        vector_size_c=0,
-        llvm_flavor=identity.llvm_flavor,
-    )
-    if (identity.arch, identity.direction, identity.algorithm) != (
-        "gfx950",
-        "fwd",
-        "implicit_gemm",
-    ):
-        return None, (
-            f"not a gfx950 forward implicit-GEMM identity "
-            f"({identity.arch}, {identity.direction}, {identity.algorithm})"
-        )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        return None, "mixed operand dtypes are not packaged"
-    for name in _CONSTANT:
-        if getattr(identity, name) != getattr(defaults, name):
-            return None, (
-                f"{name}={getattr(identity, name)!r} is not packaged "
-                f"(only {getattr(defaults, name)!r})"
-            )
-    spec = Gfx950ConvFwdAotSpec(
-        dtype=identity.dtype_a,
-        instance_id=identity.stable_hash(),
-        **_carried_values(identity),
-    )
-    return _checked(spec)
-
-
-def _direct_instance_spec(identity):
-    """A forward direct identity: the direct sweep must be able to build it, and the
-    packaged AOT launch must run its algorithm."""
-    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from builders.common.convolution_forward import (
-        Gfx950ConvFwdAotSpec,
-        aot_direct_instance_fields,
-    )
-
-    if identity.arch != "gfx950":
-        return None, f"not a gfx950 forward direct identity ({identity.arch})"
-    if identity.algorithm not in PACKAGED_DIRECT_ALGORITHMS:
-        return None, (
-            f"direct algorithm {identity.algorithm!r} has no packaged launch "
-            f"(supported: {sorted(PACKAGED_DIRECT_ALGORITHMS)})"
-        )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        return None, "mixed operand dtypes are not packaged"
-    # Every other field must be what the direct grid writes for these caps and
-    # knobs; the sweep's own round trip refuses anything else, after asking the
-    # kernel's validator.
-    try:
-        direct_job_for_identity(identity)
-        fields = aot_direct_instance_fields(identity)
-    except (LookupError, TypeError, ValueError) as exc:
-        return None, str(exc)
-    spec = Gfx950ConvFwdAotSpec(
-        dtype=identity.dtype_a,
-        instance_id=identity.stable_hash(),
-        **_carried_values(identity),
-        **fields,
-    )
-    return _checked(spec)
 
 
 def _variant(name: str, order: tuple, specs: list) -> dict:

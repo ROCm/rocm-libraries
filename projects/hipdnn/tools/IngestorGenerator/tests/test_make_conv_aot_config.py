@@ -134,7 +134,12 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    names = sorted(path.name for path in folder.iterdir())
+    # heuristics/ holds the UHD pipeline's trained ranking models, not descriptors.
+    names = sorted(
+        path.name
+        for path in folder.iterdir()
+        if not (path.is_dir() and path.name == "heuristics")
+    )
     shards = {tool.shard_name(spec, sharding) for spec in specs}
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
@@ -246,7 +251,7 @@ def test_instance_specs_in_parallel_are_the_serial_ones(seed_identities):
 
 
 def test_instance_id_is_the_identity_stable_hash(seed_identities):
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in seed_identities:
         spec, _ = tool.instance_spec(identity)
@@ -351,15 +356,33 @@ def forward_direct_identities():
     ]
 
 
-#: Forward identities per dtype and algorithm in rocKE's direct sweep grid.
+#: Forward identities per dtype and algorithm in rocKE's direct sweep grid that the
+#: packaged launch runs.
 _DIRECT_GRID = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
     "direct_nongrouped": 3058,
 }
+#: Forward identities per dtype and algorithm of the direct sweep the packaged launch
+#: does not run, and the start of the reason the adapter refuses them with: the
+#: grouped-halo kernel, the split-C non-grouped kernels and their fold.
+_DIRECT_REFUSED = {
+    "direct_grouped_halo": (2850, "direct algorithm 'direct_grouped_halo' is not"),
+    "direct_nongrouped": (1816, "split_c="),
+    "direct_split_reduce": (4, "'direct_split_reduce' is not packaged"),
+}
+
+
+def _packaged_direct(identity: dict) -> bool:
+    """Whether the packaged launch runs a forward direct identity of the sweep."""
+    knobs = json.loads(identity.get("knobs") or "{}")
+    return (
+        identity["algorithm"] in tool.PACKAGED_DIRECT_ALGORITHMS
+        and "split_c" not in knobs
+    )
 
 
 def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
@@ -369,11 +392,15 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
 
     assert tool.PACKAGED_DIRECT_ALGORITHMS == AOT_DIRECT_ALGORITHMS
     assert tool.DIRECT_ALGORITHMS.items() <= tool.PACKAGED_DIRECT_ALGORITHMS.items()
-    accepted = {}
+    accepted, refused = {}, {}
     for identity in forward_direct_identities:
         spec, why = tool.instance_spec(identity)
-        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
-            assert spec is None and "has no packaged launch" in why, why
+        if not _packaged_direct(identity):
+            key = (identity["dtype_a"], identity["algorithm"])
+            refused[key] = refused.get(key, 0) + 1
+            assert spec is None and why.startswith(
+                _DIRECT_REFUSED[identity["algorithm"]][1]
+            ), why
             continue
         assert spec is not None, why
         assert spec.is_direct
@@ -390,16 +417,25 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
         for algorithm, count in _DIRECT_GRID.items()
         if algorithm in tool.PACKAGED_DIRECT_ALGORITHMS
     }
+    assert refused == {
+        (dtype, algorithm): count
+        for dtype in ("fp16", "bf16")
+        for algorithm, (count, _) in _DIRECT_REFUSED.items()
+    }
 
 
 def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
     forward_direct_identities,
 ):
-    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.direct_aot_jobs import (
+        DirectCaps,
+        direct_job_for_identity,
+        probe_problem,
+    )
+    from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in forward_direct_identities[::7]:
-        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
+        if not _packaged_direct(identity):
             continue
         spec, _ = tool.instance_spec(identity)
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
@@ -419,8 +455,9 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
         # The knobs round-trip, and so does the job the direct sweep builds from them.
         assert spec.direct_knobs() == json.loads(identity["knobs"])
         job = direct_job_for_identity(KernelIdentity.from_dict(identity))
-        assert spec.probe_problem().cpg == (job.caps["cpg"] or 256)
-        assert spec.probe_problem().kpg == (job.caps["kpg"] or 256)
+        assert spec.probe_problem() == probe_problem(
+            DirectCaps(**job.caps), spec.dtype, identity["algorithm"], job.spec_kwargs
+        )
         # The implicit-GEMM fields are the identity's placeholders.
         assert (spec.tile_m, spec.pipeline, spec.vector_size_c, spec.grouped) == (
             0,
@@ -538,8 +575,8 @@ def test_the_seed_runs_every_direct_variant_knob(
 ):
     """The seed pins each of its instances on the GPU, so per dtype it holds at least 20
     instances of each tiled, col, grouped and non-grouped kernel, together every value
-    of every knob the direct sweep builds for it, and every grouped channel count and
-    non-grouped dilation."""
+    of every knob the direct sweep builds for the kernels the packaged launch runs, and
+    every grouped channel count and non-grouped dilation."""
     for dtype in ("fp16", "bf16"):
         for algorithm in (
             "direct_depthwise_tiled",
@@ -554,7 +591,7 @@ def test_the_seed_runs_every_direct_variant_knob(
                     if (identity["dtype_a"], identity["algorithm"]) == (
                         dtype,
                         algorithm,
-                    ):
+                    ) and _packaged_direct(identity):
                         found |= set(json.loads(identity["knobs"]).items())
                         found.add(
                             (

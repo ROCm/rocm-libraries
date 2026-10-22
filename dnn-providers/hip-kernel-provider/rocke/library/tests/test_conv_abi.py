@@ -37,6 +37,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
+from kernels.conv import aot_jobs as aj
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_abi import conv_arg_names, conv_direct_arg_names
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
@@ -597,6 +598,67 @@ def test_direct_nongrouped_abi_and_shape_invariance(stride, knobs):
     assert _names(conv_direct_args_signature("bf16")) == expected
 
 
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        dict(),
+        dict(waves_k=2, waves_c=3, waves_q=2, ho_per_block=3),
+        dict(waves_k=4, mfma_k=16, ho_per_block=30),
+    ],
+    ids=["base", "wk2_wc3_wq2", "wk4_mk16"],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_direct_wgrad_runtime_channels_shape_invariance(knobs, dtype):
+    """With ``runtime_channels`` the wgrad kernel bakes no channel count.
+
+    cpg, kpg and the group count vary here alongside the batch and the image,
+    including channel counts that leave a partial k/c tile, so the IR must
+    match across all of them; and it must differ from the baked kernel, whose
+    channel counts are constants.
+    """
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectConvWgradSpec,
+        build_direct_conv_wgrad,
+    )
+
+    fingerprints = set()
+    kernel = None
+    for N, H, W, groups, cpg, kpg in [
+        (2, 14, 14, 1, 256, 256),
+        (3, 29, 37, 1, 48, 192),
+        (1, 64, 64, 4, 64, 64),
+        (2, 20, 24, 32, 16, 16),
+        (1, 9, 40, 1, 24, 24),
+    ]:
+        problem = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype=dtype,
+        )
+        spec = DirectConvWgradSpec(problem=problem, runtime_channels=True, **knobs)
+        kernel = build_direct_conv_wgrad(spec, arch=_ARCH)
+        assert kernel.name.endswith("_rtc")
+        fingerprints.add(_op_signature(kernel))
+    assert len(fingerprints) == 1, "runtime-channel wgrad IR depends on cpg/kpg"
+    expected = [n for n, _ in conv_direct_arg_names(direction="wgrad")]
+    assert [p.name for p in kernel.params] == expected
+
+    baked = build_direct_conv_wgrad(
+        DirectConvWgradSpec(problem=problem, **knobs), arch=_ARCH
+    )
+    assert _op_signature(baked) not in fingerprints
+    assert baked.name != kernel.name
+
+
 @pytest.mark.parametrize("fold_k32", [False, True])
 def test_direct_dgrad_weight_transforms_are_shape_invariant(fold_k32):
     """The MFMA dgrad's weight transforms are cached once per filter/channels.
@@ -618,6 +680,115 @@ def test_direct_dgrad_weight_transforms_are_shape_invariant(fold_k32):
             dc.DirectReorganizeWeightsSpec(problem=problem, fold_k32=fold_k32),
             arch=_ARCH,
         )
+        fingerprints.add((_op_signature(transpose), _op_signature(reorganize)))
+    assert len(fingerprints) == 1
+
+
+@pytest.mark.parametrize(
+    "knobs",
+    [
+        dict(block_q=32, block_h=8),
+        dict(block_h=8, waves_k=4),
+        dict(block_h=16, waves_k=2, fold_k32=True),
+        dict(block_q=32, waves_q=2, runtime_k_loop=True),
+    ],
+    ids=["plain_loop", "wk4_preload", "wk2_k32", "wq2_rk"],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_direct_mfma_dgrad_runtime_channels_shape_invariance(knobs, dtype):
+    """With ``runtime_channels`` the MFMA dgrad compute pass bakes only its
+    K-atom and M-tile counts.
+
+    The dgrad problems below differ in batch, image, group count and in the
+    exact per-group channel counts -- including partial K-atoms and M-tiles --
+    but share the tile counts, so the IR must not change. It must differ from
+    the baked kernel, which takes cpg/kpg as constants.
+    """
+    from dataclasses import replace
+
+    from kernels.common import conv_direct_grouped as dc
+
+    fold_k32 = knobs.get("fold_k32", False)
+    fprop_knobs = {k: v for k, v in knobs.items() if k != "fold_k32"}
+    # (N, H, W, groups, cpg, kpg) of the dgrad problem; kpg is the K reduction.
+    if fold_k32:
+        shapes = [
+            (2, 14, 14, 1, 48, 192),
+            (3, 29, 37, 1, 36, 192),
+            (1, 9, 40, 2, 44, 192),
+        ]
+    elif knobs.get("waves_k", 1) > 1:
+        shapes = [
+            (2, 14, 14, 1, 48, 192),
+            (3, 29, 37, 1, 36, 180),
+            (1, 9, 40, 2, 44, 184),
+        ]
+    else:
+        shapes = [(2, 14, 14, 1, 24, 24), (3, 29, 37, 4, 20, 20), (1, 9, 40, 2, 32, 28)]
+    fingerprints = set()
+    spec = None
+    for N, H, W, groups, cpg, kpg in shapes:
+        problem = dc.DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
+        )
+        base = dc.make_dgrad_fprop_spec(problem, block_groups=1, **fprop_knobs)
+        base = replace(base, fold_k32=fold_k32)
+        spec = replace(
+            base,
+            runtime_channels=True,
+            k_atoms=base.problem_k_atoms(),
+            m_tiles=base.problem_m_tiles(),
+        )
+        kernel = dc.build_direct_conv(spec, arch=_ARCH)
+        fingerprints.add(_op_signature(kernel))
+    assert len(fingerprints) == 1, "runtime-channel dgrad IR depends on cpg/kpg"
+    assert [p.name for p in kernel.params] == [
+        n for n, _ in conv_direct_arg_names(direction="fwd")
+    ]
+    baked = dc.build_direct_conv(
+        replace(spec, runtime_channels=False, k_atoms=0, m_tiles=0), arch=_ARCH
+    )
+    assert _op_signature(baked) not in fingerprints
+    assert baked.name != kernel.name
+
+
+@pytest.mark.parametrize("fold_k32", [False, True])
+def test_direct_dgrad_weight_transforms_runtime_channels_are_channel_invariant(
+    fold_k32,
+):
+    """The runtime-channel weight transforms bake the filter and nothing else:
+    any channel count and group count gives the same binary, and they take the
+    channel counts as two trailing kernargs."""
+    from kernels.common import conv_direct_grouped as dc
+
+    fingerprints = set()
+    for N, H, W, groups, cpg, kpg in [
+        (2, 14, 14, 1, 48, 192),
+        (3, 29, 37, 16, 32, 32),
+        (1, 64, 64, 1, 4, 320),
+        (1, 9, 40, 3, 24, 64),
+    ]:
+        problem = dc.DirectConvProblem(
+            N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, KH=3, KW=3, PAD=1, stride=1
+        )
+        transpose = dc.build_direct_transpose_weights_dgrad(
+            dc.DirectTransposeWeightsDgradSpec(problem=problem, runtime_channels=True),
+            arch=_ARCH,
+        )
+        reorganize = dc.build_direct_reorganize_weights(
+            dc.DirectReorganizeWeightsSpec(
+                problem=problem, fold_k32=fold_k32, runtime_channels=True
+            ),
+            arch=_ARCH,
+        )
+        for kernel in (transpose, reorganize):
+            assert [p.name for p in kernel.params] == [
+                "A",
+                "D",
+                "A_bytes",
+                "D_bytes",
+                *dc.DIRECT_WEIGHT_TRANSFORM_RTC_ARGS,
+            ]
         fingerprints.add((_op_signature(transpose), _op_signature(reorganize)))
     assert len(fingerprints) == 1
 
@@ -909,7 +1080,7 @@ def test_manifest_runner_rejects_backward_directions():
 
 def test_cache_rejects_dgrad_beyond_max_sub_gemms():
     """A dgrad binary cannot serve a problem with more tilde sub-GEMMs than
-    its CTA dispatch search was unrolled for."""
+    its record table (max_sub_gemms) supports."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
@@ -942,6 +1113,34 @@ def test_cache_rejects_dgrad_beyond_max_sub_gemms():
         KernelIdentity(max_sub_gemms=2, **ident), strided
     )
     assert not ok and "sub-GEMMs" in reason
+
+
+def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
+    """The AOT dgrad grid builds only the tilde kernel: its probe is strided
+    (so the tilde epilogue is emitted) and its identity records stride and
+    dilation as runtime, so one binary serves unit and non-unit strides."""
+    from rocke.core.arch import ArchTarget
+
+    from benchmarks.common.kernel_cache import KernelCache
+
+    _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    jobs = list(aj._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    assert jobs
+    for j in jobs:
+        i = j.identity
+        assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
+        p = aj._probe_problem("dgrad", j.caps)
+        assert p.sH > 1 or p.dH > 1
+
+    cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
+    ident = next(j.identity for j in jobs if aj._spec_is_valid(j, _ARCH, "fp16"))
+    for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
+        p = ConvProblem(
+            N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
+        )
+        assert cache.supports_problem(ident, p)[0], (s, d)
 
 
 def test_deep_fused_conv_pool_signature_matches_kernel_params():
@@ -1061,7 +1260,6 @@ def test_cache_async_chunk_must_divide_cpg():
     """The async loaders' chunk width is baked from the build-time cpg; a
     problem whose cpg it does not divide would read across filter positions."""
     from benchmarks.common.kernel_cache import KernelCache
-    from benchmarks.common.kernel_sweep import _async_chunks
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
     cfg = dict(
@@ -1081,7 +1279,7 @@ def test_cache_async_chunk_must_divide_cpg():
         vector_size_c=2,
         async_dma=True,
     )
-    chunks = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, _ARCH)
+    chunks = aj._async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, _ARCH)
     assert chunks["async_chunk_a"] > 2 and chunks["async_chunk_b"] > 2
     ident = _cache_identity(async_dma=True, **chunks)
 
@@ -1097,7 +1295,7 @@ def test_cache_async_chunk_must_divide_cpg():
     # dword per lane, so the same cfg bakes a 2-half chunk there. Recording
     # gfx950's 8 for a gfx942 binary would advertise a cpg divisibility the
     # ISA does not have.
-    narrow_arch = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, "gfx942")
+    narrow_arch = aj._async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, "gfx942")
     assert narrow_arch == {"async_chunk_a": 2, "async_chunk_b": 2}
 
 
@@ -1113,36 +1311,103 @@ def test_count_jobs_matches_the_generators(monkeypatch, directions):
     """
     from rocke.core.arch import ArchTarget
 
-    ks = _shrink_sweep_grid(monkeypatch)
+    _shrink_sweep_grid(monkeypatch)
     target = ArchTarget.from_gfx(_ARCH)
     family = "wmma" if target.wave_size == 32 else "mma"
     split_ks = (1, 4)
     gens = {
-        "fwd": lambda: ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target),
-        "wgrad": lambda: ks._wgrad_jobs(
+        "fwd": lambda: aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target),
+        "wgrad": lambda: aj._wgrad_jobs(
             _ARCH, "fp16", target.wave_size, family, target, split_ks
         ),
-        "dgrad": lambda: ks._dgrad_jobs(
+        "dgrad": lambda: aj._dgrad_jobs(
             _ARCH, "fp16", target.wave_size, family, target, 64
         ),
     }
     walked = sum(sum(1 for _ in gens[d]()) for d in directions)
-    counted = ks.count_jobs(
+    counted = aj.count_jobs(
         dtype="fp16", target=target, directions=directions, split_ks=split_ks
     )
     assert walked > 0
     assert counted == walked
 
 
+def test_aot_wgrad_dgrad_jobs_pick_the_lds_layout_and_split(monkeypatch):
+    """The AOT grid builds what the JIT sweep would pick, not spec defaults.
+
+    wgrad takes ``default_lds_k_outer`` per geometry (a pure function of
+    arch/dtype/atom). dgrad's predicate also wants an even channel run, which a
+    shape-generic binary only knows through its B width: vec_b > 1 binaries are
+    K-outer, vec_b == 1 ones stay M-outer. The non-split wgrad kernel is
+    cached alongside the split-K one, except for group-merged kernels.
+    """
+    from rocke.core.arch import ArchTarget
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    wgrad = list(
+        aj._wgrad_jobs(
+            _ARCH, "fp16", target.wave_size, family, target, aj.CACHE_WGRAD_SPLIT_KS
+        )
+    )
+    for job in wgrad:
+        i = job.identity
+        assert i.lds_k_outer == WgradConvSpec.default_lds_k_outer(
+            arch=_ARCH,
+            dtype_a="fp16",
+            dtype_b="fp16",
+            warp_tile_m=i.warp_tile_m,
+            warp_tile_n=i.warp_tile_n,
+            wave_size=target.wave_size,
+        )
+        assert job.spec_kwargs["lds_k_outer"] == i.lds_k_outer
+        assert job.spec_kwargs.get("prefetch_addr", False) == i.prefetch_addr
+    # Pinned, not just re-derived: gfx950 16-bit wgrad is K-outer throughout.
+    assert wgrad and all(j.identity.lds_k_outer for j in wgrad)
+    assert {j.identity.split_k for j in wgrad if j.identity.group_merge == 1} == {1, 2}
+    assert {j.identity.split_k for j in wgrad if j.identity.group_merge > 1} == {2}
+
+    dgrad = list(aj._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    # Pinned: a scalar-B binary may serve an odd channel run, so it stays
+    # M-outer; some wider ones are K-outer.
+    assert not any(
+        j.identity.lds_k_outer for j in dgrad if j.identity.vector_size_b == 1
+    )
+    assert any(j.identity.lds_k_outer for j in dgrad)
+    for job in dgrad:
+        i = job.identity
+        assert i.lds_k_outer == (
+            i.vector_size_b > 1
+            and DgradConvSpec.default_lds_k_outer(
+                arch=_ARCH,
+                dtype_b="fp16",
+                warp_tile_n=i.warp_tile_n,
+                cpg=2,
+                wave_size=target.wave_size,
+                pipeline=i.pipeline,
+            )
+        )
+
+
 def _shrink_sweep_grid(monkeypatch):
+    """Shrink the AOT grid (:mod:`kernels.conv.aot_jobs`); return the
+    sweep module that enumerates and compiles it."""
     from benchmarks.common import kernel_sweep as ks
 
-    monkeypatch.setattr(ks, "_TILE_MN", (32, 64))
-    monkeypatch.setattr(ks, "_TILE_K", (32,))
-    monkeypatch.setattr(ks, "_WARP_MN", (1, 2))
-    monkeypatch.setattr(ks, "_VECS", (2, 8))
+    monkeypatch.setattr(aj, "_TILE_MN", (32, 64))
+    monkeypatch.setattr(aj, "_TILE_K", (32,))
+    monkeypatch.setattr(aj, "_WARP_MN", (1, 2))
+    monkeypatch.setattr(aj, "_VECS", (2, 8))
+    # Shrunk but kept non-empty and disjoint from the base axes, so wgrad's
+    # grid stays wider than fwd's and dgrad's here too -- that asymmetry is
+    # what the per-direction chunk bounds and count have to get right.
+    monkeypatch.setattr(aj, "_WGRAD_EXTRA_TILE_MN", (48,))
+    monkeypatch.setattr(aj, "_WGRAD_EXTRA_WARP_MN", (3,))
     # basic/wavelet are in so the AOT alias filter is exercised.
-    monkeypatch.setattr(ks, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
+    monkeypatch.setattr(aj, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
     return ks
 
 
@@ -1168,9 +1433,18 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
     split_ks = (1, 4)
 
     streams = [
-        iter(ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
-        iter(ks._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
-        iter(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64)),
+        iter(aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
+        iter(aj._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
+        iter(
+            aj._dgrad_jobs(
+                _ARCH,
+                "fp16",
+                target.wave_size,
+                family,
+                target,
+                aj.CACHE_DGRAD_MAX_SUB_GEMMS,
+            )
+        ),
     ]
     seen = {}
     while streams:
@@ -1178,7 +1452,7 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
         for stream in streams:
             for job in stream:
                 key = job.identity.stable_hash()
-                if key in seen or not ks._spec_is_valid(job, _ARCH, "fp16"):
+                if key in seen or not aj._spec_is_valid(job, _ARCH, "fp16"):
                     continue
                 seen[key] = job
                 still_running.append(stream)
@@ -1287,8 +1561,8 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     family = "wmma" if target.wave_size == 32 else "mma"
     pool = [
         j
-        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
-        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+        for j in aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and aj._spec_is_valid(j, _ARCH, "fp16")
     ]
     jobs, spare = pool[:3], pool[-1]
     cache = KernelCache(tmp_path, _ARCH)
@@ -1297,7 +1571,7 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     def build(job, arch, dtype):
         # A swapped job stands in for "the emitter now emits other code for
         # this identity".
-        return ks.build_kernel(swap.get(job.identity, job), arch, dtype)
+        return aj.kernel_for_job(swap.get(job.identity, job), arch, dtype)
 
     def run():
         lines = []
@@ -1360,8 +1634,8 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
     family = "wmma" if target.wave_size == 32 else "mma"
     jobs = [
         j
-        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
-        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+        for j in aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and aj._spec_is_valid(j, _ARCH, "fp16")
     ][:3]
     _REAL_COMPILE_WORKER[:] = [ks._compile_worker]
     _CRASH_IDENTITY[:] = [jobs[0].identity.stable_hash()]
@@ -1372,7 +1646,7 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
         ks.compile_jobs(
             cache=cache,
             all_jobs=jobs,
-            build=ks.build_kernel,
+            build=aj.kernel_for_job,
             arch=_ARCH,
             dtype="fp16",
             directions=("fwd",),
@@ -1574,8 +1848,9 @@ def test_cache_vector_extents_follow_direction(tmp_path, direction, ok_vecs, bad
 
 
 def test_aot_grid_capability_axes(monkeypatch):
-    """wgrad group-merged (depthwise, two-stage) kernels are in the AOT grid,
-    built from probes with the matching capabilities; pointwise is not."""
+    """Group-merged depthwise kernels are in the AOT grid -- wgrad two-stage,
+    fwd cshuffle without async_dma -- built from probes with the matching
+    capabilities; pointwise is not."""
     from rocke.core.arch import ArchTarget
 
     ks = _shrink_sweep_grid(monkeypatch)
@@ -1587,10 +1862,14 @@ def test_aot_grid_capability_axes(monkeypatch):
     # Only grouped binaries: they serve groups == 1 as well.
     assert all(j.identity.grouped for j in jobs)
     merged = [j for j in jobs if j.identity.group_merge > 1]
-    assert merged and all(j.direction == "wgrad" for j in merged)
+    assert {j.direction for j in merged} == {"fwd", "wgrad"}
     for j in merged:
-        assert j.identity.grouped and j.identity.two_stage
-        p = ks._probe_problem("wgrad", j.caps)
+        assert j.identity.grouped
+        if j.direction == "wgrad":
+            assert j.identity.two_stage
+        else:
+            assert j.identity.epilogue == "cshuffle" and not j.identity.async_dma
+        p = aj._probe_problem(j.direction, j.caps)
         assert p.cpg == p.kpg == 1 and p.groups % j.identity.group_merge == 0
 
 
@@ -1635,6 +1914,98 @@ def test_cache_group_merge_needs_depthwise_that_fits(tmp_path):
     assert not cache.supports_problem(ident, wide)[0]
 
 
+def _fwd_merged_identity(gm, tile_n=64):
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    return KernelIdentity(
+        arch=_ARCH,
+        direction="fwd",
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_m=64,
+        tile_n=tile_n,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        vector_size_a=0,
+        vector_size_b=0,
+        vector_size_c=0,
+        grouped=True,
+        group_merge=gm,
+    )
+
+
+def test_cache_fwd_group_merge_needs_depthwise_that_fits(tmp_path):
+    """A merged fwd binary serves any depthwise shape Gm divides and whose
+    merged GEMM-N (Gm) fits the tile -- the filter extent is runtime, so unlike
+    wgrad there is no filter-size limit."""
+    from benchmarks.common.kernel_cache import KernelCache
+
+    cache = KernelCache(tmp_path, _ARCH)
+    shape = dict(N=2, Hi=16, Wi=16, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1)
+    ident = _fwd_merged_identity(8)
+    dw3 = ConvProblem(C=32, K=32, Y=3, X=3, groups=32, **shape)
+    assert cache.supports_problem(ident, dw3)[0]
+    dw7 = ConvProblem(C=32, K=32, Y=7, X=7, groups=32, **shape)
+    assert cache.supports_problem(ident, dw7)[0]
+    odd = ConvProblem(C=36, K=36, Y=3, X=3, groups=36, **shape)  # 8 does not divide 36
+    assert not cache.supports_problem(ident, odd)[0]
+    wide = ConvProblem(C=64, K=64, Y=3, X=3, groups=32, **shape)  # cpg = 2
+    assert not cache.supports_problem(ident, wide)[0]
+    # Gm = 64 > tile_n = 32: the merged GEMM-N straddles tiles.
+    assert not cache.supports_problem(
+        _fwd_merged_identity(64, tile_n=32),
+        ConvProblem(C=64, K=64, Y=3, X=3, groups=64, **shape),
+    )[0]
+
+
+def test_fwd_group_merge_launch_grid():
+    """The run-from-cache grid launches one workgroup per Gm groups."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import _grid_for
+
+    p = ConvProblem(
+        N=2, Hi=14, Wi=14, C=128, K=128, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, groups=128
+    )
+    gx, gy, gz = _grid_for("fwd", p, _fwd_merged_identity(8))
+    assert (gx, gz) == (1, 16) and gy == -(-p.M // 64)
+    assert _grid_for("fwd", p, _fwd_merged_identity(1))[2] == 128
+
+
+@pytest.mark.parametrize("gm", [8, 64])
+def test_fwd_group_merge_is_shape_invariant(gm):
+    """A merged fwd binary serves every depthwise shape its degree divides.
+
+    The kernargs describe the true problem and the merged extents are folded
+    in from the build-time degree, so the IR must not depend on the extents --
+    including the group count: Gm == groups (one merged group) must emit the
+    same kernel as Gm < groups, or a binary built against one would mis-serve
+    the other.
+    """
+    tile = dict(_TILE, epilogue="cshuffle", group_merge=gm)
+    shapes = [
+        ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64),
+        ConvProblem(N=1, Hi=17, Wi=9, C=128, K=128, Y=5, X=3, pH=2, pW=1, groups=128),
+        ConvProblem(N=3, Hi=8, Wi=8, C=192, K=192, Y=1, X=3, pW=1, groups=192),
+    ]
+    fingerprints = {
+        _op_signature(
+            build_implicit_gemm_conv(
+                ImplicitGemmConvSpec(problem=p, data=_DATA, **tile), arch=_ARCH
+            )
+        )
+        for p in shapes
+    }
+    assert len(fingerprints) == 1, "merged fwd IR depends on the shape"
+
+
 def test_describe_jobs_breaks_the_grid_down(monkeypatch):
     from rocke.core.arch import ArchTarget
 
@@ -1651,7 +2022,10 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
     for direction in ("fwd", "wgrad", "dgrad"):
         n = sum(j.direction == direction for j in jobs)
         assert f"  {direction}: {n} kernels" in lines
-    assert "k-loop:" in text and "split-K:" in text and "stride x dilation:" in text
+    assert "k-loop:" in text and "split-K:" in text
+    # dgrad builds one binary for every stride and dilation, so that axis
+    # takes a single value and is not broken down.
+    assert "stride x dilation:" not in text
 
 
 def test_aot_grid_caps_accumulator_registers(monkeypatch):
@@ -1659,7 +2033,7 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
     from rocke.core.arch import ArchTarget
 
     ks = _shrink_sweep_grid(monkeypatch)
-    monkeypatch.setattr(ks, "_TILE_MN", (64, 128, 256))
+    monkeypatch.setattr(aj, "_TILE_MN", (64, 128, 256))
     target = ArchTarget.from_gfx(_ARCH)
     jobs = ks.enumerate_jobs(
         arch=_ARCH, dtype="fp16", target=target, directions=("fwd", "wgrad", "dgrad")
@@ -1669,18 +2043,19 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
         return (i.tile_m // i.warp_m) * (i.tile_n // i.warp_n) // target.wave_size
 
     assert jobs
-    assert max(acc(j.identity) for j in jobs) <= ks.CACHE_MAX_ACC_REGS
+    assert max(acc(j.identity) for j in jobs) <= aj.CACHE_MAX_ACC_REGS
     # The cap is what removed them: the shrunk grid does reach past it.
-    monkeypatch.setattr(ks, "_MAX_ACC_REGS", 10**6)
+    monkeypatch.setattr(aj, "_MAX_ACC_REGS", 10**6)
     uncapped = ks.enumerate_jobs(
         arch=_ARCH, dtype="fp16", target=target, directions=("fwd",)
     )
-    assert max(acc(j.identity) for j in uncapped) > ks.CACHE_MAX_ACC_REGS
+    assert max(acc(j.identity) for j in uncapped) > aj.CACHE_MAX_ACC_REGS
 
 
 def test_cache_applies_runtime_launch_limits(tmp_path):
-    """Rules that depend on the launch-time problem, not on the binary:
-    the per-axis grid cap and implicit dgrad's missing depthwise path."""
+    """Rules that depend on the launch-time problem, not on the binary: the
+    per-axis grid cap. The grouped implicit dgrad binary also serves depthwise
+    (cpg == 1), a one-column GEMM per group."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache(tmp_path, _ARCH)
@@ -1728,5 +2103,23 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     grouped = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=4)
     depthwise = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=64)
     assert cache.supports_problem(dgrad, grouped)[0]
-    ok, why = cache.supports_problem(dgrad, depthwise)
-    assert not ok and "depthwise" in why
+    assert cache.supports_problem(dgrad, depthwise)[0]
+
+    # A split-K 16-bit dX binary needs an even cpg (packed <2 x dtype> atomic
+    # pairs must stay within one group's slab); depthwise has cpg=1 and must
+    # be rejected, while grouped's cpg=16 is unaffected.
+    split_k_dgrad = KernelIdentity(
+        direction="dgrad",
+        tile_m=64,
+        tile_n=64,
+        stride_h=1,
+        stride_w=1,
+        dilation_h=1,
+        dilation_w=1,
+        max_sub_gemms=64,
+        split_k=2,
+        **common,
+    )
+    ok, why = cache.supports_problem(split_k_dgrad, depthwise)
+    assert not ok and "cpg" in why
+    assert cache.supports_problem(split_k_dgrad, grouped)[0]

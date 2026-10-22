@@ -6,11 +6,13 @@
 The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
 ``KernelIdentity.label()`` per line, which :meth:`KernelIdentity.from_label` turns
 back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
-grid (``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
-direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for gfx950,
-forward, fp16 or bf16. Every entry must also convert: an identity
-``make_conv_aot_config.py`` refuses, because the packaged launch does not run it,
-fails the run. Nothing is dropped silently.
+grid (``kernels/conv/aot_jobs.py``, enumerated by
+``benchmarks/common/kernel_sweep.py``) and direct entries identities of the direct
+sweep grid (``kernels/conv/direct_aot_jobs.py``, enumerated by
+``benchmarks/common/direct_kernel_sweep.py``), for gfx950, forward, fp16 or bf16.
+Every entry must also convert: an identity ``make_conv_aot_config.py`` refuses,
+because the packaged launch does not run it, fails the run. Nothing is dropped
+silently.
 
 Which instance serves a given problem, and which serving instances run, is decided
 at runtime, not here.
@@ -75,7 +77,7 @@ def read_labels(path: Path) -> list:
     identity exactly (``label()`` of the parsed identity must be the line), and on a
     repeated identity.
     """
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     identities, seen = [], set()
     for lineno, line in enumerate(path.read_text().splitlines(), 1):
@@ -112,7 +114,7 @@ def sweep_hashes(dtype: str, jobs: int) -> set:
 
 
 def stable_hash(identity: dict) -> str:
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     return KernelIdentity.from_dict(identity).stable_hash()
 
@@ -136,7 +138,7 @@ def compact_identity(identity: dict) -> dict:
     equal to its default but of another type (``0`` for ``False``) is kept, so
     ``from_dict`` rebuilds exactly the identity, and its ``stable_hash()``.
     """
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     compact = {}
     for field in dataclasses.fields(KernelIdentity):
@@ -234,7 +236,7 @@ def main(argv=None) -> int:
 
 
 def identity_label(identity: dict) -> str:
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     return KernelIdentity.from_dict(identity).label()
 

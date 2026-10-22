@@ -922,15 +922,16 @@ inline std::optional<LaunchGeometry> groupedDirectLaunch(const Problem& problem,
 }
 
 /// tile_w_candidates in conv_direct_nongrouped.py: the multiples of @p atomTile up to six
-/// atoms that tile @p wo exactly, or if none does, the one that wastes the fewest columns
-/// (the first of them). rocKE's direct_plans offers a non-grouped binary only when its
-/// tile width is one of these for the problem's Wo.
+/// atoms that tile @p wo exactly, or if none does, every one that wastes the fewest
+/// columns (at Wo = 56 a 16-, a 32- and a 64-wide tile all compute 64 columns). rocKE's
+/// dispatcher and direct_plans offer a non-grouped binary only when its tile width is one
+/// of these for the problem's Wo.
 inline bool nongroupedTileWidthFits(int64_t tileW, int64_t wo, int64_t atomTile)
 {
     constexpr int64_t MAX_MULTIPLE = 6;
     bool anyExact = false;
-    int64_t leastWaste = 0;
-    int64_t leastWasteWidth = 0;
+    int64_t leastCovered = 0;
+    int64_t tileWCovered = -1;
     for(int64_t multiple = 1; multiple <= MAX_MULTIPLE; ++multiple)
     {
         const auto width = atomTile * multiple;
@@ -943,13 +944,16 @@ inline bool nongroupedTileWidthFits(int64_t tileW, int64_t wo, int64_t atomTile)
             }
         }
         const auto covered = ceilDiv(wo, width) * width;
-        if(multiple == 1 || covered < leastWaste)
+        if(multiple == 1 || covered < leastCovered)
         {
-            leastWaste = covered;
-            leastWasteWidth = width;
+            leastCovered = covered;
+        }
+        if(width == tileW)
+        {
+            tileWCovered = covered;
         }
     }
-    return !anyExact && tileW == leastWasteWidth;
+    return !anyExact && tileWCovered == leastCovered;
 }
 
 /// The byte offset every masked-out access of the non-grouped kernel is redirected to
