@@ -414,16 +414,18 @@ TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSol
     TimingEvents events(0, 0);
     listeners.preProblem(&problem);
     listeners.preSolution(nullptr);
-    // First launch is clean; a later launch leaves residue or fails readback.
-    listeners.validateWarmups(inputs, events, events);
-    buffer[1] = 1;
-    validator->failure = failure;
+    // Without validate-after-enqueues only the warmup is checked. With it the
+    // warmup is clean and a later launch leaves residue or fails readback.
     auto validate = [&]() {
         if(afterEnqueues)
             listeners.validateEnqueues(inputs, events, events);
         else
             listeners.validateWarmups(inputs, events, events);
     };
+    if(afterEnqueues)
+        listeners.validateWarmups(inputs, events, events);
+    buffer[1]          = 1;
+    validator->failure = failure;
 
     if(failure == TransferFailure::None)
         EXPECT_NO_THROW(validate());
@@ -441,6 +443,8 @@ TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSol
     validator->failure = TransferFailure::None;
     std::fill(buffer.begin(), buffer.end(), 0);
     listeners.preSolution(nullptr);
+    if(afterEnqueues)
+        listeners.validateWarmups(inputs, events, events);
     validate();
     listeners.postSolution();
     EXPECT_EQ(listeners.error(), 1);
