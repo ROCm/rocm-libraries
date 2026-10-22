@@ -183,7 +183,7 @@ This backend emits readable HIP C++:
 - typedef aliases for ext-vector types: `f16x4`, `f32x16`, `i32x4`, `boolx8`, etc.;
 - builtin shims for clang-unfriendly intrinsics (`ds.read.tr16.b64`, `raw.ptr.buffer.load.lds`);
 - `__shared__ <elem> name_storage[...]` for LDS allocations;
-- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/0x00027000)`;
+- `__builtin_amdgcn_make_buffer_rsrc((void*)ptr, /*stride=*/(short)0, /*num_records=*/num_bytes, /*flags=*/word3)`, where `word3` is the target ISA backend's `buffer_rsrc_word3` (the same word the LLVM route emits);
 - `__builtin_amdgcn_mfma_*` for matrix ops;
 - inline `asm volatile("" : "+s"(x))` for `pin_sgpr`;
 - normal C++ `for` / `if` for structured control flow.
