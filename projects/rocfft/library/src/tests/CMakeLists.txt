@@ -22,10 +22,12 @@ include( ../../../cmake/sqlite.cmake )
 
 add_executable( rocfft-internal-test
   data_set_descriptor_test.cpp
+  field_test.cpp
   function_pool_test.cpp
   internal_test_main.cpp
   rtc_test.cpp
   ../data_set_descriptor.cpp
+  ../field.cpp
   ../rocfft_stub.cpp
 )
 
