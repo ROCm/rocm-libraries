@@ -555,3 +555,176 @@ def test_the_order_key_is_total_on_mixed_values_and_numeric():
     }
     assert len(orders) == 1
     assert sorted([128, None, 32, 1024], key=re_._order_key) == [32, 128, 1024, None]
+
+
+# selector_fields / neutral_fields: a rule-driven candidate (the split probe picks
+# num_segments from batch and seqlen) names one kernel from many request combos.
+
+
+@pytest.fixture
+def split(tmp_path, monkeypatch):
+    return synth.split_probe_manifest(synth.provider(tmp_path, monkeypatch))
+
+
+def _dedup(manifest, selector=("batch", "seqlen"), neutral=("num_seqs",)):
+    out = copy.deepcopy(manifest)
+    out["enumerate"]["selector_fields"] = list(selector)
+    out["enumerate"]["neutral_fields"] = list(neutral)
+    return out
+
+
+def _kernels(manifest) -> list:
+    config = re_.build_config(manifest, warn=lambda message: None)
+    return config["packs"][0]["kernels"]
+
+
+def test_without_dedup_keys_a_rule_driven_family_repeats_its_names(split):
+    """Today's behaviour, kept: one cell per combo, so one name per combo."""
+    with pytest.raises(re_.EnumerationError, match="duplicated kernel name"):
+        _kernels(split)
+
+
+def test_selector_only_cells_merge_into_the_union_of_their_picks(split):
+    kernels = _kernels(_dedup(split))
+    by_cell = OrderedDict()
+    for k in kernels:
+        by_cell.setdefault(k["metadata"]["hdim"], []).append(k)
+    assert list(by_cell) == [64, 128]
+    for hdim, cell in by_cell.items():
+        spec = [k["kernel_source"]["spec"] for k in cell]
+        # Combo picks 1, 8, 1, 4, 1, 1 -> {1, 4, 8}; the first combo's pick is the
+        # default, the rest follow sorted.
+        assert [s["num_segments"] for s in spec] == [1, 4, 8]
+        assert [bool(k.get("default")) for k in cell] == [True, False, False]
+        assert [k["name"] for k in cell] == [
+            f"split_probe.fp16_d{hdim}_num_segments{n}" for n in (1, 4, 8)
+        ]
+    # The merged cell carries no selector field: no kernel claims one combo's value.
+    assert all("batch" not in k["metadata"] for k in kernels)
+
+
+def test_the_merged_default_is_the_first_combos_pick(split):
+    group = next(g for g in split["enumerate"]["cells"] if g["fields"] == ["seqlen"])
+    group["values"] = [1024, 64]
+    cell = [k for k in _kernels(_dedup(split)) if k["metadata"]["hdim"] == 64]
+    assert [k["kernel_source"]["spec"]["num_segments"] for k in cell] == [8, 1, 4]
+    assert [bool(k.get("default")) for k in cell] == [True, False, False]
+
+
+def test_neutral_fields_take_the_default_specs_value(split):
+    specs = [k["kernel_source"]["spec"] for k in _kernels(_dedup(split))]
+    assert {s["num_seqs"] for s in specs} == {1}
+    batch = next(g for g in split["enumerate"]["cells"] if g["fields"] == ["batch"])
+    batch["values"] = [2, 1, 8]
+    specs = [k["kernel_source"]["spec"] for k in _kernels(_dedup(split))]
+    assert {s["num_seqs"] for s in specs} == {2}
+
+
+def test_a_combo_pick_the_merged_cell_drops_is_refused(split):
+    """Without num_seqs neutral, num_seqs varies, is held at the default, and the
+    batch-2 combos' kernels would silently not ship."""
+    with pytest.raises(
+        re_.EnumerationError, match=r"num_seqs=2\) for request \{hdim: 64, batch: 2"
+    ):
+        _kernels(_dedup(split, neutral=()))
+
+
+def test_plan_space_counts_after_merging(split, tmp_path, capsys):
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", _dedup(split))
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    out = capsys.readouterr().out
+    assert "cells: 2 (12 request combos merged on selector_fields" in out
+    assert "instances (current classification): 6 " in out
+    assert "num_seqs: {" not in out
+
+
+def _also_feature(m):
+    m["enumerate"]["selector_fields"] = ["hdim", "batch"]
+
+
+def _also_performance(m):
+    m["enumerate"]["neutral_fields"] = ["num_segments"]
+
+
+@pytest.mark.parametrize(
+    "mutate, words",
+    [
+        (lambda m: m["enumerate"].update(selector_fields="batch"), ["selector_fields"]),
+        (lambda m: m["enumerate"].update(neutral_fields=[1]), ["neutral_fields"]),
+        (
+            lambda m: m["enumerate"].update(selector_fields=["batch", "nope"]),
+            ["selector_fields", "nope"],
+        ),
+        (
+            lambda m: m["enumerate"].update(selector_fields=["dtype"]),
+            ["selector_fields", "dtype"],
+        ),
+        (
+            lambda m: m["enumerate"].update(neutral_fields=["no_such"]),
+            ["neutral_fields", "no_such"],
+        ),
+        (_also_feature, ["selector_fields", "hdim", "feature"]),
+        (_also_performance, ["neutral_fields", "num_segments", "performance"]),
+    ],
+    ids=[
+        "selector-not-a-list",
+        "neutral-not-names",
+        "selector-unknown",
+        "selector-not-a-cell-field",
+        "neutral-unknown",
+        "selector-is-feature",
+        "neutral-is-performance",
+    ],
+)
+@pytest.mark.parametrize("mode", ["--plan-space", "--out"])
+def test_a_bad_dedup_key_is_exit_2_naming_it(
+    split, tmp_path, capsys, mutate, words, mode
+):
+    manifest = _dedup(split)
+    mutate(manifest)
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    out = tmp_path / "c.yaml"
+    argv = ["--plan-space"] if mode == "--plan-space" else ["--out", str(out)]
+    assert re_.main(["--manifest", str(path), *argv]) == 2
+    err = capsys.readouterr().err
+    assert all(w in err for w in words), err
+    assert not out.exists()
+
+
+def test_duplicate_names_after_merging_still_fail(split):
+    manifest = _dedup(split)
+    manifest["kernel_name_template"] = "split_probe.{dtype}"
+    with pytest.raises(re_.EnumerationError, match="duplicated kernel name"):
+        _kernels(manifest)
+
+
+@pytest.mark.parametrize("family", ["probe", "conv"])
+@pytest.mark.parametrize("mode", ["--plan-space", "--out"])
+def test_empty_dedup_keys_are_byte_identical_to_none(
+    tmp_path, monkeypatch, capsys, family, mode
+):
+    """The keys are opt-in: an absent key and an empty one produce the same bytes
+    (gfx950's own regeneration gates pin absent == today)."""
+    root = synth.provider(tmp_path, monkeypatch)
+    base = (
+        synth.probe_manifest(root)
+        if family == "probe"
+        else synth.conv_probe_manifest(root)
+    )
+    if family == "probe" and mode == "--plan-space":
+        base["enumerate"]["space"] = "full"
+        base["reduction"] = {
+            "fields": {"feature": ["dtype"], "performance": [], "ignored": []}
+        }
+    outputs = []
+    for manifest in (base, _dedup(base, selector=(), neutral=())):
+        path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+        out = tmp_path / "c.yaml"
+        out.unlink(missing_ok=True)
+        argv = ["--plan-space"] if mode == "--plan-space" else ["--out", str(out)]
+        capsys.readouterr()
+        assert re_.main(["--manifest", str(path), *argv]) == 0
+        outputs.append(
+            (capsys.readouterr().out, out.read_bytes() if out.exists() else None)
+        )
+    assert outputs[0] == outputs[1]

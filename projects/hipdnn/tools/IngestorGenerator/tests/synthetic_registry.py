@@ -13,9 +13,12 @@ rocKE's catalog, tiles, names or admission rules do:
   (``order``, ``None`` when unset), a free tile knob (``tile_n``) and a candidate that
   declines a head size it does not support;
 - the *conv probe* family: a second, unrelated request/spec pair whose request-only
-  fields (``C``, ``K``, ``G``) the spec does not carry.
+  fields (``C``, ``K``, ``G``) the spec does not carry;
+- the *split probe* family: a rule-driven candidate, as a split-KV decode is, whose
+  one spec per request takes ``num_segments`` from ``batch`` and ``seqlen`` and
+  copies ``batch`` into an IR-neutral ``num_seqs``.
 
-``provider(tmp_path, monkeypatch)`` binds both to a throw-away provider root.
+``provider(tmp_path, monkeypatch)`` binds all three to a throw-away provider root.
 """
 
 from __future__ import annotations
@@ -154,6 +157,52 @@ def conv_probe_candidates():
     return [ConvProbeCandidate()]
 
 
+@dataclasses.dataclass(frozen=True)
+class SplitProbeRequest:
+    algorithm: str = "split"
+    spec_id: str = "rule"
+    arch: str = ARCH
+    hdim: int = 64
+    dtype: str = "fp16"
+    batch: int = 1
+    seqlen: int = 64
+
+
+@dataclasses.dataclass(frozen=True)
+class SplitProbeSpec:
+    dtype: str
+    hdim: int
+    num_segments: int
+    num_seqs: int
+
+
+def split_rule(batch: int, seqlen: int) -> int:
+    """Long keys split, fewer the more sequences already fill the device."""
+    return max(1, 8 // batch) if seqlen >= 256 else 1
+
+
+class SplitProbeCandidate:
+    name, algorithm, spec_id = "split_probe", "split", "rule"
+
+    def admits(self, request: SplitProbeRequest):
+        return True, ""
+
+    def select_spec(self, request: SplitProbeRequest):
+        return SplitProbeSpec(
+            dtype=request.dtype,
+            hdim=request.hdim,
+            num_segments=split_rule(request.batch, request.seqlen),
+            num_seqs=request.batch,
+        )
+
+    def sweep_space(self, request: SplitProbeRequest):
+        return [self.select_spec(request)]
+
+
+def split_probe_candidates():
+    return [SplitProbeCandidate()]
+
+
 def probe_manifest(provider_root, **enumerate_overrides) -> dict:
     """A slice-space manifest over the probe family: two cells, ``tile_n`` free."""
     kmd = [("dtype", "string")] + [
@@ -250,6 +299,61 @@ def conv_probe_manifest(provider_root) -> dict:
                 "feature": ["direction", "dtype", "arch"],
                 "performance": [],
                 "ignored": ["tile_m", "tile_n", "tile_k"],
+            }
+        },
+    }
+
+
+def split_probe_manifest(provider_root) -> dict:
+    """A full-space manifest over the split probe family. ``batch`` x ``seqlen``
+    combos (0..5 in catalog order) select segments 1, 8, 1, 4, 1, 1 for each
+    ``hdim``; without ``selector_fields`` every combo is its own cell and the names
+    repeat."""
+    names = ["dtype", "hdim"]
+    return {
+        "dialect": "packaged",
+        "authored_subpath": "synthetic/split_probe",
+        "engine": {
+            "name": "hipkernel:SplitProbe",
+            "sdk_version": "1.0.0",
+            "knobs": ["num_segments"],
+            "heuristic": "native",
+        },
+        "kmd_fields": [
+            {"name": n, "type": "string" if n == "dtype" else "int"} for n in names
+        ],
+        "specialization": {
+            "metadata_fields": names,
+            "matcher_only_fields": [],
+            "vocabulary": {"dtype": {"fp16": "FP16", "bf16": "BF16"}},
+            "bindings": {n: {"field": n} for n in names},
+        },
+        "kernel_source_kind": "rocke",
+        "workspace_policy": "none",
+        "pack": "split_probe",
+        "arch": ARCH,
+        "provider_root": str(provider_root),
+        "source": "kernels/split_probe.py",
+        "builder": "build_split_probe",
+        "kernel_name_template": "split_probe.{dtype}_d{hdim}",
+        "enumerate": {
+            "candidates": f"{_MODULE}:split_probe_candidates",
+            "request": f"{_MODULE}:SplitProbeRequest",
+            "pin": {"algorithm": "split", "spec_id": "rule"},
+            "fixed": {"arch": ARCH, "dtype": "fp16"},
+            "cells": [
+                {"fields": ["hdim"], "values": [64, 128]},
+                {"fields": ["batch"], "values": [1, 2, 8]},
+                {"fields": ["seqlen"], "values": [64, 1024]},
+            ],
+            "sweep_level": "production",
+            "space": "full",
+        },
+        "reduction": {
+            "fields": {
+                "feature": ["dtype", "hdim"],
+                "performance": [{"name": "num_segments"}],
+                "ignored": ["num_seqs"],
             }
         },
     }

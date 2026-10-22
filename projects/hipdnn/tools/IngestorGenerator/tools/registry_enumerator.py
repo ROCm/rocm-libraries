@@ -17,6 +17,13 @@ spec, KMD, metadata, bindings and name, and holds any other varying field at the
 registry default (with a WARN unless ``ignored``). The default spec carries
 ``default: true``.
 
+Two opt-in ``enumerate`` keys let a rule-driven candidate (one spec per request,
+picked from request fields) yield one cell per kernel family rather than one per
+request: ``selector_fields`` merges the combos that differ only in those cell fields
+into one cell holding every combo's pick; ``neutral_fields`` first sets the named
+spec fields, which the manifest author asserts are IR-neutral, to the default
+spec's value. See `cell_spaces`.
+
 Exit 0 on success; 2 on unusable input. ``--strict`` makes exit 1 mean a gate refusal:
 kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classification) or a
 ``--shapes`` GAP.
@@ -125,7 +132,7 @@ def _validate_manifest(path: str, manifest: dict) -> None:
         )
     decl = manifest["enumerate"]
     _require(isinstance(decl, dict), path, "enumerate", "a mapping")
-    for key in ("free_fields", "spec_fields"):
+    for key in ("free_fields", "spec_fields", "selector_fields", "neutral_fields"):
         _require(
             decl.get(key) is None or _is_names(decl[key]),
             path,
@@ -388,6 +395,14 @@ class Registry:
         check_value_map_cells(
             self.groups, (manifest.get("ground_truth") or {}).get("value_map")
         )
+        self.selector_fields = list(decl.get("selector_fields") or [])
+        unknown = [n for n in self.selector_fields if n not in self.cell_fields]
+        if unknown:
+            raise EnumerationError(
+                f"enumerate.selector_fields names {unknown}, which are not "
+                f"enumerate.cells fields {self.cell_fields}."
+            )
+        self.neutral_fields = list(decl.get("neutral_fields") or [])
         for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
@@ -751,12 +766,118 @@ class Enumeration:
     classification: Classification
 
 
+@dataclasses.dataclass
+class CellSpaces:
+    """The catalog's cells and each one's ``(default spec, specs)``, in catalog order."""
+
+    cells: list
+    spaces: list
+    #: Per cell, ``(request combo, its normalised select_spec)`` for every merged
+    #: combo; empty when the manifest merges nothing.
+    picks: list
+    #: Request combos before merging.
+    combos: int
+
+
+def cell_spaces(registry: Registry, classification: Classification) -> CellSpaces:
+    """The registry's space per catalog cell.
+
+    With neither ``selector_fields`` nor ``neutral_fields`` every request combo is
+    a cell and its space is the registry's, unchanged. Otherwise:
+
+    1. each spec's ``neutral_fields`` take the value of the cell's default spec;
+    2. combos equal outside ``selector_fields`` merge into one cell, ordered by its
+       first combo in catalog order, and without the selector fields;
+    3. that cell's default spec is its first combo's ``select_spec``, and its specs
+       are the union, first occurrence kept, of each combo's ``select_spec`` then
+       its ``sweep_space`` specs, combo by combo in catalog order.
+    """
+    combos = registry.cells()
+    raw = [registry.space(cell) for cell in combos]
+    selectors, neutral = registry.selector_fields, registry.neutral_fields
+    if not selectors and not neutral:
+        return CellSpaces(combos, raw, [], len(combos))
+    names = _spec_fields(raw[0][0])
+    unknown = [n for n in neutral if n not in names]
+    if unknown:
+        raise EnumerationError(
+            f"enumerate.neutral_fields names {unknown}, which the registry spec "
+            f"{type(raw[0][0]).__name__} does not have."
+        )
+    for key, declared in (("selector_fields", selectors), ("neutral_fields", neutral)):
+        for kind in ("feature", "performance"):
+            clash = [n for n in declared if n in getattr(classification, kind)]
+            if clash:
+                raise EnumerationError(
+                    f"enumerate.{key} names {clash}, which reduction.fields.{kind} "
+                    f"also names: a {kind} field defines a kernel, so it cannot "
+                    f"only steer the selector or leave the IR unchanged."
+                )
+    merged: "OrderedDict[tuple, list]" = OrderedDict()
+    for cell, space in zip(combos, raw):
+        key = tuple((f, v) for f, v in cell.items() if f not in selectors)
+        merged.setdefault(key, []).append((cell, space))
+    cells, spaces, picks = [], [], []
+    for key, members in merged.items():
+        default = members[0][1][0]
+
+        def normalised(spec, combo):
+            moved = {
+                n: getattr(default, n)
+                for n in neutral
+                if getattr(spec, n) != getattr(default, n)
+            }
+            if not moved:
+                return spec
+            try:
+                return dataclasses.replace(spec, **moved)
+            except (TypeError, ValueError) as exc:
+                raise EnumerationError(
+                    f"enumerate.neutral_fields {sorted(moved)} cannot take the "
+                    f"default spec's values in cell {_show(combo)}: {exc}"
+                ) from exc
+
+        union: "OrderedDict[object, object]" = OrderedDict()
+        cell_picks = []
+        for combo, (base, specs) in members:
+            base = normalised(base, combo)
+            cell_picks.append((combo, base))
+            for spec in (base, *(normalised(s, combo) for s in specs)):
+                union.setdefault(_identity(spec), spec)
+        cells.append(dict(key))
+        spaces.append((default, list(union.values())))
+        picks.append(cell_picks)
+    return CellSpaces(cells, spaces, picks, len(combos))
+
+
+def _identity(spec):
+    try:
+        hash(spec)
+    except TypeError:
+        return repr(spec)
+    return spec
+
+
+def _check_picks(picks: list, kept_per_cell: list) -> None:
+    """Every merged combo's own ``select_spec`` ships: a selector field that changes
+    anything but the kept knobs would otherwise drop it silently."""
+    for cell_picks, kept in zip(picks, kept_per_cell):
+        for combo, pick in cell_picks:
+            if pick not in kept:
+                raise EnumerationError(
+                    f"the registry selects {pick} for request {_show(combo)}, but its "
+                    f"merged cell keeps no such kernel: enumerate.selector_fields "
+                    f"changes a field the cell holds or filters (declare it "
+                    f"neutral only if it is proven IR-neutral)."
+                )
+
+
 def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumeration:
     registry = registry or Registry(manifest)
     full = registry.space_kind == "full"
     classification = Classification.from_manifest(manifest, required=full)
-    cells = registry.cells()
-    spaces = [registry.space(cell) for cell in cells]
+    merged = cell_spaces(registry, classification)
+    cells, spaces = merged.cells, merged.spaces
     if full:
         selected = select_full(spaces, classification)
         kept_per_cell, projected, held = (
@@ -767,6 +888,7 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
     else:
         kept_per_cell = [registry.slice_of(base, specs) for base, specs in spaces]
         projected, held = [], []
+    _check_picks(merged.picks, kept_per_cell)
     rows = []
     for cell, (base, _), kept in zip(cells, spaces, kept_per_cell):
         if not kept:
@@ -928,11 +1050,13 @@ def build_config(
             kernel["default"] = True
         kernels.append(kernel)
 
-    if registry.space_kind == "full":
+    merges = registry.selector_fields or registry.neutral_fields
+    if registry.space_kind == "full" or merges:
         repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
         if repeated:
             raise EnumerationError(
-                f"space: full renders {len(repeated)} duplicated kernel name(s), e.g. "
+                f"space: {registry.space_kind} renders {len(repeated)} duplicated "
+                f"kernel name(s), e.g. "
                 f"{repeated[:3]}: a varying field reaches neither the name template "
                 f"nor a projected knob."
             )
@@ -998,8 +1122,8 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
     out = out or sys.stdout
     registry = Registry(manifest)
     classification = Classification.from_manifest(manifest, required=True)
-    cells = registry.cells()
-    spaces = [registry.space(cell) for cell in cells]
+    merged = cell_spaces(registry, classification)
+    cells, spaces = merged.cells, merged.spaces
     budget = classification.budget
 
     def count(performance) -> int:
@@ -1043,7 +1167,15 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
     print(f"plan space: {manifest['engine']['name']} @ {arch}", file=out)
     for fields, rows in registry.groups:
         print(f"  cell group {fields}: {len(rows)} values", file=out)
-    print(f"  cells: {len(cells)}", file=out)
+    if merged.picks:
+        print(
+            f"  cells: {len(cells)} ({merged.combos} request combos merged on "
+            f"selector_fields {registry.selector_fields}, neutral_fields "
+            f"{registry.neutral_fields})",
+            file=out,
+        )
+    else:
+        print(f"  cells: {len(cells)}", file=out)
     print("  varying spec fields (value set; registry default):", file=out)
     if not values:
         print("    none", file=out)

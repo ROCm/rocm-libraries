@@ -682,6 +682,8 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  selector_fields: [batch, seqlen_k]  # optional: cell fields that only steer select_spec; see below
+  neutral_fields: [num_seqs]      # optional: spec fields proven not to change the kernel; see below
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -712,6 +714,32 @@ or flat kernel may carry `default: true`, the variant its cell always keeps. An 
 `launches: {<name>: {<overrides>}}` mapping is copied verbatim into every generated
 kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
 config's `launches` rules below, checked when the generated config loads.
+
+Two optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+request and picks a knob from request fields (rocKE's strided split-KV decode picks
+`num_segments` from `batch` and `seqlen_k`). Without them each request combo is a cell,
+so many cells name the same kernel and `--out` fails on duplicate names.
+
+- `selector_fields` lists cell fields that only steer the candidate's choice. Combos
+  equal in every other cell field merge into one cell, without the selector fields, at
+  the position of its first combo. Its specs are the union of each combo's `select_spec`
+  then `sweep_space` specs, combo by combo in catalog order, first occurrence kept; its
+  default spec is the first combo's `select_spec`. The `space` rules then apply as usual,
+  so a knob the combos vary (`num_segments`) must be a `performance` knob to reach the
+  name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
+  naming the combo. A selector field must be a cell field and must not be a `feature` or
+  `performance` field.
+- `neutral_fields` lists spec fields that do not change the compiled kernel. Before
+  merging, each spec's neutral fields take the cell's default spec's value, so specs
+  differing only there are one kernel. The manifest author owns that claim: a field is
+  neutral only if a test proves it IR-neutral. `num_seqs` on the gfx942 split-KV decode
+  grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
+  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module.py`).
+  A neutral field must be a spec field and must not be a `feature` or `performance` field.
+
+Without either key (or with both empty) the output is byte-identical to a manifest that
+never had them. `--plan-space` counts merged cells and prints the combo count beside them;
+duplicate kernel names after merging still exit 2.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard
