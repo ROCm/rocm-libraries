@@ -106,6 +106,12 @@ static const feature_row_t k_query_lengths[] = {
     {"bf16", 256, 256, "causal", NULL, "du", "paged", 16, 32, -1},
 };
 
+static const feature_row_t k_shipped_paged[] = {
+    {"bf16", 128, 128, "causal", NULL, "sdu", "paged", 64, 32, -1},
+    {"fp16", 64, 64, "causal", NULL, "su", "paged", 32, 32, -1},
+    {"fp16", 96, 96, "causal", NULL, "u", "paged", 16, 32, -1},
+};
+
 static rocke_wmma_fmha_fwd_v2_spec_t feature_spec(const feature_row_t* r)
 {
     rocke_wmma_fmha_fwd_v2_spec_t s = base_spec(r->dtype, r->hd, r->hdv, r->mask, r->bias);
@@ -235,6 +241,9 @@ static void build_table(void)
     for(a = 0; a < 2; ++a)
         for(i = 0; i < (int)(sizeof(k_query_lengths) / sizeof(k_query_lengths[0])); ++i)
             push(archs[a], feature_spec(&k_query_lengths[i]));
+    for(a = 0; a < 2; ++a)
+        for(i = 0; i < (int)(sizeof(k_shipped_paged) / sizeof(k_shipped_paged[0])); ++i)
+            push(archs[a], feature_spec(&k_shipped_paged[i]));
 }
 
 int main(int argc, char** argv)

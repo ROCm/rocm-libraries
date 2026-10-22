@@ -28,6 +28,10 @@
 #   168..169 processor replays (gfx1151, gfx1201) of feature configs
 #   170..179 QUERY_LENGTHS x (gfx11-generic, gfx12-generic): dense Q against
 #            a paged cache, and seqused_q on ragged / paged / dense-Q layouts
+#   180..185 SHIPPED_PAGED x (gfx11-generic, gfx12-generic): shipped paged
+#            catalog combinations the rows above miss (sinks with dense Q +
+#            seqused_q at page 64, sinks with ragged Q + seqused_q on the
+#            per-tile path, head 96 paged)
 #
 # The head counts (Hq / Hkv / Hv), head widths, strides and window bounds
 # are kernel arguments, so every config covers Hv != Hkv by construction.
@@ -96,6 +100,12 @@ QUERY_LENGTHS = (
     ("bf16", 128, 128, "causal", None, "u", "paged", 16, 32, None),
     ("fp16", 128, 128, "none", None, "u", "ragged", 0, 32, None),
     ("bf16", 256, 256, "causal", None, "du", "paged", 16, 32, None),
+)
+# Shipped paged catalog objects (causal, block_n 32) not reached above.
+SHIPPED_PAGED = (
+    ("bf16", 128, 128, "causal", None, "sdu", "paged", 64, 32, None),
+    ("fp16", 64, 64, "causal", None, "su", "paged", 32, 32, None),
+    ("fp16", 96, 96, "causal", None, "u", "paged", 16, 32, None),
 )
 
 
@@ -224,6 +234,9 @@ def _configs():
     out.append(("gfx1201", _feature_fields(FEATURES[8])))
     for arch in ARCHS:
         for row in QUERY_LENGTHS:
+            out.append((arch, _feature_fields(row)))
+    for arch in ARCHS:
+        for row in SHIPPED_PAGED:
             out.append((arch, _feature_fields(row)))
     return out
 
