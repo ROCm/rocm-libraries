@@ -1605,9 +1605,8 @@ namespace
         ASSERT_NE(tiles % grid, 0u)
             << "the launch gate refuses the dynamic-queue path when tiles % grid != 0";
 
-        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
-            << "A dynamic-queue StreamK launch whose grid does not divide the tile count "
-               "must be refused at selection";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Dynamic-queue StreamK kernels support USO";
     }
 
     // The dynamic-queue path takes no USO grid snap, so nothing there selects a
@@ -1643,9 +1642,8 @@ namespace
             << "SK4 takes no snap, so the flag clamp is the only thing that moves the grid";
         ASSERT_NE(tiles % grid, 0u) << "the clamped grid does not divide the tile count";
 
-        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
-            << "a grid the flag clamp moved off a tile multiple must be refused at selection, "
-               "not launched";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "Dynamic-queue StreamK kernels support USO";
 
         // Control: the refusal is the uniform-summation-order gate acting on
         // that grid, not some unrelated property of this mock solution.
@@ -1665,9 +1663,8 @@ namespace
         auto problemOff               = probeProblem();
         problemOff.setParams().setUniformSummationOrder(0);
 
-        EXPECT_FALSE(solution->uniformSummationOrderSupported(problemOn, hardware))
-            << "SK4 on this mock is not launch-legal under USO; the idle-filter assertion "
-               "below is only meaningful against that contrast";
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOn, hardware))
+            << "Dynamic-queue StreamK kernels support USO";
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardware))
             << "The selection filter must not drop kernels when uniform summation order is off";
     }

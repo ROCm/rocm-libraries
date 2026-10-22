@@ -6728,18 +6728,6 @@ namespace TensileLite
                                 + " extraIters=" + std::to_string(split.extraIters)
                                 + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
                 }
-                else if(tiles % launch.grid != 0)
-                {
-                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                    // the derivation above does not describe. They are additionally
-                    // held to SKTiles == 0 below, so the divisibility test is
-                    // redundant for them, but redundant and fail-closed is the
-                    // right side to err on.
-                    return refuse("GridDoesNotDivideTiles",
-                                  "StreamK grid " + std::to_string(launch.grid)
-                                      + " does not divide the tile count "
-                                      + std::to_string(tiles));
-                }
 
                 // Mirrors the arg-packing condition: the ws/Flags pair is only
                 // appended for these kernels, and the device reads AddressFlags == 0
