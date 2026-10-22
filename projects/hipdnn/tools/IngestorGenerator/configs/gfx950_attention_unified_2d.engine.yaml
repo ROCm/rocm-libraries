@@ -297,9 +297,13 @@ launch_surface:
       kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the batch exceeds the candidate's capacity, or the
-      candidate's geometry is one gfx950 does not build. The metadata's seqlen shape is
+      candidate's geometry is one gfx950 does not build. head_size 256 is the D256 prefill
+      kernel's alone: graph_match declines it for fp16 (ATT-34), an unmasked graph and a
+      single-token query, kernelMatches repeats those declines, and candidateFor() accepts a
+      head-256 record only with the transposed 32x32 geometry. The metadata's seqlen shape is
       not a build input of this kernel and is not carried. score() ranks the applicable
-      baseline geometry first, then ascending (tile_size, num_warps, block_m_per_warp).
+      baseline geometry first (the narrow 4 x 16 one; at head_size 256 the D256 one), then
+      ascending (tile_size, num_warps, block_m_per_warp).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DMatchers.cpp
 
   - name: kernargs

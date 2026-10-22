@@ -67,7 +67,7 @@ inline bool isSupportedGfx950Unified2DBlockSize(int64_t blockSize)
  * @brief The geometry fields a candidate carries, as the Python spec validates them.
  *
  * `UnifiedAttention2DTiledSpec.__post_init__` and `supports_tiled_2d`, conjoined:
- *   - head_size in {64, 128, 256}, divisible by 32 -- the engine ships 64 and 128
+ *   - head_size in {64, 128, 256}, divisible by 32 -- the engine ships all three
  *     (@p headSize is range-checked by the matcher, not here)
  *   - block_size in {16, 32, 64}
  *   - num_warps in {1, 2, 4, 8}; block_m_per_warp in {16, 32}; 32 needs num_warps <= 4

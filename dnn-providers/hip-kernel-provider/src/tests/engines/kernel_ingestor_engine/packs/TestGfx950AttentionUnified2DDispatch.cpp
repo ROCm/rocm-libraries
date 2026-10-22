@@ -269,6 +269,47 @@ TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderOnceEverythingBeforeI
     EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
 }
 
+/// The same positive control for the D256 candidate and a D256 graph: the 32x32 transposed
+/// geometry, its head size and its two-warp CTA are all accepted before the loader.
+TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderForTheD256Candidate)
+{
+    KernelSpec d256;
+    d256.headSize = 256;
+    d256.numWarps = 2;
+    d256.blockMPerWarp = 32;
+    d256.useMfma32x32 = 1;
+    d256.useTransposedQk32x32 = 1;
+    GraphSpec graph;
+    graph.headSize = 256;
+
+    const std::string failure = prepareFailureFor(d256, graph);
+
+    ASSERT_FALSE(failure.empty());
+    for(const char* marker : {MISSING_TOKEN_MARKER,
+                              OUTPUT_LAYOUT_MARKER,
+                              GEOMETRY_MARKER,
+                              CAPACITY_MARKER,
+                              BLOCK_MARKER})
+    {
+        EXPECT_EQ(failure.find(marker), std::string::npos) << failure;
+    }
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// The identity tables do not depend on the head size: a D256 graph of the default batch and
+/// Skv lays out the same three sections as the D128 one.
+TEST(TestGfx950AttentionUnified2DDispatch, TheD256WorkspaceIsTheSameThreeSections)
+{
+    GraphSpec spec;
+    spec.headSize = 256;
+    const Graph graph(spec);
+    const auto* handler = dispatchHandler();
+    ASSERT_NE(handler, nullptr);
+    EXPECT_EQ(
+        handler->workspaceBytes(graph.context(), bindingsFor(graph), makeKernel(KernelSpec{})),
+        768U);
+}
+
 /// Empty BoundTokens is what a mismatched catalog entry would hand prepare(). Without the read
 /// guard the bindings are default-constructed zeros: four uids of zero that resolve to
 /// whatever buffer the caller happened to label zero, and a scale of positive zero.

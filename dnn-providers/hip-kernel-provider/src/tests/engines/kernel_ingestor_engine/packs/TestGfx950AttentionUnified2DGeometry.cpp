@@ -83,6 +83,25 @@ TEST(TestGfx950AttentionUnified2DGeometry, AcceptsTheShippedBaselineAndTheDispat
     }
 }
 
+/// The D256 prefill geometry: head 256, 2 warps x 32 rows on the transposed 32x32 MFMA, a
+/// 64-token KV tile at every block size. Worked out from the Python at 2 warps (128 threads):
+/// 64 * 256 = 16384 >= 128 * 8, and 512 / 256 = 2 tokens per wave fit every block.
+TEST(TestGfx950AttentionUnified2DGeometry, AcceptsTheD256PrefillGeometryAtEveryBlockSize)
+{
+    for(const int64_t blockSize : {16, 32, 64})
+    {
+        Gfx950Unified2DGeometryFields fields = baseline();
+        fields.headSize = 256;
+        fields.blockSize = blockSize;
+        fields.tileSize = 64;
+        fields.numWarps = 2;
+        fields.blockMPerWarp = 32;
+        fields.useMfma32x32 = true;
+        fields.useTransposedQk32x32 = true;
+        EXPECT_TRUE(isSupportedGfx950Unified2DGeometry(fields)) << "block " << blockSize;
+    }
+}
+
 TEST(TestGfx950AttentionUnified2DGeometry, RefusesAnUnbuiltWarpCountOrRowCount)
 {
     for(const int64_t warps : {0, 3, 5, 6, 7, 9, 16, -4})
@@ -250,6 +269,18 @@ TEST(TestGfx950AttentionUnified2DGeometry, ANonPowerOfTwoGroupUsesTheFlooredBloc
     const auto geometry = gfx950Unified2DLaunchGeometry(4, 16, 28, 4, 512, 1, "k");
     EXPECT_EQ(geometry.gridX, 4U);
     EXPECT_EQ(geometry.gridY, 57U);
+}
+
+/// The D256 CTA is two warps of 32 rows: block_m 64 like the baseline, but 128 threads. Hq 32
+/// over Hkv 4 is a group of 8, so block_q is 8: 3 * 1024 tokens -> 384 blocks, plus one per
+/// sequence = 387, over 4 KV heads.
+TEST(TestGfx950AttentionUnified2DGeometry, TheD256CtaIsTwoWarpsOfThirtyTwoRows)
+{
+    const auto geometry = gfx950Unified2DLaunchGeometry(2, 32, 32, 4, 1024, 3, "k");
+    EXPECT_EQ(geometry.gridX, 4U);
+    EXPECT_EQ(geometry.gridY, 387U);
+    EXPECT_EQ(geometry.gridZ, 1U);
+    EXPECT_EQ(geometry.blockX, 128U);
 }
 
 TEST(TestGfx950AttentionUnified2DGeometry, BlockIsSixtyFourLanesPerWarp)

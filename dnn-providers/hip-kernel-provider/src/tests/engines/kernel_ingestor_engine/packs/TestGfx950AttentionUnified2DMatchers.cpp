@@ -118,6 +118,55 @@ TEST(TestGfx950AttentionUnified2DMatchers, AcceptsAQueryAsLongAsOrShorterThanThe
     EXPECT_TRUE(graphMatches(shorter));
 }
 
+/// D256 is the prefill kernel's alone: bf16, the two causal masks, every group up to sixteen.
+TEST(TestGfx950AttentionUnified2DMatchers, AcceptsAD256PrefillGraph)
+{
+    for(const int64_t mask : {TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL})
+    {
+        for(const auto& [hq, hkv] :
+            std::vector<std::pair<int64_t, int64_t>>{{8, 8}, {8, 1}, {16, 2}, {32, 4}, {64, 8}})
+        {
+            GraphSpec spec;
+            spec.headSize = 256;
+            spec.numQueryHeads = hq;
+            spec.numKvHeads = hkv;
+            setMask(spec, mask);
+            EXPECT_TRUE(graphMatches(spec))
+                << "D256 mask " << mask << " Hq " << hq << " Hkv " << hkv;
+        }
+    }
+}
+
+/// What the D256 kernel is not built for: fp16 (ATT-34), an unmasked graph, and a single-token
+/// query (the decode path). Each is paired with the D256 graph one field away that is served,
+/// so a matcher that refused every D256 graph would not pass.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesD256WhereTheKernelIsNotBuilt)
+{
+    GraphSpec served;
+    served.headSize = 256;
+    ASSERT_TRUE(graphMatches(served));
+
+    std::vector<DeclineCase> cases;
+    GraphSpec fp16 = served;
+    fp16.dataType = data_objects::DataType::HALF;
+    cases.push_back({"fp16 D256 (ATT-34)", fp16});
+    GraphSpec unmasked = served;
+    setMask(unmasked, NO_MASK);
+    cases.push_back({"unmasked D256", unmasked});
+    GraphSpec decode = served;
+    decode.seqLenQ = 1;
+    cases.push_back({"single-token query at D256", decode});
+    expectEveryCaseDeclines(cases);
+
+    // The same three at D128 are served: the rules are the D256 kernel's, not the engine's.
+    for(const auto& declineCase : cases)
+    {
+        GraphSpec d128 = declineCase.spec;
+        d128.headSize = 128;
+        EXPECT_TRUE(graphMatches(d128)) << declineCase.name << " at D128";
+    }
+}
+
 // =============================================================================
 // graph_match declines: silent wrong answers
 // =============================================================================
@@ -199,10 +248,10 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAGroupTheKernelCannotServe)
     expectEveryCaseDeclines(cases);
 }
 
-TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAHeadSizeOtherThanSixtyFourOrOneTwentyEight)
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAHeadSizeOutsideTheShippedSet)
 {
     std::vector<DeclineCase> cases;
-    for(const int64_t headSize : {32, 96, 192, 256})
+    for(const int64_t headSize : {32, 96, 192, 320, 512})
     {
         GraphSpec spec;
         spec.headSize = headSize;
@@ -628,6 +677,92 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchServesEveryBuildableGeomet
     EXPECT_TRUE(matchesKernel(GraphSpec{}, transposed));
 }
 
+namespace
+{
+
+/// The shipped D256 candidate: transposed 32x32, 2 warps x 32 rows, a 64-token KV tile.
+KernelSpec d256Kernel()
+{
+    KernelSpec spec;
+    spec.headSize = 256;
+    spec.tileSize = 64;
+    spec.numWarps = 2;
+    spec.blockMPerWarp = 32;
+    spec.useMfma32x32 = 1;
+    spec.useTransposedQk32x32 = 1;
+    return spec;
+}
+
+GraphSpec d256Graph()
+{
+    GraphSpec spec;
+    spec.headSize = 256;
+    return spec;
+}
+
+} // namespace
+
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchServesTheD256CandidateForAD256Graph)
+{
+    EXPECT_TRUE(matchesKernel(d256Graph(), d256Kernel()));
+    GraphSpec bottomRight = d256Graph();
+    setMask(bottomRight, BOTTOM_RIGHT_CAUSAL);
+    KernelSpec bottomRightKernel = d256Kernel();
+    bottomRightKernel.maskType = BOTTOM_RIGHT_CAUSAL;
+    EXPECT_TRUE(matchesKernel(bottomRight, bottomRightKernel));
+}
+
+/// The head size is a baked field: a D128 kernel run on a D256 graph (or the reverse) would
+/// stride Q, K and V by the wrong row length.
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchKeepsEachHeadSizeToItsOwnKernel)
+{
+    EXPECT_FALSE(matchesKernel(d256Graph(), KernelSpec{}));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, d256Kernel()));
+}
+
+/// The only head-256 kernel shipped is the transposed 32x32 one. A record that claims head
+/// 256 with the narrow 16x16 geometry is a kernel this catalog does not build, so it is
+/// declined even though the Python validator would accept the geometry.
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchDeclinesAD256RecordThatIsNotTheD256Geometry)
+{
+    KernelSpec narrow = d256Kernel();
+    narrow.useMfma32x32 = 0;
+    narrow.useTransposedQk32x32 = 0;
+    narrow.numWarps = 4;
+    narrow.blockMPerWarp = 16;
+    EXPECT_FALSE(matchesKernel(d256Graph(), narrow));
+
+    KernelSpec wide = d256Kernel();
+    wide.useTransposedQk32x32 = 0;
+    EXPECT_FALSE(matchesKernel(d256Graph(), wide));
+}
+
+/// kernel_match is total over any (graph, candidate) pair: handed a D256 candidate and a
+/// graph graph_match would have declined, it declines too. fp16 and decode here, against the
+/// bound tokens of the served graph.
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchRepeatsTheD256DeclinesOnItsOwn)
+{
+    registerNativeIngestorSymbols();
+    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(KERNEL_MATCHER_SYMBOL));
+    const Graph served(d256Graph());
+    const auto bound = matchGraph(served);
+    ASSERT_TRUE(bound.has_value());
+    ASSERT_TRUE(kernelMatcher(served.context(), *bound, makeKernel(d256Kernel())));
+
+    GraphSpec decode = d256Graph();
+    decode.seqLenQ = 1;
+    const Graph decodeGraph(decode);
+    EXPECT_FALSE(kernelMatcher(decodeGraph.context(), *bound, makeKernel(d256Kernel())));
+
+    GraphSpec fp16 = d256Graph();
+    fp16.dataType = data_objects::DataType::HALF;
+    const Graph fp16Graph(fp16);
+    KernelSpec fp16Kernel = d256Kernel();
+    fp16Kernel.dtype = "FP16";
+    EXPECT_FALSE(kernelMatcher(fp16Graph.context(), *bound, makeKernel(fp16Kernel)));
+}
+
 // =============================================================================
 // score
 // =============================================================================
@@ -684,6 +819,18 @@ TEST(TestGfx950AttentionUnified2DMatchers, ScoreRanksTheBaselineFirstThenAscendi
     // Every alternative sits in the band below ALTERNATIVE_CEILING (1.0), under the baseline.
     EXPECT_LT(scoreOf(GraphSpec{}, ascending.front()), 1.0);
     EXPECT_EQ(baseline, 2.0);
+}
+
+/// The D256 geometry is the baseline for head size 256, where no other geometry ships; at the
+/// other head sizes it is an ordinary alternative below the narrow baseline.
+TEST(TestGfx950AttentionUnified2DMatchers, ScoreMakesTheD256GeometryTheBaselineAtHeadSize256)
+{
+    EXPECT_EQ(scoreOf(d256Graph(), d256Kernel()), 2.0);
+
+    KernelSpec d128Transposed = d256Kernel();
+    d128Transposed.headSize = 128;
+    EXPECT_LT(scoreOf(GraphSpec{}, d128Transposed), 1.0);
+    EXPECT_GT(scoreOf(GraphSpec{}, d128Transposed), 0.0);
 }
 
 /// Only a record kernel_match already declined scores below every legal candidate.

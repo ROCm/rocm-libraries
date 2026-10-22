@@ -324,6 +324,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestGfx950AttentionUnified2DCatalogTiles
             EXPECTED_CASES
                 EveryShippedKernelsGeometryIsOneTheEngineLaunches
+                EveryHeadSize256KernelIsTheD256PrefillKernel
                 EveryShippedKernelServesTheManifestsBatchCapacity
         )
     else()

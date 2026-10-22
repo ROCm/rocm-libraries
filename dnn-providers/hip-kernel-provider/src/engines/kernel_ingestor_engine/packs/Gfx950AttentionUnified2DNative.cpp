@@ -55,6 +55,12 @@
  * identity, and stages the three metadata arrays that implies in the plan's workspace (see
  * Gfx950AttentionUnified2DGeometry.hpp). Its applicability rules live only in the Python;
  * this file is where they become enforceable.
+ *
+ * Two registry candidates share the pack. head_size 64 and 128 run the narrow 16x16 geometry,
+ * at both data types and every mask. head_size 256 runs rocKE's D256 prefill geometry (the
+ * transposed 32x32 kernel with its own codegen constellation) at bf16, for the causal masks, and
+ * only for prefill: the rules the Python's `_d256_gfx950_cohort` states are restated in
+ * d256Decline().
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -95,6 +101,14 @@ constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32
 constexpr int64_t BASELINE_TILE_SIZE = 64;
 constexpr int64_t BASELINE_NUM_WARPS = 4;
 constexpr int64_t BASELINE_BLOCK_M_PER_WARP = 16;
+
+/// head_size 256 is served by the D256 prefill kernel alone: transposed 32x32 MFMA, 2 warps x
+/// 32 rows, a 64-token KV tile, and rocKE's D256 codegen constellation
+/// (`_d256_gfx950_spec_overrides`). It is the baseline for that head size.
+constexpr int64_t D256_HEAD_SIZE = 256;
+constexpr int64_t D256_TILE_SIZE = 64;
+constexpr int64_t D256_NUM_WARPS = 2;
+constexpr int64_t D256_BLOCK_M_PER_WARP = 32;
 
 constexpr std::string_view Q_TOKEN = "gfx950_attention_unified_2d.q.uid";
 constexpr std::string_view K_TOKEN = "gfx950_attention_unified_2d.k.uid";
@@ -343,6 +357,32 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
     return std::nullopt;
 }
 
+/**
+ * @brief Why head_size 256 cannot be served for this graph, or nullopt when it can.
+ *
+ * Mirrors rocKE's `_d256_gfx950_cohort` and the D256 candidate's capability: bf16 only (ATT-34:
+ * fp16 D256 is not served), the causal masks only, and prefill (more than one query token; a
+ * single-token query is the 3D decode path). Shared by the graph matcher, which logs the reason,
+ * and the kernel matcher, which does not.
+ */
+std::optional<std::string_view>
+    d256Decline(data_objects::DataType dataType, MaskType mask, int64_t seqLenQ)
+{
+    if(dataType != data_objects::DataType::BFLOAT16)
+    {
+        return "head size 256 is built for BFLOAT16 only (ATT-34); fp16 D256 is not served";
+    }
+    if(mask == MaskType::NO_MASK)
+    {
+        return "head size 256 is built for the causal masks only";
+    }
+    if(seqLenQ <= 1)
+    {
+        return "head size 256 is the prefill kernel; a single-token query is decode";
+    }
+    return std::nullopt;
+}
+
 /// The tensor uids and derived scalars a matched graph binds.
 struct AttentionUnified2DBinding
 {
@@ -517,12 +557,13 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    // head_size 64 or 128. 256 is a separate kernel family and ships in its own pack.
-    if(problem.headSize != 64 && problem.headSize != 128)
+    // head_size 64 or 128 (the narrow 16x16 geometry) or 256 (the D256 prefill geometry, judged
+    // below once the mask is known).
+    if(problem.headSize != 64 && problem.headSize != 128 && problem.headSize != D256_HEAD_SIZE)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}
                                << "head size " << problem.headSize
-                               << " is not supported; this catalog is built for 64 and 128");
+                               << " is not supported; this catalog is built for 64, 128 and 256");
         return std::nullopt;
     }
 
@@ -581,6 +622,15 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     if(!mask.has_value())
     {
         return std::nullopt;
+    }
+
+    if(problem.headSize == D256_HEAD_SIZE)
+    {
+        if(const auto why = d256Decline(problem.dataType, *mask, problem.seqLenQ))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"d256"} << *why);
+            return std::nullopt;
+        }
     }
 
     // Bound even though it is always zero: kernelMatches compares it against the candidate's
@@ -841,7 +891,13 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
         return std::nullopt;
     }
 
-    if(*headSize != 64 && *headSize != 128)
+    if(*headSize != 64 && *headSize != 128 && *headSize != D256_HEAD_SIZE)
+    {
+        return std::nullopt;
+    }
+    // The only head-256 kernel is the 32x32 transposed D256 geometry; a narrow one is a kernel
+    // this catalog does not build.
+    if(*headSize == D256_HEAD_SIZE && (*useMfma32x32 != 1 || *useTransposedQk32x32 != 1))
     {
         return std::nullopt;
     }
@@ -946,6 +1002,14 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // graph_match already declined these for the graph; the kernel matcher is total over any
+    // (graph, candidate) pair it is handed.
+    if(candidate->headSize == D256_HEAD_SIZE
+       && d256Decline(problem.dataType, static_cast<MaskType>(*mask), problem.seqLenQ))
+    {
+        return false;
+    }
+
     // Sliding window: the KV-loop bound is baked at compile time.
     const auto slidingWindow
         = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SLIDING_WINDOW_TOKEN);
@@ -981,7 +1045,9 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
  *
  * A stable fallback order for cold selection, not a performance model:
  *
- *  1. The baseline geometry (tile 64, 4 warps x 16 rows) above every alternative.
+ *  1. The baseline geometry above every alternative: tile 64, 4 warps x 16 rows at head_size 64
+ *     and 128; the D256 geometry (tile 64, 2 warps x 32 rows, transposed 32x32) at head_size 256,
+ *     where no other geometry is shipped.
  *  2. The alternatives in ascending lexicographic (tile_size, num_warps, block_m_per_warp,
  *     use_mfma_32x32, use_transposed_qk_32x32) order.
  *
@@ -997,9 +1063,16 @@ double scoreKernel(const MatchContext& /*context*/,
     {
         return UNSUPPORTED_SCORE;
     }
-    if(candidate->tileSize == BASELINE_TILE_SIZE && candidate->numWarps == BASELINE_NUM_WARPS
-       && candidate->blockMPerWarp == BASELINE_BLOCK_M_PER_WARP && !candidate->useMfma32x32
-       && !candidate->useTransposedQk32x32)
+    const bool baseline
+        = candidate->headSize == D256_HEAD_SIZE
+              ? (candidate->tileSize == D256_TILE_SIZE && candidate->numWarps == D256_NUM_WARPS
+                 && candidate->blockMPerWarp == D256_BLOCK_M_PER_WARP && candidate->useMfma32x32
+                 && candidate->useTransposedQk32x32)
+              : (candidate->tileSize == BASELINE_TILE_SIZE
+                 && candidate->numWarps == BASELINE_NUM_WARPS
+                 && candidate->blockMPerWarp == BASELINE_BLOCK_M_PER_WARP
+                 && !candidate->useMfma32x32 && !candidate->useTransposedQk32x32);
+    if(baseline)
     {
         return BASELINE_SCORE;
     }

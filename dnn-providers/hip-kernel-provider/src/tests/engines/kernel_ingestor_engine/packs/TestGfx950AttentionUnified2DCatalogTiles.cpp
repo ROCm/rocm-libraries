@@ -105,6 +105,42 @@ TEST(TestGfx950AttentionUnified2DCatalogTiles, EveryShippedKernelsGeometryIsOneT
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
 }
 
+/// The only head-256 kernel the catalog may ship is the D256 prefill kernel: bf16, a causal
+/// mask, and the transposed 32x32 geometry the engine's candidateFor() requires of that head
+/// size. A narrow head-256 record would load, be declined by the engine, and never run.
+TEST(TestGfx950AttentionUnified2DCatalogTiles, EveryHeadSize256KernelIsTheD256PrefillKernel)
+{
+    const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+
+    std::size_t d256Kernels = 0;
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            if(integerField(kernel, "head_size") != 256)
+            {
+                continue;
+            }
+            ++d256Kernels;
+            const auto dtype = kernel.metadata.find("dtype");
+            ASSERT_NE(dtype, kernel.metadata.end()) << kernel.name;
+            const auto* dtypeName = std::get_if<std::string>(&dtype->second);
+            ASSERT_NE(dtypeName, nullptr) << kernel.name;
+            EXPECT_EQ(*dtypeName, "BF16") << "kernel '" << kernel.name << "': fp16 D256 is ATT-34";
+            const auto mask = integerField(kernel, "mask_type");
+            EXPECT_TRUE(mask == 1 || mask == 2)
+                << "kernel '" << kernel.name << "' is not a causal mask";
+            EXPECT_EQ(integerField(kernel, "tile_size"), 64) << kernel.name;
+            EXPECT_EQ(integerField(kernel, "num_warps"), 2) << kernel.name;
+            EXPECT_EQ(integerField(kernel, "block_m_per_warp"), 32) << kernel.name;
+            EXPECT_EQ(integerField(kernel, "use_mfma_32x32"), 1) << kernel.name;
+            EXPECT_EQ(integerField(kernel, "use_transposed_qk_32x32"), 1) << kernel.name;
+        }
+    }
+    // Nine GQA rows x two causal masks: the D256 section of the manifest.
+    EXPECT_EQ(d256Kernels, 18U);
+}
+
 TEST(TestGfx950AttentionUnified2DCatalogTiles, EveryShippedKernelServesTheManifestsBatchCapacity)
 {
     const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
