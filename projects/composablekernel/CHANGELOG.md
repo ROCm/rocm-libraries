@@ -2,6 +2,12 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## Unreleased
+
+### Added
+
+* Added gfx1250 FP16/BF16/exact-FP32 grouped forward candidates with channels-last operands and native NCHW/NCDHW output stores, avoiding an output-layout conversion when selected.
+
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
 ### Added
