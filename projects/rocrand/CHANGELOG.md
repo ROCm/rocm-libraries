@@ -9,6 +9,10 @@ Documentation for rocRAND is available at
 
 * Replaced offset applied to scrambled Sobol direction vectors with Linear Matrix Scramble. The output of ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32 and ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64 is not bitwise compatible with previous releases.
 
+### Added
+
+* Added test cases for Sobol and Scrambled Sobol equidistribution by Joe & Kuo 2008.
+
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
 ### Optimized
