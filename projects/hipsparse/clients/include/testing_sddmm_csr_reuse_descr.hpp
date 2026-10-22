@@ -560,8 +560,6 @@ void testing_sddmm_csr_reuse_descr(Arguments argus)
                                           number_of_passes,
                                           use_preprocess);
     }
-
-    // Destroy matrix
 #endif
 }
 

@@ -460,8 +460,6 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
                                      diags,
                                      algs,
                                      number_of_passes);
-
-    // Destroy matrix
 #endif
 }
 

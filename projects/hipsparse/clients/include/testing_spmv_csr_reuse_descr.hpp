@@ -450,8 +450,6 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
                                                   number_of_passes,
                                                   use_preprocess);
     }
-
-    // Destroy matrix
 #endif
 }
 
