@@ -4506,6 +4506,19 @@ namespace
                && status != hipStreamCaptureStatusNone;
     }
 
+    // A fused all-to-all call signals and writes to its peer ranks, which a
+    // candidate launched on scratch would still do, and the ranks do not
+    // coordinate a search between them.
+    bool isFusedAllToAll(const RocblasltContractionProblem& prob)
+    {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        return prob.fused_epilogue != nullptr;
+#else
+        static_cast<void>(prob);
+        return false;
+#endif
+    }
+
     /**
      * Benchmark candidates on isolated scratch and say what happened.
      *
@@ -5220,7 +5233,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
         const bool  keyed  = tuning.reads() && !prob.grouped_gemm
                            && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-        const bool tunes = keyed && tuning.writes() && !streamIsCapturing(prob.stream);
+        const bool tunes
+            = keyed && tuning.writes() && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
 
         // A mode set without a path is otherwise reported by the heuristic
         // query, which a matmul-only caller never makes.
