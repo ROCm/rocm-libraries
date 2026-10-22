@@ -4,6 +4,7 @@
 """Emit one-wave TDM persistent kernels, whose descriptors are not wave-separated."""
 
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -43,10 +44,34 @@ def test_single_wave_streamk_offsets_each_descriptor(tmp_path):
     """A work item starting mid-tile must read K from its own start."""
     _, src = _emit(tmp_path, "streamk", TileProcessingStrategy=["StreamK"],
                    ClusterDim=[[1, 1]], StreamKFixupTreeReduction=[1])
+    instructions = [line.split("//", 1)[0].strip() for line in src.splitlines()]
     for tc in ("A", "B"):
-        offset = src.index(_K_OFFSET % tc)
-        # The offset follows the per-tile descriptor rebuild it adjusts.
-        assert src.rindex("set type field to 2(image)", 0, offset) < offset
+        increment = f"s[sgprStreamKLocalStart], s[sgprGlobalReadIncs{tc}+0]"
+        products = []
+        for opcode in ("s_mul_i32", "s_mul_hi_u32"):
+            matches = [(i, re.fullmatch(rf"{opcode} (s\d+), {re.escape(increment)}", line))
+                       for i, line in enumerate(instructions)]
+            matches = [(i, match[1]) for i, match in matches if match]
+            assert len(matches) == 1, f"{tc} needs both words of its own K offset"
+            products.append(matches[0])
+        assert products[0][1] != products[1][1]
+        updates = []
+        for word, (product, register) in enumerate(products):
+            descriptor = f"s[sgprtdm{tc}Group0+{word + 2}]"
+            opcode = "s_addc_u32" if word else "s_add_u32"
+            update = instructions.index(f"{opcode} {descriptor}, {descriptor}, {register}", product + 1)
+            # Scheduling may interleave A/B instructions, but the multiply's
+            # result must reach this descriptor update without being overwritten.
+            assert not any(re.match(rf"s_\w+ {register},", line)
+                           for line in instructions[product + 1:update])
+            updates.append(update)
+        assert updates[0] < updates[1]
+        # The low address addition's carry must reach the high address addition.
+        assert all(line.startswith(("s_mul_i32 ", "s_mul_hi_u32 ", "s_delay_alu "))
+                   for line in instructions[updates[0] + 1:updates[1]] if line)
+        rebuild = (f"s_mov_b64 s[sgprtdm{tc}Group0+2:sgprtdm{tc}Group0+2+1], "
+                   f"s[sgprAddress{tc}:sgprAddress{tc}+1]")
+        assert instructions.index(rebuild) < products[0][0]
 
 
 def test_single_wave_data_parallel_has_no_k_offset(tmp_path):
