@@ -1315,14 +1315,6 @@ def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -
                 f"metadata tuple for all its launches, so a matcher-visible field "
                 f"cannot take a different value in one launch."
             )
-        for prior_name, prior in launches.items():
-            if prior == launch:
-                raise ConfigError(
-                    f"{where}.launches names launches {prior_name!r} and {name!r} "
-                    f"with the same source, builder, spec, target and role. They "
-                    f"would compile to one kernel answering for two names, which "
-                    f"the loader refuses."
-                )
         launches[name] = launch
     return launches
 

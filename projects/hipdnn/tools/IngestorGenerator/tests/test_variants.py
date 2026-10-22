@@ -1225,10 +1225,14 @@ class TestLaunches:
         (entry,) = self._emitted(tmp_path, raw)
         assert entry["sources"]["b"]["spec"] == {"block_m": 256, "n": 1}
 
-    def test_two_launches_naming_one_kernel_are_rejected(self, tmp_path):
-        raw = self._with_launches({"a": {}, "b": {}})
-        with pytest.raises(ConfigError, match="'a' and 'b' with the same"):
-            _load(tmp_path, raw)
+    def test_two_launch_names_may_name_one_kernel(self, tmp_path):
+        """A pipeline stage may run one kernel twice with different arguments, so
+        equal launches are valid config and emit two entries naming one kernel."""
+        (entry,) = self._emitted(tmp_path, self._with_launches({"a": {}, "b": {}}))
+        assert sorted(entry["sources"]) == ["a", "b"]
+        first, second = entry["sources"]["a"], entry["sources"]["b"]
+        assert first == second
+        assert first["builder"] == "build_k"
 
     def test_a_role_alone_tells_two_launches_apart(self, tmp_path):
         (entry,) = self._emitted(
