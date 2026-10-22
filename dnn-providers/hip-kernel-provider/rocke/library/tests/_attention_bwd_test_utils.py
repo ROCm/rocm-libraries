@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Small helpers shared by the attention backward tests.
+"""Small helpers shared by the attention backward tests (and, for the
+compiler-option skip, by any attention test that compiles a kernel).
 
 Nothing here emits IR or needs a device at import time; the case and config
 tables are imported when a helper is called, so a CPU-only collection never
@@ -11,6 +12,8 @@ pulls the device harness in.
   kernel, ``kind`` in the ``struct`` letters of the kernarg ABIs (``Q``
   pointer, ``f`` f32, ``q`` i64, ``i`` i32).
 * :func:`device_arch`: the gfx id of device 0, ``None`` without a HIP device.
+* :func:`skip_where_compiler_refuses_option`: skip the test when the loaded
+  compiler does not accept a ``-mllvm`` option the kernel needs.
 * :func:`find_bwd_case`: a supplementary kernel case (or a case of the extra
   lists) by id, else the case-table case.
 * :func:`distinct_configs` / :func:`device_configs`: the kernel-config lists
@@ -23,8 +26,10 @@ from __future__ import annotations
 
 import json
 import re
+import unittest
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence
 
 __all__ = [
     "device_arch",
@@ -33,6 +38,7 @@ __all__ = [
     "fake_bench_ok",
     "find_bwd_case",
     "kernel_signature",
+    "skip_where_compiler_refuses_option",
 ]
 
 _KERNEL_HEAD = re.compile(r"define amdgpu_kernel void @\S+\((.*?)\) #0")
@@ -66,6 +72,26 @@ def device_arch() -> Optional[str]:
         return get_device_arch(0)
     except Exception:  # noqa: BLE001 - no HIP runtime on this host
         return None
+
+
+@contextmanager
+def skip_where_compiler_refuses_option() -> Iterator[None]:
+    """Skip the running test if the body raises ``CompilerOptionNotAccepted``.
+
+    That error means the loaded compiler does not accept a ``-mllvm`` option
+    the kernel needs (see ``rocke.runtime.compiler_options``): a fact about
+    the compiler, not a defect in the kernel under test. The skip is raised
+    as ``unittest.SkipTest``, which both pytest test functions and a
+    ``unittest`` ``setUpClass`` treat as a skip. Every other error propagates.
+    """
+    from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+
+    try:
+        yield
+    except CompilerOptionNotAccepted as exc:
+        raise unittest.SkipTest(
+            f"loaded compiler cannot build this kernel: {exc}"
+        ) from exc
 
 
 def find_bwd_case(case_id: str, *extra: Sequence):
