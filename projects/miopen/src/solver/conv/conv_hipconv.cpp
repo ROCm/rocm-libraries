@@ -25,6 +25,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_HIPCONV)
@@ -41,6 +43,15 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 // Ensure that every call site requests the same number of configs, so that the config
 // index is consistent across calls.
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
+
+// The device the context's stream runs on, or nullopt for an architecture hipconv lacks.
+static std::optional<hipconv::Device> ResolveDevice(const ExecutionContext& ctx)
+{
+    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
+    if(!arch.has_value())
+        return std::nullopt;
+    return hipconv::Device{*arch, static_cast<int>(ctx.GetStream().GetMaxComputeUnits())};
+}
 
 // Translate a MIOpen problem into hipconv's parameter struct.
 static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
@@ -236,13 +247,19 @@ static HipConvTransposePlan MakeTransposePlan(const ExecutionContext& ctx,
     return plan;
 }
 
-// Bytes of fp32 staging the wgrad output needs before it can be written to dw.
-//
-// The hipconv wgrad kernels emit fp32. An fp32 (tf32) problem takes that output as
-// is; fp16/bf16 stages it and casts it down to the weight type.
-static size_t GetWgradCastSize(const ProblemDescription& problem)
+// Whether `problem` is a wgrad whose dw is narrower than fp32.
+static bool HasNarrowDw(const ProblemDescription& problem)
 {
-    if(!problem.IsDirectionBackwardWrW() || problem.IsFp32())
+    return problem.IsDirectionBackwardWrW() && !problem.IsFp32();
+}
+
+// Bytes of fp32 staging a kernel launched with `par` needs before its dw can be written.
+//
+// A kernel that writes dw in the weight type needs none; for one that writes fp32 for an
+// fp16/bf16 problem, the solver stages that output and casts it down.
+static size_t GetWgradCastSize(const ProblemDescription& problem, const hipconv::ConvParams& par)
+{
+    if(!HasNarrowDw(problem) || par.weight_grad_type != hipconv::DataType::fp32)
         return 0;
     return problem.GetWeights().GetElementSize() * GetTypeSize(miopenFloat);
 }
@@ -251,10 +268,10 @@ static size_t GetWgradCastSize(const ProblemDescription& problem)
 // never disagree about where a sub-buffer lives.
 //
 // Slots 0-2 are the transpose staging buffers (0 when the slot is unused), slot 3 the
-// wgrad fp32 cast buffer. hipconv's own per-kernel workspace goes last because it is
-// the only slot whose size depends on the config: GetWorkspaceSize() has to report
-// the maximum over all configs while GetSolution() sizes the one that was picked, and
-// keeping it last leaves every other offset identical between the two.
+// wgrad fp32 cast buffer, slot 4 hipconv's own per-kernel workspace. Slots 3 and 4
+// depend on the config: GetWorkspaceSize() reports the largest total over all configs,
+// and GetSolution() sizes the picked one. Keeping them last leaves the transpose offsets
+// identical between the two.
 static MultiBufferWorkspaceTraits
 GetWorkspaceLayout(const HipConvTransposePlan& plan, size_t cast_sz, size_t hipconv_sz)
 {
@@ -305,11 +322,7 @@ static bool IsSupportedProblem(const ProblemDescription& problem)
 // from another version, or from a build with no version, must match nothing.
 static std::string HipConvConfigRecord(hipconv::ConvKernelHandle kernel)
 {
-    auto record = std::string{hipconv::config_version()} + ":" + std::string{hipconv::name(kernel)};
-    const auto config = hipconv::describe_config(kernel, true);
-    if(!config.empty())
-        record += "[" + config + "]";
-    return record;
+    return std::string{hipconv::config_version()} + ":" + hipconv::describe_kernel(kernel);
 }
 
 // Whether `record` carries this build's config version; "unknown" carries none.
@@ -320,34 +333,102 @@ static bool HasCurrentConfigVersion(std::string_view record)
            record[version.size()] == ':';
 }
 
-// Resolve `config.descriptor` (a perf-db record) to `config.index` for this
-// build's config enumeration `cfgs`. No-op when the index is already set
-// (search / heuristic path) or the descriptor is empty.
-static void ResolveIndexFromDescriptor(const std::vector<hipconv::ConvKernelHandle>& cfgs,
-                                       const PerformanceConfigConvHipConv& config)
+// The kernel a perf-db record names, or nullptr if the record has another config version or
+// names no kernel of this architecture.
+static hipconv::ConvKernelHandle FindKernel(const hipconv::Device& device, std::string_view record)
 {
-    if(config.index >= 0 || !HasCurrentConfigVersion(config.descriptor))
-        return;
-    for(int i = 0; i < static_cast<int>(cfgs.size()); ++i)
-    {
-        if(HipConvConfigRecord(cfgs[i]) == config.descriptor)
-        {
-            config.index = i;
-            return;
-        }
-    }
+    if(!HasCurrentConfigVersion(record))
+        return nullptr;
+    record.remove_prefix(hipconv::config_version().size() + 1);
+    return hipconv::find_kernel(device.arch, record).value_or(nullptr);
 }
 
-// Resolve the kernel handle a perf-config selected.
-static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
-                                               const hipconv::ConvParams& par,
+// `par` with dw in the weight type.
+static hipconv::ConvParams WithNarrowDw(hipconv::ConvParams par)
+{
+    par.weight_grad_type = par.weight_type;
+    return par;
+}
+
+// The params the solver launches `kernel` with: dw in the weight type if `kernel` accepts that,
+// else fp32.
+static hipconv::ConvParams GetKernelParams(hipconv::ConvKernelHandle kernel,
+                                           const hipconv::Device& device,
+                                           const ProblemDescription& problem)
+{
+    auto par = ToHipconvParams(problem);
+    if(HasNarrowDw(problem) && hipconv::is_applicable(kernel, device, WithNarrowDw(par)))
+        par.weight_grad_type = par.weight_type;
+    return par;
+}
+
+// Whether the solver may launch `kernel` on `problem`, the condition under which GetConfigs()
+// lists it.
+static bool IsSelectable(hipconv::ConvKernelHandle kernel,
+                         const hipconv::Device& device,
+                         const ProblemDescription& problem)
+{
+    const auto par = GetKernelParams(kernel, device, problem);
+    return hipconv::is_applicable(kernel, device, par) &&
+           (!problem.GetConv().attribute.deterministic ||
+            hipconv::is_deterministic(kernel, device, par));
+}
+
+// The configs the solver chooses among, best first.
+//
+// For an fp16/bf16 wgrad, GetConfigs() enumerates twice: with dw in the weight type, which
+// only some kernels write, and with fp32 dw, which the solver casts down for the others. Each
+// kernel is listed once, with the narrower dw where it writes it, and the union is ranked by
+// each entry's WTI. Under the deterministic attribute, the kernels that add into their output
+// atomically are dropped.
+static std::vector<hipconv::ConvKernelHandle> GetConfigs(const hipconv::Device& device,
+                                                         const ProblemDescription& problem)
+{
+    const bool deterministic = problem.GetConv().attribute.deterministic;
+    std::vector<std::pair<hipconv::ConvKernelHandle, float>> ranked;
+    std::unordered_set<hipconv::ConvKernelHandle> listed;
+    const auto add = [&](const hipconv::ConvParams& par) {
+        for(auto* kernel : hipconv::get_valid_configs(device, par, MAX_CONFIGS))
+        {
+            if(!listed.insert(kernel).second)
+                continue;
+            if(deterministic && !hipconv::is_deterministic(kernel, device, par))
+                continue;
+            ranked.emplace_back(kernel,
+                                hipconv::get_weighted_throughput_index(kernel, device, par));
+        }
+    };
+
+    const auto par = ToHipconvParams(problem);
+    if(HasNarrowDw(problem))
+        add(WithNarrowDw(par));
+    add(par);
+
+    std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    std::vector<hipconv::ConvKernelHandle> cfgs;
+    cfgs.reserve(ranked.size());
+    for(const auto& entry : ranked)
+        cfgs.push_back(entry.first);
+    return cfgs;
+}
+
+// The kernel a perf config selects, or nullptr.
+//
+// IsValid() caches it, so a config already validated for this problem resolves without
+// enumerating.
+static hipconv::ConvKernelHandle ResolveKernel(const ExecutionContext& ctx,
+                                               const hipconv::Device& device,
+                                               const ProblemDescription& problem,
                                                const PerformanceConfigConvHipConv& config)
 {
-    const auto cfgs = hipconv::get_valid_configs(arch, par, MAX_CONFIGS);
-    ResolveIndexFromDescriptor(cfgs, config);
-    if(config.index < 0 || config.index >= static_cast<int>(cfgs.size()))
+    auto* const cached = static_cast<hipconv::ConvKernelHandle>(config.kernel);
+    if(cached != nullptr && IsSelectable(cached, device, problem))
+        return cached;
+    if(!config.IsValid(ctx, problem))
         return nullptr;
-    return cfgs[config.index];
+    return static_cast<hipconv::ConvKernelHandle>(config.kernel);
 }
 
 // The kernel's identity as MIOPEN_PERFORMANCE_LOGS should report it.
@@ -422,23 +503,23 @@ private:
 
 // ===================== PerformanceConfigConvHipConv =====================
 
-void PerformanceConfigConvHipConv::InitFromArch(const void* arch, const ProblemDescription& problem)
+void PerformanceConfigConvHipConv::InitFromDevice(const void* device,
+                                                  const ProblemDescription& problem)
 {
-    const auto par = ToHipconvParams(problem);
-    const auto cfgs =
-        hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par, MAX_CONFIGS);
-    config_count = static_cast<int>(cfgs.size());
-    index        = cfgs.empty() ? -1 : 0;
-    descriptor   = cfgs.empty() ? std::string{} : HipConvConfigRecord(cfgs[0]);
+    const auto cfgs = GetConfigs(*static_cast<const hipconv::Device*>(device), problem);
+    config_count    = static_cast<int>(cfgs.size());
+    index           = cfgs.empty() ? -1 : 0;
+    kernel          = cfgs.empty() ? nullptr : cfgs[0];
+    descriptor      = cfgs.empty() ? std::string{} : HipConvConfigRecord(cfgs[0]);
 }
 
 void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
                                                  const ProblemDescription& problem)
 {
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
+    const auto device = ResolveDevice(ctx);
+    if(!device.has_value())
         return;
-    InitFromArch(*arch, problem);
+    InitFromDevice(&*device, problem);
 }
 
 bool PerformanceConfigConvHipConv::SetNextValue(const ProblemDescription&)
@@ -454,35 +535,37 @@ bool PerformanceConfigConvHipConv::IsValidValue() const { return index >= 0; }
 bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
                                            const ProblemDescription& problem) const
 {
-    // A record from another config version matches nothing, so reject it without enumerating.
-    //
-    // The perf-config picker validates every candidate in its bucket this way.
-    if(index < 0 && !descriptor.empty() && !HasCurrentConfigVersion(descriptor))
+    const auto device = ResolveDevice(ctx);
+    if(!device.has_value())
         return false;
 
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
-        return false;
-    const auto cfgs = hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS);
-    // Also sizes the config list on behalf of SetNextValue, which has no
-    // ExecutionContext to resolve the arch with. ComputedIterator
-    // (generic_search.hpp) calls IsValid before every SetNextValue.
-    config_count = static_cast<int>(cfgs.size());
+    // Search path: `index` selects from GetConfigs(), and `descriptor` is set from that kernel
+    // so the perf db stores a benchmarked pick by name.
+    if(index >= 0)
+    {
+        const auto cfgs = GetConfigs(*device, problem);
+        // Also sizes the config list on behalf of SetNextValue, which has no
+        // ExecutionContext to resolve the device with. ComputedIterator
+        // (generic_search.hpp) calls IsValid before every SetNextValue.
+        config_count = static_cast<int>(cfgs.size());
+        if(index >= config_count)
+            return false;
+        kernel     = cfgs[index];
+        descriptor = HipConvConfigRecord(cfgs[index]);
+        return true;
+    }
 
-    // Perf-config-picker / db-load path: resolve the record to this build's local index.
-    ResolveIndexFromDescriptor(cfgs, *this);
-
-    if(!IsValidValue() || index >= config_count)
+    // Perf-db and perf-config-picker path: look the record up without enumerating.
+    auto* const found = FindKernel(*device, descriptor);
+    if(found == nullptr || !IsSelectable(found, *device, problem))
         return false;
-    // Search path: keep the serialized descriptor in sync with the index, so a
-    // benchmarked pick is stored by name.
-    descriptor = HipConvConfigRecord(cfgs[index]);
+    kernel = found;
     return true;
 }
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const
 {
-    return index == other.index;
+    return descriptor == other.descriptor;
 }
 
 // ===================== ConvHipConv =====================
@@ -495,16 +578,17 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
     if(!IsSupportedProblem(problem))
         return false;
-    // The wgrad kernel uses atomicAdd and is non-deterministic.
-    if(problem.IsDirectionBackwardWrW() && problem.GetConv().attribute.deterministic)
+
+    const auto device = ResolveDevice(ctx);
+    if(!device.has_value())
         return false;
 
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
-        return false;
-
-    const auto par = ToHipconvParams(problem);
-    return hipconv::find_config(*arch, par).has_value();
+    // Every kernel that writes 16-bit dw also writes fp32 dw, so find_config() on the fp32-dw
+    // params decides applicability; GetConfigs() is needed only under the deterministic
+    // attribute.
+    if(!problem.GetConv().attribute.deterministic)
+        return hipconv::find_config(*device, ToHipconvParams(problem)).has_value();
+    return !GetConfigs(*device, problem).empty();
 }
 
 size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
@@ -513,19 +597,23 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
     if(!IsSupportedProblem(problem))
         return 0;
 
-    // Max over configs: Find sizes one buffer here, before a config is picked, and the
-    // per-kernel workspace (the direct_l1 formatted weights, say) varies by config.
-    size_t hipconv_ws = 0;
-    if(const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName()); arch.has_value())
+    // Max over configs: Find sizes one buffer here, before a config is picked, and both the
+    // cast staging and the per-kernel workspace (for example, a kernel's reformatted weights)
+    // vary by config.
+    const auto plan = MakeTransposePlan(ctx, problem);
+    size_t size     = GetWorkspaceLayout(plan, 0, 0).GetSize();
+    if(const auto device = ResolveDevice(ctx); device.has_value())
     {
-        const auto par = ToHipconvParams(problem);
-        for(auto* kernel : hipconv::get_valid_configs(*arch, par, MAX_CONFIGS))
-            hipconv_ws = std::max(hipconv_ws, hipconv::get_workspace_size(kernel, par));
+        for(auto* kernel : GetConfigs(*device, problem))
+        {
+            const auto par = GetKernelParams(kernel, *device, problem);
+            const auto wt  = GetWorkspaceLayout(plan,
+                                               GetWgradCastSize(problem, par),
+                                               hipconv::get_workspace_size(kernel, *device, par));
+            size           = std::max(size, wt.GetSize());
+        }
     }
-
-    return GetWorkspaceLayout(
-               MakeTransposePlan(ctx, problem), GetWgradCastSize(problem), hipconv_ws)
-        .GetSize();
+    return size;
 }
 
 // Estimated quality, consulted only on the immediate-mode fallback (no Find).
@@ -536,14 +624,14 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
 // is unaffected: it benchmarks and ignores this.
 float ConvHipConv::GetWti(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
+    const auto device = ResolveDevice(ctx);
+    if(!device.has_value())
         return wti_approximate_worst;
-    const auto par    = ToHipconvParams(problem);
-    const auto kernel = hipconv::find_config(*arch, par);
-    if(!kernel.has_value())
+    const auto cfgs = GetConfigs(*device, problem);
+    if(cfgs.empty())
         return wti_approximate_worst;
-    return hipconv::get_weighted_throughput_index(*kernel, par);
+    return hipconv::get_weighted_throughput_index(
+        cfgs[0], *device, GetKernelParams(cfgs[0], *device, problem));
 }
 
 PerformanceConfigConvHipConv
@@ -575,14 +663,15 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
 {
     ConvSolution result;
 
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
+    const auto resolved = ResolveDevice(ctx);
+    if(!resolved.has_value())
         MIOPEN_THROW("ConvHipConv: unsupported architecture.");
+    const hipconv::Device device = *resolved;
 
-    const auto par     = ToHipconvParams(problem);
-    auto* const kernel = ResolveKernel(*arch, par, config);
+    auto* const kernel = ResolveKernel(ctx, device, problem, config);
     if(kernel == nullptr)
         MIOPEN_THROW("ConvHipConv: performance config does not resolve to a kernel.");
+    const auto par = GetKernelParams(kernel, device, problem);
 
     MIOPEN_LOG_I(hipconv::name(kernel) << ": " << hipconv::describe_config(kernel));
 
@@ -595,8 +684,8 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     // built, every staging size below is 0, and the invokers hand hipconv the caller's
     // tensors directly.
     const auto plan          = MakeTransposePlan(ctx, problem);
-    const auto cast_sz       = GetWgradCastSize(problem);
-    const auto hipconv_ws_sz = hipconv::get_workspace_size(kernel, par);
+    const auto cast_sz       = GetWgradCastSize(problem, par);
+    const auto hipconv_ws_sz = hipconv::get_workspace_size(kernel, device, par);
     const auto wt            = GetWorkspaceLayout(plan, cast_sz, hipconv_ws_sz);
 
     result.workspace_sz = wt.GetSize();
@@ -674,8 +763,8 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                         ? handle.CreateSubBuffer(workSpace, hipconv_ws_off, hipconv_ws_sz)
                         : shared<Data_t>{};
 
-                // Where hipconv's fp32 gradient lands: the cast staging when dw is
-                // narrower, else the NHWC staging, else dw itself.
+                // Where hipconv writes the gradient: the cast staging when the kernel
+                // writes fp32 for a narrower dw, else the NHWC staging, else dw itself.
                 void* const dw_staged =
                     trans[2].has_value() ? trans[2]->GetBufferPtr() : tensors.dw;
                 void* const hipconv_dst = need_cast ? cast_buf.get() : dw_staged;
@@ -684,6 +773,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                     const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
                     if(const auto status = hipconv::launch(
                            kernel,
+                           device,
                            par,
                            trans[0].has_value() ? trans[0]->GetBufferPtr() : tensors.x,
                            trans[1].has_value() ? trans[1]->GetBufferPtr() : tensors.dy,
@@ -747,6 +837,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                     const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
                     if(const auto status = hipconv::launch(
                            kernel,
+                           device,
                            par,
                            trans[0].has_value() ? trans[0]->GetBufferPtr() : tensors.in,
                            trans[1].has_value() ? trans[1]->GetBufferPtr() : tensors.w,
@@ -798,7 +889,7 @@ bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv
 {
     return true;
 }
-void PerformanceConfigConvHipConv::InitFromArch(const void*, const ProblemDescription&) {}
+void PerformanceConfigConvHipConv::InitFromDevice(const void*, const ProblemDescription&) {}
 
 bool ConvHipConv::IsApplicable(const ExecutionContext&, const ProblemDescription&) const
 {

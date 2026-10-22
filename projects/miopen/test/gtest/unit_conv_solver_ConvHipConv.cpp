@@ -14,6 +14,21 @@
 
 #include "unit_conv_solver.hpp"
 
+#include <miopen/conv/solvers.hpp>
+#include <miopen/convolution.hpp>
+#include <miopen/solver_id.hpp>
+#include <miopen/conv/wrw_invoke_params.hpp>
+#include <miopen/errors.hpp>
+
+#include "../workspace.hpp"
+#include "conv_common.hpp"
+#include "conv_tensor_gen.hpp"
+#include "get_handle.hpp"
+#include "tensor_holder.hpp"
+
+#include <cstring>
+#include <limits>
+
 #if defined(MIOPEN_USE_HIPCONV) && MIOPEN_USE_HIPCONV
 
 namespace {
@@ -1073,5 +1088,291 @@ INSTANTIATE_TEST_SUITE_P(SmokeDepthwise,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvDepthwiseTestCases(miopenFloat,
                                                                                       true))));
+
+namespace {
+
+struct WrwConfigCounts
+{
+    int with_ws    = 0;
+    int without_ws = 0;
+};
+
+// Runs the solution of every wgrad config of `test_case` and counts the configs with and
+// without workspace.
+//
+// Each solution must fit GetWorkspaceSize(), compute dw on exactly the workspace it reports,
+// and refuse one byte less. Under the deterministic attribute each config must also repeat its
+// result bitwise. For an fp16 or bf16 layer, a config with no workspace writes dw in the weight
+// type: one that writes fp32 needs workspace to stage the cast.
+template <typename T>
+WrwConfigCounts RunEveryWrwConfig(const TestCase& test_case, bool deterministic)
+{
+    auto input     = tensor<T>{test_case.GetXTensorDescriptor()};
+    auto weights   = tensor<T>{test_case.GetWTensorDescriptor()};
+    auto conv_desc = test_case.GetConv();
+    if(deterministic)
+        conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
+    const auto output_desc =
+        conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
+    auto output = tensor<T>{output_desc};
+    input.generate(GenConvData<T, T>{output_desc.GetLengths()});
+    output.generate(GenConvData<T, T>{output_desc.GetLengths()});
+    std::fill(weights.begin(), weights.end(), T());
+
+    auto&& handle      = get_handle();
+    const auto in_dev  = handle.Write(input.data);
+    const auto out_dev = handle.Write(output.data);
+
+    const auto problem = miopen::conv::ProblemDescription(
+        output.desc, weights.desc, input.desc, conv_desc, miopen::conv::Direction::BackwardWeights);
+    auto ctx = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+
+    const auto solver = miopen::solver::conv::ConvHipConv{};
+    EXPECT_TRUE(solver.IsApplicable(ctx, problem)) << test_case;
+    const auto max_ws = solver.GetWorkspaceSize(ctx, problem);
+
+    const auto ref = ref_conv_wrw(input, tensor<T>{weights.desc}, output, conv_desc);
+    // Matches GetThreshold() in unit_conv_solver.cpp at its default tolerance.
+    const double threshold = problem.UseTF32() ? std::numeric_limits<half_float::half>::epsilon()
+                                               : std::numeric_limits<T>::epsilon();
+
+    int configs = 0;
+    auto counts = WrwConfigCounts{};
+    for(;; ++configs)
+    {
+        auto config  = miopen::solver::conv::PerformanceConfigConvHipConv{};
+        config.index = configs;
+        if(!solver.IsValidPerformanceConfig(ctx, problem, config))
+            break;
+        const auto label = config.ToString();
+        const auto sol   = solver.GetSolution(ctx, problem, config);
+        EXPECT_LE(sol.workspace_sz, max_ws) << label;
+        const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
+
+        const auto launch = [&](std::size_t ws_bytes) {
+            Workspace ws;
+            ws.resize(ws_bytes);
+            const auto wei_dev = handle.Write(weights.data);
+            const auto tensors = miopen::ConvWrwTensors{
+                output.desc, out_dev.get(), input.desc, in_dev.get(), weights.desc, wei_dev.get()};
+            invoker(handle, miopen::conv::WrWInvokeParams{tensors, ws.ptr(), ws.size(), false});
+            handle.Finish();
+            return handle.Read<T>(wei_dev, weights.data.size());
+        };
+
+        const auto dw = launch(sol.workspace_sz);
+        EXPECT_LT(miopen::rms_range(ref.data, dw), threshold) << label;
+        if(sol.workspace_sz > 0)
+        {
+            ++counts.with_ws;
+            EXPECT_THROW(launch(sol.workspace_sz - 1), miopen::Exception) << label;
+        }
+        else
+        {
+            ++counts.without_ws;
+        }
+        if(deterministic)
+        {
+            const auto again = launch(sol.workspace_sz);
+            EXPECT_EQ(std::memcmp(dw.data(), again.data(), dw.size() * sizeof(T)), 0) << label;
+        }
+    }
+    EXPECT_GE(configs, 1) << test_case;
+    return counts;
+}
+
+// Wgrad layers covering each kernel family but patch_embed, which GetConvPatchEmbedTestCases()
+// covers.
+//
+// gfx950: direct_wgrad (16-bit dw, with and without splitting the N × P × Q reduction),
+// depthwise_wgrad_hankel and grouped_wgrad (fp32 dw and a cast). gfx1250: direct_wgrad,
+// depthwise_wgrad_hankel and grouped_wgrad.
+auto GetWrwFamilyTestCases(miopenDataType_t datatype)
+{
+    constexpr auto layout = miopenTensorNHWC;
+    return std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {1, 512, 32, 32}}, {datatype, layout, {512, 512, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}},     // dense 3x3, unsplit
+        TestCase{{datatype, layout, {7,  64,  8,  8}}, {datatype, layout, {128, 64, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}},      // dense 3x3, split
+        TestCase{{datatype, layout, {6, 162,  8,  8}}, {datatype, layout, {128, 162, 5, 5}}, datatype, {{2, 2}, {1, 1}, {1, 1}}},     // dense 5x5, C(162)
+        TestCase{{datatype, layout, {2,  64, 17, 19}}, {datatype, layout, { 64,  1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 64}},  // depthwise
+        TestCase{{datatype, layout, {4,  64,  8,  7}}, {datatype, layout, { 64,  4, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 16}},  // grouped 4c
+        // clang-format on
+    };
+}
+
+// Layers whose gfx950 wgrad kernels are all deterministic.
+auto GetWrwDeterministicTestCases(miopenDataType_t datatype)
+{
+    constexpr auto layout = miopenTensorNHWC;
+    return std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {7,  64,  8,  8}}, {datatype, layout, {128, 64, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}},      // dense 3x3
+        TestCase{{datatype, layout, {2,  64, 17, 19}}, {datatype, layout, { 64,  1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 64}},  // depthwise
+        // clang-format on
+    };
+}
+
+// Find, then an immediate-mode call to ConvHipConv on the workspace size GetSolutions()
+// reports after Find.
+template <typename T>
+void RunFindThenImmediateWrw(const TestCase& test_case)
+{
+    auto input           = tensor<T>{test_case.GetXTensorDescriptor()};
+    auto weights         = tensor<T>{test_case.GetWTensorDescriptor()};
+    const auto conv_desc = test_case.GetConv();
+    const auto output_desc =
+        conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
+    auto output = tensor<T>{output_desc};
+    input.generate(GenConvData<T, T>{output_desc.GetLengths()});
+    output.generate(GenConvData<T, T>{output_desc.GetLengths()});
+    std::fill(weights.begin(), weights.end(), T());
+
+    auto&& handle      = get_handle();
+    const auto in_dev  = handle.Write(input.data);
+    const auto out_dev = handle.Write(output.data);
+    const auto wei_dev = handle.Write(weights.data);
+
+    const auto problem = miopen::conv::ProblemDescription(
+        output.desc, weights.desc, input.desc, conv_desc, miopen::conv::Direction::BackwardWeights);
+    auto ctx = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+
+    Workspace find_ws;
+    find_ws.resize(conv_desc.GetWorkSpaceSize(ctx, problem));
+    int found = 0;
+    miopenConvAlgoPerf_t perf;
+    conv_desc.FindConvBwdWeightsAlgorithm(handle,
+                                          output.desc,
+                                          out_dev.get(),
+                                          input.desc,
+                                          in_dev.get(),
+                                          weights.desc,
+                                          wei_dev.get(),
+                                          1,
+                                          &found,
+                                          &perf,
+                                          find_ws.ptr(),
+                                          find_ws.size(),
+                                          false);
+
+    const auto id = miopen::solver::Id{miopen::solver::conv::ConvHipConv{}.SolverDbId()};
+    auto fallback = miopen::FallbackPath{};
+    const auto solutions =
+        conv_desc.GetSolutions(ctx, problem, std::numeric_limits<int>::max(), &fallback);
+    const auto sol = std::find_if(solutions.begin(), solutions.end(), [&](const auto& s) {
+        return s.solution_id == id.Value();
+    });
+    ASSERT_NE(sol, solutions.end()) << test_case;
+
+    conv_desc.CompileSolution(ctx, problem, id);
+    Workspace ws;
+    ws.resize(sol->workspace_size);
+    conv_desc.ConvolutionWrwImmediate(handle,
+                                      output.desc,
+                                      out_dev.get(),
+                                      input.desc,
+                                      in_dev.get(),
+                                      weights.desc,
+                                      wei_dev.get(),
+                                      ws.ptr(),
+                                      ws.size(),
+                                      id);
+    handle.Finish();
+
+    const auto dw  = handle.Read<T>(wei_dev, weights.data.size());
+    const auto ref = ref_conv_wrw(input, tensor<T>{weights.desc}, output, conv_desc);
+    EXPECT_LT(miopen::rms_range(ref.data, dw), std::numeric_limits<T>::epsilon()) << test_case;
+}
+
+} // namespace
+
+TEST(GPU_ConvHipConvWrwConfigs_FP16, FindThenImmediate)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
+        GTEST_SKIP();
+    for(const auto& test_case : GetWrwFamilyTestCases(miopenHalf))
+        RunFindThenImmediateWrw<half_float::half>(test_case);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_FP16, Workspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
+        GTEST_SKIP();
+    const auto cases = GetWrwFamilyTestCases(miopenHalf);
+    int with_ws      = 0;
+    for(const auto& test_case : cases)
+    {
+        const auto counts = RunEveryWrwConfig<half_float::half>(test_case, false);
+        with_ws += counts.with_ws;
+        // hipconv writes 16-bit dw only on gfx950; elsewhere dw is cast from a workspace.
+        if(&test_case == &cases[0])
+        {
+            if(IsTestSupportedByDevice(Gpu::gfx950))
+                EXPECT_GT(counts.without_ws, 0);
+            else
+                EXPECT_EQ(counts.without_ws, 0);
+        }
+    }
+    EXPECT_GT(with_ws, 0);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_BFP16, Workspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
+        GTEST_SKIP();
+    const auto cases = GetWrwFamilyTestCases(miopenBFloat16);
+    int with_ws      = 0;
+    for(const auto& test_case : cases)
+    {
+        const auto counts = RunEveryWrwConfig<bfloat16>(test_case, false);
+        with_ws += counts.with_ws;
+        // hipconv writes 16-bit dw only on gfx950; elsewhere dw is cast from a workspace.
+        if(&test_case == &cases[0])
+        {
+            if(IsTestSupportedByDevice(Gpu::gfx950))
+                EXPECT_GT(counts.without_ws, 0);
+            else
+                EXPECT_EQ(counts.without_ws, 0);
+        }
+    }
+    EXPECT_GT(with_ws, 0);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_TF32, Workspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    const int with_ws =
+        RunEveryWrwConfig<float>(GetConvDenseTestCases(miopenFloat, true)[2], false).with_ws +
+        RunEveryWrwConfig<float>(GetConvGroupedTestCases(miopenFloat, true)[0], false).with_ws;
+    EXPECT_GT(with_ws, 0);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_FP16, PatchEmbedWorkspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    for(const auto& test_case : GetConvPatchEmbedTestCases(miopenHalf))
+        RunEveryWrwConfig<half_float::half>(test_case, false);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_FP16, Deterministic)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    for(const auto& test_case : GetWrwDeterministicTestCases(miopenHalf))
+        RunEveryWrwConfig<half_float::half>(test_case, true);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_BFP16, Deterministic)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    for(const auto& test_case : GetWrwDeterministicTestCases(miopenBFloat16))
+        RunEveryWrwConfig<bfloat16>(test_case, true);
+}
 
 #endif // MIOPEN_USE_HIPCONV
