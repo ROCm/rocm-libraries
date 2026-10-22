@@ -383,7 +383,7 @@ template <typename T>
 void testing_itilu0_convergence_history(Arguments argus)
 {
     LocalMatrix<T> matrix;
-    getTestMatrix<T>(argus, matrix);
+    getLaplacianTestMatrix<T>(argus, matrix);
 
     // The host backend falls back to ILU0 and records no history
     matrix.MoveToAccelerator();
