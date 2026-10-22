@@ -70,6 +70,15 @@ extern "C" size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
                                                          int32_t     hotIters,
                                                          uint64_t*   values,
                                                          size_t      count);
+extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
+                                                       void*  matmulDesc,
+                                                       void*  matA,
+                                                       void*  matB,
+                                                       void*  matC,
+                                                       void*  matD,
+                                                       size_t workspaceBytes,
+                                                       int*   indexes,
+                                                       size_t count);
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -773,53 +782,95 @@ namespace
         return ok;
     }
 
-    // How many algorithms the heuristic offers, up to `requested`, for the fp16
-    // problem runGemm and runGemmWith launch, with their workspace limit.
-    int offeredAlgorithms(int64_t m, int64_t n, int64_t k, int requested)
+    // The fp16 problem runGemm and runGemmWith launch, described with their
+    // workspace limit.
+    struct Fp16Problem
     {
-        hipblasLtHandle_t handle = nullptr;
-        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
-            return 0;
+        hipblasLtHandle_t           handle  = nullptr;
+        hipblasLtMatrixLayout_t     layoutA = nullptr;
+        hipblasLtMatrixLayout_t     layoutB = nullptr;
+        hipblasLtMatrixLayout_t     layoutC = nullptr;
+        hipblasLtMatmulDesc_t       desc    = nullptr;
+        hipblasLtMatmulPreference_t pref    = nullptr;
+        uint64_t                    maxWs   = 32 * 1024 * 1024;
+        bool                        ok      = false;
 
-        hipblasLtMatrixLayout_t     layoutA = nullptr, layoutB = nullptr, layoutC = nullptr;
-        hipblasLtMatmulDesc_t       desc  = nullptr;
-        hipblasLtMatmulPreference_t pref  = nullptr;
-        const uint64_t              maxWs = 32 * 1024 * 1024;
-        std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(requested);
-        int                                           returned = 0;
+        Fp16Problem(int64_t m, int64_t n, int64_t k)
+        {
+            ok = hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceSetAttribute(
+                        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
 
-        const bool ok
-            = hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m) == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k) == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m) == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
-                     == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatmulPreferenceSetAttribute(
-                     pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
-                     == HIPBLAS_STATUS_SUCCESS
-              && hipblasLtMatmulAlgoGetHeuristic(handle,
+        ~Fp16Problem()
+        {
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            for(auto layout : {layoutA, layoutB, layoutC})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(handle)
+                hipblasLtDestroy(handle);
+        }
+
+        Fp16Problem(const Fp16Problem&)            = delete;
+        Fp16Problem& operator=(const Fp16Problem&) = delete;
+
+        // The solution indexes the heuristic offers, up to `requested`, in its order.
+        std::vector<int> offered(int requested) const
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(requested);
+            int                                           returned = 0;
+            std::vector<int>                              indexes;
+            if(ok
+               && hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  desc,
+                                                  layoutA,
+                                                  layoutB,
+                                                  layoutC,
+                                                  layoutC,
+                                                  pref,
+                                                  requested,
+                                                  heuristic.data(),
+                                                  &returned)
+                      == HIPBLAS_STATUS_SUCCESS)
+                for(int i = 0; i < returned; i++)
+                    indexes.push_back(hipblaslt_ext::getIndexFromAlgo(heuristic[i].algo));
+            return indexes;
+        }
+
+        // The solution indexes tune mode would measure under the current
+        // settings, in order and before the baseline is moved to the front.
+        std::vector<int> tuningCandidates() const
+        {
+            if(!ok)
+                return {};
+            std::vector<int> indexes(hipblaslt_tuning_candidates_for_test(
+                handle, desc, layoutA, layoutB, layoutC, layoutC, maxWs, nullptr, 0));
+            hipblaslt_tuning_candidates_for_test(handle,
                                                  desc,
                                                  layoutA,
                                                  layoutB,
                                                  layoutC,
                                                  layoutC,
-                                                 pref,
-                                                 requested,
-                                                 heuristic.data(),
-                                                 &returned)
-                     == HIPBLAS_STATUS_SUCCESS;
-
-        if(pref)
-            hipblasLtMatmulPreferenceDestroy(pref);
-        if(desc)
-            hipblasLtMatmulDescDestroy(desc);
-        for(auto layout : {layoutA, layoutB, layoutC})
-            if(layout)
-                hipblasLtMatrixLayoutDestroy(layout);
-        hipblasLtDestroy(handle);
-        return ok ? returned : 0;
-    }
+                                                 maxWs,
+                                                 indexes.data(),
+                                                 indexes.size());
+            return indexes;
+        }
+    };
 
     std::vector<std::string> readLines(const std::string& path)
     {
@@ -1223,6 +1274,27 @@ namespace
         ASSERT_GT(valueRowCount(m_path), 0u) << "exhaustive tuning recorded nothing";
     }
 
+    // A ranked search measures the list hipblasLtMatmulAlgoGetHeuristic returns,
+    // in its order, including what it adds from the size-independent libraries
+    // when the ranked ones return fewer than asked for, so tune mode and
+    // hipblaslt-bench search the same candidates.
+    TEST_F(TuningTune_pre_checkin, RankedCandidatesAreTheHeuristicsList)
+    {
+        const Fp16Problem problem(1024, 512, 1024);
+        ASSERT_TRUE(problem.ok);
+        enterMode("tune", m_path);
+        for(int cap : {1, 16, 256})
+        {
+            SCOPED_TRACE(cap);
+            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(cap).c_str(), 1);
+            hipblaslt_tuning_reset_for_test();
+
+            const auto offered = problem.offered(cap);
+            ASSERT_FALSE(offered.empty());
+            EXPECT_EQ(problem.tuningCandidates(), offered);
+        }
+    }
+
     // The winner has to actually run on the caller's buffers and be right.
     //
     // Separate C and D, and nonzero inputs, because the rest of the suite tunes
@@ -1569,7 +1641,7 @@ namespace
     {
         // The stop is asked before each candidate, so a search of one candidate
         // finishes before it is asked again.
-        if(offeredAlgorithms(1024, 512, 1024, 2) < 2)
+        if(Fp16Problem(1024, 512, 1024).offered(2).size() < 2)
             GTEST_SKIP() << "the heuristic offers one algorithm for this problem";
         enterMode("tune", m_path);
         hipblaslt_tuning_inject_failure_for_test(4);

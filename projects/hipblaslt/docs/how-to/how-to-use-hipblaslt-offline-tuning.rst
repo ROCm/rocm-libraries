@@ -226,8 +226,9 @@ same way on those shapes.
 
 By default every kernel that can run the problem is measured, not just the ones the selection
 heuristic ranks highest, because the fastest kernel is not always inside that ranked prefix. Setting
-``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the top ``HIPBLASLT_TUNING_MAX_CANDIDATES``
-ranked kernels instead, which is faster but can miss the best one.
+``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the first ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+kernels ``hipblasLtMatmulAlgoGetHeuristic`` returns, in its order, which is faster but can miss the
+best one.
 
 Tuning one shape this thoroughly takes time. An exhaustive search over several hundred candidates
 takes minutes, and it is paid once per shape in the first process that runs with ``tune``.

@@ -239,6 +239,20 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+/**
+ * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
+ * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries
+ * return fewer: in their order, skipping indexes the array already holds and
+ * algorithms prob does not support. Returns whether those libraries could be read.
+ */
+bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
+                                       RocblasltContractionProblem&      prob,
+                                       std::shared_ptr<void>             gemmData,
+                                       rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                       int*                              returnAlgoCount,
+                                       int                               requestedAlgoCount,
+                                       size_t                            maxWorkSpaceBytes);
+
 namespace TensileLite
 {
     class ProblemOverride;
@@ -315,6 +329,17 @@ size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
                                 int32_t                            hotIters,
                                 uint64_t*                          values,
                                 size_t                             count);
+
+/**
+ * The indexes tune mode would measure for prob, in order and before the
+ * baseline is moved to the front; the first count go to indexes. Returns how
+ * many there are, 0 when they cannot be enumerated.
+ */
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

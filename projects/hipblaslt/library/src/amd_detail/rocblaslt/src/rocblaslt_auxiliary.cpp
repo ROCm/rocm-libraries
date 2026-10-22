@@ -177,6 +177,57 @@ inline bool
     return (index == -1) ? false : true;
 }
 
+bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
+                                       RocblasltContractionProblem&      prob,
+                                       std::shared_ptr<void>             gemmData,
+                                       rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                       int*                              returnAlgoCount,
+                                       int                               requestedAlgoCount,
+                                       size_t                            maxWorkSpaceBytes)
+{
+    static TensileLite::StringSet emptySet({});
+    static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
+
+    // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
+    // But in that case, we don't need to get GridBased or Prediction which are already returned here
+    static std::mutex           mtx;
+    std::lock_guard<std::mutex> lock(mtx);
+    TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
+
+    std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
+
+    const bool read = getAllSolutions(prob, handle, allSolutionsResults, maxWorkSpaceBytes)
+                      == rocblaslt_status_success;
+    if(read)
+    {
+        int oriReturnAlgoCount = *returnAlgoCount;
+        for(int i = 0; *returnAlgoCount < requestedAlgoCount && i < allSolutionsResults.size(); i++)
+        {
+            size_t required_workspace_size = 0;
+            if(heuristicResult_check_duplicated(
+                   heuristicResultsArray, &allSolutionsResults[i], oriReturnAlgoCount, false)
+               || rocblaslt_status_success
+                      != isSolutionSupported(handle,
+                                             prob,
+                                             gemmData,
+                                             &allSolutionsResults[i].algo,
+                                             &required_workspace_size))
+                continue;
+
+            //append sol to heuristpicResultsArray
+            heuristicResult_copy(&heuristicResultsArray[*returnAlgoCount],
+                                 &allSolutionsResults[i],
+                                 maxWorkSpaceBytes,
+                                 required_workspace_size);
+            (*returnAlgoCount)++;
+        }
+    }
+
+    // reset
+    TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
+    return read;
+}
+
 // Preload problem/solution mappings
 namespace
 {
@@ -2840,54 +2891,18 @@ rocblaslt_status
             matmul_desc->bias = nullptr;
         log_api(__func__, "returnAlgoCount", *returnAlgoCount);
 
-        static TensileLite::StringSet emptySet({});
-        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
-
         // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > *returnAlgoCount)
+        if(requestedAlgoCount > *returnAlgoCount
+           && topUpWithSizeIndependentSolutions(handle,
+                                                prob,
+                                                tensile_data,
+                                                heuristicResultsArray,
+                                                returnAlgoCount,
+                                                requestedAlgoCount,
+                                                pref->max_workspace_bytes))
         {
-            // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
-            // But in that case, we don't need to get GridBased or Prediction which are already returned here
-            static std::mutex mtx;
-            std::lock_guard<std::mutex> lock(mtx);
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
-
-            std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
-            if(rocblaslt_status_success
-               == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
-            {
-                status = rocblaslt_status_success;
-                int oriReturnAlgoCount = *returnAlgoCount;
-                for(int i = 0;
-                    *returnAlgoCount < requestedAlgoCount && i < allSolutionsResults.size();
-                    i++)
-                {
-                    size_t required_workspace_size = 0;
-                    if(heuristicResult_check_duplicated(heuristicResultsArray,
-                                                        &allSolutionsResults[i],
-                                                        oriReturnAlgoCount,
-                                                        false)
-                       || rocblaslt_status_success
-                              != isSolutionSupported(handle,
-                                                     prob,
-                                                     tensile_data,
-                                                     &allSolutionsResults[i].algo,
-                                                     &required_workspace_size))
-                        continue;
-
-                    //append sol to heuristpicResultsArray
-                    heuristicResult_copy(&heuristicResultsArray[*returnAlgoCount],
-                                         &allSolutionsResults[i],
-                                         pref->max_workspace_bytes,
-                                         required_workspace_size);
-                    (*returnAlgoCount)++;
-                }
-
-                log_api(__func__, "final returnAlgoCount", *returnAlgoCount);
-            }
-
-            // reset
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
+            status = rocblaslt_status_success;
+            log_api(__func__, "final returnAlgoCount", *returnAlgoCount);
         }
 
         if(status != rocblaslt_status_success)
@@ -3478,6 +3493,39 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
     prob.D            = D;
     return tuningScratchPlanForTest(
         prob, rotatingBytes, capBytes, coldIters, hotIters, values, count);
+}
+
+// The solution indexes tune mode would measure, under the current tuning
+// settings, for the problem hipblasLtMatmulAlgoGetHeuristic builds from these
+// descriptors, in order and before the baseline is moved to the front. The
+// first count go to indexes. Returns how many there are, 0 when they cannot be
+// enumerated.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_candidates_for_test(void*  handle,
+                                                                        void*  matmulDesc,
+                                                                        void*  matA,
+                                                                        void*  matB,
+                                                                        void*  matC,
+                                                                        void*  matD,
+                                                                        size_t workspaceBytes,
+                                                                        int*   indexes,
+                                                                        size_t count)
+{
+    auto   desc      = static_cast<rocblaslt_matmul_desc>(matmulDesc);
+    auto   layoutA   = static_cast<rocblaslt_matrix_layout>(matA);
+    int8_t alpha[16] = {0};
+    int8_t beta[16]  = {0};
+    assignAlphaBeta1(desc->compute_type, layoutA->type, (void*)alpha, (void*)beta);
+    auto prob = construct_rocblaslt_problem(static_cast<rocblaslt_handle>(handle),
+                                            desc,
+                                            layoutA,
+                                            static_cast<rocblaslt_matrix_layout>(matB),
+                                            static_cast<rocblaslt_matrix_layout>(matC),
+                                            static_cast<rocblaslt_matrix_layout>(matD),
+                                            &alpha,
+                                            &beta,
+                                            workspaceBytes);
+    return tuningCandidatesForTest(
+        prob, static_cast<rocblaslt_handle>(handle), desc->m_data, indexes, count);
 }
 
 // The solution the calling thread's last hipblasLtMatmul launched, or -1,

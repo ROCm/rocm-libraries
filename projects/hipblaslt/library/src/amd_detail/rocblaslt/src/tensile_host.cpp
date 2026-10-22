@@ -4521,6 +4521,65 @@ namespace
     }
 
     /**
+     * The indexes tune mode measures for prob, before the baseline is moved to
+     * the front, or nothing when they cannot be enumerated.
+     *
+     * All-kernel enumeration reuses the public getAllSolutions, which already
+     * dedups repeated indexes and drops custom kernels that cannot run
+     * pointer-array batch. Otherwise it is the list hipblasLtMatmulAlgoGetHeuristic
+     * returns, in its order, without the tuning file's entry: the ranked
+     * libraries' best, topped up from the size-independent ones when they
+     * return fewer than the cap.
+     */
+    std::optional<std::vector<int>> tuningCandidates(const RocblasltContractionProblem& prob,
+                                                     rocblaslt_handle                   handle,
+                                                     std::shared_ptr<void>              gemmData)
+    {
+        std::vector<int> indexes;
+        if(TuningPolicy::allKernels())
+        {
+            std::vector<rocblaslt_matmul_heuristic_result> all;
+            if(getAllSolutions(gemmData,
+                               handle,
+                               rocblaslt::RocGemmType::ROCBLASLT_GEMM,
+                               all,
+                               prob.workspaceSize)
+               != rocblaslt_status_success)
+                return std::nullopt;
+
+            indexes.reserve(all.size());
+            for(const auto& result : all)
+                indexes.push_back(*(int*)result.algo.data);
+
+            // getAllSolutions returns them in the order of a set of pointers,
+            // which differs from one process to the next; sorted, every process
+            // measures them in the same order.
+            std::sort(indexes.begin(), indexes.end());
+            return indexes;
+        }
+
+        const int                                      cap = TuningPolicy::candidateCap();
+        std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
+        int                                            returned = 0;
+        RocblasltContractionProblem                    probe    = prob;
+        const bool                                     found
+            = getBestSolutions(
+                  probe, handle, gemmData, cap, ranked.data(), &returned, prob.workspaceSize)
+              == rocblaslt_status_success;
+        const bool toppedUp
+            = returned < cap
+              && topUpWithSizeIndependentSolutions(
+                  handle, probe, gemmData, ranked.data(), &returned, cap, prob.workspaceSize);
+        if(!found && !toppedUp)
+            return std::nullopt;
+
+        indexes.reserve(returned);
+        for(int i = 0; i < returned; i++)
+            indexes.push_back(*(int*)ranked[i].algo.data);
+        return indexes;
+    }
+
+    /**
      * Benchmark candidates on isolated scratch and say what happened.
      *
      * Returns a reason rather than a bare -1 so the caller can report exactly
@@ -4737,41 +4796,10 @@ namespace
             }
         }
 
-        // Candidate indexes. All-kernel enumeration reuses the public
-        // getAllSolutions, which already dedups repeated indexes and drops
-        // custom kernels that cannot run pointer-array batch.
-        std::vector<int> candidateIndexes;
-        if(TuningPolicy::allKernels())
-        {
-            std::vector<rocblaslt_matmul_heuristic_result> all;
-            if(getAllSolutions(gemmData,
-                               handle,
-                               rocblaslt::RocGemmType::ROCBLASLT_GEMM,
-                               all,
-                               prob.workspaceSize)
-               != rocblaslt_status_success)
-                return TuningAttempt::FallbackEnumeration;
-
-            candidateIndexes.reserve(all.size());
-            for(const auto& result : all)
-                candidateIndexes.push_back(*(int*)result.algo.data);
-
-            // getAllSolutions returns them in the order of a set of pointers,
-            // which differs from one process to the next; sorted, every process
-            // measures them in the same order.
-            std::sort(candidateIndexes.begin(), candidateIndexes.end());
-        }
-        else
-        {
-            auto prefix = getBestRawSolutions(
-                prob, handle, gemmData, TuningPolicy::candidateCap(), prob.workspaceSize);
-            candidateIndexes.reserve(prefix.size());
-            for(const auto& solution : prefix)
-                candidateIndexes.push_back(solution->index);
-        }
-
-        if(tuningFailureInjected(TuningFailureStage::Enumeration))
+        auto enumerated = tuningCandidates(prob, handle, gemmData);
+        if(!enumerated || tuningFailureInjected(TuningFailureStage::Enumeration))
             return TuningAttempt::FallbackEnumeration;
+        std::vector<int> candidateIndexes = std::move(*enumerated);
 
         // Moved to the front with the rest left in order, so it is measured
         // first whichever way the candidates were enumerated.
@@ -5122,6 +5150,20 @@ size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
     for(size_t i = 0; i < count && i < std::size(known); i++)
         values[i] = known[i];
     return std::size(known);
+}
+
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count)
+{
+    const auto found = tuningCandidates(prob, handle, gemmData);
+    if(!found)
+        return 0;
+    for(size_t i = 0; i < count && i < found->size(); i++)
+        indexes[i] = (*found)[i];
+    return found->size();
 }
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
