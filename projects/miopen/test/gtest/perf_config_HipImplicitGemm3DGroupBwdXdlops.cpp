@@ -24,20 +24,30 @@ static Problem MakeSearchProblem(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardData);
 }
 
+// Skip when the solver is inapplicable on this device (CK ships no instances for the dtype/arch);
+// where it is applicable the search must enumerate, so callers still assert SetNextValue().
+template <class Solver>
+static bool SolverApplicable(const Problem& problem)
+{
+    auto& handle = get_handle();
+    auto ctx     = miopen::ExecutionContext{};
+    ctx.SetStream(&handle);
+    return Solver{}.IsApplicable(ctx, problem);
+}
+
 TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
-
     const auto problem =
         MakeSearchProblem({1, 1, 4, 4, {8, 28, 28}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
                           miopenHalf,
                           miopenTensorNDHWC);
+
+    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>(problem))
+        GTEST_SKIP() << "solver not applicable for " << device_name;
 
     Config cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));

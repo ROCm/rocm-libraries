@@ -10,11 +10,11 @@
 //
 // Two layers of coverage:
 //   * GPU_* : exercise the real CK lazy-init path end-to-end for the 2D Fwd/Bwd/Wrw solvers, so
-//     they require a ROCm device and the installed CK grouped-conv library (GTEST_SKIP otherwise).
-//     They use a canonical group=1, C=K=64, 3x3 shape that CK should always enumerate kernels for;
-//     if SetNextValue() returns no kernels the ASSERT fails on purpose -- that signals a real CK /
-//     applicability regression, not a bad test shape. The 3D Fwd/Bwd end-to-end equivalents live in
-//     their own perf_config_HipImplicitGemm3DGroup*Xdlops.cpp files.
+//     they require a ROCm device (GTEST_SKIP otherwise) and a canonical group=1, C=K=64, 3x3 shape.
+//     Each test skips where the solver is inapplicable (CK ships no instances for the dtype/arch,
+//     e.g. FP32 grouped bwd-weight on gfx11/gfx12) and otherwise asserts the search starts at
+//     valid_kernels[0]. The 3D Fwd/Bwd equivalents live in
+//     perf_config_HipImplicitGemm3DGroup*Xdlops.cpp.
 //   * CPU_* : host-only advance walks for the non-split solvers (2D Fwd, 3D Fwd/Bwd). With
 //     valid_kernels injected directly, SetNextValue() bypasses the CK populate branch and only the
 //     advance path runs -- no device or CK library is needed and these run in the CPU-only stage.
@@ -77,6 +77,17 @@ Problem MakeSearchProblem3D(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, direction);
 }
 
+// Skip when the solver is inapplicable on this device (CK ships no instances for the dtype/arch);
+// where it is applicable the search must enumerate, so callers still assert SetNextValue().
+template <class Solver>
+bool SolverApplicable(const Problem& problem)
+{
+    auto& handle = get_handle();
+    auto ctx     = miopen::ExecutionContext{};
+    ctx.SetStream(&handle);
+    return Solver{}.IsApplicable(ctx, problem);
+}
+
 } // namespace
 
 TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
@@ -85,15 +96,14 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
-
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::Forward);
+
+    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>(problem))
+        GTEST_SKIP() << "solver not applicable for " << device_name;
 
     FwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -109,15 +119,14 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
-
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::BackwardData);
+
+    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>(problem))
+        GTEST_SKIP() << "solver not applicable for " << device_name;
 
     BwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -134,15 +143,14 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
-
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenFloat,
                           miopenTensorNHWC,
                           Direction::BackwardWeights);
+
+    if(!SolverApplicable<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>(problem))
+        GTEST_SKIP() << "solver not applicable for " << device_name;
 
     WrwConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
