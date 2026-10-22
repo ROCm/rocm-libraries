@@ -4698,15 +4698,12 @@ namespace
                != rocblaslt_status_success)
                 return std::nullopt;
 
+            // In solution-index order, as getAllSolutions returns them, so a
+            // search the budget stops covers the same prefix in every process,
+            // which is what lets a rerun under the same ceiling be skipped.
             indexes.reserve(all.size());
             for(const auto& result : all)
                 indexes.push_back(*(int*)result.algo.data);
-
-            // getAllSolutions returns them in the order of a set of pointers,
-            // which differs from one process to the next. Sorted, a search the
-            // budget stops covers the same prefix in every process, which is
-            // what lets a rerun under the same ceiling be skipped.
-            std::sort(indexes.begin(), indexes.end());
             return indexes;
         }
 
