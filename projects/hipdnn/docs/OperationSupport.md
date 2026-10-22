@@ -46,6 +46,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 ## Operation Contracts
 
 - **[SDPA forward with a paged K/V cache](./SdpaPagedAttention.md)** - Graph rules and runtime semantics for paged K/V, alone or with ragged queries (cuDNN-compatible, with listed differences)
+- **[SDPA forward attention sinks](./SdpaPagedAttention.md#attention-sinks)** - `sink_token` shape, data types and softmax semantics for dense, ragged and paged SDPA forward (cuDNN-compatible)
 
 ## Roadmap
 
