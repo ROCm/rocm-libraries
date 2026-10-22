@@ -98,7 +98,10 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "num_persistent": lambda s: bool(s.persistent),
             "persist_decode": lambda s: bool(s.persistent),
             "interleave": lambda s: bool(s.persistent) and bool(s.causal),
-            "nonpersist_decode": lambda s: not s.persistent,
+            # A knob only where the variant leaves the order to auto: a variant
+            # that sets it (qbminor) keeps it in sweeps and ignores the knob.
+            "nonpersist_decode": lambda s: not s.persistent
+            and s.nonpersist_decode == "auto",
             # Wide DMA locks the K/V slab pads.
             "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
