@@ -371,7 +371,7 @@ def _validate_embedded_source_file(source_file, where):
 
 def _validate_sources(ukd, where):
     """A UKD's `sources` map: two or more launches, all rocke (authored) or all
-    kpack (packed). Returns the kind they share.
+    kpack (packed). Returns the kind they share. Launches may name one kernel.
 
     A single entry says what `kernel_source` says, so it is refused: two spellings
     of one fact is how descriptors drift. Authored entries are rocke only; hip,
@@ -394,10 +394,7 @@ def _validate_sources(ukd, where):
             raise HkpPackError(f"{where} sources '{name}' missing 'kind'")
         kind = ks["kind"]
         if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS:
-            raise HkpPackError(
-                f"{where} sources '{name}' has kind '{kind}'; only 'rocke' "
-                "entries may be authored in sources"
-            )
+            raise sourcesmod.refuse_authored_kind(where, name, kind)
         if kind not in ("rocke", "kpack"):
             raise HkpPackError(
                 f"{where} sources '{name}' has unsupported kind '{kind}' "
@@ -435,12 +432,6 @@ def _validate_sources(ukd, where):
             raise HkpPackError(
                 f"{where} carries sources under version '{version}' "
                 f"(needs {sourcesmod.SOURCES_VERSION} or later)"
-            )
-        kernels = [(k["library"], k["toc_key"], k["symbol"]) for k in sources.values()]
-        if len(set(kernels)) != len(kernels):
-            raise HkpPackError(
-                f"{where} sources name one kernel (library, toc_key, symbol) "
-                "under two launch names"
             )
     return kind
 

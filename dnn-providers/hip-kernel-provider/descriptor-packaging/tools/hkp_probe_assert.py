@@ -268,16 +268,17 @@ def _shipped_entries(ukd):
     return [(None, ukd.get("kernel_source") or {})]
 
 
-def _check_kpack_entry(label, source, pass_arch, archives, failures):
+def _check_kpack_entry(label, source, pass_arch, archives, failures, field):
     """Check 4-7 for one shipped kpack source. Returns its archive blob, or None.
 
     Nothing is checked past a `kind` that is not "kpack": the entry is not one this
-    check can read."""
+    check can read. `field` names where the kind is shipped: `kernel_source` for a
+    single-launch UKD, the launch's `sources` entry otherwise."""
     kind = source.get("kind")
     if kind != "kpack":
         failures.add(
             "ukd-kind",
-            f"{label} kernel_source.kind is {kind!r}; expected kind has kpack output, "
+            f"{label} {field} kind is {kind!r}; expected kind has kpack output, "
             'which ships "kpack"',
         )
         return None
@@ -402,7 +403,14 @@ def _check_kpack_ukd(args, label, ukd, expected, archives, failures):
 
     for launch, source in entries:
         entry_label = label if launch is None else f"{label} launch {launch!r}"
-        blob = _check_kpack_entry(entry_label, source, pass_arch, archives, failures)
+        blob = _check_kpack_entry(
+            entry_label,
+            source,
+            pass_arch,
+            archives,
+            failures,
+            "kernel_source" if launch is None else "sources entry",
+        )
         if launch in (launches or {}) and source.get("kind") == "kpack":
             _check_launch(
                 entry_label, launch, source, launches[launch], blob, ukd, failures

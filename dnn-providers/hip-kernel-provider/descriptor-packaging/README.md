@@ -312,9 +312,10 @@ A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (seve
 packed `sources` is a JSON object keyed by launch name with at least two entries, each a
 complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
 Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
-single entry, a bad name, a `sources` under version 1.0, an entry that is not `kpack`, and
-two entries naming the same (`library`, `toc_key`, `symbol`) are all refused, by the packer
-and by the loader. Key order carries no meaning. The packer stamps 1.1 on a UKD with
+single entry, a bad name, a `sources` under version 1.0 and an entry that is not `kpack`
+are all refused, by the packer and by the loader. Two launch names may name one kernel (a
+stage that runs one kernel twice with different arguments): such entries carry equal
+`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
 `sources` only; every other UKD packs byte for byte as before, and a runtime that predates
 the key skips a 1.1 file at its version gate.
 
@@ -329,7 +330,10 @@ the key skips a 1.1 file at its version gate.
 
 The authored form is the same map, each value a full `rocke` source (`kind`, `source`,
 `builder`, `spec`, optional `target`) plus an optional `role`. Authored entries are `rocke`
-only: `hip`, `hsaco` and `embedded_source` entries are refused.
+only. A `hip` or `hsaco` entry is refused as not yet supported as a `sources` entry, an
+`embedded_source` entry because it is not packed into a code object, and a `kpack` entry
+because already-packed entries are not pack input. The packer still validates a packed
+`sources`, so a shipped tree can be checked.
 
 - **One builder, several kernels.** A builder may return a `rocke.helpers.KernelModule`: a
   primary kernel plus role-keyed companions in **one code object**. An entry without `role`
@@ -341,9 +345,10 @@ only: `hip`, `hsaco` and `embedded_source` entries are refused.
   reduce kernel, say) are two entries with no `role`, and two code objects. No wrapper
   builder is needed.
 - **Claim check.** For each compiled variant a UKD uses, the kernels its entries claim
-  must equal the kernels the compile produced: the primary plus every companion role. A
-  compiled companion that no entry claims, or a claimed role the module lacks, fails the
-  pack and the message names both lists.
+  must equal the kernels the compile produced: the primary plus every companion role. Entries
+  that name one kernel under different launch names make one claim. A compiled companion
+  that no entry claims, or a claimed role the module lacks, fails the pack and the message
+  names both lists.
 - **Never authored.** `role` exists only in the authored form. The packed `symbol` and
   `signature` are read out of the compiled object, so they cannot disagree with what was
   built.
@@ -748,14 +753,14 @@ compiles hip and rocke fixtures. There is no local Windows reproduction.
 | `arch-dir-missing` / `extra-arch-dir` | `<out>/<arch>/` is absent, or another `gfx*` directory is present. |
 | `kpack-missing` / `kpack-empty` | Kpack output is expected and `<out>/<arch>/kpack/hip_kernel_provider_<arch>.kpack` is absent or empty. |
 | `no-kdp` | No `*.kdp.json` under `<out>/<arch>`, or one is unreadable or not a JSON object. |
-| `ukd-kind` | A shipped UKD's `kernel_source.kind` differs from what its expected kind's output type requires: `kpack` for kpack output, the authored kind for pass-through output. |
+| `ukd-kind` | A shipped UKD's `kernel_source.kind` (for a UKD with `sources`, a launch entry's `kind`) differs from what its expected kind's output type requires: `kpack` for kpack output, the authored kind for pass-through output. |
 | `arch-field` | A shipped UKD's `arch` is not exactly `[<arch>]` (an absent `arch` fails too), or a KDP's `arch`, when present, is not exactly `[<arch>]`. |
 | `passthrough-source` | A pass-through UKD's `kernel_source` differs from the authored one recorded in `expect.json`. |
 | `passthrough-provenance` | A pass-through UKD's `provenance.source_label` is empty, or `provenance.source_file` differs from `kernel_source.source_file`. |
-| `kpack-toc` | The archive is unreadable, or has no entry for a UKD's `toc_key` and architecture. |
-| `sha256` | The blob's sha256 differs from `kernel_source.sha256`. |
-| `signature` | A kpack UKD's `kernel_source.signature` is empty or not a list. |
-| `symbol` | A UKD's `symbol` does not appear in its blob. |
+| `kpack-toc` | The archive is unreadable, or has no entry for an entry's `toc_key` and architecture (checked per launch for `sources`). |
+| `sha256` | The blob's sha256 differs from the entry's `sha256` (`kernel_source`, or each launch entry of `sources`). |
+| `signature` | A kpack entry's `signature` is empty or not a list (checked per launch for `sources`). |
+| `symbol` | An entry's `symbol` does not appear in its blob (checked per launch for `sources`). |
 | `launches` | A kpack UKD ships `kernel_source` where `expect.json` lists `launches`, or `sources` where it lists none, or both keys, or a `sources` that is not an object; the shipped launch names differ from the expected ones; or a launch's shipped `symbol` differs from the compiler's recorded one for that launch in `provenance.effective_spec` (the primary `symbol`, or `companions[<role>]` for an authored role), or the record is missing. |
 | `launch-signature` | A shipped launch's `signature` differs from the argument list its `symbol` has in the archive blob, or the blob has no such kernel. |
 | `provenance-origin` | `origin_kind` differs from the UKD's expected kind (the authored `kernel_source.kind`). |

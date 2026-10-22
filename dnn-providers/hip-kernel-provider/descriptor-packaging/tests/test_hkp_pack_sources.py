@@ -8,6 +8,7 @@ import copy
 import dataclasses
 import hashlib
 import json
+import re
 
 import pytest
 
@@ -624,6 +625,39 @@ class TestFieldsALaunchDoesNotReport:
             agreement.verify(doc, records, payload)
 
 
+class TestSameKernelUnderTwoLaunches:
+    def test_two_compile_groups_with_identical_bytes_verify(self, monkeypatch):
+        """Two compiles (distinct variant keys, toc_keys and builders) can yield
+        byte-identical code objects; they are two compiles, not one."""
+        monkeypatch.setitem(MODULES, "vk-x", {"primary": PRIMARY, "companions": {}})
+        monkeypatch.setitem(MODULES, "vk-y", {"primary": PRIMARY, "companions": {}})
+        doc, records, payload = shipped({"a": ("vk-x", None), "b": ("vk-y", None)})
+        assert payload["a"] == payload["b"]
+        sa, sb = doc["sources"]["a"], doc["sources"]["b"]
+        assert sa["toc_key"] != sb["toc_key"]
+        sources_provenance = doc["provenance"]["sources"]
+        assert sources_provenance["a"]["builder"] != sources_provenance["b"]["builder"]
+        agreement.verify(doc, records, payload)
+
+    def test_one_compile_claimed_by_two_launches_verifies(self):
+        doc, records, payload = shipped(
+            {
+                "first": ("vk-a", None),
+                "second": ("vk-a", None),
+                "merge": ("vk-a", "merge"),
+            }
+        )
+        assert doc["sources"]["first"]["symbol"] == doc["sources"]["second"]["symbol"]
+        agreement.verify(doc, records, payload)
+
+    def test_a_companion_claimed_twice_with_the_primary_unclaimed_fails(self):
+        doc, records, payload = shipped(
+            {"one": ("vk-a", "merge"), "two": ("vk-a", "merge")}
+        )
+        with pytest.raises(HkpPackError, match=r"claim the kernels \['merge'\]"):
+            agreement.verify(doc, records, payload)
+
+
 class TestClaimCheck:
     OBSERVED = {"symbol": PRIMARY, "companions": {"merge": MERGE}}
 
@@ -633,29 +667,44 @@ class TestClaimCheck:
     @pytest.mark.parametrize(
         "roles",
         [
-            [None],
-            ["merge"],
-            [None, "reduce"],
             [None, None, "merge"],
-            [None, "merge", "merge"],
-            [],
+            [None, None, "merge", "merge"],
+        ],
+        ids=["primary-twice", "both-twice"],
+    )
+    def test_one_kernel_under_two_launch_names_is_one_claim(self, roles):
+        names = [f"n{i}" for i in range(len(roles))]
+        sources.check_claims("W", "b", names, roles, self.OBSERVED)
+
+    @pytest.mark.parametrize(
+        "roles, claimed",
+        [
+            ([None], r"\['\(primary\)'\]"),
+            (["merge"], r"\['merge'\]"),
+            ([None, "reduce"], r"\['\(primary\)', 'reduce'\]"),
+            (["merge", "merge"], r"\['merge'\]"),
+            ([], r"\[\]"),
         ],
         ids=[
             "companion-unclaimed",
             "primary-unclaimed",
             "renamed-role",
-            "primary-twice",
             "companion-twice",
             "nothing-claimed",
         ],
     )
-    def test_a_claim_set_other_than_the_compiled_kernels_fails_naming_both(self, roles):
+    def test_a_claim_set_other_than_the_compiled_kernels_fails_naming_both(
+        self, roles, claimed
+    ):
         names = [f"n{i}" for i in range(len(roles))]
         with pytest.raises(HkpPackError) as info:
             sources.check_claims("W", "b", names, roles, self.OBSERVED)
         message = str(info.value)
-        assert "claim the kernels" in message
-        assert "compile produced ['(primary)', 'merge']" in message
+        assert re.search(rf"claim the kernels {claimed}", message)
+        assert re.search(r"compile produced \['\(primary\)', 'merge'\]", message)
+
+    def test_a_distinct_claim_set_is_sorted_and_deduplicated(self):
+        assert sources.claimed_roles([None, "merge", None]) == ["(primary)", "merge"]
 
     def test_a_single_kernel_compile_has_only_a_primary(self):
         sources.check_claims("W", "b", ["a"], [None], {"symbol": PRIMARY})
@@ -761,8 +810,28 @@ class TestAuthoredValidation:
     )
     def test_only_rocke_entries_may_be_authored(self, entry):
         doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
-        with pytest.raises(HkpPackError, match="only 'rocke' entries may be authored"):
+        with pytest.raises(HkpPackError) as info:
             _validate_ukd_fields(doc, "UKD 'k'")
+        assert f"'k1' has kind '{entry['kind']}'" in str(info.value)
+
+    def test_an_embedded_source_entry_is_refused_at_validation(self):
+        entry = {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "e"}
+        doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match="'k1' has kind 'embedded_source'"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize(
+        "kind, says",
+        [
+            ("hip", "not yet supported"),
+            ("hsaco", "not yet supported"),
+            ("embedded_source", "not packed into a code object"),
+            ("kpack", "not pack input"),
+        ],
+    )
+    def test_each_refused_kind_says_why(self, kind, says):
+        message = str(sources.refuse_authored_kind("W", "k1", kind))
+        assert f"'k1' has kind '{kind}'" in message and says in message
 
     def test_an_unknown_kind_and_a_missing_kind_are_refused(self):
         with pytest.raises(HkpPackError, match="unsupported kind 'flydsl'"):
@@ -823,12 +892,11 @@ class TestPackedValidation:
         with pytest.raises(HkpPackError, match="needs 1.1 or later"):
             _validate_ukd_fields(doc, "UKD 'k'")
 
-    def test_two_launch_names_for_one_kernel_are_refused(self):
+    def test_two_launch_names_for_one_kernel_are_accepted(self):
         doc = _packed_ukd(
             entries={"k0": _packed_entry(PRIMARY), "k1": _packed_entry(PRIMARY)}
         )
-        with pytest.raises(HkpPackError, match="one kernel .* under two launch names"):
-            _validate_ukd_fields(doc, "UKD 'k'")
+        _validate_ukd_fields(doc, "UKD 'k'")
 
     def test_entries_sharing_a_module_but_not_a_symbol_are_accepted(self):
         _validate_ukd_fields(_packed_ukd(), "UKD 'k'")
@@ -914,10 +982,11 @@ class TestEveryReaderOfAUkdsKernel:
 
     def test_a_non_rocke_entry_reaching_the_compile_is_refused(self):
         ukd = _sources_ukd({"k0": _rocke_entry(), "k1": _packed_entry(PRIMARY)})
-        with pytest.raises(HkpPackError, match="only 'rocke' entries may be authored"):
+        with pytest.raises(HkpPackError) as info:
             pipeline._compile_ukd_variant(
                 ukd, "W", ".", ".", ARCH, "hipcc", ".", {}, {}, {}, {}, {}, None
             )
+        assert "'k1' has kind 'kpack'" in str(info.value)
 
     def test_the_authored_extras_exclude_sources(self):
         assert "sources" not in pipeline._ukd_extra(_sources_ukd(version="1.0"))
