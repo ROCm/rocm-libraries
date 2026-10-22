@@ -1307,13 +1307,13 @@ def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -
             )
             continue
         target = override.get("target", base.target)
-        if target and target not in ROCKE_TARGETS:
+        if "target" in override and target not in ROCKE_TARGETS:
             raise ConfigError(
                 f"{launch_where}.target is {target!r}, which hkp_pack does not "
                 f"compile for. Known targets: {list(ROCKE_TARGETS)}."
             )
         role = override.get("role", "")
-        if role and not LAUNCH_NAME_PATTERN.fullmatch(role):
+        if "role" in override and not LAUNCH_NAME_PATTERN.fullmatch(role):
             raise ConfigError(
                 f"{launch_where}.role is {role!r}, which is not a lowercase "
                 f"identifier ({LAUNCH_NAME_PATTERN.pattern}), the rule a "

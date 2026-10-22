@@ -184,6 +184,22 @@ class TestNesting:
         assert code == 1
         assert "small binaries subset of big: False  MISSING 1" in output
 
+    def test_a_renamed_launch_with_identical_content_does_not_nest(
+        self, tmp_path, capsys
+    ):
+        """The launch name is part of the identity: the same builder, spec and role
+        under another name is another binary."""
+
+        def rename(by_name):
+            sources = by_name[D64]["sources"]
+            sources["mrg"] = sources.pop("merge")
+
+        small = _tree(tmp_path, "small", keep=(D64,))
+        big = _tree(tmp_path, "big", rename, keep=(D64,))
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 1
+        assert "small binaries subset of big: False  MISSING 1" in output
+
     def test_a_role_swap_between_launches_does_not_nest(self, tmp_path, capsys):
         """Both launches keep their builder and spec, so only the role tells which
         kernel of the module each one launches."""

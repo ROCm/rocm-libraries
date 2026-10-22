@@ -127,7 +127,10 @@ def test_multi_launch_fixture_loads_and_keeps_its_kernels(validator):
     assert payload["success"] is True
     assert payload["engines"] == [engine]
     assert payload["expected_engines_missing"] == []
-    assert "0 dropped" in " ".join(d["message"] for d in payload["diagnostics"])
+    diagnostics = " ".join(d["message"] for d in payload["diagnostics"])
+    assert "0 dropped" in diagnostics, diagnostics
+    # "0 dropped" counts engines; a kernel dropped for its launch set says so itself.
+    assert "carries the launches" not in diagnostics, diagnostics
 
 
 def test_mismatched_launch_sets_drop_the_odd_kernel_and_fail(validator):
