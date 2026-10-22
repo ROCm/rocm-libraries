@@ -437,6 +437,18 @@ public:
             }
         }
     }
+
+    static void free_noexcept(T* d) noexcept
+    {
+        try
+        {
+            free(d);
+        }
+        catch(const hipError_t& status)
+        {
+            rocsparse_clients_log_hip_error("rocsparse_allocator::free", status);
+        }
+    }
 };
 
 template <typename T>

@@ -186,7 +186,7 @@ rocsparse_clients::timer::timer(hipStream_t stream)
 
 void rocsparse_clients::timer::start()
 {
-    CHECK_HIP_ERROR(hipEventRecord(this->m_start, this->m_stream));
+    CHECK_HIP_THROW_ERROR(hipEventRecord(this->m_start, this->m_stream));
 }
 
 float rocsparse_clients::timer::stop()

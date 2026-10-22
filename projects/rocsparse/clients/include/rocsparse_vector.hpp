@@ -304,14 +304,7 @@ public:
 #ifdef GOOGLE_TEST
         allocator::check_guards(this->data(), this->size());
 #endif
-        try
-        {
-            allocator::free(this->data());
-        }
-        catch(const hipError_t& status)
-        {
-            rocsparse_clients_log_hip_error("rocsparse_allocator::free", status);
-        }
+        allocator::free_noexcept(this->data());
     };
 
     hipError_t memcheck() const
@@ -333,6 +326,8 @@ public:
             if(this->m_val)
             {
                 allocator::free(this->m_val);
+                this->m_val  = nullptr;
+                this->m_size = 0;
             }
             this->m_val  = allocator::malloc(s);
             this->m_size = s;

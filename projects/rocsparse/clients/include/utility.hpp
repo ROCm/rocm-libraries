@@ -1037,8 +1037,10 @@ namespace rocsparse_clients
 
     public:
         timer(hipStream_t stream);
-        void  start();
-        float stop();
+        timer(const timer&) = delete;
+        timer& operator=(const timer&) = delete;
+        void   start();
+        float  stop();
         ~timer();
     };
 
@@ -1087,12 +1089,22 @@ namespace rocsparse_clients
         for(int32_t iter = 0; iter < n_calls; ++iter)
         {
             t.start();
+            rocsparse_status hot_status = rocsparse_status_success;
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                std::ignore = func(handle, std::forward<ARG>(arg)...);
+                const rocsparse_status status = func(handle, std::forward<ARG>(arg)...);
+                if(status != rocsparse_status_success)
+                {
+                    hot_status = status;
+                }
             }
             const double t_microseconds = (t.stop() * 1000);
-            gpu_time[iter]              = t_microseconds / n_sub_calls;
+            if(hot_status != rocsparse_status_success)
+            {
+                std::cerr << "error " << __FUNCTION__ << ": timed call failed." << std::endl;
+                throw hot_status;
+            }
+            gpu_time[iter] = t_microseconds / n_sub_calls;
         }
 
         std::sort(gpu_time.begin(), gpu_time.end());
