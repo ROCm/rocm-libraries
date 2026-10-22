@@ -1,0 +1,26 @@
+outs:
+- path: Small.tensor0.bin
+  remote: golden-data
+  md5: eb61b4f6cb5c576e206b01ce1de276c9
+  size: 32768
+  hash: md5
+- path: Small.tensor1.bin
+  remote: golden-data
+  md5: 1f80f2a2b77140eb52d6a180b20a96a5
+  size: 32768
+  hash: md5
+- path: Small.tensor2.bin
+  remote: golden-data
+  md5: 9b2dfff7f279e7320c2edd1a9c42de94
+  size: 32768
+  hash: md5
+- path: Small.tensor3.bin
+  remote: golden-data
+  md5: d002766723f7b1cc4e55d29e962009b1
+  size: 32768
+  hash: md5
+- path: Small.tensor4.bin
+  remote: golden-data
+  md5: 2638821f70ad07b92d8e0ca694c3b545
+  size: 512
+  hash: md5
