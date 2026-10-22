@@ -49,7 +49,8 @@ by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 
 The tests need 24 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/rocsparse/clients/matrices`` from the root of the rocm-libraries repository.
-Reading from the DVC storage doesn't require credentials.
+Reading from the DVC storage doesn't require credentials. DVC needs S3 support, for example
+``pip install 'dvc[s3]'``.
 In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
 ``git sparse-checkout add .dvc`` first.
 Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.csr`` files,

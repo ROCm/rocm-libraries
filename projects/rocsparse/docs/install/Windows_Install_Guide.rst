@@ -42,7 +42,8 @@ Building rocSPARSE from source also requires the following components and depend
 
 The tests need 24 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/rocsparse/clients/matrices`` from the root of the rocm-libraries repository.
-Reading from the DVC storage doesn't require credentials.
+Reading from the DVC storage doesn't require credentials. DVC needs S3 support, for example
+``pip install "dvc[s3]"``.
 In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
 ``git sparse-checkout add .dvc`` first.
 Alternatively, configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.

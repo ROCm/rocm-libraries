@@ -3,7 +3,7 @@
 The `.dvc` files in this directory point to the test matrices that `cmake/ClientMatrices.cmake`
 converts for the rocSPARSE tests. Run `dvc pull -R projects/rocsparse/clients/matrices` from the
 root of the rocm-libraries repository to download them. Reading the DVC remote (`sparse-matrices`)
-doesn't require credentials.
+doesn't require credentials. DVC needs S3 support, for example `pip install 'dvc[s3]'`.
 
 DVC reads its configuration from the `.dvc` directory at the repository root. A sparse checkout of
 `projects/rocsparse` omits that directory, and `dvc pull` then fails with
@@ -23,7 +23,7 @@ Each `.tar.gz` file is the unmodified Matrix Market archive from `https://sparse
 Its MD5 hash is in the `.dvc` file and in `cmake/ClientMatrices.cmake`. The header of each `.mtx` file
 lists the authors and editors of that matrix.
 
-At build time, the rocSPARSE build converts each matrix to a rocSPARSE-specific binary CSR file
+At build time, the rocSPARSE build converts each matrix to the rocALUTION binary CSR format
 (`<name>.csr`) with `deps/convert.cpp`. The conversion changes only the storage format.
 
 | Matrix | Group |
