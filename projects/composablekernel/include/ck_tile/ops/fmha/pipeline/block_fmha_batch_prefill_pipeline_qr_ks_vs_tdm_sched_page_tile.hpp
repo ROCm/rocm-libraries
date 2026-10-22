@@ -46,9 +46,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                   "the batch-prefill page tile supports D64/V64 or D128/V128");
     static_assert(Base::kBlockPerCu == 1);
     static_assert(!Base::kHasSink);
-    // Not supported: LSE output (not wired: the kernel passes a null LSE window), sinks, and
-    // dropout, bias and logits soft cap (rejected by the core).
-    static_assert(!Base::kStoreLSE, "the batch-prefill page tile does not store LSE");
+    // Not supported: sinks, and dropout, bias and logits soft cap (rejected by the core).
     static_assert(Base::Policy::AsyncCopy);
 
     using PageTileTraits =
