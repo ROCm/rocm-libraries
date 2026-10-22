@@ -58,8 +58,10 @@ def record_num_calls(f):
 
     return wrapper
 
-def kernel_header(name: str, gfx_arch: str, xnack: bool = False):
-    target_id = f'{gfx_arch}:xnack+' if xnack else gfx_arch
+def kernel_header(name: str, gfx_arch: str, target_id: str = ''):
+    # The directive must spell exactly the id the assembler is given; the
+    # caller owns that, and gfx_arch (bare) is only the codegen key.
+    target_id = target_id or gfx_arch
     return f'''.amdgcn_target "amdgcn-amd-amdhsa--{target_id}"
 .text
 .global {name}
@@ -721,7 +723,10 @@ if __name__ == '__main__':
     ap.add_argument('--debug-build', action='store_true', dest='debug_build', help='Build with debug information')
     ap.set_defaults(debug_build=False)
     ap.add_argument('--arch', type=str, default='gfx90a', help='Target architecture for assembler, e.g. gfx908. Default is gfx90a')
-    ap.add_argument('--xnack', action='store_true', help='Append :xnack+ to the .amdgcn_target code-object id (arch logic still uses the base arch)')
+    ap.add_argument('--target-id', type=str, default='', dest='target_id',
+                    help='Full code-object target id for the .amdgcn_target directive, e.g. '
+                         '"gfx950:sramecc+". Must match the assembler -mcpu or the assembler '
+                         'rejects the file. Defaults to --arch, which arch logic always uses.')
     args = ap.parse_args()
     output_path: str = args.output
     m: int = args.m
@@ -729,7 +734,7 @@ if __name__ == '__main__':
     toolchain_path: str = validateToolchain(args.toolchain)
     debug_build: bool = args.debug_build
     arch: str = args.arch
-    xnack: bool = args.xnack
+    target_id: str = args.target_id
     isa = gfxToIsa(arch)
 
     if any([not i for i in (arch, toolchain_path, isa)]):
@@ -759,7 +764,7 @@ if __name__ == '__main__':
     func_name = softmax.func_name
     meta = KernelMeta(func_name, softmax.vgpr_pool.size(), softmax.sgpr_pool.size(), 0, softmax.lds_usage_byte, waveFrontSize, 256, 8, args)
     meta.update_args_offsets()
-    k_str = '\n'.join([kernel_header(func_name, arch, xnack),
+    k_str = '\n'.join([kernel_header(func_name, arch, target_id),
                        str(kernel_body),
                        kernel_rodata(func_name, isa),
                        meta_str((meta,))])

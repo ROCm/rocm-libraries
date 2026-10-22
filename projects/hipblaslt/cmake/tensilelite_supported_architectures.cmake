@@ -115,7 +115,31 @@ function(tensilelite_sanitizer_requires_xnack output_var)
     endif()
 endfunction()
 
-function(tensilelite_offload_target output_var arch)
+# ISA features an architecture's code objects must be built with, spelled the
+# way a target id spells them. This is the CMake-side twin of
+# tensilelite/Common/Architectures.py::ARCH_TARGET_ID_FEATURES, and it must stay
+# in step with it: both describe the same code objects.
+#
+# gfx950 is sramecc+ because the rocRoller kernels under
+# tensilelite/CustomKernels/rocroller/ declare
+# `amdgcn-amd-amdhsa--gfx950:sramecc+` and the assembler rejects any -mcpu that
+# is not exactly that id. Carrying it on every gfx950 path keeps what hipBLASLt
+# ships uniformly SRAMECC_ON. The consequence is deliberate: those code objects
+# will not load on a gfx950 part with sramecc disabled. xnack is left
+# unspecified (XNACK_ANY) outside sanitizer builds.
+#
+# A target id is never a path. Callers keep using the bare ${arch} for
+# directories, file names and the --architecture= identifier TensileLite
+# validates against its own allow-list.
+set(TARGET_ID_FEATURES_gfx950 "sramecc+")
+
+# The xnack normalization a sanitizer build needs, and nothing else. This is
+# what GPU_TARGETS is normalized with: GPU_TARGETS is also forwarded verbatim to
+# TensileLite as --architecture=, where it is checked against architectureMap,
+# which knows `gfx950:xnack+` but not `gfx950:sramecc+`. ISA features therefore
+# must not be added here -- they are added by tensilelite_offload_target, at the
+# points that actually name a compiler target.
+function(tensilelite_sanitizer_target output_var arch)
     set(_xnack_capable gfx908 gfx90a gfx942 gfx950) #gfx1250 support xnack_any so don't need to explicit ":xnack+"
     set(_target "${arch}")
     tensilelite_sanitizer_requires_xnack(_requires_xnack)
@@ -125,11 +149,50 @@ function(tensilelite_offload_target output_var arch)
     set(${output_var} "${_target}" PARENT_SCOPE)
 endfunction()
 
+# The full target id for an architecture: what belongs in -mcpu,
+# --offload-arch and a generated `.amdgcn_target` directive. Features are
+# spelled sramecc before xnack, which is the only order clang accepts.
+function(tensilelite_offload_target output_var arch)
+    set(_base "${arch}")
+    set(_tail "")
+    if("${arch}" MATCHES "^([^:]+)(:.*)$")
+        set(_base "${CMAKE_MATCH_1}")
+        set(_tail "${CMAKE_MATCH_2}")
+    endif()
+    set(_target "${_base}")
+    if(DEFINED TARGET_ID_FEATURES_${_base} AND NOT "${_tail}" MATCHES "sramecc")
+        foreach(_feature IN LISTS TARGET_ID_FEATURES_${_base})
+            set(_target "${_target}:${_feature}")
+        endforeach()
+    endif()
+    set(_target "${_target}${_tail}")
+    # Same rule as tensilelite_sanitizer_target, applied after the ISA features
+    # so the id reads sramecc-then-xnack.
+    set(_xnack_capable gfx908 gfx90a gfx942 gfx950)
+    tensilelite_sanitizer_requires_xnack(_requires_xnack)
+    if(_requires_xnack AND _tail STREQUAL "" AND "${_base}" IN_LIST _xnack_capable)
+        set(_target "${_target}:xnack+")
+    endif()
+    set(${output_var} "${_target}" PARENT_SCOPE)
+endfunction()
+
 function(tensilelite_normalize_targets output_var)
     set(_normalized "")
     foreach(_arch IN LISTS ARGN)
-        tensilelite_offload_target(_target "${_arch}")
+        tensilelite_sanitizer_target(_target "${_arch}")
         list(APPEND _normalized "${_target}")
     endforeach()
     set(${output_var} "${_normalized}" PARENT_SCOPE)
+endfunction()
+
+# The list hip-config.cmake turns into `--offload-arch=` on hip::device, i.e.
+# the target ids hipBLASLt's own HIP device code is compiled for. Separate from
+# GPU_TARGETS so the feature tail never reaches the allow-list or a path.
+function(tensilelite_offload_targets output_var)
+    set(_targets "")
+    foreach(_arch IN LISTS ARGN)
+        tensilelite_offload_target(_target "${_arch}")
+        list(APPEND _targets "${_target}")
+    endforeach()
+    set(${output_var} "${_targets}" PARENT_SCOPE)
 endfunction()

@@ -27,6 +27,38 @@ external manifest.
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
 
+## Target id and ISA features
+
+A kernel's `.amdgcn_target` directive is part of its identity: the assembler
+compares the directive against `-mcpu` and errors on any difference, in either
+direction. The build assembles to a *target id*, which carries the
+architecture's ISA features — gfx950 is built `gfx950:sramecc+`. The id is
+produced by `Tensile.Common.Architectures.targetIdOf` and its CMake twin
+`tensilelite_offload_target`; feature tails belong to target ids only, never to
+a path, a file name, or the `--architecture=` value TensileLite validates
+against its allow-list, all of which stay bare (`gfx950`).
+
+When adding a kernel, either declare the target id the build assembles to:
+
+```
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
+```
+
+or strip the directive and let the assembler's flags supply the target.
+
+Either way, `Assembler._retargetAssemblySource` rewrites the *whole* target id —
+features and all — in both `.amdgcn_target` and the `amdhsa.target` metadata
+key, in place in the checked-in file, before assembling. So a stale or
+hand-edited `:feature` tail is not cosmetic. The rewrite matches the processor
+as one hyphenated token (`gfx950`, `gfx1250-strict`, `gfx9-4-generic`); an id
+it cannot match survives untouched into an assembler that rejects it, and the
+build fails. `test_every_checked_in_gfx950_kernel_declares_the_id_the_build_assembles_to`
+in `Tests/unit/test_arch_steppings.py` pins this against the shipped sources.
+
+One consequence is deliberate and worth knowing: gfx950 code objects are
+SRAMECC_ON rather than SRAMECC_ANY, so they will not load on a gfx950 part
+running with sramecc disabled.
+
 ## Triton-sourced kernels
 
 The `triton/` subdirectory holds GEMM kernels compiled from Triton

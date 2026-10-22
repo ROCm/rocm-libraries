@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Union, NamedTuple
 
 from ..Common import ensurePath, print1, print2, printWarning
 from ..Common.GlobalParameters import globalParameters
-from ..Common.Architectures import compilerTargetOf, isaToGfx
+from ..Common.Architectures import compilerTargetOf, isaToGfx, targetIdOf
 from ..Common.Types import IsaVersion
 from ..CustomKernels import validateCustomKernelMetadata
 from ..SolutionStructs import Solution
@@ -155,7 +155,12 @@ def buildAssemblyCodeObjectFiles(
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
+          # Tag the bundle with the id the objects inside were actually built
+          # to -- `compilerTargetOf(name)` right above is the *filename*, which
+          # must stay bare. An entry claiming plain gfx950 over SRAMECC_ON
+          # content would be selected for an sramecc-off agent and then fail in
+          # the ELF loader instead of being passed over.
+          bundler.compress(str(coFileRaw), str(coFile), targetIdOf(name))
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

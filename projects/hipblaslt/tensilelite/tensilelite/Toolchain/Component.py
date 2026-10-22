@@ -32,7 +32,7 @@ from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional
 
 from Tensile.Common import SemanticVersion, print2
-from Tensile.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
+from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf, targetIdOf
 from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -243,7 +243,7 @@ class Assembler(Component):
         ]
 
     @staticmethod
-    def _retargetAssemblySource(targetGfx: str, srcPath: str):
+    def _retargetAssemblySource(targetId: str, srcPath: str):
         path = Path(srcPath)
         try:
             src = path.read_text()
@@ -254,25 +254,29 @@ class Assembler(Component):
             # genuinely bad, rather than a confusing traceback from this helper.
             return
 
-        target = f"amdgcn-amd-amdhsa--{targetGfx}"
-        # The processor is the whole hyphenated name: a stepping (gfx1250-strict)
-        # or a generic (gfx9-4-generic) must be replaced as one token, or a source
-        # already naming the stepping gains its suffix twice. Only the `:feature`
-        # tail is carried over.
+        target = f"amdgcn-amd-amdhsa--{targetId}"
+        # Replace the whole target id, features and all, not just the processor:
+        # the assembler compares the directive against the id -mcpu names and
+        # errors on any difference in either direction, so the source's own
+        # `:feature` tail cannot be carried over -- a kernel declaring
+        # `gfx942` assembled for `gfx950:sramecc+` has to end up declaring
+        # `gfx950:sramecc+`. The processor is the whole hyphenated name: a
+        # stepping (gfx1250-strict) or a generic (gfx9-4-generic) is one token,
+        # or a source already naming the stepping gains its suffix twice.
         processor = r'gfx[0-9a-fA-F]+(?:-[0-9A-Za-z]+)*'
         updated = sub(
-            rf'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--{processor}([^"]*")',
-            rf'\1{target}\2',
+            rf'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--{processor}[^"]*(")',
+            rf'\g<1>{target}\g<2>',
             src,
         )
         updated = sub(
-            rf'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--{processor}([^\s]*)',
-            rf'\1{target}\2',
+            rf'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--{processor}[^\s]*',
+            rf'\g<1>{target}',
             updated,
         )
 
         if updated != src:
-            print2(f"Retargeting assembly source {path.name} to {targetGfx}")
+            print2(f"Retargeting assembly source {path.name} to {targetId}")
             path.write_text(updated)
 
     def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
@@ -285,8 +289,11 @@ class Assembler(Component):
             destPath: The destination path for the generated object file.
         """
         features = deviceTargetFeaturesOf(targetGfx)
+        # The id carries the architecture's ISA features; the bare name is only
+        # for the gfx11*/gfx12* test just below, which is about the processor.
+        targetId = targetIdOf(targetGfx)
         targetGfx = compilerTargetOf(targetGfx)
-        self._retargetAssemblySource(targetGfx, srcPath)
+        self._retargetAssemblySource(targetId, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
         if targetGfx.startswith(("gfx11", "gfx12")):
@@ -294,7 +301,7 @@ class Assembler(Component):
         args = [
             *args,
             *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
-            f"-mcpu={targetGfx}",
+            f"-mcpu={targetId}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
             "-o",
@@ -365,7 +372,7 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
+        archFlags = [f"--offload-arch={targetIdOf(gfx)}" for gfx in target_list]
         # -Xclang reaches every device compile; an alias always builds alone.
         features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
         featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
