@@ -95,9 +95,10 @@ namespace rocalution
         this->L_mat_descr_ = 0;
         this->U_mat_descr_ = 0;
 
-        this->mat_descr_     = 0;
-        this->mat_info_      = 0;
-        this->mat_info_itsv_ = 0;
+        this->mat_descr_       = 0;
+        this->mat_info_        = 0;
+        this->mat_info_itsv_   = 0;
+        this->mat_info_itsv_U_ = 0;
 
         this->mat_buffer_size_ = 0;
         this->mat_buffer_      = NULL;
@@ -122,6 +123,9 @@ namespace rocalution
 
         status = rocsparse_create_mat_info(&this->mat_info_itsv_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        status = rocsparse_create_mat_info(&this->mat_info_itsv_U_);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
     template <typename ValueType>
@@ -140,6 +144,9 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         status = rocsparse_destroy_mat_info(this->mat_info_itsv_);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+        status = rocsparse_destroy_mat_info(this->mat_info_itsv_U_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
     }
 
@@ -1907,7 +1914,7 @@ namespace rocalution
             this->mat_.val,
             this->mat_.row_offset,
             this->mat_.col,
-            this->mat_info_itsv_,
+            this->mat_info_itsv_U_,
             &U_buffer_size);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
@@ -1955,7 +1962,7 @@ namespace rocalution
                                          this->mat_.val,
                                          this->mat_.row_offset,
                                          this->mat_.col,
-                                         this->mat_info_itsv_,
+                                         this->mat_info_itsv_U_,
                                          rocsparse_analysis_policy_reuse,
                                          rocsparse_solve_policy_auto,
                                          this->mat_buffer_);
@@ -1985,7 +1992,7 @@ namespace rocalution
             status
                 = rocsparse_csritsv_clear(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                                           this->U_mat_descr_,
-                                          this->mat_info_itsv_);
+                                          this->mat_info_itsv_U_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
         }
 
@@ -2035,6 +2042,7 @@ namespace rocalution
             assert(this->L_mat_descr_ != 0);
             assert(this->U_mat_descr_ != 0);
             assert(this->mat_info_itsv_ != 0);
+            assert(this->mat_info_itsv_U_ != 0);
             assert(this->ncol_ == this->nrow_);
             assert(this->tmp_vec_ != NULL);
 
@@ -2098,7 +2106,7 @@ namespace rocalution
                                           this->mat_.val,
                                           this->mat_.row_offset,
                                           this->mat_.col,
-                                          this->mat_info_itsv_,
+                                          this->mat_info_itsv_U_,
                                           this->tmp_vec_->vec_,
                                           cast_out->vec_,
                                           rocsparse_solve_policy_auto,
@@ -3108,7 +3116,7 @@ namespace rocalution
             this->mat_.val,
             this->mat_.row_offset,
             this->mat_.col,
-            this->mat_info_itsv_,
+            this->mat_info_itsv_U_,
             &buffer_size);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
@@ -3137,7 +3145,7 @@ namespace rocalution
                                          this->mat_.val,
                                          this->mat_.row_offset,
                                          this->mat_.col,
-                                         this->mat_info_itsv_,
+                                         this->mat_info_itsv_U_,
                                          rocsparse_analysis_policy_reuse,
                                          rocsparse_solve_policy_auto,
                                          this->mat_buffer_);
@@ -3155,7 +3163,7 @@ namespace rocalution
             status
                 = rocsparse_csritsv_clear(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                                           this->U_mat_descr_,
-                                          this->mat_info_itsv_);
+                                          this->mat_info_itsv_U_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
         }
 
@@ -3189,7 +3197,7 @@ namespace rocalution
         {
             assert(out != NULL);
             assert(this->U_mat_descr_ != 0);
-            assert(this->mat_info_itsv_ != 0);
+            assert(this->mat_info_itsv_U_ != 0);
             assert(this->ncol_ == this->nrow_);
             assert(this->mat_buffer_size_ > 0);
             assert(this->mat_buffer_ != NULL);
@@ -3228,7 +3236,7 @@ namespace rocalution
                                           this->mat_.val,
                                           this->mat_.row_offset,
                                           this->mat_.col,
-                                          this->mat_info_itsv_,
+                                          this->mat_info_itsv_U_,
                                           cast_in->vec_,
                                           cast_out->vec_,
                                           rocsparse_solve_policy_auto,
