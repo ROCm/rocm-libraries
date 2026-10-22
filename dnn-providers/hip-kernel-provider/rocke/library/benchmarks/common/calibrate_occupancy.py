@@ -263,8 +263,12 @@ def predict(arch: Optional[str] = None) -> list[Prediction]:
                 file=sys.stderr,
             )
             continue
-        notes = parse_notes(hsaco)
-        det = estimate_occupancy_detail(hsaco, karch)
+        try:
+            notes = parse_notes(hsaco)
+            det = estimate_occupancy_detail(hsaco, karch)
+        except ValueError as e:  # unreadable code-object notes -- skip, don't abort
+            print(f"# skip {label} ({karch}): {e}", file=sys.stderr)
+            continue
         if not det:
             continue
         wg = notes.get("max_flat_workgroup_size", 0)

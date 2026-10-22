@@ -4,10 +4,18 @@
 
 Covers the parse/match/compare path that turns a rocprofv3 CSV into a
 predicted-vs-measured verdict. The ``predict``/``measure`` halves need a compiler /
-GPU and are exercised elsewhere."""
+GPU and are exercised elsewhere; ``predict``'s handling of a kernel whose notes
+cannot be read is checked here with stand-ins for the compiler and the notes reader."""
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+import rocke.helpers.compile
+from rocke.benchmark.perf import occupancy
 
 from benchmarks.common import calibrate_occupancy as C
 
@@ -102,6 +110,48 @@ class TestCompare(unittest.TestCase):
         rows = C.compare([_pred()], {})
         self.assertEqual(rows[0].verdict, "NO_MEASUREMENT")
         self.assertIsNone(rows[0].delta)
+
+
+class TestPredictSkipsUnreadableNotes(unittest.TestCase):
+    """One kernel whose code-object notes cannot be read is skipped, not fatal."""
+
+    @staticmethod
+    def _compile(kernel, arch, capture_ir_text):
+        # The "code object" is just the kernel name; the notes reader keys on it.
+        return SimpleNamespace(hsaco=kernel.name.encode())
+
+    @staticmethod
+    def _parse_notes(hsaco_bytes):
+        if hsaco_bytes == b"unreadable":
+            raise ValueError(
+                "the code object's amdhsa.target note: '' is not a target ID"
+            )
+        return {
+            "vgpr": 64,
+            "agpr": 0,
+            "lds_bytes": 2048,
+            "max_flat_workgroup_size": 256,
+            "target": "gfx950",
+        }
+
+    def test_unreadable_kernel_is_skipped(self):
+        kernels = [
+            ("bad", "gfx950", lambda: SimpleNamespace(name="unreadable")),
+            ("good", "gfx950", lambda: SimpleNamespace(name="readable")),
+        ]
+        stderr = io.StringIO()
+        with mock.patch.object(C, "REFERENCE_KERNELS", kernels), mock.patch.object(
+            rocke.helpers.compile, "compile_kernel", self._compile
+        ), mock.patch.object(
+            occupancy, "parse_notes", self._parse_notes
+        ), contextlib.redirect_stderr(
+            stderr
+        ):
+            rows = C.predict()
+        self.assertEqual([r.label for r in rows], ["good"])
+        self.assertIn(
+            "# skip bad (gfx950): the code object's amdhsa.target", stderr.getvalue()
+        )
 
 
 if __name__ == "__main__":

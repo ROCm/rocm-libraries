@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 import pytest
@@ -15,6 +16,8 @@ from rocke.core.arch import (
     compiler_target_from_target_id,
     generic_arch_from_target_id,
     known_arches,
+    parse_target_id,
+    processor_from_target_id,
     target_id_from_isa,
 )
 
@@ -62,6 +65,74 @@ def test_target_id_extraction_accepts_all_triple_field_forms(
     isa: str, target_id: str
 ) -> None:
     assert target_id_from_isa(isa) == target_id
+
+
+@pytest.mark.parametrize(
+    ("value", "target_id"),
+    [
+        # Compilers write the triple's environment field empty or as "unknown".
+        ("amdgcn-amd-amdhsa--gfx950", "gfx950"),
+        ("amdgcn-amd-amdhsa-unknown-gfx1201", "gfx1201"),
+        ("gfx942", "gfx942"),
+        ("amdgcn-amd-amdhsa--gfx950:xnack+", "gfx950:xnack+"),
+        ("amdgcn-amd-amdhsa-unknown-gfx950:xnack-", "gfx950:xnack-"),
+        ("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-"),
+        ("amdgcn-amd-amdhsa--gfx11-generic", "gfx11-generic"),
+        ("amdgcn-amd-amdhsa-unknown-gfx9-4-generic:xnack+", "gfx9-4-generic:xnack+"),
+        ("gfx1250-strict", "gfx1250-strict"),
+    ],
+)
+def test_parse_target_id_accepts_isa_names_and_bare_target_ids(
+    value: str, target_id: str
+) -> None:
+    assert parse_target_id(value) == target_id
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "''",
+        '""',
+        # A processor name in the wrong place, which target_id_from_isa would
+        # still pick out of the value.
+        "notgfx950",
+        "amdgcn-amd-amdhsa--notgfx950",
+        "amdgcn-amd-amdhsa-unknown-:gfx950",
+        "gfx-named-prefix-gfx942",
+        # The triple with no processor, or another environment field.
+        "amdgcn-amd-amdhsa-unknown-",
+        "amdgcn-amd-amdhsa--",
+        "amdgcn-amd-amdhsa-linux-gfx950",
+        "amdgcn-amd-amdhsa-opencl-gfx950",
+        # A feature without its sign, an empty feature, a trailing separator.
+        "gfx950:xnack",
+        "gfx950:",
+        "gfx950::xnack+",
+        "gfx950-",
+        "gfx",
+        "GFX950",
+        " gfx950",
+        "gfx950 ",
+    ],
+)
+def test_parse_target_id_refuses_any_other_form(value: str) -> None:
+    with pytest.raises(ValueError, match=f"^'{re.escape(value)}' is not a target ID"):
+        parse_target_id(value)
+
+
+@pytest.mark.parametrize(
+    ("target_id", "processor"),
+    [
+        ("gfx942:sramecc+:xnack-", "gfx942"),
+        ("gfx1250-strict", "gfx1250"),
+        ("gfx11-generic:xnack-", "gfx11-generic"),
+        # A concrete processor stays itself; base_arch gives its catalog row.
+        ("gfx1100", "gfx1100"),
+    ],
+)
+def test_processor_from_target_id(target_id: str, processor: str) -> None:
+    assert processor_from_target_id(target_id) == processor
 
 
 @pytest.mark.parametrize(
@@ -176,6 +247,9 @@ def test_generic_targets_are_catalogued_and_disjoint() -> None:
 def test_cpp_target_identity_matches_python() -> None:
     """Compare the native CTest executable with Python when a build is supplied.
 
+    Every target identity helper is compared, including the strict parser's
+    accepted target IDs and its refusal text.
+
     The C++ engine keeps its own copy of the generic target table, so every
     generic processor and every member read from arch_specs.json is an input:
     a member missing from, or misspelled in, the C++ copy resolves to a
@@ -205,14 +279,23 @@ def test_cpp_target_identity_matches_python() -> None:
         "gfx",
         "gfx-",
         "gfx942_bad",
+        "notgfx950",
+        "GFX950",
     ]
     inputs = [
         f"{prefix}{target}{profile}{features}"
         for target in targets
-        for prefix in ("", "amdgcn-amd-amdhsa--", "gfx-named-prefix-")
-        for profile in ("", "-strict")
-        for features in ("", ":", ":sramecc+:xnack-", ":unknown+")
+        for prefix in (
+            "",
+            "amdgcn-amd-amdhsa--",
+            "amdgcn-amd-amdhsa-unknown-",
+            "amdgcn-amd-amdhsa-linux-",
+            "gfx-named-prefix-",
+        )
+        for profile in ("", "-strict", "-")
+        for features in ("", ":", ":sramecc+:xnack-", ":unknown+", ":xnack", "::xnack+")
     ]
+    inputs += ["amdgcn-amd-amdhsa-unknown-", "amdgcn-amd-amdhsa-unknown-:gfx950", "''"]
     result = subprocess.run(
         [executable, *inputs], capture_output=True, text=True, check=True, timeout=30
     )
@@ -220,6 +303,10 @@ def test_cpp_target_identity_matches_python() -> None:
     expected = []
     for isa in inputs:
         target = target_id_from_isa(isa)
+        try:
+            parsed = parse_target_id(isa)
+        except ValueError as refusal:
+            parsed = f"!{refusal}"
         expected.append(
             (
                 target,
@@ -227,6 +314,8 @@ def test_cpp_target_identity_matches_python() -> None:
                 compiler_target_from_target_id(target),
                 arch_from_isa(isa),
                 generic_arch_from_target_id(target) or "-",
+                processor_from_target_id(target),
+                parsed,
             )
         )
     assert actual == expected
