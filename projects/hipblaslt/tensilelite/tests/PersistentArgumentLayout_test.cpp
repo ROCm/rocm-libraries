@@ -1072,3 +1072,21 @@ TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSp
         EXPECT_LE(capped.clusterSchedule.physicalGrid, 32u * 6u);
     }
 }
+
+TEST(PersistentArgumentLayout, ClusterFitCountsRealPeersInOutputOrder)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 4, 2);
+    auto problem = clusterProblem(129, 257, 1024, 3);
+    // 2x3 tiles occupy one 4x2 block in M and two in N, per batch.
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 16.0);
+    problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ajlk_Blik_Cijk_Dijk", {257, 129, 3, 1024},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
+    ASSERT_TRUE(problem.transposeC01());
+    // Transposing output gives 3x2 tiles and a single complete spatial block.
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 8.0);
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 1.0);
+}

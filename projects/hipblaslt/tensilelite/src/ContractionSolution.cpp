@@ -6437,6 +6437,17 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    double ContractionSolution::streamKClusterUtilization(Problem const& problem) const
+    {
+        if(!usesStreamKSpatialCluster())
+            return 1.0;
+        const auto geometry = spatialClusterGeometry(*this, problem);
+        if(geometry.totalBlocks == 0)
+            return 1.0;
+        return static_cast<double>(geometry.totalTiles)
+               / (static_cast<double>(geometry.totalBlocks) * geometry.clusterSize);
+    }
+
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -8301,7 +8312,8 @@ namespace TensileLite
         pp.staticModel = staticPerformanceModel(
             M, N, K, NumBatches, MT0, MT1, NumCUs, pp.granularities.totalGranularity, GlobalSplitU);
 
-        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity;
+        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity
+                        * streamKClusterUtilization(problem);
         pp.CUs         = NumCUs;
 
         return pp;
