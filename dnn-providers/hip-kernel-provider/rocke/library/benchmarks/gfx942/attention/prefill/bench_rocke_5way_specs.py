@@ -224,7 +224,11 @@ def _git_provenance(root: Path) -> dict:
 def _require_clean_checkout(root: Path) -> dict:
     """Capture the measured Git state before creating outputs or compiling."""
     state = _git_provenance(root)
-    if not state["repository_root"] or not state["head_sha"] or state["working_tree_dirty"] is None:
+    if (
+        not state["repository_root"]
+        or not state["head_sha"]
+        or state["working_tree_dirty"] is None
+    ):
         raise SystemExit("Cannot verify Git HEAD/worktree; refusing benchmark")
     if state["working_tree_dirty"]:
         status = _command_output(
@@ -433,7 +437,8 @@ def _environment(
             "benchmark_script": str(script_file),
             "benchmark_script_sha256": _file_sha256(script_file),
             "builder_sha256": _file_sha256(
-                rocke / "library/builders/gfx942/attention/prefill/attention_dense_prefill.py"
+                rocke
+                / "library/builders/gfx942/attention/prefill/attention_dense_prefill.py"
             ),
         },
     }
@@ -519,7 +524,9 @@ def main() -> int:
         f"({environment['gpu']['cu_count_reported_by_hip']} CUs) | "
         f"Git={environment['git']['head_sha']} | LLVM={environment['llvm_flavor']}"
     )
-    print(f"HIP runtime={hip_runtime['version']} | DSO={hip_runtime['loaded_library_path']}")
+    print(
+        f"HIP runtime={hip_runtime['version']} | DSO={hip_runtime['loaded_library_path']}"
+    )
     print(f"HIP stream={stream_ptr} | arms={[v.name for v in VARIANTS]}")
 
     raw_rows: list[dict] = []
@@ -578,7 +585,7 @@ def main() -> int:
                 raise RuntimeError(f"{shape.label}/{name} rejected: {reason}")
 
         # Trace full specs, including policy resolutions that dataclass fields
-        # otherwise encode as None. 
+        # otherwise encode as None.
         def describe_spec(spec):
             return {
                 "fields": asdict(spec),
@@ -684,6 +691,7 @@ def main() -> int:
         reference = fp32_reference(
             torch, q, k, v_tensor, scale=scale, chunk=args.reference_chunk
         )
+
         def check_and_record(name: str, stage: str, round_id: int | str = ""):
             """Validate against the same FP32 reference and record the exact gate."""
             try:
@@ -695,11 +703,19 @@ def main() -> int:
                     f"ABORT: correctness failed: {shape.label}/{name}, "
                     f"stage={stage}, round={round_id}"
                 ) from exc
-            validation_rows.append(dict(
-                shape=shape.label, variant=name, stage=stage, round=round_id,
-                passed=1, max_abs=f"{max_abs:.9g}", max_rel=f"{max_rel:.9g}",
-                atol=args.atol, rtol=args.rtol,
-            ))
+            validation_rows.append(
+                dict(
+                    shape=shape.label,
+                    variant=name,
+                    stage=stage,
+                    round=round_id,
+                    passed=1,
+                    max_abs=f"{max_abs:.9g}",
+                    max_rel=f"{max_rel:.9g}",
+                    atol=args.atol,
+                    rtol=args.rtol,
+                )
+            )
             return max_abs, max_rel
 
         print("  Validating five compiled kernels...")
@@ -758,9 +774,9 @@ def main() -> int:
 
         del reference
         median = {name: statistics.median(times) for name, times in samples.items()}
-        print("  Median ms: " + ", ".join(
-            f"{name}={median[name]:.6f}" for name in median
-        ))
+        print(
+            "  Median ms: " + ", ".join(f"{name}={median[name]:.6f}" for name in median)
+        )
         for variant in VARIANTS:
             name = variant.name
             x = median[name]
@@ -793,8 +809,10 @@ def main() -> int:
                 raise RuntimeError("GPU timing returned nonpositive latency")
             speedup = a / b
             latency_reduction_pct = 100 * (a - b) / a
-            paired = [a_round / b_round for a_round, b_round in
-                      zip(samples[before], samples[after])]
+            paired = [
+                a_round / b_round
+                for a_round, b_round in zip(samples[before], samples[after])
+            ]
             ratio_rows.append(
                 dict(
                     shape=shape.label,
@@ -816,10 +834,26 @@ def main() -> int:
     # Stable CSV schemas: the static analyzer and external result consumers
     # depend on these filenames/field names, so keep them byte-for-byte.
     exports = (
-        ("ablation_runs.csv", "shape round order variant use_cfvst lds_num_buffers v_reg_prefetch repeat ms", raw_rows),
-        ("ablation_summary.csv", "shape variant median_ms min_ms max_ms speedup_vs_baseline speedup_vs_cfvst rounds repeat", summary_rows),
-        ("validation.csv", "shape variant stage round passed max_abs max_rel atol rtol", validation_rows),
-        ("ablation_ratios.csv", "shape numerator denominator ratio_a_over_b latency_reduction_pct paired_min paired_max", ratio_rows),
+        (
+            "ablation_runs.csv",
+            "shape round order variant use_cfvst lds_num_buffers v_reg_prefetch repeat ms",
+            raw_rows,
+        ),
+        (
+            "ablation_summary.csv",
+            "shape variant median_ms min_ms max_ms speedup_vs_baseline speedup_vs_cfvst rounds repeat",
+            summary_rows,
+        ),
+        (
+            "validation.csv",
+            "shape variant stage round passed max_abs max_rel atol rtol",
+            validation_rows,
+        ),
+        (
+            "ablation_ratios.csv",
+            "shape numerator denominator ratio_a_over_b latency_reduction_pct paired_min paired_max",
+            ratio_rows,
+        ),
     )
     for filename, schema, rows in exports:
         write_csv(out_dir / filename, tuple(schema.split()), rows)
@@ -844,15 +878,17 @@ def main() -> int:
         "working_directory": str(Path.cwd()),
     }
     # Snapshot after compilation/launch so lazily loaded ROCm DSOs appear.
-    environment["software"]["rocm_libraries_loaded_at_end"] = (
-        _loaded_rocm_shared_objects()
-    )
+    environment["software"][
+        "rocm_libraries_loaded_at_end"
+    ] = _loaded_rocm_shared_objects()
     (out_dir / "provenance.json").write_text(
         json.dumps(environment, indent=2, default=str) + "\n"
     )
     print(f"\nOutputs in {out_dir}")
-    print("Reproducability: provenance.json, resolved_specs.json, validation.csv, "
-          "ablation_ratios.csv; keep latency CSVs internal")
+    print(
+        "Reproducability: provenance.json, resolved_specs.json, validation.csv, "
+        "ablation_ratios.csv; keep latency CSVs internal"
+    )
     return 0
 
 
