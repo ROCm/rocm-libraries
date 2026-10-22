@@ -4673,14 +4673,11 @@ namespace
                != rocblaslt_status_success)
                 return std::nullopt;
 
+            // In solution-index order, as getAllSolutions returns them, so every
+            // process measures them in the same order.
             indexes.reserve(all.size());
             for(const auto& result : all)
                 indexes.push_back(*(int*)result.algo.data);
-
-            // getAllSolutions returns them in the order of a set of pointers,
-            // which differs from one process to the next; sorted, every process
-            // measures them in the same order.
-            std::sort(indexes.begin(), indexes.end());
             return indexes;
         }
 
