@@ -295,7 +295,10 @@ make coverage_cleanup coverage GTEST_FILTER='*'
 `ROCALUTION_CODE_COVERAGE=1` is set for the coverage run; it enables coverage-specific parameter sets
 and is **required for `test_itersolver`** (skipped otherwise). `scripts/filter_lcov_exclusions.py`
 applies the `LCOV_EXCL_*` markers and drops `src/utils/*`, `src/base/host/host_io.*`, `clients/*`,
-`/opt/*` and `/usr/*`. Jenkins `codecov.groovy` uploads `coverage-report/coverage.info`.
+`/opt/*` and `/usr/*`. Code that only runs with more than one process (the global matrix and vector,
+the parallel manager and their backend helpers) is marked with `COVERAGE_EXCL_NO_MPI_START` /
+`COVERAGE_EXCL_NO_MPI_STOP` and only excluded in builds without MPI. Jenkins `codecov.groovy` uploads
+`coverage-report/coverage.info`.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.

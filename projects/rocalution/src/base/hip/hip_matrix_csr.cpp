@@ -4977,6 +4977,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::ExtractExtRowNnz(int                  offset,
                                                               BaseVector<PtrType>* row_nnz) const
@@ -5199,6 +5200,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGConnect(ValueType        eps,
@@ -6441,6 +6443,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGBoundaryNnz(const BaseVector<int>&  boundary,
                                                             const BaseVector<bool>& connections,
@@ -6534,6 +6537,7 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGComputeStrongConnections(
@@ -6929,6 +6933,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGExtractBoundaryState(
         const BaseVector<PtrType>&   bnd_csr_row_ptr,
@@ -6992,6 +6997,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::AMGPMISFindMaxNeighbourNode(
@@ -9903,6 +9909,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::CombineAndRenumber(int     ncol,
                                                                 int64_t ext_nnz,
@@ -12017,6 +12024,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template class HIPAcceleratorMatrixCSR<double>;
     template class HIPAcceleratorMatrixCSR<float>;

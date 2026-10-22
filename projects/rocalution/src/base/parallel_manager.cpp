@@ -40,7 +40,7 @@
 #include <mpi.h>
 #endif
 
-// LCOV_EXCL_START
+// COVERAGE_EXCL_NO_MPI_START
 
 namespace rocalution
 {
@@ -1423,4 +1423,4 @@ namespace rocalution
 
 } // namespace rocalution
 
-// LCOV_EXCL_STOP
+// COVERAGE_EXCL_NO_MPI_STOP

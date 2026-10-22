@@ -4986,6 +4986,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGBoundaryNnz(const BaseVector<int>&       boundary,
                                                   const BaseVector<bool>&      connections,
@@ -5131,6 +5132,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // ----------------------------------------------------------
     // original function connect(const spmat &A,
@@ -5298,7 +5300,7 @@ namespace rocalution
         return *ti;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGExtractBoundaryState(
         const BaseVector<PtrType>&   bnd_csr_row_ptr,
@@ -5385,7 +5387,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGPMISFindMaxNeighbourNode(
@@ -8015,7 +8017,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIBoundaryNnz(const BaseVector<int>&       boundary,
                                                       const BaseVector<int>&       CFmap,
@@ -8187,7 +8189,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIProlongNnz(int64_t                    global_column_begin,
@@ -11474,7 +11476,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::ExtractGlobalColumnIndices(int     ncol,
                                                               int64_t global_offset,
@@ -12443,7 +12445,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template class HostMatrixCSR<double>;
     template class HostMatrixCSR<float>;

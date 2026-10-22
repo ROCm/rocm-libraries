@@ -1479,6 +1479,7 @@ namespace rocalution
                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HIPAcceleratorVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                             BaseVector<ValueType>* values)
@@ -1509,6 +1510,7 @@ namespace rocalution
                 cast_idx->size_, cast_idx->vec_, cast_vec->vec_, this->vec_);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     void HIPAcceleratorVector<ValueType>::ExtractCoarseMapping(

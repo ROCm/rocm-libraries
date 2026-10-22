@@ -31,6 +31,9 @@ coverage data for lines marked with exclusion comments:
   - LCOV_EXCL_LINE: Exclude a single line
   - GCOV_EXCL_START / GCOV_EXCL_STOP: Same as LCOV (for compatibility)
   - GCOVR_EXCL_START / GCOVR_EXCL_STOP: Same as LCOV (for compatibility)
+  - COVERAGE_EXCL_NO_MPI_START / COVERAGE_EXCL_NO_MPI_STOP: Exclude a block of
+    multi-node code, only when --no-mpi is given. These blocks are tracked
+    independently, so LCOV_EXCL blocks may be nested inside them.
 
 The following LCOV record types are filtered for excluded lines:
   - DA:   per-line execution counts
@@ -45,7 +48,7 @@ function definition. FNF (functions found) and FNH (functions hit) totals
 are recomputed accordingly per source-file section.
 
 Usage:
-    python filter_lcov_exclusions.py input.info output.info
+    python filter_lcov_exclusions.py [--no-mpi] input.info output.info
 """
 
 import re
@@ -58,6 +61,11 @@ from pathlib import Path
 EXCL_START_PATTERN = re.compile(r"(LCOV|GCOV|GCOVR)_EXCL_START")
 EXCL_STOP_PATTERN = re.compile(r"(LCOV|GCOV|GCOVR)_EXCL_STOP")
 EXCL_LINE_PATTERN = re.compile(r"(LCOV|GCOV|GCOVR)_EXCL_LINE")
+
+# Markers for code that only runs with more than one process. It cannot be
+# reached in a build without MPI, but is measured in one with MPI.
+NO_MPI_START_PATTERN = re.compile(r"COVERAGE_EXCL_NO_MPI_START")
+NO_MPI_STOP_PATTERN = re.compile(r"COVERAGE_EXCL_NO_MPI_STOP")
 
 
 # Whole-file (SF section) exclusions. Any LCOV source-file section whose path
@@ -80,7 +88,7 @@ def is_excluded_section(source_file: str) -> bool:
     return any(p.search(source_file) for p in SECTION_EXCLUDE_PATTERNS)
 
 
-def get_excluded_lines(source_file: str) -> set:
+def get_excluded_lines(source_file: str, exclude_no_mpi: bool) -> set:
     """
     Parse a source file and return the set of line numbers that should be excluded.
     """
@@ -97,8 +105,21 @@ def get_excluded_lines(source_file: str) -> set:
         return excluded_lines
 
     in_exclusion_block = False
+    in_no_mpi_block = False
 
     for line_num, line in enumerate(lines, start=1):
+        if NO_MPI_START_PATTERN.search(line):
+            in_no_mpi_block = True
+        elif NO_MPI_STOP_PATTERN.search(line):
+            in_no_mpi_block = False
+            if exclude_no_mpi:
+                excluded_lines.add(line_num)
+            continue
+
+        if exclude_no_mpi and in_no_mpi_block:
+            excluded_lines.add(line_num)
+            continue
+
         # Check for EXCL_START
         if EXCL_START_PATTERN.search(line):
             in_exclusion_block = True
@@ -123,7 +144,7 @@ def get_excluded_lines(source_file: str) -> set:
     return excluded_lines
 
 
-def filter_lcov_file(input_path: str, output_path: str) -> tuple:
+def filter_lcov_file(input_path: str, output_path: str, exclude_no_mpi: bool) -> tuple:
     """
     Filter an LCOV file to remove excluded lines.
 
@@ -209,7 +230,7 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
                 skip_section = False
                 if current_source_file not in excluded_lines_cache:
                     excluded_lines_cache[current_source_file] = get_excluded_lines(
-                        current_source_file
+                        current_source_file, exclude_no_mpi
                     )
                     if excluded_lines_cache[current_source_file]:
                         files_processed += 1
@@ -302,19 +323,25 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <input.info> <output.info>", file=sys.stderr)
+    args = sys.argv[1:]
+    exclude_no_mpi = "--no-mpi" in args
+    args = [a for a in args if a != "--no-mpi"]
+    if len(args) != 2:
+        print(
+            f"Usage: {sys.argv[0]} [--no-mpi] <input.info> <output.info>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    input_path = sys.argv[1]
-    output_path = sys.argv[2]
+    input_path = args[0]
+    output_path = args[1]
 
     if not os.path.isfile(input_path):
         print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     lines_removed, files_processed, files_excluded = filter_lcov_file(
-        input_path, output_path
+        input_path, output_path, exclude_no_mpi
     )
 
     print(f"Filtered LCOV coverage file:")

@@ -328,6 +328,12 @@ if(BUILD_CODE_COVERAGE)
   # the library, e.g. ROCm headers or the logging utilities
   set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # Multi-node code can only run in a build with MPI, so it is excluded otherwise
+  set(COVERAGE_FILTER_OPTIONS)
+  if(NOT SUPPORT_MPI)
+    list(APPEND COVERAGE_FILTER_OPTIONS --no-mpi)
+  endif()
   find_program(GENHTML genhtml)
 
   if(GENHTML)
@@ -347,7 +353,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocalution-coverage_*.profraw -o ./coverage-report/rocalution.profdata
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=lcov > ./coverage-report/coverage-raw.info
-    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Building coverage report"
