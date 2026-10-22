@@ -99,6 +99,32 @@ class TestParseNotes(unittest.TestCase):
         self.assertEqual(res["target_arch"], "gfx1201")
         self.assertEqual(res["occupancy"], 12)  # RDNA model, not the CDNA 4
 
+    def _patch_target(self, target):
+        notes = self._NOTES.replace("amdgcn-amd-amdhsa--gfx1201", target)
+        occupancy.subprocess.run = lambda *a, **k: SimpleNamespace(
+            returncode=0, stdout=notes, stderr=""
+        )
+
+    def test_the_recorded_target_names_the_processor(self):
+        # The note's value is read with rocke.core.arch.parse_target_id, whose
+        # tests cover every spelling; here, the processor reaches the fields.
+        self._patch_target("amdgcn-amd-amdhsa-unknown-gfx950:xnack+")
+        self.assertEqual(occupancy.parse_notes(b"fake")["target"], "gfx950")
+
+    def test_a_recorded_target_that_is_not_a_target_id_is_refused(self):
+        # Never fall back to the caller's arch for a target that cannot be read,
+        # nor take a processor name from the wrong place in the value.
+        for target in ("''", "notgfx950", "amdgcn-amd-amdhsa-unknown-:gfx950"):
+            refusal = "amdhsa.target note: .* is not a target ID"
+            with self.subTest(target=target):
+                self._patch_target(target)
+                with self.assertRaisesRegex(ValueError, refusal):
+                    occupancy.parse_notes(b"fake")
+                with self.assertRaisesRegex(ValueError, refusal):
+                    occupancy.resources(b"fake", "gfx950")
+                with self.assertRaisesRegex(ValueError, refusal):
+                    occupancy.estimate_occupancy_detail(b"fake", "gfx950")
+
 
 class TestOccupancyEstimate(unittest.TestCase):
     def test_estimate_is_capped(self):
@@ -168,6 +194,26 @@ class TestEstimateOccupancyDetail(unittest.TestCase):
     def test_unknown_arch_returns_empty(self):
         self._patch(vgpr=64, lds_bytes=2048)
         self.assertEqual(occupancy.estimate_occupancy_detail(b"x", "gfx1201"), {})
+
+    def test_code_object_target_selects_the_caps(self):
+        # A gfx942 code object (64 VGPRs, 32 KiB LDS, 256-lane workgroup) with a
+        # stale gfx950 argument: gfx942's 64 KiB LDS fits 2 workgroups of 4 waves,
+        # 2 waves per SIMD. gfx950's 160 KiB would give 5.
+        self._patch(
+            vgpr=64,
+            agpr=0,
+            lds_bytes=32768,
+            max_flat_workgroup_size=256,
+            target="gfx942",
+        )
+        det = occupancy.estimate_occupancy_detail(b"x", "gfx950")
+        self.assertEqual(det["waves_per_simd"], 2)
+        self.assertEqual(det["limited_by"], "LDS")
+
+    def test_code_object_target_without_caps_returns_empty(self):
+        # An RDNA code object has no multi-limiter caps, whatever the argument says.
+        self._patch(vgpr=64, lds_bytes=2048, target="gfx1201")
+        self.assertEqual(occupancy.estimate_occupancy_detail(b"x", "gfx950"), {})
 
     def test_empty_notes_returns_empty(self):
         self._patch()  # {}

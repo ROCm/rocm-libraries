@@ -1838,15 +1838,72 @@ def target_id_from_isa(isa: str) -> str:
     It also accepts a target ID without the ISA prefix.
 
     The result starts at the last ``gfx`` in the input. If there is no
-    ``gfx``, the input is returned unchanged. This does not validate the name.
+    ``gfx``, the input is returned unchanged. This does not validate the name;
+    :func:`parse_target_id` does.
     """
 
     start = isa.rfind("gfx")
     return isa[start:] if start >= 0 else isa
 
 
-def _processor_from_target_id(target_id: str) -> str:
-    """Extract the processor token before any profile or feature suffix."""
+# The whole of a value parse_target_id accepts: an optional AMDHSA triple with an
+# empty or "unknown" environment field, a processor, then feature suffixes.
+_TARGET_ID = re.compile(
+    r"(?:amdgcn-amd-amdhsa-(?:unknown)?-)?"
+    r"(gfx[0-9a-z]+(?:-[0-9a-z]+)*(?::[0-9a-z_]+[+-])*)"
+)
+
+
+def parse_target_id(value: str) -> str:
+    """Return the target ID that ``value`` names, refusing any other form.
+
+    ``value`` is either an AMDHSA ISA name, as a code object's ``amdhsa.target``
+    note records it, or a bare target ID. All of it must be, in order:
+
+    - optionally the triple ``amdgcn-amd-amdhsa-`` with an empty or ``unknown``
+      environment field and its closing ``-`` (``amdgcn-amd-amdhsa--`` or
+      ``amdgcn-amd-amdhsa-unknown-``; compilers write either);
+    - a processor: ``gfx`` then lower-case letters and digits, with ``-``
+      separated parts for names such as ``gfx11-generic`` or ``gfx9-4-generic``;
+    - zero or more feature suffixes, each ``:`` then a name then ``+`` or ``-``
+      (``:sramecc+:xnack-``).
+
+    Returns the target ID with its feature suffixes, without the triple:
+    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` gives ``gfx942:xnack-``.
+    :func:`processor_from_target_id` then gives the processor.
+
+    Raises ``ValueError`` naming the value for anything else: an empty value, an
+    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), a processor
+    name in the wrong place (``notgfx950``, ``amdgcn-amd-amdhsa-unknown-:gfx950``)
+    or a feature without its sign (``gfx950:xnack``). Unlike
+    :func:`target_id_from_isa`, it never guesses a processor out of a malformed
+    value. It does not check that rocKE, the compiler or a device supports the
+    target.
+    """
+
+    match = _TARGET_ID.fullmatch(value)
+    if match is None:
+        raise ValueError(
+            f"'{value}' is not a target ID: expected an optional "
+            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix, a processor "
+            "such as gfx942 or gfx11-generic, then any :feature+ or :feature- "
+            "suffixes"
+        )
+    return match.group(1)
+
+
+def processor_from_target_id(target_id: str) -> str:
+    """Return the processor of a target ID, without profile or feature suffixes.
+
+    ``gfx942:sramecc+:xnack-`` gives ``gfx942`` and ``gfx1250-strict`` gives
+    ``gfx1250``; catalog names such as ``gfx11-generic`` stay whole. A concrete
+    processor stays itself even when it lowers through a generic catalog row
+    (``gfx1100`` stays ``gfx1100``; :func:`base_arch_from_target_id` gives the
+    row). Any other name is cut to its leading ``gfx`` token of lower-case
+    letters and digits; a name that does not start with ``gfx`` is returned up
+    to its first ``:``. This does not validate the name; validate it first with
+    :func:`parse_target_id` when it comes from outside rocKE.
+    """
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -1884,7 +1941,7 @@ def base_arch_from_target_id(target_id: str) -> str:
     """
 
     target_without_features = target_id.split(":", 1)[0]
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
     for generic, members in _load_generic_targets().items():
@@ -1910,7 +1967,7 @@ def compiler_target_from_target_id(target_id: str) -> str:
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if target_without_features.startswith(f"{processor}-"):
         target_without_features = processor
     if separator:
