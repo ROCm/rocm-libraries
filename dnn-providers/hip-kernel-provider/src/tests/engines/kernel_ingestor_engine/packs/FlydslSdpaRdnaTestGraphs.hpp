@@ -245,10 +245,10 @@ struct SdpaGraphSpec
     /// Every third query row's bias is the dtype's lowest finite value on every key.
     bool biasMasksRows = false;
     /// The first this-many keys of every query row get a -inf bias, as a boolean key-padding
-    /// mask cast to the bias writes them (the CDNA harness).
+    /// mask cast to the bias writes them (device values, both device harnesses).
     int64_t biasNegativeInfinityLeadingKeys = 0;
-    /// Every third query row's bias is -inf on every key, a row no key reaches (the CDNA
-    /// harness).
+    /// Every third query row's bias is -inf on every key, a row no key reaches (device
+    /// values, both device harnesses).
     bool biasNegativeInfinityRows = false;
     bool withDropout = false;
     /// Marks Q as ragged (THD), which the kernel would read as dense.
@@ -288,7 +288,7 @@ struct SdpaGraphSpec
     /// K's first column NaN at this key, every batch and KV head.
     std::optional<int64_t> keyNanPosition;
     /// Every sink logit this value (the device values; the graph is unchanged), e.g. one far
-    /// above the scores (the CDNA harness).
+    /// above the scores (both device harnesses).
     std::optional<float> sinkValue;
     /// Tensors (by uid) marked runtime pass-by-value: a host scalar supplied at execute, which
     /// no operand but the scale can be.

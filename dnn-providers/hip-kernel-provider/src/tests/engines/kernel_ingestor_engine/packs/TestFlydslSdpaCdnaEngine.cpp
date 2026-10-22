@@ -1059,6 +1059,56 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesASplitWorkspacePastThirtyTwoBits)
     EXPECT_TRUE(cdnaAdmits(spec, split));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, SizesTheSplitWorkspaceForEachPartialAndItsLse)
+{
+    // The launch lays the split workspace out as the f32 partial O, Dv per (batch, query
+    // head, query position, split), then each partial's LSE: B * H * Sq * splits * (Dv + 1)
+    // f32s, and the caller allocates what workspaceBytes reports. The split count is the
+    // engine's own choice, so the size must be a whole number of splits of that row, between
+    // 2 and 64. One stat short per row is not: Dv and Dv + 1 are coprime and Dv + 1 > 64.
+    struct Shape
+    {
+        int64_t batch;
+        int64_t heads;
+        int64_t kvHeads;
+        int64_t seqLenQ;
+        int64_t seqLenKv;
+        int64_t headDim;
+        int computeUnits;
+    };
+    for(const auto& shape : {Shape{1, 32, 8, 1, 8192, 128, 0},
+                             Shape{2, 16, 2, 1, 20000, 64, 0},
+                             Shape{1, 8, 8, 3, 4096, 128, 304},
+                             Shape{3, 4, 1, 2, 70000, 64, 80}})
+    {
+        SCOPED_TRACE("B " + std::to_string(shape.batch) + ", H " + std::to_string(shape.heads)
+                     + ", Sq " + std::to_string(shape.seqLenQ) + ", Skv "
+                     + std::to_string(shape.seqLenKv) + ", D " + std::to_string(shape.headDim));
+        auto spec = cdnaSpec();
+        spec.batch = shape.batch;
+        spec.heads = shape.heads;
+        spec.kvHeads = shape.kvHeads;
+        spec.seqLenQ = shape.seqLenQ;
+        spec.seqLenKv = shape.seqLenKv;
+        spec.headDim = shape.headDim;
+        auto properties = testDeviceProperties();
+        properties.multiProcessorCount = shape.computeUnits;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), properties);
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto kernel = makeCdnaKernel("decode", shape.headDim, 0, "bf16", 64);
+        ASSERT_TRUE(matchesCdnaKernel(fixture.context(), kernel, *bound));
+        const auto bytes = dispatchHandler(FLYDSL_SDPA_CDNA_DECODE)
+                               .workspaceBytes(fixture.context(), *bound, kernel);
+        const auto perSplit
+            = static_cast<size_t>(shape.batch * shape.heads * shape.seqLenQ * (shape.headDim + 1))
+              * sizeof(float);
+        EXPECT_EQ(bytes % perSplit, 0U) << bytes << " bytes";
+        EXPECT_GE(bytes / perSplit, 2U) << bytes << " bytes";
+        EXPECT_LE(bytes / perSplit, 64U) << bytes << " bytes";
+    }
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsAnyDiagonalOnTheGenericAndDecodeObjects)
 {
     // Only the dual-wave kernel bakes the diagonal; the generic and decode objects take any
@@ -1548,18 +1598,16 @@ void expectCandidateMatchesReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
-    // A split object launched with more than one split writes its partials here.
+    // A split object launched with more than one split writes its partials here: exactly the
+    // size the engine reports, so a launch that writes past it fails the case.
     const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
-    void* workspace = nullptr;
-    if(workspaceBytes > 0)
-    {
-        ASSERT_EQ(hipSuccess, hipMalloc(&workspace, workspaceBytes));
-    }
+    const GuardedWorkspace workspace(workspaceBytes);
     const Handle handle;
     handler.launch(
-        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    static_cast<void>(hipFree(workspace));
+    EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
+        << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
     ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
     static_cast<void>(hipFree(qDevice));
     if(!spec.packedQkv)

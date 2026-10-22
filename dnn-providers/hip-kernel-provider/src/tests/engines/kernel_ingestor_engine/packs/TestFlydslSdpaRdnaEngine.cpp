@@ -1039,6 +1039,58 @@ TEST(TestFlydslSdpaRdnaDecodeDispatch, RefusesToPrepareWithoutTheMatcherSBinding
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestFlydslSdpaRdnaDecodeDispatch, SizesTheSplitWorkspaceForEachPartialAndItsMaxAndSum)
+{
+    // The launch lays the split workspace out as the f32 partial O, Dv per (batch, query
+    // head, query position, split), then each split row's max and sum: B * H * Sq * splits *
+    // (Dv + 2) f32s, and the caller allocates what workspaceBytes reports. The split count is
+    // the engine's own choice, so the size must be a whole number of splits of that row,
+    // between 2 and 64. One stat short per row is not: Dv + 1 and Dv + 2 are coprime and
+    // Dv + 2 > 64.
+    struct Shape
+    {
+        int64_t batch;
+        int64_t heads;
+        int64_t kvHeads;
+        int64_t seqLenQ;
+        int64_t seqLenKv;
+        int64_t headDim;
+        int computeUnits;
+    };
+    for(const auto& shape : {Shape{1, 8, 2, 1, 4096, 128, 0},
+                             Shape{2, 16, 2, 2, 20000, 64, 0},
+                             Shape{1, 1, 1, 1, 2049, 128, 40},
+                             Shape{3, 4, 4, 3, 70000, 64, 60}})
+    {
+        SCOPED_TRACE("B " + std::to_string(shape.batch) + ", H " + std::to_string(shape.heads)
+                     + ", Sq " + std::to_string(shape.seqLenQ) + ", Skv "
+                     + std::to_string(shape.seqLenKv) + ", D " + std::to_string(shape.headDim));
+        SdpaGraphSpec spec;
+        spec.batch = shape.batch;
+        spec.heads = shape.heads;
+        spec.kvHeads = shape.kvHeads;
+        spec.seqLenQ = shape.seqLenQ;
+        spec.seqLenKv = shape.seqLenKv;
+        spec.headDim = shape.headDim;
+        auto properties = testDeviceProperties();
+        properties.multiProcessorCount = shape.computeUnits;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), properties);
+        const auto bound = matchesGraph(FLYDSL_SDPA_RDNA_DECODE, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto kernel
+            = makeFlydslSdpaRdnaKernel("bf16", shape.headDim, 0, 16, 32, 1, 0, shape.headDim, 1);
+        ASSERT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), kernel, *bound));
+        const auto bytes = dispatchHandler(FLYDSL_SDPA_RDNA_DECODE)
+                               .workspaceBytes(fixture.context(), *bound, kernel);
+        const auto perSplit
+            = static_cast<size_t>(shape.batch * shape.heads * shape.seqLenQ * (shape.headDim + 2))
+              * sizeof(float);
+        EXPECT_EQ(bytes % perSplit, 0U) << bytes << " bytes";
+        EXPECT_GE(bytes / perSplit, 2U) << bytes << " bytes";
+        EXPECT_LE(bytes / perSplit, 64U) << bytes << " bytes";
+    }
+}
+
 // ---------------------------------------------------------------------------
 // dispatch on device: a real launch out of the staged archive
 // ---------------------------------------------------------------------------
@@ -1542,20 +1594,33 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     const bool biasInQueryType = spec.withBias && spec.biasDataType != DataType::FLOAT;
     DeviceTensor<float> bias(biasDims4, biasStrides4, 6U, true);
     DeviceTensor<T> biasQ(biasDims4, biasStrides4, 6U, true);
-    if(spec.biasMasksRows)
+    if(spec.biasMasksRows || spec.biasNegativeInfinityLeadingKeys > 0
+       || spec.biasNegativeInfinityRows)
     {
-        // Every third query row masked on every key with the dtype's lowest finite value,
-        // as a padding mask writes it: the row's softmax is uniform over its keys.
         for(int64_t b = 0; b < biasDims4[0]; ++b)
         {
             for(int64_t h = 0; h < biasDims4[1]; ++h)
             {
-                for(int64_t s = 0; s < biasDims4[2]; s += 3)
+                for(int64_t s = 0; s < biasDims4[2]; ++s)
                 {
-                    for(int64_t j = 0; j < biasDims4[3]; ++j)
+                    // Every third query row masked on every key with the dtype's lowest
+                    // finite value, as a padding mask writes it: the row's softmax is uniform
+                    // over its keys.
+                    for(int64_t j = 0; spec.biasMasksRows && s % 3 == 0 && j < biasDims4[3]; ++j)
                     {
                         bias.set(b, h, s, j, std::numeric_limits<float>::lowest());
                         biasQ.set(b, h, s, j, std::numeric_limits<T>::lowest());
+                    }
+                    // -inf on the leading keys (a boolean key-padding mask cast to the bias),
+                    // or on every key of every third row, a row no key reaches.
+                    const int64_t masked
+                        = spec.biasNegativeInfinityRows && s % 3 == 0
+                              ? biasDims4[3]
+                              : std::min(spec.biasNegativeInfinityLeadingKeys, biasDims4[3]);
+                    for(int64_t j = 0; j < masked; ++j)
+                    {
+                        bias.set(b, h, s, j, -std::numeric_limits<float>::infinity());
+                        biasQ.set(b, h, s, j, T(-std::numeric_limits<float>::infinity()));
                     }
                 }
             }
@@ -1569,6 +1634,10 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 
     // The attention sink, one logit per query head in the query's dtype, read as [1, H, 1, 1].
     DeviceTensor<T> sink({1, spec.heads, 1, 1}, {0, 1, 0, 0}, 7U, true);
+    if(spec.sinkValue)
+    {
+        sink.fillWith(T(*spec.sinkValue));
+    }
     if(spec.sinkNegativeInfinity)
     {
         sink.fillWith(T(-std::numeric_limits<float>::infinity()));
@@ -1597,18 +1666,16 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
 
-    // A decode launch with more than one KV split writes its partials to workspace.
+    // A decode launch with more than one KV split writes its partials to workspace: exactly
+    // the size the engine reports, so a launch that writes past it fails the case.
     const auto workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, *kernel);
-    void* workspace = nullptr;
-    if(workspaceBytes > 0)
-    {
-        ASSERT_EQ(hipSuccess, hipMalloc(&workspace, workspaceBytes));
-    }
+    const GuardedWorkspace workspace(workspaceBytes);
     const Handle handle;
     handler.launch(
-        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    static_cast<void>(hipFree(workspace));
+    EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
+        << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
     o.readBack();
     stats.readBack();
 
@@ -1630,6 +1697,9 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
             for(int64_t s = 0; s < spec.seqLenQ; ++s)
             {
                 double maxScore = -std::numeric_limits<double>::infinity();
+                // A NaN score (NaN in Q, or in a key the row sees) keeps O and the LSE NaN,
+                // as PyTorch's softmax and logsumexp do.
+                bool nanRow = false;
                 for(int64_t j = 0; j < spec.seqLenKv; ++j)
                 {
                     if(isMasked(s, j))
@@ -1643,20 +1713,22 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     }
                     scores[static_cast<size_t>(j)]
                         = dot * scale + (spec.withBias ? biasAt(b, h, s, j) : 0.0);
+                    nanRow = nanRow || std::isnan(scores[static_cast<size_t>(j)]);
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
                 }
+                // A row no key reaches: O = 0 and LSE = -inf, as CpuFpReferenceSdpa defines
+                // it. The mask leaves it no key, or a bias masks every key it has with -inf
+                // (its max score is -inf).
+                const bool hasKeys = nanRow || maxScore > -std::numeric_limits<double>::infinity();
                 double sum = 0.0;
                 for(int64_t j = 0; j < spec.seqLenKv; ++j)
                 {
                     scores[static_cast<size_t>(j)]
-                        = isMasked(s, j) ? 0.0
-                                         : std::exp(scores[static_cast<size_t>(j)] - maxScore);
+                        = isMasked(s, j) || !hasKeys
+                              ? 0.0
+                              : std::exp(scores[static_cast<size_t>(j)] - maxScore);
                     sum += scores[static_cast<size_t>(j)];
                 }
-                // A row no key reaches: O = 0 and LSE = -inf, as the reference defines it.
-                // Only a sum of exactly 0: a NaN sum (NaN in Q, or in a key the row sees)
-                // keeps O and the LSE NaN, as PyTorch's softmax and logsumexp do.
-                const bool hasKeys = !(sum == 0.0);
                 // The sink's logit joins the denominator of a row that reaches keys, as a key
                 // with no value; a row that reaches none has O = 0 and LSE = the sink.
                 const double sinkLogit = spec.withSink ? sink.at(0, h, 0, 0) : 0.0;
@@ -2039,6 +2111,107 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, WeighsDecodeSplitsByKeyCountUnderALowestFini
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, TOLERANCE, true);
     spec.biasDataType = DataType::BFLOAT16;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasThatMasksWholeRowsWithMinusInfinity)
+{
+    SKIP_IF_NO_DEVICES();
+    // Every third row's bias is -inf on every key, so the row reaches no key: O = 0 and
+    // LSE = -inf, not NaN, as hipDNN's CPU reference and the CDNA kernels give (COVERAGE.md
+    // 5.7). f32 and query-dtype biases, prefill and decode.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasNegativeInfinityRows = true;
+    spec.headDim = 64;
+    spec.heads = 4;
+    spec.kvHeads = 4;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 300;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Decode, one split: rows 0 and 3 of each head's four masked.
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 4;
+    spec.biasDataType = DataType::FLOAT;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    // Decode over 2085 keys, two splits: every split of a masked row sees only -inf.
+    spec.seqLenKv = 2085;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasThatMasksLeadingKeysWithMinusInfinity)
+{
+    SKIP_IF_NO_DEVICES();
+    // A boolean key-padding mask cast to the bias: the first 40 keys of every row -inf, part
+    // of a KV tile, and the softmax is over the rest (COVERAGE.md 5.7). Prefill, plain and
+    // bottom-right causal, and decode.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasNegativeInfinityLeadingKeys = 40;
+    spec.headDim = 64;
+    spec.heads = 4;
+    spec.kvHeads = 4;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 300;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Decode over 2085 keys, two splits (the first holds keys [0, 1056)).
+    spec.mask = SdpaMask::NONE;
+    spec.biasDataType = DataType::FLOAT;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 4;
+    spec.seqLenKv = 2085;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    // The whole first split -inf: its partial reaches no key, and the merge must give it no
+    // weight rather than a NaN.
+    spec.biasNegativeInfinityLeadingKeys = 1100;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsASinkFarAboveTheScores)
+{
+    SKIP_IF_NO_DEVICES();
+    // A sink 200 above scores of at most a few units: exp(sink - max) alone overflows f32
+    // (past ~88.7), so the sink must join the row's max. O ~ 0 and LSE = the sink, as the
+    // CDNA kernels give (COVERAGE.md 5.7).
+    SdpaGraphSpec spec;
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkValue = 200.0F;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Non-causal, f16.
+    spec.mask = SdpaMask::NONE;
+    spec.dataType = DataType::HALF;
+    spec.seqLenQ = 129;
+    spec.seqLenKv = 333;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+    // Rows no key reaches next to rows that reach keys: LSE = the sink for both.
+    spec.dataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Decode over 2085 keys, two splits: the merge adds the sink against the max.
+    spec.mask = SdpaMask::NONE;
+    spec.heads = 8;
+    spec.seqLenQ = 4;
+    spec.seqLenKv = 2085;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, GivesANanRowANanLse)
@@ -2871,6 +3044,97 @@ TEST(TestGpuFlydslSdpaAiwDispatch, AddsAMaskThatMasksWholeRowsAtTheLowestFiniteV
     spec.biasDataType = DataType::FLOAT;
     spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+}
+
+/// The aiw cases' mask: Skv a multiple of 8 (the mask's rows stay aligned for the object's
+/// vector loads), an f32 mask declared 32-byte aligned.
+SdpaGraphSpec aiwMaskSpec()
+{
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.seqLenQ = 77;
+    spec.seqLenKv = 104;
+    spec.stats = SdpaStats::LSE;
+    spec.biasDataType = DataType::FLOAT;
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsABiasThatMasksWholeRowsWithMinusInfinity)
+{
+    SKIP_IF_NO_DEVICES();
+    // Every third row's mask is -inf on every key, so the row reaches no key: O = 0 and
+    // LSE = -inf, not NaN, as the RDNA and CDNA kernels give (COVERAGE.md 5.7). The kernel
+    // was built without fast math's no-infinities flag so that such a mask works (README
+    // modification 9). f32 and query-dtype masks, plain and bottom-right causal.
+    auto spec = aiwMaskSpec();
+    spec.biasNegativeInfinityRows = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.alignment.clear();
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.dataType = DataType::HALF;
+    spec.headDim = 64;
+    spec.mask = SdpaMask::NONE;
+    spec.biasDataType = DataType::HALF;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsABiasThatMasksLeadingKeysWithMinusInfinity)
+{
+    SKIP_IF_NO_DEVICES();
+    // A boolean key-padding mask cast to the mask: the first 40 keys of every row -inf, part
+    // of a KV tile, and the softmax is over the rest (COVERAGE.md 5.7). f32 and query-dtype
+    // masks, plain and bottom-right causal.
+    auto spec = aiwMaskSpec();
+    spec.biasNegativeInfinityLeadingKeys = 40;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.alignment.clear();
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsASinkFarAboveTheScores)
+{
+    SKIP_IF_NO_DEVICES();
+    // A sink 200 above scores of at most a few units: exp(sink - max) alone overflows f32,
+    // so the sink must join the row's max. O ~ 0 and LSE = the sink, as the RDNA and CDNA
+    // kernels give (COVERAGE.md 5.7).
+    SdpaGraphSpec spec;
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkValue = 200.0F;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    // Non-causal, f16, at head_dim 128.
+    spec.mask = SdpaMask::NONE;
+    spec.dataType = DataType::HALF;
+    spec.headDim = 128;
+    spec.seqLenQ = 129;
+    spec.seqLenKv = 333;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+    // Rows no key reaches next to rows that reach keys: LSE = the sink for both.
+    spec.dataType = DataType::BFLOAT16;
+    spec.headDim = 64;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
 }
 
 TEST(TestGpuFlydslSdpaAiwDispatch, AppliesBottomRightWindowsAndBands)
