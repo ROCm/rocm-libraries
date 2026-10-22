@@ -235,12 +235,12 @@ __host__ __device__ inline I get_tempgemm_size(const I n)
 template <typename S, typename I>
 __host__ __device__ inline S* ptr_vecs(I n, S* tempgemm)
 {
-    return tempgemm + 0 * n * n;
+    return tempgemm + 0 * rocblas_stride(n) * n;
 }
 template <typename S, typename I>
 __host__ __device__ inline S* ptr_etmpd(I n, S* tempgemm)
 {
-    return tempgemm + 1 * n * n;
+    return tempgemm + 1 * rocblas_stride(n) * n;
 }
 
 /*************** Main kernels *********************************************************/
@@ -270,11 +270,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_divide_kernel(const I 
     if(bid < batch_count)
     {
         // select batch instance to work with
-        S* D = DD + bid * strideD;
-        S* E = EE + bid * strideE;
+        S* D = DD + rocblas_stride(bid) * strideD;
+        S* E = EE + rocblas_stride(bid) * strideE;
 
         // temporary arrays in global memory
-        I* splits = splitsA + bid * get_splits_size(n);
+        I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
         I* msz = ptr_msz(n, splits);
         I* mps = ptr_mps(n, splits);
 
@@ -340,23 +340,23 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_solve_kernel(const I l
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     I* info = iinfo + bid;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* msz = ptr_msz(n, splits);
     I* mps = ptr_mps(n, splits);
     // workspace for solvers
-    S* W = WA + bid * 2 * n;
+    S* W = WA + rocblas_stride(bid) * 2 * n;
 
     // Solve the blks sub-blocks in parallel (using classic QR iteration).
     {
         I sz = msz[sid]; // size of sub-block
         I p2 = mps[sid]; // start position of sub-block
 
-        run_steqr(tidb, tidb_inc, sz, D + p2, E + p2, C + p2 + p2 * ldc, ldc, info, W + p2 * 2,
+        run_steqr(tidb, tidb_inc, sz, D + p2, E + p2, C + idx2D(p2, p2, ldc), ldc, info, W + p2 * 2,
                   30 * sz, eps, ssfmin, ssfmax, false);
     }
 }
@@ -371,7 +371,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     stedc_update_splits(const I levs, const I k, const I n, I* splitsA)
 {
     I bid = hipBlockIdx_y;
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* em = ptr_em(n, splits);
     I* msz = ptr_msz(n, splits);
     I* mps = ptr_mps(n, splits);
@@ -463,16 +463,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* mask = ptr_mask(n, splits);
     I* bsz = ptr_bsz(n, splits);
     I* bps = ptr_bps(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_z(n, tmpz);
     S* r1p = ptr_r1p(n, tmpz);
     S* tolsD = ptr_tolsD(n, tmpz);
@@ -501,14 +501,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         // copy last line of the first sub-block
         for(I i = hipThreadIdx_x; i < sz1; i += hipBlockDim_x)
         {
-            S val = C[p2 - 1 + (p1 + i) * ldc] / sqrt(2);
+            S val = C[idx2D(p2 - 1, p1 + i, ldc)] / sqrt(2);
             z[p1 + i] = val;
             maxz = std::max(maxz, std::abs(val));
         }
         // copy first line of the second sub-block
         for(I i = hipThreadIdx_x; i < sz2; i += hipBlockDim_x)
         {
-            S val = C[p2 - 0 + (p2 + i) * ldc] / sqrt(2);
+            S val = C[idx2D(p2 - 0, p2 + i, ldc)] / sqrt(2);
             z[p2 + i] = val;
             maxz = std::max(maxz, std::abs(val));
         }
@@ -591,17 +591,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I gid = hipBlockIdx_x;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* mask = ptr_mask(n, splits);
     I* ndd = ptr_ndd(n, splits);
     I* map = ptr_map(n, splits);
     I* nsz = ptr_nsz(n, splits);
     I* nps = ptr_nps(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* md = ptr_md(n, tmpz);
 
     S d = D[gid];
@@ -704,15 +704,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I bid = hipBlockIdx_y;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* nps = ptr_nps(n, splits);
     I* ndd = ptr_ndd(n, splits);
     I* cand = ptr_cand(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* md = ptr_md(n, tmpz);
     S* tolsD = ptr_tolsD(n, tmpz);
 
@@ -766,14 +766,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I bid = hipBlockIdx_y;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* dcount = ptr_dcount(n, splits);
     I* cand = ptr_cand(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* md = ptr_md(n, tmpz);
     S* tolsD = ptr_tolsD(n, tmpz);
 
@@ -846,15 +846,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I bid = hipBlockIdx_y;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* mask = ptr_mask(n, splits);
     I* map = ptr_map(n, splits);
     I* dcount = ptr_dcount(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_z(n, tmpz);
     S* cc = ptr_cc(n, tmpz);
     S* ss = ptr_ss(n, tmpz);
@@ -925,11 +925,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
 
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* map = ptr_map(n, splits);
     I* dcounts = ptr_dcount(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* cc = ptr_cc(n, tmpz);
     S* ss = ptr_ss(n, tmpz);
 
@@ -944,7 +944,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     if(dcnt)
     {
         I base = map[dgs];
-        S* Cbase = C + base * ldc;
+        S* Cbase = C + idx2D(0, base, ldc);
 
         for(I chunk = 0; chunk < n_chunks; chunk++)
         {
@@ -962,7 +962,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                 I top = map[dgs + dn + 1];
                 S c = cc[top];
                 S s = ss[top];
-                S* Ctop = C + top * ldc;
+                S* Ctop = C + idx2D(0, top, ldc);
 
                 for(I i = 0; i < regs; i++)
                 {
@@ -1020,17 +1020,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I gid = hipBlockIdx_x;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* mask = ptr_mask(n, splits);
     I* map = ptr_map(n, splits);
     I* nsz = ptr_nsz(n, splits);
     I* nps = ptr_nps(n, splits);
     I* ndd = ptr_ndd(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_z(n, tmpz);
     S* cd = ptr_cd(n, tmpz);
     S* cz = ptr_cz(n, tmpz);
@@ -1146,17 +1146,17 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I eid = hipBlockIdx_x;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* ndd = ptr_ndd(n, splits);
     I* nps = ptr_nps(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* evs = ptr_evs(n, tmpz);
     S* cd = ptr_cd(n, tmpz);
 
-    S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
+    S* tempgemm = tempgemmA + rocblas_stride(bid) * get_tempgemm_size(n);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
     I dd = ndd[eid];
@@ -1206,16 +1206,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
     I bid = hipBlockIdx_y;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* ndd = ptr_ndd(n, splits);
     I* nps = ptr_nps(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_cz(n, tmpz);
     S* r1p = ptr_r1p(n, tmpz);
     S* evs = ptr_evs(n, tmpz);
     // updated eigenvectors after merges
-    S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
+    S* tempgemm = tempgemmA + rocblas_stride(bid) * get_tempgemm_size(n);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
     I i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
@@ -1279,18 +1279,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     I eid = hipBlockIdx_x;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* nps = ptr_nps(n, splits);
     I* nsz = ptr_nsz(n, splits);
     I* ndd = ptr_ndd(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_cz(n, tmpz);
     // updated eigenvectors after merges
-    S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
+    S* tempgemm = tempgemmA + rocblas_stride(bid) * get_tempgemm_size(n);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
     I sz = nsz[eid];
@@ -1363,15 +1363,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* nsz = ptr_nsz(n, splits);
     I* nps = ptr_nps(n, splits);
     I* ndd = ptr_ndd(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* z = ptr_cz(n, tmpz);
     // updated eigenvectors after merges
-    S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
+    S* tempgemm = tempgemmA + rocblas_stride(bid) * get_tempgemm_size(n);
     S* vecs = ptr_vecs(n, tempgemm);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
@@ -1445,7 +1445,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                 // inner products
                 S temp = 0;
                 for(I kk = tidb; kk < dd; kk += dim)
-                    temp += C[i + (p1 + kk) * ldc] * etmpd[kk + eid * n];
+                    temp += C[idx2D(i, p1 + kk, ldc)] * etmpd[kk + eid * n];
 
                 // reduction
                 inrms[tidb] = temp;
@@ -1495,18 +1495,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
     // select batch instance to work with
     S* C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
 
     // temporary arrays in global memory
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* ndd = ptr_ndd(n, splits);
     I* nsz = ptr_nsz(n, splits);
     I* nps = ptr_nps(n, splits);
 
-    S* tmpz = tmpzA + bid * get_tmpz_size(n);
+    S* tmpz = tmpzA + rocblas_stride(bid) * get_tmpz_size(n);
     S* evs = ptr_evs(n, tmpz);
     // updated eigenvectors after merges
-    S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
+    S* tempgemm = tempgemmA + rocblas_stride(bid) * get_tempgemm_size(n);
     S* vecs = ptr_vecs(n, tempgemm);
 
     I p1 = nps[eid];
@@ -1519,7 +1519,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
         if(hipThreadIdx_x == 0)
             D[eid] = evs[eid];
         for(I i = p1 + hipThreadIdx_x; i < p1 + sz; i += hipBlockDim_x)
-            C[i + eid * ldc] = vecs[i + eid * n];
+            C[idx2D(i, eid, ldc)] = vecs[i + eid * n];
     }
 }
 
@@ -1533,8 +1533,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_copyD(const I n,
     // batch instance id
     I bid = hipBlockIdx_y;
 
-    S* Din = DDin + bid * strideDin;
-    S* Dout = DDout + bid * strideDout;
+    S* Din = DDin + rocblas_stride(bid) * strideDin;
+    S* Dout = DDout + rocblas_stride(bid) * strideDout;
 
     I tid = hipThreadIdx_x;
 
@@ -1621,7 +1621,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_reshuffleC(const I n,
     // group id
     I gid = hipBlockIdx_x;
 
-    I* splits = splitsA + bid * get_splits_size(n);
+    I* splits = splitsA + rocblas_stride(bid) * get_splits_size(n);
     I* map = ptr_map(n, splits);
 
     I dst_row = gid;
@@ -1678,8 +1678,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_sort(const I n,
     // group id
     I gid = hipBlockIdx_x;
 
-    S* Din = DDin + bid * strideDin;
-    S* Dout = DDout + bid * strideDout;
+    S* Din = DDin + rocblas_stride(bid) * strideDin;
+    S* Dout = DDout + rocblas_stride(bid) * strideDout;
 
     I tid = hipThreadIdx_x;
 
@@ -1849,7 +1849,7 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
 
         // extra requirements for original eigenvectors of small independent blocks
         if(evect != rocblas_evect_tridiagonal)
-            *size_tempvect = sizeof(S) * (n * n) * batch_count;
+            *size_tempvect = sizeof(S) * (rocblas_stride(n) * n) * batch_count;
         else
             *size_tempvect = 0;
         *size_tempgemm = sizeof(S) * get_tempgemm_size(n) * batch_count;
@@ -2103,7 +2103,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                     {
                         I sz = n / n_merges;
                         rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, sz,
-                                       sz, sz, &one, V, 0, ldv, sz * ldv + sz,
+                                       sz, sz, &one, V, 0, ldv, idx2D(sz, sz, ldv),
                                        ptr_etmpd(n, tempgemm), 0, n, sz * n + sz, &zero,
                                        ptr_vecs(n, tempgemm), 0, n, sz * n + sz, n_merges, workArr);
                     }
@@ -2135,7 +2135,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                             for(size_t j = 0; j < nbb; ++j)
                             {
                                 auto ps = b[j];
-                                hABC[j + 0 * nbb] = ps + ps * ldv + V;
+                                hABC[j + 0 * nbb] = V + idx2D(ps, ps, ldv);
                                 hABC[j + 1 * nbb] = ps + ps * n + ptr_etmpd(n, tempgemm);
                                 hABC[j + 2 * nbb] = ps + ps * n + ptr_vecs(n, tempgemm);
                             }
@@ -2189,8 +2189,8 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                 n, C, shiftC, ldc, strideC, (T*)tempgemm, 0, n, n * n);
 
         ROCSOLVER_LAUNCH_KERNEL(stedc_sort<T>, dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, n,
-                                tmpz, n, D + shiftD, strideD, (T*)tempgemm, 0, n, n * n, C, shiftC,
-                                ldc, strideC);
+                                tmpz, n, D + shiftD, strideD, (T*)tempgemm, 0, n,
+                                rocblas_stride(n) * n, C, shiftC, ldc, strideC);
     }
 
     return rocblas_status_success;

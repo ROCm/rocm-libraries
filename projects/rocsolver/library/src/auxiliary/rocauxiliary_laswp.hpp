@@ -61,7 +61,7 @@ ROCSOLVER_KERNEL void laswp_kernel(const I n,
 
             // will exchange rows i and exch if they are not the same
             if(exch != i)
-                swap(A[(i - 1) * inca + tid * lda], A[(exch - 1) * inca + tid * lda]);
+                swap(A[idx2D(i - 1, tid, inca, lda)], A[idx2D(exch - 1, tid, inca, lda)]);
         }
     }
 }

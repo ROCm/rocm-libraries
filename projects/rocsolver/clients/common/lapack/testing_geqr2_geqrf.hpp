@@ -147,9 +147,9 @@ void geqr2_geqrf_initData(const rocblas_handle handle,
                 for(I j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -289,7 +289,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     I m = argus.get<I>("m");
     I n = argus.get<I>("n", m);
     I lda = argus.get<I>("lda", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
 
     I bc = argus.batch_count;

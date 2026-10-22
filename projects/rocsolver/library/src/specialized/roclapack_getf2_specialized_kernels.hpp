@@ -71,7 +71,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // read corresponding row from global memory into local array
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        rA[j] = A[myrow + j * lda];
+        rA[j] = A[idx2D(myrow, j, lda)];
 
         // for each pivot (main loop)
 #pragma unroll DIM
@@ -137,7 +137,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         *info = myinfo + offset;
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        A[myrow + j * lda] = rA[j];
+        A[idx2D(myrow, j, lda)] = rA[j];
 }
 
 /** getf2_npvt_small_kernel (non pivoting version) **/
@@ -179,7 +179,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // read corresponding row from global memory into local array
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        rA[j] = A[myrow + j * lda];
+        rA[j] = A[idx2D(myrow, j, lda)];
 
         // for each pivot (main loop)
 #pragma unroll DIM
@@ -216,7 +216,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         *info = myinfo + offset;
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        A[myrow + j * lda] = rA[j];
+        A[idx2D(myrow, j, lda)] = rA[j];
 }
 
 /** getf2_panel_kernel takes care of small matrices with m >= n **/
@@ -316,13 +316,13 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
         {
             pivot_val *= x[tx];
             if(ty == 0 && tx >= k && tx < m)
-                A[tx + k * lda] = pivot_val;
+                A[idx2D(tx, k, lda)] = pivot_val;
         }
 
         // put pivot row in shared mem
         if(tx < n && ty == 0)
         {
-            y[tx] = A[pivot_idx + tx * lda];
+            y[tx] = A[idx2D(pivot_idx, tx, lda)];
             if(tx == k)
                 val = pivot_val;
         }
@@ -331,10 +331,10 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
         // swap pivot row with updated row k
         if(tx < n && ty == 0 && pivot_idx != k)
         {
-            valtmp = (tx == k) ? val : A[k + tx * lda];
+            valtmp = (tx == k) ? val : A[idx2D(k, tx, lda)];
             valtmp -= (tx > k) ? val * y[tx] : 0;
-            A[pivot_idx + tx * lda] = valtmp;
-            A[k + tx * lda] = y[tx];
+            A[idx2D(pivot_idx, tx, lda)] = valtmp;
+            A[idx2D(k, tx, lda)] = y[tx];
             if(tx == k + 1)
             {
                 x[pivot_idx] = valtmp;
@@ -350,16 +350,16 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
         {
             for(I j = ty + k + 2; j < n; j += bdy)
             {
-                valtmp = A[tx + j * lda];
+                valtmp = A[idx2D(tx, j, lda)];
                 valtmp -= pivot_val * y[j];
-                A[tx + j * lda] = valtmp;
+                A[idx2D(tx, j, lda)] = valtmp;
             }
 
             if(ty == 0 && k < n - 1)
             {
-                valtmp = A[tx + (k + 1) * lda];
+                valtmp = A[idx2D(tx, k + 1, lda)];
                 valtmp -= pivot_val * y[k + 1];
-                A[tx + (k + 1) * lda] = valtmp;
+                A[idx2D(tx, k + 1, lda)] = valtmp;
                 x[tx] = valtmp;
                 val1 = aabs<S>(valtmp);
                 sval[tx] = val1;
@@ -441,13 +441,13 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
         {
             pivot_val *= x[tx];
             if(ty == 0 && tx >= k && tx < m)
-                A[tx + k * lda] = pivot_val;
+                A[idx2D(tx, k, lda)] = pivot_val;
         }
 
         // put pivot row in shared mem
         if(tx < n && ty == 0)
         {
-            y[tx] = A[k + tx * lda];
+            y[tx] = A[idx2D(k, tx, lda)];
             if(tx == k)
                 val = pivot_val;
         }
@@ -458,16 +458,16 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
         {
             for(I j = ty + k + 2; j < n; j += bdy)
             {
-                val1 = A[tx + j * lda];
+                val1 = A[idx2D(tx, j, lda)];
                 val1 -= pivot_val * y[j];
-                A[tx + j * lda] = val1;
+                A[idx2D(tx, j, lda)] = val1;
             }
 
             if(ty == 0 && k < n - 1)
             {
-                val1 = A[tx + (k + 1) * lda];
+                val1 = A[idx2D(tx, k + 1, lda)];
                 val1 -= pivot_val * y[k + 1];
-                A[tx + (k + 1) * lda] = val1;
+                A[idx2D(tx, k + 1, lda)] = val1;
                 x[tx] = val1;
             }
         }
@@ -516,7 +516,7 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
     // read data from global to shared memory
     I j = tx * hipBlockDim_y + ty;
     if(j < n)
-        y[j] = Y[j * lda];
+        y[j] = Y[idx2D(0, j, lda)];
 
     // scale
     if(ty == 0 && i < m)
@@ -533,9 +533,9 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
 #pragma unroll
         for(I j = ty; j < n; j += hipBlockDim_y)
         {
-            val = A[i + j * lda];
+            val = A[idx2D(i, j, lda)];
             val -= x[tx] * y[j];
-            A[i + j * lda] = val;
+            A[idx2D(i, j, lda)] = val;
         }
     }
 }

@@ -226,12 +226,12 @@ ROCSOLVER_KERNEL void getrf_row_permutate(const I n,
         // do permutations in parallel (each tx perform a row swap)
         I idx1 = piv[tx];
         I idx2 = piv[idx1];
-        temp[tx + ty * bdx] = A[idx1 * inca + j * lda];
-        A[idx1 * inca + j * lda] = A[idx2 * inca + j * lda];
+        temp[tx + ty * bdx] = A[idx2D(idx1, j, inca, lda)];
+        A[idx2D(idx1, j, inca, lda)] = A[idx2D(idx2, j, inca, lda)];
         __syncthreads();
 
         // copy temp results back to A
-        A[tx * inca + j * lda] = temp[tx + ty * bdx];
+        A[idx2D(tx, j, inca, lda)] = temp[tx + ty * bdx];
     }
 }
 
@@ -513,8 +513,8 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
 
             // swap rows
             ROCSOLVER_LAUNCH_KERNEL(getrf_row_permutate<T>, grid, threads, lmemsize, stream, n,
-                                    offset + k, jb, A, r_shiftA + k * inca, inca, lda, strideA,
-                                    permut_idx, stridePI);
+                                    offset + k, jb, A, r_shiftA + rocblas_stride(k) * inca, inca,
+                                    lda, strideA, permut_idx, stridePI);
         }
 
         // update trailing sub-block
@@ -708,18 +708,18 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
         if(pivot || panel)
         {
             // factorize outer block panel
-            getrf_panelLU<BATCHED, STRIDED, T>(handle, m - j, jb, n, A, shiftA + j * inca, inca,
-                                               lda, strideA, ipiv, shiftP + j, strideP, info,
-                                               batch_count, pivot, scalars, work1, work2, work3,
-                                               work4, optim_mem, pivotval, pivotidx, j, iipiv, m);
+            getrf_panelLU<BATCHED, STRIDED, T>(
+                handle, m - j, jb, n, A, shiftA + rocblas_stride(j) * inca, inca, lda, strideA,
+                ipiv, shiftP + j, strideP, info, batch_count, pivot, scalars, work1, work2, work3,
+                work4, optim_mem, pivotval, pivotidx, j, iipiv, m);
         }
         else
         {
             // factorize only outer diagonal block
-            getrf_panelLU<BATCHED, STRIDED, T>(handle, jb, jb, n, A, shiftA + j * inca, inca, lda,
-                                               strideA, ipiv, shiftP + j, strideP, info,
-                                               batch_count, pivot, scalars, work1, work2, work3,
-                                               work4, optim_mem, pivotval, pivotidx, j, iipiv, m);
+            getrf_panelLU<BATCHED, STRIDED, T>(
+                handle, jb, jb, n, A, shiftA + rocblas_stride(j) * inca, inca, lda, strideA, ipiv,
+                shiftP + j, strideP, info, batch_count, pivot, scalars, work1, work2, work3, work4,
+                optim_mem, pivotval, pivotidx, j, iipiv, m);
 
             // update remaining rows in outer panel
             rocsolver_trsm_upper<BATCHED, STRIDED, T>(
