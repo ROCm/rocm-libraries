@@ -1037,3 +1037,101 @@ def test_authored_launch_order_does_not_change_the_compile_group(tmp_path):
     _write_root(tmp_path / "src", ukds)
     expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
     assert [e["name"] for e in expect] == ["m_a"]
+
+
+# --- hip and hsaco multi-launch UKDs -------------------------------------------
+def _sources_ukd(name, sources, arch=None):
+    ukd = _ukd(name, {}, arch)
+    del ukd["kernel_source"]
+    ukd["version"] = "1.1"
+    ukd["sources"] = sources
+    return ukd
+
+
+def _hip_sources(name, launches, source="a.cpp", build=None):
+    """A multi-launch hip UKD. `launches` maps each launch name to its kernel symbol."""
+    return _sources_ukd(
+        name,
+        {
+            launch: {
+                "kind": "hip",
+                "source": source,
+                "entry": entry,
+                "build": dict(build) if build is not None else {},
+            }
+            for launch, entry in launches.items()
+        },
+    )
+
+
+def _hsaco_sources(name, launches, file="k.hsaco"):
+    """A multi-launch hsaco UKD. `launches` maps each launch name to its symbol."""
+    return _sources_ukd(
+        name,
+        {
+            launch: {"kind": "hsaco", "file": file, "symbol": symbol}
+            for launch, symbol in launches.items()
+        },
+        ["gfx950"],
+    )
+
+
+_HIP_DECODE_MERGE = {"decode": "k_decode", "merge": "k_merge"}
+
+
+def test_expect_lists_hip_and_hsaco_launches_with_no_role(tmp_path):
+    _write_root(
+        tmp_path / "src",
+        [
+            _hip_sources("h", _HIP_DECODE_MERGE),
+            _hsaco_sources("s", _HIP_DECODE_MERGE),
+        ],
+        kdp_file="x.kdp.json",
+    )
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    by_name = {e["name"]: e for e in expect}
+    assert by_name["h"] == {
+        "kdp": "x.kdp.json",
+        "name": "h",
+        "kind": "hip",
+        "arch": "gfx950",
+        "launches": {"decode": None, "merge": None},
+    }
+    assert by_name["s"]["kind"] == "hsaco"
+    assert by_name["s"]["launches"] == {"decode": None, "merge": None}
+
+
+def test_hip_launches_are_grouped_by_source_and_build_per_launch(tmp_path):
+    ukds = [
+        _hip_sources("h_a", _HIP_DECODE_MERGE),
+        # Same source and build, other kernel symbols: the same compile group.
+        _hip_sources("h_same", {"decode": "k_other", "merge": "k_third"}),
+        # Another build: a different compile group.
+        _hip_sources("h_build", _HIP_DECODE_MERGE, build={"defines": {"N": 1}}),
+        # Another source: a different compile group.
+        _hip_sources("h_source", _HIP_DECODE_MERGE, source="b.cpp"),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["h_a", "h_build", "h_source"]
+
+
+def test_one_differing_hip_launch_separates_compile_groups(tmp_path):
+    # `decode` agrees in both UKDs; only the build of `merge` differs. A key that read
+    # the first launch alone would keep one UKD.
+    other = _hip_sources("h_b", _HIP_DECODE_MERGE)
+    other["sources"]["merge"]["build"] = {"flags": ["-O1"]}
+    _write_root(tmp_path / "src", [_hip_sources("h_a", _HIP_DECODE_MERGE), other])
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["h_a", "h_b"]
+
+
+def test_hsaco_sources_with_the_same_launch_names_are_one_compile_group(tmp_path):
+    ukds = [
+        _hsaco_sources("s_a", _HIP_DECODE_MERGE),
+        _hsaco_sources("s_b", _HIP_DECODE_MERGE, file="other.hsaco"),
+        _hsaco_sources("s_c", {"decode": "k_decode", "reduce": "k_reduce"}),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["s_a", "s_c"]
