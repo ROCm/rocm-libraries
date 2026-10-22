@@ -8,6 +8,9 @@ which need the HIP runtime directory in LD_LIBRARY_PATH.
 """
 
 import ctypes
+from contextlib import ExitStack
+from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -31,6 +34,25 @@ NAN_BYTE = 0x7F
 # guard must keep the pattern.
 D_SENTINEL = 0x5A5B
 D_GUARD = 64
+FULL_LANES_K = LANES_K_CHOICES[-1]
+# The assume_range bounds of the GEMM kernel: a value above them is undefined
+# behaviour. ld, k and spk go up to 2^20, ldD >= m bounds m by 2^20, and the D
+# buffer bounds n by 2^30.
+MAX_EXTENT = 2**20
+MAX_WIDE = 2**30
+# At most one split per K element (spk >= 1, k <= MAX_EXTENT).
+MAX_SPLITS = 2**20
+# A buffer descriptor addresses fewer than 2^31 bytes.
+BUFFER_LIMIT = 2**31
+# (m, n, k) of the primary skinny target and the vLLM decode shapes (m = 1).
+PRIMARY_SHAPE = (5120, 1, 8192)
+VLLM_SHAPES = [
+    (1, 5120, 25600),
+    (1, 10240, 5120),
+    (1, 5120, 8192),
+    (1, 51200, 5120),
+    (1, 151936, 5120),
+]
 
 
 def ceilDiv(a: int, b: int) -> int:
@@ -390,3 +412,578 @@ def launchReduce(kernel, dBuf, wsBuf, ldD: int, m: int, n: int, splits: int) -> 
             ctypes.c_int32(splits),
         ),
     )
+
+
+# Skinny GEMM configuration, ported from the driver. The pick* functions choose
+# the default knobs of a shape, fitted to sweeps over skinny shapes on MI355X.
+
+# One wave per SIMD on the 256 CUs of an MI355X.
+TARGET_WAVES = 1024
+# Beyond this many waves LANES_K=16 is replaced by 8 and a single skinny column
+# with LANES_K < 64 uses 4 waves per block (empirical).
+LARGE_GRID_WAVES = 4 * TARGET_WAVES
+# Grids below this lose to a ring of 2 at NI >= 8 (empirical, LANES_K=16, single
+# skinny column); the exact cut was not measured.
+LATENCY_BOUND_WAVES = 2 * TARGET_WAVES
+MAX_DEEP_RING_ITERS = 5
+MAX_BM = 4
+MIN_TN = 2
+# A bigger BM*TN tile stops paying off once the grid is large enough (empirical).
+MAX_TILE = 16
+# XCDs of an MI355X; blocks are dispatched round-robin over them.
+NUM_XCDS = 8
+# Skinny tile rows walked together by the grouped tile order.
+MAX_GROUP = 4
+# The tile reordering only pays off when the wide operand (wide * k bytes) is
+# re-read from HBM by several skinny tile rows of one XCD, well beyond its 4 MB
+# L2. At 256 MiB it removes 25-30% of the time; at 128 MiB it only helps for 3 or
+# 4 skinny tile rows; below that it is neutral or slower.
+REORDER_WIDE_BYTES = 256 << 20
+REORDER_FEW_ROWS_WIDE_BYTES = 128 << 20
+REORDER_FEW_ROWS = (3, 4)
+# HIP limits gridDim.y and gridDim.z to 16 bits, which bounds the tile rows and
+# the splits of the 3-D launch.
+GRID_DIM_YZ_LIMIT = 65535
+# The up-front scales hold every iteration's scales in VGPRs and lose to the ring
+# at long K; K <= 8192 wins or ties. 16384 bounds the measured regimes and is not
+# an optimum.
+UP_FRONT_MAX_SPK = 16384
+
+
+def blockCols(waves: int, lanesK: int, tn: int) -> int:
+    """Wide columns covered by one block (BN in the kernel)."""
+    return waves * (64 // lanesK) * tn
+
+
+def countTiles(m: int, n: int, k: int, spk: int, bm: int, bn: int) -> int:
+    """Block-sized work items (tx, ty, kz) of the whole problem."""
+    return ceilDiv(max(m, n), bn) * ceilDiv(min(m, n), bm) * ceilDiv(k, spk)
+
+
+@dataclass(frozen=True)
+class Problem:
+    """One kernel configuration together with the problem shape."""
+
+    m: int
+    n: int
+    k: int
+    spk: int
+    bm: int
+    tn: int
+    lanes_k: int
+    waves: int
+    pf: int
+    group: int
+    xcds: int
+    up_scales: int
+    ldA: int
+    ldB: int
+    ldD: int
+    blocks: int
+    grid3d: bool
+
+    @property
+    def skinny(self) -> int:
+        return min(self.m, self.n)
+
+    @property
+    def wide(self) -> int:
+        return max(self.m, self.n)
+
+    @property
+    def bn(self) -> int:
+        return blockCols(self.waves, self.lanes_k, self.tn)
+
+    @property
+    def ki(self) -> int:
+        return 64 * self.lanes_k
+
+    @property
+    def splits(self) -> int:
+        return ceilDiv(self.k, self.spk)
+
+    @property
+    def up_iters(self) -> int:
+        """UP_ITERS in the kernel: the entries of the up-front scale vector, the
+        most K iterations a split [ks, ke) touches, ceilDiv(ke, KI) - ks // KI;
+        0 for the ring scales."""
+        if not self.up_scales:
+            return 0
+        ks = np.arange(self.splits, dtype=np.int64) * self.spk
+        ke = np.minimum(ks + self.spk, self.k)
+        return int(np.max((ke + self.ki - 1) // self.ki - ks // self.ki))
+
+    @property
+    def partial_steps(self) -> int:
+        """PARTIAL_STEPS in the kernel: 0 when no split has a partial iteration
+        (spk and k are multiples of ki), 1 when every split starts on an
+        iteration boundary but the last may end inside one (tail steps only),
+        else 2 (head and tail steps)."""
+        if self.spk % self.ki != 0:
+            return 2
+        return int(self.k % self.ki != 0)
+
+    @property
+    def grid(self) -> tuple[int, int, int]:
+        """Launch grid: (tilesX, tilesY, splits) for the 3-D launch, else the
+        1-D (blocks, 1, 1)."""
+        if not self.grid3d:
+            return (self.blocks, 1, 1)
+        return (ceilDiv(self.wide, self.bn), ceilDiv(self.skinny, self.bm), self.splits)
+
+    @property
+    def label(self) -> str:
+        return (
+            f"BM={self.bm} TN={self.tn} LANES_K={self.lanes_k} "
+            f"WAVES={self.waves} PF={self.pf} M={self.m} N={self.n} "
+            f"K={self.k} SPK={self.spk} B={self.blocks} "
+            f"GROUP={self.group} XCDS={self.xcds} UP={self.up_scales} "
+            f"GRID3D={int(self.grid3d)}"
+        )
+
+
+class Knobs(NamedTuple):
+    """The compile-time constants of one kernel configuration."""
+
+    bm: int
+    tn: int
+    lanes_k: int
+    waves: int
+    pf: int
+    group: int = 1
+    xcds: int = 1
+    up_scales: int = 0
+
+
+def gridWaves(skinny: int, wide: int, tile: int, lanesK: int) -> int:
+    """Waves of a no-split grid: each wave covers 64/lanesK wide columns of tn
+    each and every block covers bm skinny columns."""
+    return skinny * wide * lanesK // (64 * tile)
+
+
+def targetTile(area: int, lanesK: int) -> int:
+    """Largest BM*TN tile that still reaches TARGET_WAVES, at most MAX_TILE."""
+    return min(area * lanesK // (64 * TARGET_WAVES), MAX_TILE)
+
+
+def fitLanesK(k: int, limit: int) -> int:
+    """The largest LANES_K at most limit for which k is a multiple of 64*LANES_K
+    (no partial step), else the largest choice at most limit."""
+    choices = [lk for lk in LANES_K_CHOICES if lk <= limit]
+    fitting = [lk for lk in choices if k % (64 * lk) == 0]
+    return max(fitting, default=max(choices))
+
+
+def pickLanesK(skinny: int, wide: int, k: int) -> int:
+    """LANES_K such that the grid fills the GPU with a useful tile.
+
+    LANES_K=16 reaches TARGET_WAVES with a tile of area/(4*TARGET_WAVES)
+    elements, which is only worth it when that tile holds at least MIN_TN
+    columns for each of min(skinny, MAX_BM / 2) skinny columns; otherwise
+    LANES_K=64 trades the K parallelism of each column for a 4x bigger tile.
+    Large grids drop to LANES_K=8. A K that is not a multiple of 64*LANES_K runs
+    a partial step, so the largest LANES_K that divides it is preferred.
+    """
+    area = skinny * wide
+    lanesK = 16 if targetTile(area, 16) >= MIN_TN * min(skinny, MAX_BM // 2) else 64
+    tile = targetTile(area, lanesK)
+    if lanesK == 16 and gridWaves(skinny, wide, tile, lanesK) > LARGE_GRID_WAVES:
+        lanesK = 8
+    return fitLanesK(k, lanesK)
+
+
+def pickReorder(tilesY: int, wideBytes: int) -> tuple[int, int]:
+    """(GROUP, NUM_XCDS) of the tile order: the grouped order with the XCD
+    relabeling where it was measured to help, else the plain order (1, 1)."""
+    plain = (1, 1)
+    if tilesY < 2:
+        return plain
+    if wideBytes >= REORDER_WIDE_BYTES:
+        return min(tilesY, MAX_GROUP), NUM_XCDS
+    if wideBytes >= REORDER_FEW_ROWS_WIDE_BYTES and tilesY in REORDER_FEW_ROWS:
+        return tilesY, NUM_XCDS
+    return plain
+
+
+def pickUpScales(spk: int) -> int:
+    """1 when the up-front scales are the default, i.e. spk is at most
+    UP_FRONT_MAX_SPK (the caller also needs k % spk == 0); 0 for the ring
+    scales. An explicit up_scales = 1 works for any spk."""
+    return int(spk <= UP_FRONT_MAX_SPK)
+
+
+def pickRingDepth(wide: int, lanesK: int, ni: int) -> int:
+    """Ring depth of a single skinny column with LANES_K < 64, never deeper than
+    the K loop of NI iterations. Oversubscribed grids take 3, grids below
+    LATENCY_BOUND_WAVES only profit from a deeper ring for short K loops, and
+    the others take 2."""
+    waves = gridWaves(1, wide, 1, lanesK)
+    if waves > LARGE_GRID_WAVES:
+        depth = 3
+    elif waves < LATENCY_BOUND_WAVES and ni > MAX_DEEP_RING_ITERS:
+        depth = 1
+    else:
+        depth = 2
+    return min(depth, ni)
+
+
+def pickSingleColumnConfig(wide: int, k: int) -> Knobs:
+    """Defaults for a single skinny column (bm = 1), from sweeps over 5120x1x8192
+    and the vLLM decode shapes. The smallest tile (tn = 1) gives the most waves.
+    LANES_K = 64 only wins when K is a multiple of 64 * 64; every other K takes
+    the largest LANES_K of 16, 8 and 4 that divides it, else 16 with a partial
+    step. The ring depth of LANES_K = 64 is 2 for NI = 2 and 1 otherwise; that of
+    smaller LANES_K is pickRingDepth. Blocks of 4 waves win with LANES_K = 64
+    (the waves share the up-front scales through LDS) and on grids beyond
+    LARGE_GRID_WAVES waves. Split-K never paid off, since its reduce launch
+    costs at least 6 us, and the tile order stays plain with one tile row.
+    """
+    lanesK = FULL_LANES_K if k % (64 * FULL_LANES_K) == 0 else fitLanesK(k, 16)
+    ni = ceilDiv(k, 64 * lanesK)
+    full = lanesK == FULL_LANES_K
+    if full:
+        pf = 2 if ni == 2 else 1
+    else:
+        pf = pickRingDepth(wide, lanesK, ni)
+    oversubscribed = gridWaves(1, wide, 1, lanesK) > LARGE_GRID_WAVES
+    waves = 4 if full or oversubscribed else 1
+    return Knobs(1, 1, lanesK, waves, pf, 1, 1, pickUpScales(k))
+
+
+def pickConfig(m: int, n: int, k: int) -> Knobs:
+    """Defaults for a shape; k is the K extent of one block (spk).
+
+    The grid targets one wave per SIMD with the largest tile (bm skinny x tn
+    wide columns per lane) that still reaches TARGET_WAVES. A single skinny
+    column has its own rule (see pickSingleColumnConfig). Prefetch depth 1 is the
+    default and split-K is never chosen; pass spk explicitly to split. The tile
+    order is the plain one unless the wide operand is large enough for the
+    reordering to pay off (see pickReorder).
+    """
+    skinny, wide = min(m, n), max(m, n)
+    if skinny == 1:
+        return pickSingleColumnConfig(wide, k)
+    lanesK = pickLanesK(skinny, wide, k)
+    tile = targetTile(skinny * wide, lanesK)
+    bm = max(1, min(skinny, MAX_BM, tile // MIN_TN))
+    tn = max(MIN_TN, tile // bm)
+    pf = 1
+    # Fewer waves per block balance an oversubscribed grid better.
+    oversubscribed = gridWaves(skinny, wide, bm * tn, lanesK) > TARGET_WAVES
+    waves = 1 if lanesK == 64 else 2 if oversubscribed else 4
+    group, xcds = pickReorder(ceilDiv(skinny, bm), wide * k)
+    return Knobs(bm, tn, lanesK, waves, pf, group, xcds, pickUpScales(k))
+
+
+def gemmKernelName(p) -> str:
+    """Symbol of the GEMM kernel for the knobs of p (a Problem or any object
+    with the same knob attributes): each compile-time parameter followed by its
+    value."""
+    params = (
+        ("BM", p.bm),
+        ("TN", p.tn),
+        ("LANES_K", p.lanes_k),
+        ("WAVES", p.waves),
+        ("UP_ITERS", p.up_iters),
+        ("PARTIAL_STEPS", p.partial_steps),
+        ("PF", p.pf),
+        ("GROUP", p.group),
+        ("NUM_XCDS", p.xcds),
+        ("GRID_3D", int(p.grid3d)),
+    )
+    return "_".join(["gemm"] + [f"{name}{value}" for name, value in params])
+
+
+def skinnyConfig(p: Problem):
+    """The tensilelite_codegen.SkinnyGEMMConfig of the problem; the module is
+    imported lazily so this file works without the bindings."""
+    import tensilelite_codegen
+
+    return tensilelite_codegen.SkinnyGEMMConfig(
+        bm=p.bm,
+        tn=p.tn,
+        lanesK=p.lanes_k,
+        waves=p.waves,
+        prefetch=p.pf,
+        upIters=p.up_iters,
+        partialSteps=p.partial_steps,
+        group=p.group,
+        numXcds=p.xcds,
+        grid3d=p.grid3d,
+    )
+
+
+def useGrid3d(
+    skinny: int, bm: int, splits: int, blocks: int | None, group: int, xcds: int
+) -> bool:
+    """Whether the launch is the 3-D (tilesX, tilesY, splits) one. It requires
+    the plain tile order, one block per tile (no explicit block count) and a grid
+    that fits the 16-bit y and z limits of HIP."""
+    return (
+        blocks is None
+        and group == 1
+        and xcds == 1
+        and ceilDiv(skinny, bm) <= GRID_DIM_YZ_LIMIT
+        and splits <= GRID_DIM_YZ_LIMIT
+    )
+
+
+def checkKernelRanges(p: Problem) -> None:
+    """The extents must lie in the assume_range bounds of the kernel."""
+    assert p.m <= MAX_EXTENT, f"m={p.m} exceeds {MAX_EXTENT}"
+    assert p.n <= MAX_WIDE, f"n={p.n} exceeds {MAX_WIDE}"
+    assert max(p.k, p.spk, p.ldA, p.ldB, p.ldD) <= MAX_EXTENT, (
+        f"k, spk and the ld values must not exceed {MAX_EXTENT}"
+    )
+    assert p.splits <= MAX_SPLITS, f"splits={p.splits} exceeds {MAX_SPLITS}"
+
+
+def checkConstraints(p: Problem) -> None:
+    assert p.spk >= 1, f"spk={p.spk} must be positive"
+    assert p.lanes_k in LANES_K_CHOICES, f"lanes_k must be in {LANES_K_CHOICES}"
+    assert p.k >= 1, f"k={p.k} must be positive"
+    assert p.pf >= 0, f"pf={p.pf} must not be negative"
+    assert p.up_scales in (0, 1), f"up_scales={p.up_scales} must be 0 or 1"
+    assert p.blocks >= 1, f"blocks={p.blocks} must be positive"
+    assert p.group >= 1, f"group={p.group} must be positive"
+    assert p.xcds >= 1, f"xcds={p.xcds} must be positive"
+    assert p.ldA >= p.k and p.ldB >= p.k and p.ldD >= p.m, (
+        "ld values must cover the tensor"
+    )
+    assert p.ldA % 4 == 0 and p.ldB % 4 == 0 and p.ldD % 4 == 0, (
+        "ldA, ldB and ldD must be multiples of 4"
+    )
+    checkKernelRanges(p)
+    assert (
+        max(
+            operandExtent(p.m, p.k, p.ldA),
+            operandExtent(p.n, p.k, p.ldB),
+            2 * dElements(p.m, p.n, p.ldD),
+            4 * p.splits * p.m * p.n,
+            scaleExtent(p.m, p.k),
+            scaleExtent(p.n, p.k),
+        )
+        < BUFFER_LIMIT
+    ), "buffers must stay below 2^31 bytes"
+
+
+def makeProblem(
+    m: int,
+    n: int,
+    k: int,
+    *,
+    spk: int | None,
+    bm: int | None,
+    tn: int | None,
+    lanes_k: int | None,
+    waves: int | None,
+    pf: int | None,
+    group: int | None,
+    xcds: int | None,
+    up_scales: int | None,
+    blocks: int | None,
+    padding: tuple,
+) -> Problem:
+    """Resolves the knobs (explicit ones win over pickConfig), the block count
+    and the leading dimensions, and checks the constraints. The leading
+    dimensions are the smallest multiples of 4 covering k and m plus the padding,
+    whose entries must be multiples of 4. Without an explicit up_scales the
+    default rule applies, derived from the final spk: up-front only for a split
+    of at most UP_FRONT_MAX_SPK and k % spk == 0, while an explicit up_scales = 1
+    works for any spk and k. Without an explicit spk one split covers k, rounded
+    up to whole iterations.
+    """
+    given = Knobs(bm, tn, lanes_k, waves, pf, group, xcds, up_scales)
+    overrides = {
+        name: value for name, value in given._asdict().items() if value is not None
+    }
+    knobs = pickConfig(m, n, k if spk is None else spk)._replace(**overrides)
+    ki = 64 * knobs.lanes_k
+    # An empty K gets one iteration so checkConstraints reports it.
+    spk = max(ceilDiv(k, ki), 1) * ki if spk is None else spk
+    if up_scales is None:
+        upFits = k % spk == 0 and pickUpScales(spk)
+        knobs = knobs._replace(up_scales=int(upFits))
+    grid3d = useGrid3d(
+        min(m, n), knobs.bm, ceilDiv(k, spk), blocks, knobs.group, knobs.xcds
+    )
+    # An explicit block count is used as is, even above the tile count (the
+    # extra blocks find no tile).
+    if blocks is None:
+        blocks = countTiles(
+            m, n, k, spk, knobs.bm, blockCols(knobs.waves, knobs.lanes_k, knobs.tn)
+        )
+    p = Problem(
+        m,
+        n,
+        k,
+        spk,
+        *knobs,
+        ldA=alignUp(k, 4) + padding[0],
+        ldB=alignUp(k, 4) + padding[1],
+        ldD=alignUp(m, 4) + padding[2],
+        blocks=blocks,
+        grid3d=grid3d,
+    )
+    checkConstraints(p)
+    return p
+
+
+# The knob arguments of makeProblem, in the order of its signature.
+KNOB_OVERRIDE_NAMES = (
+    "spk",
+    "bm",
+    "tn",
+    "lanes_k",
+    "waves",
+    "pf",
+    "group",
+    "xcds",
+    "up_scales",
+    "blocks",
+)
+
+
+def noKnobProblem(m: int, n: int, k: int, **knobs) -> Problem:
+    """A problem with the default knobs, except for the given ones."""
+    resolved = {name: knobs.get(name) for name in KNOB_OVERRIDE_NAMES}
+    return makeProblem(m, n, k, padding=(0, 0, 0), **resolved)
+
+
+class Inputs(NamedTuple):
+    """Host buffers handed to the kernel and the float32 reference result (None
+    when the reference was not computed)."""
+
+    aBuf: np.ndarray
+    bBuf: np.ndarray
+    sclABuf: np.ndarray
+    sclBBuf: np.ndarray
+    expected: np.ndarray | None
+
+
+def makeInputs(p: Problem, seed: int, withReference: bool = True) -> Inputs:
+    """Random operands for the problem and, unless withReference is False, the
+    float64-derived reference (too expensive in memory for the largest shapes)."""
+    rng = np.random.default_rng(seed=seed)
+    a, scalesA, aBuf, sclABuf = makeOperand(rng, p.m, p.k, p.ldA)
+    b, scalesB, bBuf, sclBBuf = makeOperand(rng, p.n, p.k, p.ldB)
+    if not withReference:
+        return Inputs(aBuf, bBuf, sclABuf, sclBBuf, None)
+    expected = referenceProduct(dequant(a, scalesA), dequant(b, scalesB))
+    return Inputs(aBuf, bBuf, sclABuf, sclBBuf, expected.astype(np.float32))
+
+
+def missingMilestones(p: Problem) -> list[str]:
+    """The later milestones the emitter needs for the problem; empty when it
+    runs with the current one."""
+    missing = []
+    if p.up_iters > 0:
+        missing.append("M7 (up-front scales)")
+    if p.partial_steps != 0:
+        missing.append("M8 (partial steps)")
+    if not p.grid3d:
+        missing.append("M9 (persistent launch / tile reordering)")
+    return missing
+
+
+# Kernels are emitted and loaded once per session; the modules stay loaded
+# until the process exits.
+_kernelCache: dict[str, LoadedKernel] = {}
+
+
+def gemmKernel(p: Problem) -> LoadedKernel:
+    """The loaded GEMM kernel of the problem's configuration."""
+    import tensilelite_codegen
+    import tensilelite_jit
+
+    name = gemmKernelName(p)
+    if name not in _kernelCache:
+        asm = tensilelite_codegen.emitSkinnyGEMM(skinnyConfig(p))
+        hsaco = tensilelite_jit.assembleToHSACO(asm, TARGET)
+        _kernelCache[name] = LoadedKernel(hsaco, name)
+    return _kernelCache[name]
+
+
+def reduceKernel() -> LoadedKernel:
+    """The loaded splitk_reduce kernel."""
+    import tensilelite_codegen
+    import tensilelite_jit
+
+    if REDUCE_KERNEL_NAME not in _kernelCache:
+        hsaco = tensilelite_jit.assembleToHSACO(
+            tensilelite_codegen.emitSplitKReduce(), TARGET
+        )
+        _kernelCache[REDUCE_KERNEL_NAME] = LoadedKernel(hsaco, REDUCE_KERNEL_NAME)
+    return _kernelCache[REDUCE_KERNEL_NAME]
+
+
+def launchGemm(p: Problem, kernel, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf) -> None:
+    """Runs the GEMM kernel with its explicit kernargs: the six pointers, then
+    ldD, ldA, ldB, m, n, k and spk."""
+    launchKernel(
+        kernel,
+        p.grid,
+        (64 * p.waves, 1, 1),
+        (
+            dBuf.pointer,
+            aBuf.pointer,
+            bBuf.pointer,
+            sclABuf.pointer,
+            sclBBuf.pointer,
+            wsBuf.pointer,
+            *(
+                ctypes.c_int32(value)
+                for value in (p.ldD, p.ldA, p.ldB, p.m, p.n, p.k, p.spk)
+            ),
+        ),
+    )
+
+
+def verifyGemm(p: Problem, inputs: Inputs, dBits: np.ndarray, ws: np.ndarray) -> None:
+    """Checks D (no split) or the workspace sum against the reference."""
+    if p.splits == 1:
+        verifyD(dBits, inputs.expected, p.m, p.n, p.ldD, p.label)
+        return
+    verifyWorkspace(ws, inputs.expected, p.splits, p.m, p.n, p.label)
+
+
+def executeProblem(p: Problem, inputs: Inputs, iters: int, verifyFn=None) -> np.ndarray:
+    """Launches the GEMM (and the split-K reduction) iters times each, which must
+    be idempotent, checks the results against the reference unless the inputs
+    carry none, and returns the D bits. verifyFn(inputs, (dBits, ws)) replaces
+    the GEMM check."""
+    dBits, ws = makeOutputs(p.m, p.n, p.ldD, p.splits)
+    arrays = (dBits, inputs.aBuf, inputs.bBuf, inputs.sclABuf, inputs.sclBBuf, ws)
+    with ExitStack() as stack:
+        dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf = (
+            stack.enter_context(DeviceBuffer(array)) for array in arrays
+        )
+        kernel = gemmKernel(p)
+        for _ in range(iters):
+            launchGemm(p, kernel, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf)
+        dBuf.download(dBits)
+        wsBuf.download(ws)
+        if verifyFn is not None:
+            verifyFn(inputs, (dBits, ws))
+        elif inputs.expected is not None:
+            verifyGemm(p, inputs, dBits, ws)
+        if p.splits > 1:
+            reducer = reduceKernel()
+            for _ in range(iters):
+                launchReduce(reducer, dBuf, wsBuf, p.ldD, p.m, p.n, p.splits)
+            dBuf.download(dBits)
+            if inputs.expected is not None:
+                verifyD(dBits, inputs.expected, p.m, p.n, p.ldD, p.label)
+    return dBits
+
+
+def runProblem(p: Problem, iters: int, seed: int = 42, verifyFn=None) -> None:
+    """Runs and verifies the problem on random inputs."""
+    executeProblem(p, makeInputs(p, seed), iters, verifyFn)
+
+
+def computeD(p: Problem, seed: int) -> np.ndarray:
+    """Runs the GEMM (and the split-K reduction), checks D against the
+    reference and returns the [n, m] bits of D."""
+    dBits = executeProblem(p, makeInputs(p, seed), 1)
+    return dColumns(dBits, p.m, p.n, p.ldD)

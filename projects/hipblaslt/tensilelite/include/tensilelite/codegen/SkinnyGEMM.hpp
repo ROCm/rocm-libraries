@@ -42,13 +42,19 @@ struct SkinnyGEMMConfig {
 std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 
 /// Emits the GEMM kernel as the assembly text of one kernel, for
-/// assembleToHSACO. The kernargs are the pointers D, A, B, scalesA, scalesB and
-/// ws, then ldD, ldA, ldB, m, n, k and spk (i32), then the hidden group sizes
-/// x, y, z and block counts x, y, z, in the layout of the reference. The block
-/// is (64 * waves, 1, 1) and the grid is (ceil(max(m, n) / BN), ceil(min(m, n)
-/// / bm), ceil(k / spk)) with BN = waves * (64 / lanesK) * tn when grid3d, else
-/// (blocks, 1, 1). Throws std::invalid_argument for invalid knobs and, until
-/// the emitter lands, "not implemented yet".
+/// assembleToHSACO, replicating the behavior and the schedule of the MLIR
+/// reference for the 3-D launch with ring scales and no partial K steps: grid3d
+/// with group = 1 and numXcds = 1, upIters = 0 and partialSteps = 0, so k and
+/// spk must be multiples of 64 * lanesK. The kernargs are the pointers D, A, B,
+/// scalesA, scalesB and ws, then ldD, ldA, ldB, m, n, k and spk (i32), then the
+/// hidden group sizes x, y, z and block counts x, y, z, in the layout of the
+/// reference. The block is (64 * waves, 1, 1) and the grid is (ceil(max(m, n) /
+/// BN), ceil(min(m, n) / bm), ceil(k / spk)) with BN = waves * (64 / lanesK) *
+/// tn. With a single split the kernel stores bf16 into D, else each split
+/// stores its f32 slice into the workspace, which splitk_reduce sums. Throws
+/// std::invalid_argument for invalid knobs, for the features that are not
+/// emitted yet (upIters > 0, partialSteps != 0 and grid3d = false, each
+/// naming the knob) and when the configuration exceeds the register budget.
 std::string emitSkinnyGEMM(const Target &target,
                            const SkinnyGEMMConfig &config);
 

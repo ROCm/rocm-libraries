@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -73,15 +74,385 @@ TEST(SkinnyGEMM, RejectsInvalidKnobs) {
   }
 }
 
-TEST(SkinnyGEMM, EmitIsNotImplementedYet) {
-  Target target = Target::get("gfx950");
+std::string rejectionMessage(const SkinnyGEMMConfig &config) {
   try {
-    emitSkinnyGEMM(target, {});
-    FAIL() << "expected std::invalid_argument";
+    emitSkinnyGEMM(Target::get("gfx950"), config);
   } catch (const std::invalid_argument &error) {
-    EXPECT_NE(std::string(error.what()).find("not implemented"),
-              std::string::npos);
+    return error.what();
   }
+  ADD_FAILURE() << "expected std::invalid_argument";
+  return {};
+}
+
+TEST(SkinnyGEMM, RejectsUnimplementedFeatures) {
+  SkinnyGEMMConfig upFront;
+  upFront.upIters = 3;
+  EXPECT_EQ(rejectionMessage(upFront),
+            "upIters > 0 (up-front scales) is not implemented yet");
+
+  SkinnyGEMMConfig partial;
+  partial.partialSteps = 2;
+  EXPECT_EQ(rejectionMessage(partial),
+            "partialSteps != 0 (partial K steps) is not implemented yet");
+
+  SkinnyGEMMConfig persistent;
+  persistent.grid3d = false;
+  EXPECT_EQ(rejectionMessage(persistent),
+            "grid3d = false (persistent launch) is not implemented yet");
+
+  SkinnyGEMMConfig grouped;
+  grouped.group = 4;
+  EXPECT_EQ(rejectionMessage(grouped), "grid3d requires group = 1");
+
+  SkinnyGEMMConfig remapped;
+  remapped.numXcds = 8;
+  EXPECT_EQ(rejectionMessage(remapped), "grid3d requires numXcds = 1");
+}
+
+TEST(SkinnyGEMM, RejectsConfigsOverTheRegisterBudget) {
+  SkinnyGEMMConfig wide;
+  wide.bm = 8;
+  wide.tn = 8;
+  wide.lanesK = 16;
+  wide.waves = 1;
+  wide.prefetch = 4;
+  EXPECT_NE(rejectionMessage(wide).find("config exceeds the register budget: "),
+            std::string::npos);
+}
+
+SkinnyGEMMConfig config(int bm, int tn, int lanesK, int waves, int prefetch) {
+  SkinnyGEMMConfig result;
+  result.bm = bm;
+  result.tn = tn;
+  result.lanesK = lanesK;
+  result.waves = waves;
+  result.prefetch = prefetch;
+  return result;
+}
+
+std::string emitted(const SkinnyGEMMConfig &config) {
+  return emitSkinnyGEMM(Target::get("gfx950"), config);
+}
+
+std::string trimmed(const std::string &line) {
+  auto isBlank = [](char c) { return c == ' ' || c == '\t'; };
+  std::string::const_iterator first =
+      std::find_if_not(line.begin(), line.end(), isBlank);
+  std::string::const_reverse_iterator last =
+      std::find_if_not(line.rbegin(), line.rend(), isBlank);
+  if (first >= last.base())
+    return "";
+  return std::string(first, last.base());
+}
+
+// Returns the lines from the first one that starts with from up to the first
+// later one that contains to.
+std::vector<std::string> linesBetween(const std::string &assembly,
+                                      std::string_view from,
+                                      std::string_view to) {
+  std::vector<std::string> lines;
+  std::istringstream stream(assembly);
+  std::string line;
+  while (std::getline(stream, line)) {
+    line = trimmed(line);
+    if (line.rfind(from, 0) == 0)
+      break;
+  }
+  if (stream) {
+    lines.push_back(line);
+    while (std::getline(stream, line)) {
+      line = trimmed(line);
+      lines.push_back(line);
+      if (line.find(to) != std::string::npos)
+        break;
+    }
+  }
+  return lines;
+}
+
+std::vector<std::string> waitsOf(const std::vector<std::string> &lines) {
+  std::vector<std::string> waits;
+  for (const std::string &line : lines)
+    if (line.rfind("s_waitcnt", 0) == 0)
+      waits.push_back(line);
+  return waits;
+}
+
+std::string joined(const std::vector<std::string> &lines) {
+  std::string text;
+  for (const std::string &line : lines)
+    text += line + "\n";
+  return text;
+}
+
+std::string vmcnt(int count) {
+  return "s_waitcnt vmcnt(" + std::to_string(count) + ")";
+}
+
+std::string lgkmcnt(int count) {
+  return "s_waitcnt lgkmcnt(" + std::to_string(count) + ")";
+}
+
+TEST(SkinnyGEMM, AssemblyHasTheReferenceAbi) {
+  std::string assembly = emitted(config(1, 1, 16, 2, 1));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  expectLinesInOrder(
+      assembly,
+      {".name: gemm_BM1_TN1_LANES_K16_WAVES2_UP_ITERS0_PARTIAL_STEPS0_PF1_"
+       "GROUP1_NUM_XCDS1_GRID_3D1",
+       ".kernarg_segment_size: 104", ".group_segment_fixed_size: 0",
+       ".max_flat_workgroup_size: 128"});
+  // The pointers, the scalars and the hidden arguments of the reference.
+  expectLinesInOrder(
+      assembly,
+      {".name: D",       ".offset: 0",  ".name: A",       ".offset: 8",
+       ".name: B",       ".offset: 16", ".name: scalesA", ".offset: 24",
+       ".name: scalesB", ".offset: 32", ".name: ws",      ".offset: 40",
+       ".name: ldD",     ".offset: 48", ".name: ldA",     ".offset: 52",
+       ".name: ldB",     ".offset: 56", ".name: m",       ".offset: 60",
+       ".name: n",       ".offset: 64", ".name: k",       ".offset: 68",
+       ".name: spk",     ".offset: 72"});
+  expectLinesInOrder(assembly, {".offset: 76", "hidden_group_size_x",
+                                ".offset: 80", "hidden_group_size_y",
+                                ".offset: 84", "hidden_group_size_z",
+                                ".offset: 88", "hidden_block_count_x",
+                                ".offset: 92", "hidden_block_count_y",
+                                ".offset: 96", "hidden_block_count_z"});
+  EXPECT_NE(assembly.find(".amdhsa_system_sgpr_workgroup_id_y 1"),
+            std::string::npos);
+  EXPECT_NE(assembly.find(".amdhsa_system_sgpr_workgroup_id_z 1"),
+            std::string::npos);
+  EXPECT_NE(assembly.find(".amdhsa_group_segment_fixed_size 0"),
+            std::string::npos);
+}
+
+// The waits of the steady loop follow from the issue order. A ring slot is
+// L = 5 * NC loads in flight (NC scale dwords, then 4 chunks of NC), and a use
+// waits for the loads issued after it: the rest of its slot, the PF - 1 later
+// slots and the refill loads of the slot itself. For NC = 2 and PF = 1 that is
+// the reference's 9 and 8 for every column.
+TEST(SkinnyGEMM, PrimarySteadyLoopWaits) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 1));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loop =
+      linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  constexpr int columns = 2;
+  constexpr int loadsPerSlot = 5 * columns;
+  std::vector<std::string> expected;
+  for (int c = 0; c < columns; ++c)
+    expected.push_back(vmcnt(loadsPerSlot - 1 - c));
+  // The permutes of the two columns are the 2 * (NC - 1 - c) newest of the LDS
+  // operations in flight.
+  for (int c = 0; c < columns; ++c)
+    expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
+  for (int chunk = 0; chunk < 4; ++chunk)
+    for (int c = 0; c < columns; ++c)
+      expected.push_back(vmcnt(loadsPerSlot - 1 - c));
+  EXPECT_EQ(waitsOf(loop), expected);
+  EXPECT_EQ(expected.size(), 12u);
+  EXPECT_EQ(expected.front(), "s_waitcnt vmcnt(9)");
+  EXPECT_EQ(expected[1], "s_waitcnt vmcnt(8)");
+}
+
+TEST(SkinnyGEMM, DecodeFirstSteadyLoopWaits) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 2));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loop =
+      linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  // One more slot is in flight behind each use: 19 and 18, the reference's
+  // values, in both unrolled slots.
+  constexpr int columns = 2;
+  constexpr int loadsPerSlot = 5 * columns;
+  std::vector<std::string> expected;
+  for (int slot = 0; slot < 2; ++slot) {
+    for (int c = 0; c < columns; ++c)
+      expected.push_back(vmcnt(loadsPerSlot + loadsPerSlot - 1 - c));
+    for (int c = 0; c < columns; ++c)
+      expected.push_back(lgkmcnt(2 * (columns - 1 - c)));
+    for (int chunk = 0; chunk < 4; ++chunk)
+      for (int c = 0; c < columns; ++c)
+        expected.push_back(vmcnt(loadsPerSlot + loadsPerSlot - 1 - c));
+  }
+  EXPECT_EQ(waitsOf(loop), expected);
+  EXPECT_EQ(expected.front(), "s_waitcnt vmcnt(19)");
+}
+
+// The prologue loads that the epilogue overwrites may still be in flight when
+// a split has fewer iterations than the ring has slots.
+TEST(SkinnyGEMM, EpilogueWaitsForThePrologueLoadsItOverwrites) {
+  struct Case {
+    int prefetch;
+    int outstanding;
+  };
+  // The first register of the epilogue is the first chunk of the ring, so only
+  // the loads issued after it are left: the reference's 7 for PF = 1, and 17
+  // for PF = 2.
+  for (Case current : {Case{1, 7}, Case{2, 17}}) {
+    std::string assembly = emitted(config(1, 1, 16, 1, current.prefetch));
+    SCOPED_TRACE("assembly:\n" + assembly);
+    std::vector<std::string> epilogue =
+        linesBetween(assembly, "label_kloop_end_", "quad_perm:[1,0,3,2]");
+    // The last loop's exit label starts the arms, so start at the last wait
+    // before the first reduction instruction.
+    std::vector<std::string> waits = waitsOf(epilogue);
+    ASSERT_FALSE(waits.empty());
+    EXPECT_EQ(waits.back(), vmcnt(current.outstanding));
+  }
+}
+
+// Without a ring each iteration issues its loads and consumes them at once, so
+// the waits count down from the L loads of the iteration.
+TEST(SkinnyGEMM, NoPrefetchLoopWaits) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 0));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loop =
+      linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  ASSERT_FALSE(loop.empty());
+  std::vector<std::string> expected = {
+      vmcnt(9), vmcnt(8), lgkmcnt(2), lgkmcnt(0), vmcnt(7), vmcnt(6),
+      vmcnt(5), vmcnt(4), vmcnt(3),   vmcnt(2),   vmcnt(1), vmcnt(0)};
+  EXPECT_EQ(waitsOf(loop), expected);
+  // The loads of the iteration all issue before the first wait.
+  std::string text = joined(loop);
+  EXPECT_EQ(text.find("buffer_load", text.find("s_waitcnt")),
+            std::string::npos);
+}
+
+// The remaining 1 to 2 * PF - 1 iterations run in an arm of a chain of ifs, and
+// the steady loop end is max((NIfull / PF - 1) * PF, 0), as shifts for a power
+// of two and as LLVM's multiply by a magic number otherwise.
+TEST(SkinnyGEMM, RemainderArmsAndSteadyLoopEnd) {
+  for (int prefetch : {1, 2, 3, 4}) {
+    std::string assembly = emitted(config(1, 1, 16, 1, prefetch));
+    SCOPED_TRACE("prefetch " + std::to_string(prefetch));
+    EXPECT_EQ(countLinesContaining(assembly, "s_cmp_eq_i32 "),
+              2 * prefetch - 1);
+    EXPECT_EQ(countLinesContaining(assembly, "s_mul_hi_i32"),
+              prefetch == 3 ? 1 : 0);
+  }
+  EXPECT_NE(emitted(config(1, 1, 16, 1, 3)).find("1431655766"),
+            std::string::npos);
+}
+
+TEST(SkinnyGEMM, PerChunkOpOrder) {
+  std::string assembly = emitted(config(1, 1, 16, 1, 1));
+  SCOPED_TRACE("assembly:\n" + assembly);
+  std::vector<std::string> loop =
+      linesBetween(assembly, "label_kloop_0:", "s_cbranch_scc1 label_kloop_0");
+  std::string text = joined(loop);
+  // Chunk 0: the decode shifts by 23 and masks the exponent, then per dword
+  // two converts and a dot for the low and the high pair, then the refill.
+  expectLinesInOrder(text, {"v_lshlrev_b32", ", 23, ", "v_and_b32",
+                            "2139095040", "v_lshlrev_b32", "v_and_b32",
+                            "v_cvt_scalef32_pk_bf16_fp8",
+                            "v_cvt_scalef32_pk_bf16_fp8", "v_dot2_f32_bf16",
+                            "v_cvt_scalef32_pk_bf16_fp8 v", "op_sel:[1,0,0]",
+                            "v_cvt_scalef32_pk_bf16_fp8", "op_sel:[1,0,0]",
+                            "v_dot2_f32_bf16", "v_cvt_scalef32_pk_bf16_fp8",
+                            "v_cvt_scalef32_pk_bf16_fp8", "v_dot2_f32_bf16"});
+  EXPECT_EQ(countLinesContaining(text, "v_dot2_f32_bf16"), 4 * 8);
+  EXPECT_EQ(countLinesContaining(text, "op_sel:[1,0,0]"), 4 * 4 * 2);
+  // Each chunk refills its two columns after its compute, and the last decode
+  // shifts right by 1.
+  std::vector<std::string> chunk0 =
+      linesBetween(text, "v_lshlrev_b32", "buffer_load_dwordx4");
+  EXPECT_EQ(countLinesContaining(joined(chunk0), "v_dot2_f32_bf16"), 8);
+  EXPECT_EQ(countLinesContaining(text, "buffer_load_dwordx4"), 8);
+  EXPECT_EQ(countLinesContaining(text, "buffer_load_dword "), 2);
+  expectLinesInOrder(text, {"v_lshrrev_b32", ", 1, ", "v_and_b32"});
+}
+
+// Counts the v_nop that precede each DPP add of the reduction of a single
+// accumulator, in order.
+std::vector<int> nopsBeforeDpp(const std::string &assembly) {
+  std::vector<int> counts;
+  std::istringstream stream(assembly);
+  int nops = 0;
+  bool inReduction = false;
+  for (std::string line; std::getline(stream, line);) {
+    line = trimmed(line);
+    if (line == "v_nop") {
+      ++nops;
+      continue;
+    }
+    bool dpp = line.rfind("v_add_f32", 0) == 0 &&
+               (line.find("quad_perm") != std::string::npos ||
+                line.find("mirror") != std::string::npos ||
+                line.find("row_bcast") != std::string::npos);
+    if (dpp) {
+      inReduction = true;
+      counts.push_back(nops);
+    }
+    if (line.rfind("v_readlane_b32", 0) == 0)
+      counts.push_back(nops);
+    if (inReduction && line.rfind("v_cmp_eq_i32", 0) == 0)
+      break;
+    nops = 0;
+  }
+  return counts;
+}
+
+TEST(SkinnyGEMM, ReduceForEveryLanesK) {
+  // Three nops cover the dot's write, two every DPP read of a VALU result.
+  EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 4, 1, 1))),
+            (std::vector<int>{3, 2}));
+  EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 8, 1, 1))),
+            (std::vector<int>{3, 2, 2}));
+  EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 16, 1, 1))),
+            (std::vector<int>{3, 2, 2, 2}));
+  // 64 lanes add the row broadcasts and read lane 63 after one nop; the move
+  // of the lane's value takes two more, which the reference omits.
+  EXPECT_EQ(nopsBeforeDpp(emitted(config(1, 1, 64, 1, 1))),
+            (std::vector<int>{3, 2, 2, 2, 2, 2, 1}));
+
+  std::string lanes16 = emitted(config(1, 1, 16, 1, 1));
+  expectLinesInOrder(lanes16,
+                     {"quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf "
+                      "bound_ctrl:1",
+                      "quad_perm:[2,3,0,1] row_mask:0xf bank_mask:0xf "
+                      "bound_ctrl:1",
+                      "row_half_mirror row_mask:0xf bank_mask:0xf bound_ctrl:1",
+                      "row_mirror row_mask:0xf bank_mask:0xf bound_ctrl:1",
+                      "v_cmp_eq_i32"});
+  EXPECT_EQ(lanes16.find("row_bcast"), std::string::npos);
+  EXPECT_EQ(lanes16.find("v_readlane_b32"), std::string::npos);
+
+  std::string lanes64 = emitted(config(1, 1, 64, 1, 1));
+  expectLinesInOrder(lanes64,
+                     {"row_mirror", "row_bcast:15 row_mask:0xa bank_mask:0xf",
+                      "row_bcast:31 row_mask:0xf bank_mask:0xf bound_ctrl:1",
+                      "v_readlane_b32", "v_nop", "v_nop", "v_mov_b32",
+                      "v_cmp_eq_i32"});
+  EXPECT_NE(lanes64.find(", 63"), std::string::npos);
+  // 4 lanes stop after the quad permutes.
+  std::string lanes4 = emitted(config(1, 1, 4, 1, 1));
+  EXPECT_EQ(lanes4.find("row_half_mirror"), std::string::npos);
+}
+
+TEST(SkinnyGEMM, VectorStoresOnlyWhenPreconditionHolds) {
+  // One element per lane has no run to vectorize and no orientation split.
+  std::string scalar = emitted(config(1, 1, 16, 1, 1));
+  EXPECT_EQ(scalar.find("buffer_store_dwordx"), std::string::npos);
+  EXPECT_EQ(scalar.find("s_cmp_eq_u32"), std::string::npos);
+  EXPECT_EQ(countLinesContaining(scalar, "buffer_store_short"), 1);
+  EXPECT_EQ(countLinesContaining(scalar, "buffer_store_dword "), 1);
+
+  // BM = 2, TN = 4: bf16 runs of 2 (one dword) and 4 (dwordx2) elements,
+  // behind the branch on the orientation and the one on a full tile.
+  std::string vector = emitted(config(2, 4, 16, 1, 1));
+  SCOPED_TRACE("assembly:\n" + vector);
+  EXPECT_NE(vector.find("buffer_store_dwordx2"), std::string::npos);
+  EXPECT_NE(vector.find("buffer_store_dword "), std::string::npos);
+  EXPECT_NE(vector.find("v_pack_b32_f16"), std::string::npos);
+  EXPECT_NE(vector.find("s_cmp_eq_u32"), std::string::npos);
+
+  // 8 bf16 elements make a dwordx4, and 4 f32 elements do for the workspace.
+  EXPECT_NE(emitted(config(8, 2, 16, 1, 1)).find("buffer_store_dwordx4"),
+            std::string::npos);
+  EXPECT_NE(emitted(config(4, 2, 16, 1, 1)).find("buffer_store_dwordx4"),
+            std::string::npos);
 }
 
 bool isLabelOrComment(const std::string &line) {

@@ -1,7 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <tensilelite/codegen/Kernel.hpp>
 #include <tensilelite/codegen/SkinnyGEMM.hpp>
+
+#include "SkinnyGEMMEmitter.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -50,10 +53,73 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config) {
          std::to_string(config.grid3d ? 1 : 0);
 }
 
-// The emitter lands in later milestones, so the target is unused until then.
-std::string emitSkinnyGEMM(const Target &, const SkinnyGEMMConfig &config) {
+namespace {
+
+// The reference's features that are not emitted yet.
+void requireImplemented(const SkinnyGEMMConfig &config) {
+  if (config.upIters > 0)
+    throw std::invalid_argument(
+        "upIters > 0 (up-front scales) is not implemented yet");
+  if (config.partialSteps != 0)
+    throw std::invalid_argument(
+        "partialSteps != 0 (partial K steps) is not implemented yet");
+  if (!config.grid3d)
+    throw std::invalid_argument(
+        "grid3d = false (persistent launch) is not implemented yet");
+  if (config.group != 1)
+    throw std::invalid_argument("grid3d requires group = 1");
+  if (config.numXcds != 1)
+    throw std::invalid_argument("grid3d requires numXcds = 1");
+}
+
+// The kernarg layout of the reference: the pointers, the i32 scalars, then
+// the hidden group sizes and block counts.
+detail::SkinnyArguments declareArguments(KernelSignature &signature) {
+  detail::SkinnyArguments arguments;
+  arguments.d = signature.addPointer("D");
+  arguments.a = signature.addPointer("A");
+  arguments.b = signature.addPointer("B");
+  arguments.scalesA = signature.addPointer("scalesA");
+  arguments.scalesB = signature.addPointer("scalesB");
+  arguments.ws = signature.addPointer("ws");
+  arguments.ldD = signature.addScalar("ldD", 4);
+  arguments.ldA = signature.addScalar("ldA", 4);
+  arguments.ldB = signature.addScalar("ldB", 4);
+  arguments.m = signature.addScalar("m", 4);
+  arguments.n = signature.addScalar("n", 4);
+  arguments.k = signature.addScalar("k", 4);
+  arguments.spk = signature.addScalar("spk", 4);
+  signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4);
+  signature.addHidden(KernelArgumentKind::hiddenGroupSizeY, 4);
+  signature.addHidden(KernelArgumentKind::hiddenGroupSizeZ, 4);
+  arguments.blocksX =
+      signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 4);
+  arguments.blocksY =
+      signature.addHidden(KernelArgumentKind::hiddenBlockCountY, 4);
+  arguments.blocksZ =
+      signature.addHidden(KernelArgumentKind::hiddenBlockCountZ, 4);
+  return arguments;
+}
+
+} // namespace
+
+std::string emitSkinnyGEMM(const Target &target,
+                           const SkinnyGEMMConfig &config) {
   validate(config);
-  throw std::invalid_argument("not implemented yet");
+  requireImplemented(config);
+  Kernel kernel(target, skinnyGEMMKernelName(config), 64 * config.waves);
+  // The workgroup ids are the tile (tx, ty) and the split kz.
+  kernel.enableWorkgroupIds(true, true);
+  detail::SkinnyArguments arguments = declareArguments(kernel.signature());
+  detail::SkinnyGEMMEmitter(kernel, config, arguments).emit();
+  try {
+    kernel.builder().allocator().checkLimits();
+  } catch (const std::runtime_error &error) {
+    throw std::invalid_argument(std::string("config exceeds the register "
+                                            "budget: ") +
+                                error.what());
+  }
+  return kernel.toAssembly();
 }
 
 } // namespace rocm::tensilelite::codegen

@@ -64,9 +64,12 @@ NB_MODULE(tensilelite_codegen, m) {
         return emitSkinnyGEMM(Target::get(arch), config);
       },
       "config"_a, "arch"_a = "gfx950",
-      "Returns the assembly text of the GEMM kernel for config. Raises "
-      "ValueError for invalid knobs, an unsupported arch and, until the "
-      "emitter lands, with 'not implemented yet'.");
+      "Returns the assembly text of the GEMM kernel for config, for the 3-D "
+      "launch with ring scales and no partial K steps (grid3d, group = 1, "
+      "numXcds = 1, upIters = 0, partialSteps = 0). Raises ValueError for "
+      "invalid knobs, an unsupported arch, the features that are not emitted "
+      "yet (the message names the knob) and a configuration that exceeds the "
+      "register budget.");
 
   m.def(
       "emitSplitKReduce",
