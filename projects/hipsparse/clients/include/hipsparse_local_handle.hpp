@@ -45,8 +45,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr
-                << "ERROR: hipsparseLocalHandle_t constructor: status != HIPSPARSE_STATUS_SUCCESS";
+            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
             throw(status);
         }
     }
@@ -57,8 +56,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr
-                << "ERROR: hipsparseLocalHandle_t constructor: status != HIPSPARSE_STATUS_SUCCESS";
+            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
             throw(status);
         }
     }
@@ -155,5 +153,10 @@ private:
     bool        capture_started;
     bool        graph_testing;
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error 
+// instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&) = delete;
 
 #endif // HIPSPARSE_LOCAL_HANDLE_HPP
