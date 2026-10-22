@@ -50,6 +50,10 @@ public:
   int maxUnifiedVgpr() const { return maxUnifiedVgprs; }
   /// Largest LDS allocation per workgroup in bytes (rocisa's DeviceLDS).
   int maxLdsSize() const { return maxLdsBytes; }
+  /// Largest vmcnt an s_waitcnt can encode.
+  int maxVmcnt() const { return maxVmcnts; }
+  /// Largest lgkmcnt an s_waitcnt can encode.
+  int maxLgkmcnt() const { return maxLgkmcnts; }
 
 private:
   Target(IsaVersion isa, int wavefront, std::string_view arch,
@@ -64,6 +68,8 @@ private:
   int maxAgprs = 0;
   int maxUnifiedVgprs = 0;
   int maxLdsBytes = 0;
+  int maxVmcnts = 0;
+  int maxLgkmcnts = 0;
 };
 
 } // namespace rocm::tensilelite::codegen

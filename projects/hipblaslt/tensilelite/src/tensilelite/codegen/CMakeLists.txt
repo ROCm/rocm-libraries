@@ -32,6 +32,7 @@ target_sources(tensilelite-codegen
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Select.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitTracker.cpp"
 )
 
 target_include_directories(tensilelite-codegen PUBLIC "${PROJECT_SOURCE_DIR}/include")

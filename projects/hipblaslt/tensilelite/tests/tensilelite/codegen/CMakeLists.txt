@@ -15,6 +15,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/RocisaCore_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Select_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitTracker_test.cpp"
 )
 
 # Assembling and launching needs the JIT assembler.
@@ -31,6 +32,7 @@ if(TENSILELITE_ENABLE_JIT)
             "${CMAKE_CURRENT_SOURCE_DIR}/MoveDevice_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Saxpy_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SelectDevice_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/WaitTrackerDevice_test.cpp"
     )
 endif()
 

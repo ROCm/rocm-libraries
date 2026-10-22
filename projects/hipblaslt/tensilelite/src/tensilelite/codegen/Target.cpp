@@ -22,6 +22,8 @@ Target::Target(IsaVersion isa, int wavefront, std::string_view arch,
   maxSgprs = info.reg_caps.at("MaxSgpr");
   maxUnifiedVgprs = info.reg_caps.at("PhysicalMaxVgpr");
   maxLdsBytes = info.arch_caps.at("DeviceLDS");
+  maxVmcnts = info.asm_caps.at("MaxVmcnt");
+  maxLgkmcnts = info.asm_caps.at("MaxLgkmcnt");
   // rocisa has no AGPR cap; this mirrors the kernel writer's maxLimitAgprs.
   maxAgprs = maxUnifiedVgprs - maxVgprs;
 }
