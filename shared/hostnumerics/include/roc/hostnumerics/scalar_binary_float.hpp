@@ -210,8 +210,8 @@ inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
 
 template <ScalarType Type>
 inline float decodeBinaryFloatKnown(uint32_t raw) {
-    constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
     static const auto values = [] {
+        constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
         std::array<float, size_t{1} << format.totalBits> result{};
         for (uint32_t value = 0; value < result.size(); ++value)
             result[value] = decodeBinaryFloat(Type, value);
