@@ -989,3 +989,51 @@ def test_sweep_covers_the_values_of_every_launch(tmp_path):
     )
     expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
     assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]
+
+
+def test_sweep_keys_each_launch_apart_when_a_constant_launch_sorts_later(tmp_path):
+    # Only `decode` (the first launch by name) varies; `merge` carries one value under
+    # the same spec key in both UKDs. Keys not told apart by launch would let `merge`
+    # mask the variation, and one UKD would be kept.
+    def ukd(name, decode_block):
+        built = _rocke_sources(name, _DECODE_MERGE)
+        built["sources"]["decode"]["spec"] = {"block": decode_block}
+        built["sources"]["merge"]["spec"] = {"block": 32}
+        return built
+
+    _write_root(tmp_path / "src", [ukd("m_64", 64), ukd("m_128", 128)])
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["m_128", "m_64"]
+
+
+def test_launch_names_alone_separate_compile_groups(tmp_path):
+    # Same builder, source and launch count throughout; only the second launch's name
+    # differs. `a1`/`a2` and `b1`/`b2` each vary `decode`, so each pair keeps both. In
+    # one group the four would be covered by two, as `merge` and `reduce` are absent
+    # in each other's UKDs.
+    def ukd(name, second, decode_block):
+        built = _rocke_sources(name, {"decode": ("b1", None), second: ("b1", None)})
+        built["sources"]["decode"]["spec"] = {"block": decode_block}
+        built["sources"][second]["spec"] = {"block": 1}
+        return built
+
+    ukds = [
+        ukd("a1", "merge", 1),
+        ukd("a2", "merge", 2),
+        ukd("b1", "reduce", 1),
+        ukd("b2", "reduce", 2),
+    ]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert sorted(e["name"] for e in expect) == ["a1", "a2", "b1", "b2"]
+
+
+def test_authored_launch_order_does_not_change_the_compile_group(tmp_path):
+    ukds = [
+        _rocke_sources("m_a", _DECODE_MERGE),
+        _rocke_sources("m_b", dict(reversed(list(_DECODE_MERGE.items())))),
+    ]
+    assert list(ukds[1]["sources"]) == ["merge", "decode"]
+    _write_root(tmp_path / "src", ukds)
+    expect = _derive(tmp_path / "src", "gfx950", tmp_path / "w" / "root")
+    assert [e["name"] for e in expect] == ["m_a"]

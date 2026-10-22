@@ -39,9 +39,9 @@ Assertion ids:
                        the checks below read it from it)
     ukd-count          the number of shipped UKDs found in the --expect list differs
                        from its length (or is 0), or a shipped UKD is not in the list
-    ukd-kind           a UKD's shipped kernel_source.kind is not what its expected
-                       kind's output type requires ("kpack", or the authored kind for
-                       a pass-through)
+    ukd-kind           a UKD's shipped kernel_source.kind (for `sources`, the kind of
+                       each launch's entry) is not what its expected kind's output
+                       type requires ("kpack", or the authored kind for a pass-through)
     arch-field         a KDP `arch` present and not [<pass>], or a UKD `arch` absent
                        or not [<pass>], where <pass> is the expected UKD's `arch` (for
                        a KDP, that of its expected UKDs; --arch when it has none)
@@ -51,9 +51,12 @@ Assertion ids:
                        provenance.source_file differs from kernel_source.source_file
     kpack-toc          an archive is unreadable or has no entry, under its pass, for a
                        UKD's toc_key
-    sha256             the archive blob's sha256 differs from kernel_source.sha256
-    signature          a UKD's signature is not a non-empty list
-    symbol             a UKD's symbol does not appear in its archive blob
+    sha256             the archive blob's sha256 differs from kernel_source.sha256 (for
+                       `sources`, from that of each launch's entry)
+    signature          a UKD's signature (for `sources`, each launch's) is not a
+                       non-empty list
+    symbol             a UKD's symbol (for `sources`, each launch's) does not appear in
+                       its archive blob
     launches           a kpack UKD ships `kernel_source` where the expect entry lists
                        launches, or `sources` where it lists none; the shipped launch
                        names differ from the expect entry's; or a launch's shipped symbol

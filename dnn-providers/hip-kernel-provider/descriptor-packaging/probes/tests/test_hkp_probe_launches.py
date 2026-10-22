@@ -219,3 +219,10 @@ def test_a_well_formed_launches_entry_in_expect_loads(tmp_path):
     assert (
         tool._load_expect(path)[("x.kdp.json", "m")]["launches"] == EXPECTED["launches"]
     )
+
+
+def test_authored_launch_order_does_not_change_the_result():
+    ukd = _ukd()
+    ukd["sources"] = dict(reversed(list(ukd["sources"].items())))
+    assert list(ukd["sources"]) == ["merge", "decode"]
+    assert _run(ukd) == []
