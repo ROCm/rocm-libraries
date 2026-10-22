@@ -1383,6 +1383,15 @@ function(hkp_gfx950_attention_unified_2d_available out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx950_attention_unified_3d_available(<out>)
+#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionUnified3D on gfx950.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_attention_unified_3d_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionUnified3D" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_product_offers_engine(<out_var> <engine>)
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
