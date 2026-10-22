@@ -75,7 +75,7 @@ Link the CI, superbuild, and release-artifact runs that back this validation.
 
 How to prepare the validated artifacts on a GPU node so a reader can reproduce section 5.
 
-Use a GPU node matching the artifact family (e.g. `gfx94X-dcgpu` for MI300/MI325, `gfx950-dcgpu` for MI350/MI355). Download the `...-tests.tar.gz` variant (a superset of the plain distribution tarball that also carries the test executables); see [Obtaining ROCm](../Building.md#obtaining-rocm) for the filename structure and version selection. Run from an empty working directory:
+Use a GPU node matching the artifact family (e.g. `gfx94X-dcgpu` for MI300/MI325, `gfx950-dcgpu` for MI350/MI355). Download the `...-tests.tar.gz` variant (a superset of the plain distribution tarball that also carries the test executables); see [Tarballs](../Building.md#tarballs) for the filename structure and version selection. Run from an empty working directory:
 
 ```bash
 mkdir <feature>-validation

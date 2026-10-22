@@ -173,6 +173,7 @@ _SEMANTIC_FIELDS = frozenset(
         "has_softcap",
         "use_alibi",
         "use_qq_bias",
+        "use_additive_bias",
         "num_seqs",
         "kv_storage_dtype",
         "kv_layout",
@@ -205,6 +206,8 @@ def make_explicit_attention_2d_spec(
         raise ValueError(
             f"explicit 2D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    if problem.use_additive_bias:
+        raise ValueError("explicit 2D attention tuning does not support additive bias")
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
@@ -280,6 +283,8 @@ def make_explicit_attention_3d_specs(
         raise ValueError(
             f"explicit 3D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    if problem.use_additive_bias:
+        raise ValueError("explicit 3D attention tuning does not support additive bias")
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
