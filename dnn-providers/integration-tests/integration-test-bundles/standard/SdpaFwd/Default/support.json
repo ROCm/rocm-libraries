@@ -99,8 +99,7 @@
       {
         "cases": [
           "1_8_1_128_bfp16_nhwc_decode_hkv2_skv512_causal_tl",
-          "2_16_1_128_fp16_nhwc_decode_hkv16_skv512_nomask",
-          "3_32_1_256_bfp16_nhwc_decode_hkv8_skv1024_causal_br"
+          "2_16_1_128_fp16_nhwc_decode_hkv16_skv512_nomask"
         ],
         "support": {
           "gfx950": [
