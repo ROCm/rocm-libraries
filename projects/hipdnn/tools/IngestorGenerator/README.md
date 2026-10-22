@@ -380,12 +380,13 @@ the shipped engine.
 
 | Gate | Fails when |
 |---|---|
-| g1 In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder, `default` marker), or ships an unshipped spec field off its dataclass default |
+| g1 In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder, `default` marker, launch names/builders/roles), or omits a spec field the registry holds off its dataclass default |
 | g2 Selection regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection (`catalog_diff --strict-spec`, native symbols included) |
-| g3 Registry regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the manifest's enumeration, compared on the shipped spec fields |
-| g4 Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization` or `reduction` differs from the manifest's |
+| g3 Registry regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the manifest's enumeration, compared on the shipped spec fields; a `space: full` (reduced) catalog must be a `--subset` of it |
+| g4 Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization`, `reduction` or launch set differs from the manifest's |
 | g5 Vocabulary matches the matcher | a `specialization.vocabulary.dtype` spelling is not one the C++ matcher compares (or the matcher produces one the vocabulary lacks), or the matcher's source or dtype literals can no longer be read |
-| g6 Specs hydrate | an enumerated or shipped spec cannot be built by `hkp_pack`'s own `build_spec`, or the builder's support predicate declines it (the pack-time checks that need no comgr) |
+| g6 Specs hydrate | an enumerated or shipped spec (every launch of a multi-launch kernel) cannot be built by `hkp_pack`'s own `build_spec`, or the builder's support predicate declines it, or a module builder's kernels are not exactly the launched roles (the pack-time checks that need no comgr) |
+| g7 Metadata is observed | an enumerated kernel's metadata differs from what its hydrated spec reports through the manifest's `specialization.bindings` (a field, or a bound method such as `mask_type`), or a binding names an attribute the spec lacks: `hkp_pack`'s agreement check, without the compile |
 
 To update a catalog, from this directory: run the gates, diff the edited selection against
 the shipped bundle (the report is the change under review), and check with
@@ -696,6 +697,12 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  also:                           # optional: more sections in the same pack, each its own
+    - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
+      space: full                 #   candidates/request/sweep_level/space inherited unless set
+launches:                         # optional: copied onto every kernel's kernel_source
+  segment: {}                     #   a KernelModule builder's primary kernel
+  reduce: {role: reduce}          #   and each companion, by role
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -723,6 +730,13 @@ one `reduction.fields` list; in `space: full`, a varying field in none is held a
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
 `launch_surface:` block feeds `tools/launch_surface.py`.
+
+A `space: full` section (the primary or an `also`) projects its own varying performance
+knobs; the catalog's projected knobs are the union over sections, and `--plan-space`
+counts every section. A registry candidate that pairs its kernel with a reduce kernel (a
+`reduce_spec` beside the `kernel_spec`, as the attention split-KV tuning specs do) needs
+`launches`, built from one module builder, or the enumerator exits 2: the catalog would
+ship the kernel without the reduce the dispatcher launches after it.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard

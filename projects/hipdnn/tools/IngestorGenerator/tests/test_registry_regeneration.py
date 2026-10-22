@@ -60,8 +60,9 @@ def manifest_path(request) -> Path:
 @pytest.fixture(scope="module")
 def selection_path(manifest_path) -> Path:
     path = manifest_path.with_name(manifest_path.name.replace(".engine.yaml", ".yaml"))
-    if not path.is_file():
-        pytest.skip(f"no authored selection yet: {path.name}")
+    # Not a skip: a manifest without its selection gates nothing, and a strict run
+    # (hipdnn_strict_skips) would fail the skip anyway.
+    assert path.is_file(), f"{manifest_path.name} has no authored selection {path.name}"
     return path
 
 
@@ -120,30 +121,60 @@ def _key(
     metadata: dict,
     default: bool,
     fields: frozenset,
+    launches: dict,
 ):
     """`source` is the kernel_source (kind, source, builder); `default` the kernel's
-    `default` marker, which reduction keeps as the cell's floor."""
+    `default` marker, which reduction keeps as the cell's floor; `launches` maps each
+    launch name to its (source, builder, role), so a dropped or re-roled launch is a
+    different kernel."""
     return (
         name,
         source,
         default,
         _canonical({k: v for k, v in spec.items() if k in fields}),
         _canonical(metadata),
+        _canonical(launches),
+    )
+
+
+def _selection_launches(kernel) -> dict:
+    return {
+        name: [launch.source, launch.builder, launch.role]
+        for name, launch in kernel.kernel_source.launches.items()
+    }
+
+
+def _registry_launches(source: dict) -> dict:
+    return {
+        name: [
+            override.get("source", source.get("source", "")),
+            override.get("builder", source.get("builder", "")),
+            override.get("role", ""),
+        ]
+        for name, override in (source.get("launches") or {}).items()
+    }
+
+
+def _selection_key(kernel, fields: frozenset) -> tuple:
+    return _key(
+        kernel.name,
+        (
+            kernel.kernel_source.kind,
+            kernel.kernel_source.source,
+            kernel.kernel_source.builder,
+        ),
+        kernel.kernel_source.spec,
+        kernel.metadata,
+        kernel.default,
+        fields,
+        _selection_launches(kernel),
     )
 
 
 def _selection_keys(selection) -> collections.Counter:
     fields = _shipped_spec_fields(selection)
     return collections.Counter(
-        _key(
-            k.name,
-            (k.kernel_source.kind, k.kernel_source.source, k.kernel_source.builder),
-            k.kernel_source.spec,
-            k.metadata,
-            k.default,
-            fields,
-        )
-        for k in _selection_kernels(selection)
+        _selection_key(k, fields) for k in _selection_kernels(selection)
     )
 
 
@@ -156,6 +187,7 @@ def _registry_key(kernel: dict, fields: frozenset) -> tuple:
         kernel["metadata"],
         kernel.get("default", False),
         fields,
+        _registry_launches(source),
     )
 
 
@@ -184,24 +216,73 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
     fields = _shipped_spec_fields(selection)
     missing = _selection_keys(selection) - _registry_keys(registry_config, fields)
     assert not missing, sorted(key[0] for key in missing)[:10]
-    shipped = set(_selection_keys(selection))
+    off_default = _off_default(selection, manifest, registry, registry_config)
+    assert not off_default, sorted({repr(o) for o in off_default})[:10]
+
+
+def _off_default(selection, manifest, registry, registry_config) -> list:
+    """``(field, registry value, default)`` for every spec field a shipped selection
+    kernel omits while the registry spec it keys onto holds it off its dataclass
+    default: hkp_pack compiles the default for an omitted field.
+
+    The omitted fields are read from the SELECTION kernel: one the selection drops
+    from every kernel also leaves the shared key, so the registry kernel's own spec
+    keys would never name it."""
+    fields = _shipped_spec_fields(selection)
+    by_key = {_selection_key(k, fields): k for k in _selection_kernels(selection)}
     enumeration = enumerator.enumerate_space(manifest, registry)
     kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
     assert len(kernels) == len(enumeration.rows)
     off_default = []
     for (_, ks, _), kernel in zip(enumeration.rows, kernels):
-        if _registry_key(kernel, fields) not in shipped:
+        shipped = by_key.get(_registry_key(kernel, fields))
+        if shipped is None:
             continue
-        # A kernel's own spec keys, not the selection's union: a field only some kernels
-        # carry (a section's codegen knobs) must still sit at its default on the rest.
-        carried = kernel["kernel_source"]["spec"]
+        carried = shipped.kernel_source.spec
         for f in dataclasses.fields(ks):
             if f.name in carried:
                 continue
             default = _field_default(f)
             if default is dataclasses.MISSING or getattr(ks, f.name) != default:
                 off_default.append((f.name, getattr(ks, f.name), default))
-    assert not off_default, sorted({repr(o) for o in off_default})[:10]
+    return off_default
+
+
+def test_g1_catches_a_field_the_selection_omits_from_every_kernel(
+    selection, manifest, registry, registry_config
+):
+    """The negative control for g1's default check: drop, from EVERY selection kernel,
+    a field whose value differs from its dataclass default. The selection still keys
+    onto the registry (the field left the shared key with it), and hkp_pack would
+    compile the default, so the gate must fire on that field."""
+    import copy
+
+    fields = _shipped_spec_fields(selection)
+    registry_keys = _registry_keys(registry_config, fields)
+    spec_cls = type(enumerator.enumerate_space(manifest, registry).rows[0][1])
+    defaults = {f.name: _field_default(f) for f in dataclasses.fields(spec_cls)}
+    target = next(
+        (
+            name
+            for kernel in _selection_kernels(selection)
+            if _selection_key(kernel, fields) in registry_keys
+            for name, value in kernel.kernel_source.spec.items()
+            if defaults.get(name, dataclasses.MISSING) is not dataclasses.MISSING
+            and value != defaults[name]
+            and all(name in k.kernel_source.spec for k in _selection_kernels(selection))
+        ),
+        None,
+    )
+    assert target, "no selection field sits off its default in every kernel"
+    stripped = copy.deepcopy(selection)
+    for kernel in _selection_kernels(stripped):
+        kernel.kernel_source.spec.pop(target, None)
+    assert not (
+        _selection_keys(stripped)
+        - _registry_keys(registry_config, _shipped_spec_fields(stripped))
+    ), "the stripped selection should still key onto the registry"
+    off_default = _off_default(stripped, manifest, registry, registry_config)
+    assert target in {name for name, _, _ in off_default}, (target, off_default[:5])
 
 
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
@@ -241,14 +322,23 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     assert rc == 0, report.out + report.err
 
 
+def _full_space(manifest: dict) -> bool:
+    decl = manifest["enumerate"]
+    return decl.get("space") == "full" or any(
+        section.get("space", decl.get("space")) == "full"
+        for section in decl.get("also") or []
+    )
+
+
 def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
-    registry_config, shipped, tmp_path_factory, capsys
+    manifest, registry_config, shipped, tmp_path_factory, capsys
 ):
     """The manifest's own enumeration, rendered and diffed against the shipped
     catalog: the gate that the registry, not the authored selection, still yields
     the shipped kernels. Keyed on the shipped spec fields, because the enumeration
     also carries `lds_k_row_pad`, which the shipped specs omit and g1 asserts sits at
-    its default."""
+    its default. A ``space: full`` catalog is reduced (variant_reduce), so the shipped
+    kernels must be a SUBSET of the enumeration rather than equal to it."""
     shipped_kdp, shipped_kmd = shipped
     out = tmp_path_factory.mktemp("g3")
     path = out / "registry.yaml"
@@ -274,6 +364,7 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
             "--regenerated-descriptors",
             str(descriptors),
         ]
+        + (["--subset"] if _full_space(manifest) else [])
     )
     report = capsys.readouterr()
     assert rc == 0, report.out + report.err
@@ -293,6 +384,11 @@ def test_g4_the_selection_header_equals_the_manifest(
     assert selection.kernel_source_kind == built.kernel_source_kind
     assert selection.workspace_policy == built.workspace_policy
     assert selection.authored_subpath == built.authored_subpath
+    # One handler, one launch set (launchNames()): every selection kernel launches what
+    # the manifest declares, by name, builder and role.
+    assert {
+        _canonical(_selection_launches(k)) for k in _selection_kernels(selection)
+    } == {_canonical(_selection_launches(k)) for k in _selection_kernels(built)}
 
 
 #: The graph dtypes the C++ matcher translates, as ``return std::string("<spelling>")``.
@@ -308,8 +404,7 @@ def _matcher_source(manifest: dict) -> Path:
         for surface in manifest.get("launch_surface") or []
         if surface.get("cpp_mirror", "").split(":")[0].endswith("Native.cpp")
     ]
-    if not mirrors:
-        pytest.skip("manifest names no *Native.cpp in launch_surface")
+    assert mirrors, "manifest names no *Native.cpp in launch_surface"
     return enumerator._REPO / mirrors[0]
 
 
@@ -356,7 +451,7 @@ def _hydration_failures(manifest: dict, specs: list) -> list:
     builder = manifest["builder"]
     spec_cls = rocke_compile._resolve_spec_class(module, getattr(module, builder))
     failures = []
-    for name, source in specs:
+    for name, source in _launch_sources(specs):
         compile_arch = rocke_compile.rocke_compile_arch(
             arch, source.get("target", rocke_compile.ROCKE_TARGET_NATIVE)
         )
@@ -366,6 +461,21 @@ def _hydration_failures(manifest: dict, specs: list) -> list:
         except Exception as exc:
             failures.append(f"{name}: {type(exc).__name__}: {exc}")
     return failures
+
+
+def _launch_sources(specs: list) -> list:
+    """``(name, kernel_source)`` per launch: a multi-launch kernel's launches each
+    compile on their own (a packed KDP carries them as ``sources``), a single-launch
+    kernel is itself. A role-only launch shares the kernel's builder and spec."""
+    out = []
+    for name, source in specs:
+        launches = source.get("launches") or source.get("sources")
+        if not launches:
+            out.append((name, source))
+            continue
+        for launch, override in launches.items():
+            out.append((f"{name}[{launch}]", {**source, **override, "launches": None}))
+    return out
 
 
 def test_g6_every_enumerated_spec_hydrates_and_passes_the_builders_predicate(
@@ -390,7 +500,13 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
     """The same check on the bytes that ship, which can name a spec field the
     registry has since renamed."""
     kdp = json.loads(shipped[0].read_text())
-    specs = [(k["name"], k["kernel_source"]) for k in kdp["kernelDescriptors"]]
+    specs = [
+        (
+            k["name"],
+            k["kernel_source"] if "kernel_source" in k else {"sources": k["sources"]},
+        )
+        for k in kdp["kernelDescriptors"]
+    ]
     assert specs
     failures = _hydration_failures(manifest, specs)
     assert not failures, failures[:5]
@@ -405,7 +521,30 @@ _PREDICATE_DECLINES = {
     # The tiled 2D/3D kernels are built for head_size 64, 128 and 256.
     "build_unified_attention_2d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled": {"head_size": 96},
+    "build_unified_attention_3d_tiled_module": {"head_size": 96},
 }
+
+
+def test_g6_the_module_yields_exactly_the_launched_roles(manifest, registry_config):
+    """hkp_pack requires the launches to claim exactly the kernels a module builder
+    compiles: its primary (no role) and every companion role. Build the first kernel's
+    module (IR only, no comgr) and compare."""
+    kernel = registry_config["packs"][0]["kernels"][0]
+    launches = kernel["kernel_source"].get("launches")
+    if not launches:
+        assert not manifest.get("launches")
+        return
+    module = importlib.import_module(
+        rocke_compile._module_from_source(manifest["source"])
+    )
+    builder = getattr(module, manifest["builder"])
+    spec_cls = rocke_compile._resolve_spec_class(module, builder)
+    built = builder(
+        rocke_compile.build_spec(spec_cls, kernel["kernel_source"]["spec"]),
+        arch=manifest["arch"],
+    )
+    roles = {override.get("role", "") for override in launches.values()}
+    assert roles == {""} | set(getattr(built, "companions", {})), roles
 
 
 def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_config):
