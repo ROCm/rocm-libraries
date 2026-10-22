@@ -7,10 +7,14 @@ companion by role. The spec is the one rocKE's strided decode candidate selects,
 what is packed here is what the runtime would build. Needs rocke and libamd_comgr;
 like the other packs in this directory, a machine without them fails
 (conftest `rocke_available`) rather than skipping.
+
+`HKP_PACK_OUTPUT_DIR`, when set, receives the packed tree under `gfx942_unified_3d`,
+for a later run of `hipdnn_validate_descriptors`.
 """
 
 import dataclasses
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -29,12 +33,14 @@ BUILDER = "build_unified_attention_3d_module"
 PREDICATE = "supports_unified_attention_3d_module"
 
 
-def _selected_segment_spec():
-    """The segment spec rocKE's strided decode candidate selects for one decode batch.
+def _selected_specs():
+    """The segment and reduce specs rocKE's strided decode candidate selects.
 
     D128 fp16, GQA 32/8, 16-token blocks, one query token per sequence. The
     candidate fills in the decode grid, the streaming K/V cache policy and
-    `num_segments` from its split rule.
+    `num_segments` from its split rule. The reduce spec is the runtime's own
+    pairing (`_strided_3d_specs_from_problem`), built apart from the module
+    builder's `reduce_spec_for_segment`, so it can referee that helper.
     """
     from dispatch.attention import AttentionRequest, dispatch_attention
 
@@ -60,7 +66,7 @@ def _selected_segment_spec():
         True,
         "stream",
     )
-    return spec
+    return spec, result.spec.reduce_spec
 
 
 def _root(tmp_path, spec):
@@ -86,8 +92,11 @@ def _root(tmp_path, spec):
     return root
 
 
-def _pack(root, tmp_path, hipcc, rocm_kpack_dir):
-    out = tmp_path / "out"
+def _pack(root, tmp_path, hipcc, rocm_kpack_dir, export=None):
+    override = os.environ.get("HKP_PACK_OUTPUT_DIR")
+    out = Path(override) / export if override and export else tmp_path / "out"
+    if out.exists():
+        shutil.rmtree(out)
     run_pipeline(
         source_root=root,
         arches=[ARCH],
@@ -112,13 +121,16 @@ def _expected_signature(kernel):
 def test_the_split_kv_module_packs_both_launches_from_one_object(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    from kernels.gfx942.attention_tiled_3d import (
-        build_unified_attention_3d_module,
-        reduce_spec_for_segment,
-    )
+    from kernels.gfx942.attention_tiled_3d import build_unified_attention_3d_module
 
-    spec = _selected_segment_spec()
-    out = _pack(_root(tmp_path, spec), tmp_path, hipcc, rocm_kpack_dir)
+    spec, runtime_reduce = _selected_specs()
+    out = _pack(
+        _root(tmp_path, spec),
+        tmp_path,
+        hipcc,
+        rocm_kpack_dir,
+        export="gfx942_unified_3d",
+    )
     kdp = out / ARCH / "multi_launch.kdp.json"
     ukd = read_shipped(kdp)["kernelDescriptors"][0]
 
@@ -131,7 +143,7 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
         assert segment[key] == reduce[key], key
     assert segment["symbol"] != reduce["symbol"]
     assert segment["symbol"] == spec.kernel_name()
-    assert reduce["symbol"] == reduce_spec_for_segment(spec).kernel_name()
+    assert reduce["symbol"] == runtime_reduce.kernel_name()
 
     # Each signature is read off the object for its own symbol, and matches the
     # params of the kernel the builder emitted for that launch.
@@ -162,7 +174,7 @@ def test_a_module_the_predicate_refuses_is_refused_at_pack_time(
     # D256 with 64-token blocks and no tile override: the segment's Q/K/V tiles
     # overflow gfx942's 64 KiB LDS.
     spec = dataclasses.replace(
-        _selected_segment_spec(), head_size=256, block_size=64, tile_size_override=None
+        _selected_specs()[0], head_size=256, block_size=64, tile_size_override=None
     )
     ok, reason = supports_unified_attention_3d_module(spec, arch=ARCH)
     assert not ok and "LDS" in reason
