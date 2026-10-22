@@ -343,6 +343,9 @@ public:
                                                 rocsparse_hipFreeManaged(d));
                 break;
             }
+            // Consume the error so that it is not reported by the next hipGetLastError
+            // call, as in report_allocation_failure.
+            static_cast<void>(hipGetLastError());
             throw;
         }
 #else
