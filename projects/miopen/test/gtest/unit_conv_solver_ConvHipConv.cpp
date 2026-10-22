@@ -216,7 +216,8 @@ auto GetConvGroupedStride2TestCases(miopenDataType_t datatype, bool tf32_compute
     };
 }
 
-// Grouped 3x3 at stride 2 with 8 channels per group, which gfx950 serves in fprop only.
+// Grouped 3x3 at stride 2 with 8 channels per group, which hipconv supports on gfx950 except
+// in TF32 wgrad.
 auto GetConvGrouped8cStride2TestCases(miopenDataType_t datatype, bool tf32_compute = false)
 {
     constexpr auto layout = miopenTensorNHWC;
@@ -1015,14 +1016,28 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     SmokeGrouped8cStride2,
     GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParamsGfx125X()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvGrouped8cStride2TestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeGrouped8cStride2,
     GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParamsGfx125X()),
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvGrouped8cStride2TestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeGrouped8cStride2,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvGrouped8cStride2TestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeGrouped8cStride2,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvGrouped8cStride2TestCases(miopenBFloat16))));
 
