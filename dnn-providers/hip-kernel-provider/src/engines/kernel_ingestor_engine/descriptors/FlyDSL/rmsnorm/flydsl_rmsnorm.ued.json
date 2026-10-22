@@ -6,7 +6,9 @@
   "graph_match": {
     "native": "hipkernel.flydsl_rmsnorm.graph_match"
   },
-  "heuristic": "b1392faf-ca0b-527d-a523-1d723ce4420f",
+  "sort_kernel_catalog": {
+    "default": "b1392faf-ca0b-527d-a523-1d723ce4420f"
+  },
   "metadata": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
   "knobs": [
     "block_threads"

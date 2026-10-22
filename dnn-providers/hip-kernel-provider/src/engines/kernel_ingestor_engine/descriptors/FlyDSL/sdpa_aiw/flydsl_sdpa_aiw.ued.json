@@ -6,7 +6,9 @@
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_aiw.graph_match"
   },
-  "heuristic": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328",
+  "sort_kernel_catalog": {
+    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328"
+  },
   "metadata": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
   "knobs": [
     "head_dim_max",

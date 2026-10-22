@@ -2,6 +2,9 @@
   "version": "1.0",
   "id": "f2cc7bac-2ce6-5237-8ceb-d9350ea7f62b",
   "name": "flydsl rmsnorm_bwd selector",
-  "kind": "native",
-  "payload": "hipkernel.flydsl_rmsnorm_bwd.score"
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_rmsnorm_bwd.score"
+  }
 }

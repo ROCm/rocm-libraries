@@ -6,7 +6,9 @@
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_rdna.graph_match"
   },
-  "heuristic": "4757c57d-f563-5463-9b4a-d22d0c4e1332",
+  "sort_kernel_catalog": {
+    "default": "4757c57d-f563-5463-9b4a-d22d0c4e1332"
+  },
   "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
   "knobs": [
     "block_m",

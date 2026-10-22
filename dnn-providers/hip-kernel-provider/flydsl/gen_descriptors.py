@@ -327,8 +327,11 @@ class OpDescriptors:
                 "version": DESCRIPTOR_VERSION,
                 "id": self.uhd_id,
                 "name": f"flydsl {self.op} selector",
-                "kind": "native",
-                "payload": f"{self.symbols}.score",
+                # The engine's own native scorer, higher first, as the ingestor ranked
+                # it before UHD models (RFC 0019): no trained model ships yet.
+                "adapter": "native",
+                "objective": "max",
+                "native": {"symbol": f"{self.symbols}.score"},
             },
             f"{self.stem}.udd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -339,7 +342,8 @@ class OpDescriptors:
             f"{self.stem}.ued.json": {
                 **ued,
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
-                "heuristic": self.uhd_id,
+                # The UHD that orders the engine's kernel catalog, on every arch.
+                "sort_kernel_catalog": {"default": self.uhd_id},
                 "metadata": self.kmd_id,
                 "knobs": [
                     f
