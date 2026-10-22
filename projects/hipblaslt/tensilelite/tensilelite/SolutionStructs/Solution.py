@@ -6941,7 +6941,7 @@ class Solution(collections.abc.Mapping):
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
-    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
+    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"] and not state.get("_DualPeriodMXFP8"):
       # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
       if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
         reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
@@ -6960,16 +6960,6 @@ class Solution(collections.abc.Mapping):
         and state["LoopIters"] >= 4 and state["ProblemType"]["MacDataTypeA"].numBytes() < 4
         and state["ProblemType"]["MacDataTypeB"].numBytes() < 4):
       reject(state, printRejectionReason, "PrefetchLocalRead=2 with ClusterLocalRead=0 and numByte<4 does not support LoopIters>=4")
-      return
-
-    # The dual-period MXFP8 schedule overlays its own A/B operand double-buffering
-    # on a plr=0 base, so it cannot also run the generic local-read prefetch.
-    # PrefetchLocalRead is still being adjusted above (SIA=2 forces it to 1), so the
-    # check has to happen here rather than where _DualPeriodMXFP8 is first derived.
-    # Such solutions are only reachable from a parameter search; the tuned library
-    # ships PrefetchLocalRead=0 for every dual-period macrotile.
-    if state.get("_DualPeriodMXFP8") and state["PrefetchLocalRead"] != 0:
-      reject(state, printRejectionReason, "dual-period MXFP8 requires PrefetchLocalRead=0, got %u" % state["PrefetchLocalRead"])
       return
 
     # reject iterations are not enough to use wider local read

@@ -1386,15 +1386,15 @@ def mainLoop(writer, kernel):
   # global reads two DUs deep into LDS with one operand set), matching the
   # non-subtile F8 MT256x256 register profile so large MTs fit in 256 VGPRs.
   #
-  # Only the dual-period path reads it. Every other subtile kernel keeps the
-  # legacy derivation (plr = 0 if pgr == 0 else 1, selected by plr=-1): honouring
-  # an explicit PrefetchLocalRead=1 on a pgr=0 kernel would double-buffer operands
-  # that used to share one set, which overflows the VGPR budget on wide tiles
+  # The dual-period path pins a plr=0 base and overlays its own partition-directed
+  # prefetch, so it never consults the solution's PrefetchLocalRead -- exactly as
+  # ForceUnrollSubIter pins numItersPLR/numVgprBuffer in the non-subtile path.
+  # Every other subtile kernel keeps the legacy derivation
+  # (plr = 0 if pgr == 0 else 1, selected by plr=-1): honouring an explicit
+  # PrefetchLocalRead=1 on a pgr=0 kernel would double-buffer operands that used
+  # to share one set, which overflows the VGPR budget on wide tiles
   # (e.g. BBS MT496x64 MIWaveTile [31,1] needs 256).
-  schedulerPlr = -1
-  if kernel.get("_DualPeriodMXFP8"):
-      schedulerPlr = int(kernel["PrefetchLocalRead"]) \
-          if kernel["PrefetchLocalRead"] in (0, 1) else -1
+  schedulerPlr = 0 if kernel.get("_DualPeriodMXFP8") else -1
 
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
@@ -1413,8 +1413,6 @@ def mainLoop(writer, kernel):
   schedulerPartitionOrder = "m-major"
   forcedPartition = None
   if schedulerPartitionPrefetch:
-      assert schedulerPlr == 0, \
-          "dual-period MXFP8 subtile kernel requires PrefetchLocalRead=0"
       schedulerPartitionOrder = "n-major"
       schedulerDoubleBuffer = ('A', 'B')
       # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
