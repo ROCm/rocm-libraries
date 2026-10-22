@@ -53,7 +53,6 @@ else()
             -Wno-lifetime-safety-intra-tu-suggestions
             -Wno-lifetime-safety-cross-tu-suggestions
             -Wno-lifetime-safety-lifetimebound-violation
-            -Wno-experimental-lifetime-safety-field-origin-escape
             -Wno-lifetime-safety-lifetimebound-invalidation
             -Wno-lifetime-safety-experimental-field-origin-escape
             -Wno-unknown-warning-option
