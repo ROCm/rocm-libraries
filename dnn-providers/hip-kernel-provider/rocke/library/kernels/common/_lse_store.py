@@ -354,6 +354,7 @@ def validate_unified_lse(
     sinks=None,
     alibi_slopes=None,
     qq_bias=None,
+    additive_bias=None,
 ):
     """Caller-owned LSE contract for unified attention: FP32 [total_q, Hq, 1].
 
@@ -380,5 +381,6 @@ def validate_unified_lse(
             "sinks": sinks,
             "alibi_slopes": alibi_slopes,
             "qq_bias": qq_bias,
+            "additive_bias": additive_bias,
         },
     )

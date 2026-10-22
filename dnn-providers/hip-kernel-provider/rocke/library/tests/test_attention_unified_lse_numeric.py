@@ -403,11 +403,12 @@ def test_cached_lse_off_2d_graph_never_serves_an_lse_request():
 
 
 def _aliases_last_lse_element(lse, like):
-    """An int32 tensor shaped like ``like`` whose first element shares memory
-    with the last element of ``lse``: the smallest possible overlap."""
+    """A tensor with ``like``'s 4-byte dtype and shape whose first element
+    shares memory with the last element of ``lse``: the smallest possible
+    overlap, and otherwise a valid input."""
     pool = torch.empty(lse.numel() - 1 + like.numel(), device="cuda")
     overlapping_lse = pool[: lse.numel()].view(lse.shape)
-    alias = pool[lse.numel() - 1 :].view(torch.int32).view(like.shape)
+    alias = pool[lse.numel() - 1 :].view(like.dtype).view(like.shape)
     return overlapping_lse, alias
 
 
@@ -424,6 +425,7 @@ def _aliases_last_lse_element(lse, like):
         "cu_seqlens_q",
         "seqused_k",
         "block_table",
+        "additive_bias",
     ],
 )
 def test_malformed_lse_buffer_is_refused_before_launch(case):
@@ -446,8 +448,18 @@ def test_malformed_lse_buffer_is_refused_before_launch(case):
         lse, su = _aliases_last_lse_element(lse, su)
     elif case == "block_table":
         lse, bt = _aliases_last_lse_element(lse, bt)
+    bias = {}
+    if case == "additive_bias":
+        # The reduce must never write LSE over a bias it (or a later replay)
+        # reads. The alias is otherwise a valid bias (float32, long enough for
+        # the broadcast strides), so only the overlap check can refuse it.
+        problem = dataclasses.replace(problem, use_additive_bias=True)
+        like = torch.empty(4096, device="cuda")
+        lse, storage = _aliases_last_lse_element(lse, like)
+        bias = dict(additive_bias=storage, additive_bias_sq_stride=0)
     out = torch.full_like(q, float("nan"))
-    with pytest.raises(ValueError, match="lse"):
+    aliased = ("cu_seqlens_q", "seqused_k", "block_table", "additive_bias")
+    with pytest.raises(ValueError, match=f"lse overlaps {case}" if case in aliased else "lse"):
         run_unified_attention_torch(
             problem=problem,
             q=q,
@@ -461,6 +473,7 @@ def test_malformed_lse_buffer_is_refused_before_launch(case):
             softcap=0.0,
             backend="3d",
             lse=lse,
+            **bias,
         )
     torch.cuda.synchronize()
     assert torch.isnan(out).all(), "a kernel ran for a malformed lse buffer"

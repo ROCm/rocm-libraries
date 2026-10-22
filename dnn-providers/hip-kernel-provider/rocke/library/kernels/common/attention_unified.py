@@ -5747,6 +5747,7 @@ def run_unified_attention_torch(
         sinks=sinks,
         alibi_slopes=alibi_slopes,
         qq_bias=qq_bias,
+        additive_bias=additive_bias,
     )
     if execution is not None:
         if not isinstance(execution, Attention3DExecution):
