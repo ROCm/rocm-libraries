@@ -1274,6 +1274,192 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
         << recorder.getRecordedLogsAsString();
 }
 
+namespace
+{
+
+/// A native handler that launches the named stages of a multi-launch kernel. Its stages are
+/// the only thing it declares; the checks under test never call prepare or launch.
+class LaunchesHandler : public NoopDispatchHandler<TestHandle>
+{
+public:
+    explicit LaunchesHandler(std::set<std::string> launches)
+        : _launches(std::move(launches))
+    {
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        return _launches;
+    }
+
+private:
+    std::set<std::string> _launches;
+};
+
+/// A kernel with one kpack entry per launch name, in the shape the loader produces: the
+/// default `source`, and every entry its own symbol of one module.
+KernelDescriptor makeMultiLaunchKernel(const DescriptorId& id,
+                                       const std::string& name,
+                                       int64_t blockSize,
+                                       const std::vector<std::string>& launches)
+{
+    KernelDescriptor kernel = makeKernel(id, name, blockSize, "FLOAT");
+    kernel.source = KernelSource{};
+    for(const auto& launch : launches)
+    {
+        auto source = makeKpackSource();
+        source.symbol = launch + "_kernel";
+        kernel.sources.emplace(launch, std::move(source));
+    }
+    return kernel;
+}
+
+/// The catalog of one pack holding @p kernels under a handler that launches
+/// @p handlerLaunches, for the graph and device the other tests here use.
+std::vector<KernelDefinition> definitionsUnderHandler(const std::set<std::string>& handlerLaunches,
+                                                      const std::vector<KernelDescriptor>& kernels)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+    const LaunchesHandler handler(handlerLaunches);
+    const ScopedDispatchRegistration<TestHandle> registration("test.dispatch", handler);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels = kernels;
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x80));
+    const auto properties = testDeviceProperties();
+    return manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+}
+
+} // namespace
+
+/// RFC 0017 §8.6: a kernel that applicability accepts must be launchable. A handler launches
+/// the launches it declares, so a kernel carrying the same set is kept, with every entry
+/// reaching the definition under its name.
+TEST(TestKernelIngestorStateManager, KeepsAMultiLaunchKernelWhoseLaunchesTheHandlerDeclares)
+{
+    const auto definitions = definitionsUnderHandler(
+        {"decode", "merge"},
+        {makeMultiLaunchKernel(testId(0x81), "decode_merge", 64, {"decode", "merge"})});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    ASSERT_EQ(definitions.front().sources.size(), 2U);
+    EXPECT_EQ(definitions.front().sources.at("decode").symbol, "decode_kernel");
+    EXPECT_EQ(definitions.front().sources.at("merge").symbol, "merge_kernel");
+}
+
+/// Two launch names may name one kernel (the same library, toc_key and symbol): the handler
+/// declares both names, so the kernel is kept and both entries reach the definition.
+TEST(TestKernelIngestorStateManager, KeepsAKernelWhoseTwoLaunchesNameOneKernel)
+{
+    auto kernel = makeMultiLaunchKernel(testId(0x8C), "twice", 64, {"decode", "merge"});
+    kernel.sources.at("merge") = kernel.sources.at("decode");
+
+    const auto definitions = definitionsUnderHandler({"decode", "merge"}, {kernel});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    ASSERT_EQ(definitions.front().sources.size(), 2U);
+    EXPECT_EQ(definitions.front().sources.at("merge").symbol, "decode_kernel");
+    EXPECT_EQ(definitions.front().sources.at("decode").symbol, "decode_kernel");
+}
+
+/// A multi-launch kernel is adaptable only if every launch is: with all launches adaptable it
+/// is kept, and one launch this build has no adapter for drops the whole kernel (alone -- its
+/// sibling still serves) even though the other launch is adaptable.
+TEST(TestKernelIngestorStateManager, AMultiLaunchKernelIsAdaptableOnlyIfEveryLaunchIs)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    auto allAdaptable
+        = makeMultiLaunchKernel(testId(0x8D), "all_adaptable", 64, {"decode", "merge"});
+    auto oneNot = makeMultiLaunchKernel(testId(0x8E), "one_not", 128, {"decode", "merge"});
+    oneNot.sources.at("merge").kind = KernelSourceKind::HSACO_FILE;
+
+    const auto definitions = definitionsUnderHandler({"decode", "merge"}, {allAdaptable, oneNot});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "all_adaptable");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'one_not'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The default handler launches one kernel from `kernel_source`: a two-launch kernel under it
+/// would reach prepare() with no `source` to read. Dropped alone -- its sibling still serves.
+TEST(TestKernelIngestorStateManager, DropsAMultiLaunchKernelUnderASingleLaunchHandler)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto definitions = definitionsUnderHandler(
+        {},
+        {makeMultiLaunchKernel(testId(0x82), "decode_merge", 64, {"decode", "merge"}),
+         makeKernel(testId(0x83), "kernel_sibling", 256, "FLOAT")});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kernel_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'decode_merge'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "{decode, merge}"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The reverse: a handler that launches two stages cannot launch a kernel that has one.
+TEST(TestKernelIngestorStateManager, DropsASingleLaunchKernelUnderAMultiLaunchHandler)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto definitions = definitionsUnderHandler(
+        {"decode", "merge"},
+        {makeKernel(testId(0x84), "kernel_single", 64, "FLOAT"),
+         makeMultiLaunchKernel(testId(0x85), "decode_merge", 256, {"decode", "merge"})});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "decode_merge");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_single'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "(one launch, 'kernel_source')"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The count matching is not enough: a renamed launch is a kernel the handler cannot find
+/// the entry of, and a kernel with an extra launch is one it does not launch.
+TEST(TestKernelIngestorStateManager, DropsAKernelWhoseLaunchNamesDifferFromTheHandlers)
+{
+    const auto definitions = definitionsUnderHandler(
+        {"decode", "merge"},
+        {makeMultiLaunchKernel(testId(0x86), "renamed", 64, {"decode", "reduce"}),
+         makeMultiLaunchKernel(testId(0x87), "extra", 128, {"decode", "merge", "reduce"}),
+         makeMultiLaunchKernel(testId(0x88), "missing_one", 192, {"merge", "other"}),
+         makeMultiLaunchKernel(testId(0x89), "exact", 256, {"merge", "decode"})});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "exact");
+}
+
+/// A dropped kernel claims nothing. The two kernels below share their whole metadata tuple and
+/// arch, which the state manager refuses to construct if both claim it, so the one that survives
+/// loading is proof the dropped one never reached the claim.
+TEST(TestKernelIngestorStateManager, ADroppedMultiLaunchKernelDoesNotClaimItsMetadataTuple)
+{
+    const auto definitions = definitionsUnderHandler(
+        {},
+        {makeMultiLaunchKernel(testId(0x8A), "dropped", 64, {"decode", "merge"}),
+         makeKernel(testId(0x8B), "kept", 64, "FLOAT")});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kept");
+}
+
 /// `source.library` is relative, so a definition is only usable together with the
 /// directory of the descriptor that declared it. The state manager carries the anchor
 /// through unchanged; the loader is what fills it.

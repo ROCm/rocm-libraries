@@ -434,6 +434,13 @@ struct KernelDescriptor
     DescriptorId id;
     std::string name;
     KernelSource source;
+    /// RFC 0017 §15.1: the launches of a multi-launch kernel, keyed by launch name, in place
+    /// of @c source. Empty for every kernel that ships one launch, which keeps `source`;
+    /// non-empty always holds at least two entries and leaves `source` default. The
+    /// descriptor only lists the entries: launch order, workspace and the hand-off between
+    /// stages belong to the native dispatch handler of the pack, which also declares the
+    /// names it launches.
+    std::map<std::string, KernelSource> sources;
     /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
     int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.

@@ -5,16 +5,17 @@ SPDX-License-Identifier: MIT
 
 # GPU CI with pinned rocKE reference kernels
 
-This is the methodology and extension guide. See the [SDPA](sdpa-test-reference.md)
-and [convolution](conv-test-reference.md) guides for numerical contracts and bundle status,
+This is the methodology and extension guide. See the [SDPA](../../sdpa_reference/docs/sdpa-test-reference.md)
+and [convolution](../../conv_reference/docs/conv-test-reference.md) guides for numerical contracts and bundle status,
 and the [reference workflow](gpu-reference-workflow.md) for all authoring and publication steps,
-and [GPU attention coverage](gpu-attention-test-coverage.md)
+and [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-SDPA has eight gfx942, seven gfx950, and eight standalone FP16 WMMA configurations
-each on gfx1151 and gfx1201. Convolution has sixteen qualified gfx942
-forward cases; the operation guides and DVC pointers record the current bundle
-identities. All five pairs are enrolled for default installation. Both operations share
+Each architecture adapter's `CASES` defines its cohort; from the rocKE root,
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists it,
+and [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
+lists the pairs enrolled for default installation. The operation guides and DVC
+pointers record the current bundle identities. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
@@ -26,20 +27,24 @@ The gfx1200 adapter uses the same compiler target but
 awaits its own GPU qualification and installation enrollment. On a gfx1200
 runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
 77; that result is not gfx1200 pinned coverage. See
-[family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
-Local packaging checks used TheRock's artifact descriptor, splitter, archive
-compression, and downloader selection to verify processor-specific payload routing
-and file-hash preservation for all five published pairs. These checks used the
-Python reference installation harness and local archive transport; native provider
-execution needs separate coverage.
-Further architectures, convolution gradients, KDA, and GDN remain future work.
+[family CI selection](../../sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection).
+Before convolution/gfx950 was published, local packaging checks used TheRock's
+artifact descriptor, splitter, archive compression, and downloader selection to
+verify processor-specific payload routing and file-hash preservation for the
+five pairs then published. These checks used a CMake installation of the Python
+reference suites without native binaries, and local archive transport; native
+provider execution needs separate coverage.
+Further architectures, pinned gradient replay, KDA, and GDN remain future work.
+Separate convolution gradient suites check dgrad and wgrad cases on gfx942 and
+gfx950 directly against live NumPy oracles; see the [coverage guide](../../../../docs/conv-coverage-roadmap.md).
 
 Offline qualification compares a pinned rocKE implementation with an independent
 reference. Ordinary CI executes its precompiled kernels to generate answers,
 then compares current rocKE against those answers using the remaining accuracy
 budget. CI neither downloads tensor answers nor qualifies its own baseline.
-Both operations use float64 NumPy references offline. Convolution qualification
-can additionally cross-check CPU Torch when explicitly requested. Reference CI
+Both operations use float64 NumPy references offline. Qualification can
+additionally cross-check Torch when explicitly requested: CPU Torch for
+convolution, and CPU or ROCm GPU Torch for SDPA. Reference CI
 uses an environment without Torch; shared worker launchers block its import.
 
 ```mermaid
@@ -64,7 +69,6 @@ For one qualified input case and one required output/metric pair, let:
 - `T` be the original test's tolerance in its specified norm.
 - `B` be a qualified upper bound on the old version's error, `norm(O - R)`.
 - `D` be a conservative evaluation of `norm(N - O)` in CI.
-- `M > 0` be reserved numerical and engineering headroom.
 
 Use the same norm, coordinates, masks, and normalization in both comparisons.
 The triangle inequality gives:
@@ -76,9 +80,9 @@ norm(N - R) <= norm(N - O) + norm(O - R) <= D + B
 Set the online comparison limit `C` so that:
 
 ```text
-C <= T - B - M
+C < T - B
 accept only when D <= C
-therefore norm(N - R) <= T - M < T
+therefore norm(N - R) <= D + B <= C + B < T
 ```
 
 Qualification and CI must reject non-finite bounds or distances, negative
@@ -94,9 +98,17 @@ qualification result**, would be:
 | --- | ---: |
 | Original accuracy limit `T` | 0.020 |
 | Qualified old-to-reference upper bound `B` | 0.002 |
-| Reserved margin `M` | 0.001 |
-| Maximum new-to-old distance `C` | 0.017 |
-| Maximum accepted new-to-reference error | 0.019 |
+| Maximum new-to-old distance `C` | Rounded strictly below 0.018 |
+| Accepted new-to-reference error | Strictly below 0.020 |
+
+The comparison limit is rounded strictly below the exact rational remainder
+`T-B`, preserving the strict test threshold without a fixed reserve. A 5%
+reserve does not add cases or reference coverage. If several independent
+references are enabled, B is the maximum pinned-to-reference bound across all
+of them; the same triangle inequality then applies to each recorded answer.
+The NumPy–Torch gap can be recorded diagnostically without a separate cutoff.
+Older authenticated bundles retain their recorded reserve and limit until
+requalification; new bundles mark the no-reserve policy explicitly.
 
 The budget stays strictly below `0.020`. The actual bound must come from
 qualification. Do not assume a particular fraction of the tolerance is
@@ -142,7 +154,7 @@ Bind all of the following into a versioned case identity:
 | Initial state | Mutable buffers, state pools, workspaces that require initialization, and relevant RNG state |
 | Old implementation | Source revision, engine backend, compiled artifact hashes, ABI/runner version, and target features |
 | Independent reference | Implementation/version, algorithm, precision, and relevant numerical settings |
-| Numerical contract | Every norm, original tolerance, fixed scale/mask, qualified bound, comparison limit, and margin |
+| Numerical contract | Every norm, original tolerance, fixed scale/mask, qualified bound, comparison limit, and budget policy |
 | Qualified result | Joint output digest and, where useful for diagnostics, per-output digests |
 | Provenance | Qualification command, environment, device target, and validation report |
 
@@ -277,18 +289,20 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942 for convolution |
+| `operation.json` | Operation id that bundle manifests declare; a package with `architectures/registry.json` is registered as an operation without any shared list |
+| `architectures/registry.json` | Processors enrolled for qualification, verification, and the `cases` and `diff` commands; enrollment does not publish a pair |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
-| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
-| `worker.py` | Operation-specific HIP execution and replay |
+| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 adapters, so editing it requires requalifying every published WMMA pair. Dense adapters retain their own cohorts, and every adapter its candidate selection |
+| `worker.py` | Operation-specific launch and replay-argument binding for `../reference_common/worker.py`, the shared HIP execution loop |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
-| `cli.py` | Snapshot, qualification, and verification commands |
+| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands and the host-only `cases` and `diff` cohort checks |
+| `../reference_common/pinned_tests.py` | The required GPU comparisons and failure controls each `test_<operation>_pinned_reference.py` binds |
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
 | `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
@@ -318,11 +332,12 @@ matching test artifact. Do not place references in release `engines/arch_content
 or leave architecture-specific code objects in the generic test tree.
 
 One archive per operation/architecture keeps qualification and updates independent.
-The gfx942 archive currently contains 1,900,516 compressed bytes; most extracted
-bytes are the frozen Python runtime, not the eight code objects. Additional cases
-usually add kernels and manifest records, but runtime/runner changes and new
-operation/architecture archives can add overhead too. Do not assume all future
-growth is kernel payload or introduce cross-bundle deduplication prematurely.
+When published, the gfx942 archive contained 1,900,516 compressed bytes; most
+extracted bytes were the frozen Python runtime, not its code objects. Its DVC
+pointer records the current size. Additional cases usually add kernels and
+manifest records, but runtime/runner changes and new operation/architecture
+archives can add overhead too. Do not assume all future growth is kernel
+payload or introduce cross-bundle deduplication prematurely.
 
 ## 6. Extend coverage deliberately
 
@@ -342,8 +357,8 @@ The numerical requirements below supplement the common workflow.
 
 The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
 `engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
-now used by the [forward-convolution infrastructure](conv-test-reference.md).
-That harness has a published bounded gfx942 forward cohort. Further convolution coverage still needs:
+now used by the [forward-convolution infrastructure](../../conv_reference/docs/conv-test-reference.md).
+That harness has published bounded forward cohorts. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
    separately. Record dimensions, groups, strides, padding, dilation, layouts,
@@ -362,8 +377,8 @@ That harness has a published bounded gfx942 forward cohort. Further convolution 
 4. **Execution and replay adapters.** Invoke production dispatch for current code,
    export the exact baseline code objects and ABI, initialize workspaces, and check
    all required outputs. Multi-kernel operations need ordered replay and complete
-   observable-state checks; the existing single-kernel SDPA worker is not a generic
-   convolution runner.
+   observable-state checks; the shared single-kernel, single-output worker loop is
+   not a generic convolution runner.
 
 Use the [reference workflow](gpu-reference-workflow.md) for implementation
 integration, tests, qualification, and publication. Direction-specific failure
@@ -433,9 +448,9 @@ difference a regression.
 ## 9. Validation evidence and practical reproduction
 
 The current baseline, archive identity, numerical measurements, and CI results are
-recorded in the [SDPA guide](sdpa-test-reference.md#validation-evidence) and
-[convolution guide](conv-test-reference.md#validation-evidence). The
-[coverage map](gpu-attention-test-coverage.md) distinguishes declared shapes from
+recorded in the [SDPA guide](../../sdpa_reference/docs/sdpa-test-reference.md#validation-evidence) and
+[convolution guide](../../conv_reference/docs/conv-test-reference.md#validation-evidence). The
+[coverage map](../../../../docs/gpu-attention-test-coverage.md) distinguishes declared shapes from
 executed tests and retains the gaps in older Torch-dependent suites.
 
 GPU qualification and audit work used Enroot under Slurm. Request the intended GPU,
@@ -462,11 +477,11 @@ selection. A successful host-only test run cannot establish GPU qualification.
 
 ## Source anchors
 
-- [Current gfx942 tests and original tolerances](../library/tests/test_attention_dense_gfx942_numeric.py)
-- [Architecture adapter](../library/tests/sdpa_reference/architectures/gfx942/__init__.py)
-- [SDPA numerical contract](../library/tests/sdpa_reference/contract.py)
-- [Convolution forward reference and normalization](../library/tests/test_conv_fwd_correctness.py)
-- [Installed CTest registration](../platform/CMakeLists.txt)
-- [Provider test categories](../../ROCKE_ENGINE_test_categories_external.yaml)
+- [Current gfx942 tests and original tolerances](../../test_attention_dense_gfx942_numeric.py)
+- [Architecture adapter](../../sdpa_reference/architectures/gfx942/__init__.py)
+- [SDPA numerical contract](../../sdpa_reference/contract.py)
+- [Convolution forward reference and normalization](../../test_conv_fwd_correctness.py)
+- [Installed CTest registration](../../../../platform/CMakeLists.txt)
+- [Provider test categories](../../../../../ROCKE_ENGINE_test_categories_external.yaml)
 - [TheRock artifact descriptor](https://github.com/ROCm/TheRock/blob/7440cb8578f4daae0d85a428fadd6645dc5464a0/ml-libs/artifact-hipkernelprovider.toml)
-- [Existing rocKE testing strategy](../TESTING.md)
+- [Existing rocKE testing strategy](../../../../TESTING.md)

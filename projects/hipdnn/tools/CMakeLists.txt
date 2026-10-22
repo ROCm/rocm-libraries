@@ -248,6 +248,52 @@ endif()
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()
 
+# DescriptorGenerator pytest suite, then the IngestorGenerator one below. Build tree only, like
+# the smoke tests above. Both run under the hipdnn_strict_skips plugin: ctest reports a suite
+# whose cases all skip as a pass, so a missing compiler or binary would otherwise go unnoticed.
+if(HIPDNN_ENABLE_TOOLING_TESTS AND HIPDNN_SKIP_TESTS)
+    message(STATUS "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS is ignored because HIPDNN_SKIP_TESTS is ON")
+endif()
+if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON needs a Python3 interpreter")
+    endif()
+    if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+        message(
+            FATAL_ERROR
+                "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON also needs HIPDNN_ENABLE_KERNEL_INGESTOR=ON: "
+                "the IngestorGenerator suite runs the hipdnn_validate_descriptors tool that option "
+                "builds. Enable it, or configure with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
+    endif()
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import pytest, yaml, jinja2"
+        RESULT_VARIABLE _hipdnn_tooling_imports
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _hipdnn_tooling_imports EQUAL 0)
+        message(
+            FATAL_ERROR
+                "hipDNN: pytest, PyYAML and Jinja2 are not all importable by "
+                "${Python3_EXECUTABLE}, so the tooling tests cannot run. Install "
+                "tools/IngestorGenerator/requirements.txt for that interpreter, or configure "
+                "with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
+    endif()
+    set(HIPDNN_STRICT_SKIPS_PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pytest_plugins")
+    add_test(
+        NAME hipdnn_descriptor_generator_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                "${CMAKE_CURRENT_SOURCE_DIR}/DescriptorGenerator/tests" -v
+    )
+    set_tests_properties(
+        hipdnn_descriptor_generator_pytest
+        PROPERTIES ENVIRONMENT_MODIFICATION
+                   "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
+    )
+    _apply_hipdnn_test_category_labels(hipdnn_descriptor_generator_pytest)
+endif()
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
     # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target
@@ -407,6 +453,25 @@ endforeach()
         )
         set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
 
+        # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
+        # kernels and one naming a kernel under both launch names. It has its own engine,
+        # and the same driver script. A validator that stopped declaring the pack's launch
+        # names drops this engine and fails here, which the single-launch root cannot show.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
+            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
+        )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE "hipkernel:ValidateFixtureMultiLaunch")
+        add_test(
+            NAME hipdnn_validate_descriptors_smoke_multi_launch
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT}"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE}"
+                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        )
+        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
+
         # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
@@ -473,5 +538,94 @@ endforeach()
         endif()
 
         _apply_hipdnn_test_category_labels(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS})
+
+        # IngestorGenerator pytest suite. It is registered here, after the validator target:
+        # tests/test_round_trip.py runs that binary (HIPDNN_VALIDATE_DESCRIPTORS) and
+        # tests/test_native_stub.py needs the include list written below.
+        if(HIPDNN_ENABLE_TOOLING_TESTS)
+            # TestAgainstTheRealBuild gates a build packed with the gfx950 attention engine; the
+            # lanes pack other descriptors, so it would fail there.
+            add_test(
+                NAME hipdnn_ingestor_generator_pytest
+                COMMAND
+                    "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                    "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests" -v
+                    --deselect=tests/test_coverage_gate.py::TestAgainstTheRealBuild
+            )
+
+            set(_hipdnn_ingestor_pytest_env
+                "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
+            )
+
+            # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
+            # follow ALIAS targets, so resolve to the real target.
+            set(_hipdnn_stub_include_exprs "")
+            foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
+                if(TARGET ${_stub_dep})
+                    get_target_property(_stub_real ${_stub_dep} ALIASED_TARGET)
+                    if(NOT _stub_real)
+                        set(_stub_real ${_stub_dep})
+                    endif()
+                    string(
+                        APPEND
+                        _hipdnn_stub_include_exprs
+                        "$<JOIN:$<TARGET_PROPERTY:${_stub_real},INTERFACE_INCLUDE_DIRECTORIES>,\n>\n"
+                    )
+                endif()
+            endforeach()
+            file(
+                GENERATE
+                OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+                CONTENT "${_hipdnn_stub_include_exprs}"
+            )
+            list(
+                APPEND
+                _hipdnn_ingestor_pytest_env
+                "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+            )
+
+            # test_packs_formatting.py takes the formatter from HIPDNN_CLANG_FORMAT, else PATH.
+            # The lanes install clang-format into the interpreter's own environment, whose
+            # scripts directory is not on PATH, so name it here.
+            get_filename_component(_hipdnn_py_dir "${Python3_EXECUTABLE}" DIRECTORY)
+            find_program(
+                HIPDNN_INGESTOR_CLANG_FORMAT
+                NAMES clang-format
+                HINTS "${_hipdnn_py_dir}"
+                NO_DEFAULT_PATH
+            )
+            if(HIPDNN_INGESTOR_CLANG_FORMAT)
+                list(APPEND _hipdnn_ingestor_pytest_env
+                     "HIPDNN_CLANG_FORMAT=${HIPDNN_INGESTOR_CLANG_FORMAT}"
+                )
+            endif()
+
+            if(DEFINED TEST_ENVIRONMENT)
+                list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})
+            endif()
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT
+                                                            "${_hipdnn_ingestor_pytest_env}"
+            )
+
+            # PYTHONPATH makes the plugin named by -p importable.
+            set(_hipdnn_ingestor_pytest_env_mod
+                "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
+            )
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                list(APPEND _hipdnn_ingestor_pytest_env_mod ${TEST_ENVIRONMENT_MODIFICATION})
+            endif()
+            # Give test_native_stub.py the compiler that builds this tree; its lib/llvm/bin is not
+            # on the lanes' PATH.
+            get_filename_component(_hipdnn_stub_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+            list(APPEND _hipdnn_ingestor_pytest_env_mod
+                 "PATH=path_list_prepend:${_hipdnn_stub_cxx_dir}")
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT_MODIFICATION
+                                                            "${_hipdnn_ingestor_pytest_env_mod}"
+            )
+
+            _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_pytest)
+        endif()
     endif()
 endif()
