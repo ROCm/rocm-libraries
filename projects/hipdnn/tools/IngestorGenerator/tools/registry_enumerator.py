@@ -25,6 +25,7 @@ kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classificati
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
 import enum
 import importlib
@@ -157,6 +158,14 @@ def _validate_manifest(path: str, manifest: dict) -> None:
         path,
         "reduction",
         "a mapping",
+    )
+    # Carried verbatim into every kernel_source; the generator's loader owns the
+    # launch count and name rules (`config_loader._build_launches`).
+    _require(
+        manifest.get("launches") is None or isinstance(manifest["launches"], dict),
+        path,
+        "launches",
+        "a mapping of launch name to override",
     )
 
 
@@ -907,6 +916,11 @@ def build_config(
                 "source": manifest["source"],
                 "builder": manifest["builder"],
                 "spec": spec,
+                **(
+                    {"launches": copy.deepcopy(manifest["launches"])}
+                    if manifest.get("launches") is not None
+                    else {}
+                ),
             },
             "metadata": metadata,
         }

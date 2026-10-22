@@ -101,6 +101,108 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
 
 
+_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
+
+
+def test_manifest_launches_reach_every_generated_kernel_source(probe):
+    """A split-KV engine (segment + reduce): every generated kernel is a
+    multi-launch descriptor, as the generator's loader reads it."""
+    from codegen.config_loader import load_config
+
+    probe.manifest["launches"] = copy.deepcopy(_LAUNCHES)
+    assert _run_probe(probe) == 0
+    raw = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert all(k["kernel_source"]["launches"] == _LAUNCHES for k in raw)
+    kernels = [k for p in load_config(probe.out).packs for k in p.kernels]
+    assert len(kernels) == len(raw) > 0
+    for kernel in kernels:
+        launches = kernel.kernel_source.launches
+        assert list(launches) == ["segment", "reduce"]
+        assert launches["reduce"].role == "reduce"
+        assert launches["segment"].builder == kernel.kernel_source.builder
+
+
+def _run_both_ways(tmp: Path, manifest: dict, capsys, *argv) -> list:
+    """Run the CLI on ``manifest`` without, then with, `launches`; return each
+    run's exit code, stdout and generated config (parsed, or None)."""
+    runs = []
+    for launches in (None, _LAUNCHES):
+        m = copy.deepcopy(manifest)
+        if launches:
+            m["launches"] = copy.deepcopy(launches)
+        path = synth.write_manifest(tmp / "m.engine.yaml", m)
+        out = tmp / "c.yaml"
+        out.unlink(missing_ok=True)
+        capsys.readouterr()
+        code = re_.main(["--manifest", str(path), *argv])
+        text = capsys.readouterr().out.replace(str(out), "<out>")
+        runs.append(
+            (code, text, yaml.safe_load(out.read_text()) if out.exists() else None)
+        )
+    return runs
+
+
+def _without_launches(config: dict) -> dict:
+    for kernel in config["packs"][0]["kernels"]:
+        assert kernel["kernel_source"].pop("launches") == _LAUNCHES
+    return config
+
+
+def test_manifest_launches_change_nothing_but_the_kernel_sources(probe, capsys):
+    """`--out` and `--shapes`: the same kernels, the same report."""
+    (shapes := probe.tmp / "shapes.json").write_text(
+        '[{"hdim": 64, "heads": 8, "dtype": "bf16", "mask": 1}]'
+    )
+    out = str(probe.tmp / "c.yaml")
+    for argv in (["--out", out], ["--out", out, "--shapes", str(shapes)]):
+        plain, launched = _run_both_ways(probe.tmp, probe.manifest, capsys, *argv)
+        assert plain[0] == launched[0] == 0, argv
+        assert plain[1] == launched[1], argv
+        assert _without_launches(launched[2]) == plain[2], argv
+    assert "covered: 1 shapes" in launched[1]
+
+
+def test_manifest_launches_leave_the_plan_space_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    plain, launched = _run_both_ways(tmp_path, manifest, capsys, "--plan-space")
+    assert plain[0] == launched[0] == 0
+    assert plain[1] == launched[1] != ""
+
+
+def test_a_manifest_without_launches_emits_no_launches(probe):
+    """Regression guard: the single-launch output is unchanged."""
+    assert _run_probe(probe) == 0
+    raw = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert all(
+        set(k["kernel_source"]) == {"kind", "source", "builder", "spec"} for k in raw
+    )
+
+
+def test_manifest_launches_must_be_a_mapping(probe, capsys):
+    probe.manifest["launches"] = ["segment", "reduce"]
+    assert _run_probe(probe) == 2
+    assert "launches" in capsys.readouterr().err
+    assert not probe.out.exists()
+
+
+@pytest.mark.parametrize(
+    "launches",
+    [{"segment": {}}, {"segment": {}, "Reduce": {"role": "reduce"}}],
+    ids=["single-launch", "bad-name"],
+)
+def test_bad_manifest_launches_are_refused_when_the_config_loads(probe, launches):
+    """The enumerator only carries `launches`; the loader owns the one rule for
+    their count and names, and refuses the generated config."""
+    from codegen.config_loader import ConfigError, load_config
+
+    probe.manifest["launches"] = launches
+    assert _run_probe(probe) == 0
+    with pytest.raises(ConfigError, match="launches"):
+        load_config(probe.out)
+
+
 def _declined(m):
     m["enumerate"]["cells"][0]["values"] = [[96, 8]]
 
