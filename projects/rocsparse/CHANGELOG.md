@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed `rocsparse_Xcsr2hyb` leaving dangling ELL and COO pointers in a reused HYB matrix when the new conversion had no ELL or COO part (including `m == 0` or `n == 0`). A later `rocsparse_destroy_hyb_mat` or `rocsparse_Xcsr2hyb` freed them a second time.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
