@@ -3211,7 +3211,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # Skip to end if not doing the global write
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
         skCloseLoopLabel = Label("PersistentLoopClose", "")
-        if isStreamKSpatialCluster(kernel):
+        if isStreamKSpatialCluster(kernel) and kernel["ClusterBarrier"]:
             alphaOwner = Label(writer.labels.getNameInc("SKClusterAlphaOwner"), "")
             module.add(SCBranchSCC1(labelName=alphaOwner.getLabelName()))
             module.add(SBarrier(True, True, True, comment="alpha-zero nonowner consumes cluster arrive"))

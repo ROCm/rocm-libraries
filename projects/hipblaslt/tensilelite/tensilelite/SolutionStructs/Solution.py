@@ -1368,6 +1368,12 @@ class Solution(collections.abc.Mapping):
     # each block, so both preserve the physical peers used by multicast masks.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
                                   and (not isPersistent(state) or streamKCluster(state)))
+    # One-axis StreamK clusters share only B. Independent TDM loads avoid
+    # multicast synchronization that outweighs the saved loads on gfx1250.
+    # Keep spatial scheduling and ABI2; two-axis clusters share both operands
+    # and retain multicast, as does the DataParallel path.
+    if isStreamKSpatialCluster(state) and state["ClusterDim"][1] == 1:
+      clusterPeersShareTiles = False
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles

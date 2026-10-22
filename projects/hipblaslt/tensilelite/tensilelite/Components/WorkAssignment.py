@@ -136,7 +136,7 @@ class WorkAssignment(Component):
 
     def persistentMulticastPrologueSignal(self, writer, kernel):
         module = Module('Persistent multicast prologue signal')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.addComment0('cluster B-multicast: elect wave 0 to signal the cluster barrier (pairs first-load wait)')
@@ -152,7 +152,7 @@ class WorkAssignment(Component):
         test is uniform across the cluster and the last tile leaves no arrive.
         """
         module = Module('Persistent cluster next-tile arrive')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
@@ -168,7 +168,7 @@ class WorkAssignment(Component):
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
         module = Module('Persistent multicast zero-iteration cluster wait')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.addComment0('cluster B-multicast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)')

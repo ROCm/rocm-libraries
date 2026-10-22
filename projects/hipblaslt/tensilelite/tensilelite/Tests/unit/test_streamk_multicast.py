@@ -150,6 +150,21 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
+    @pytest.mark.parametrize("shape,multicast", [
+        ([2, 1], False), ([4, 1], False), ([8, 1], False),
+        ([2, 2], True), ([4, 2], True), ([2, 4], True)])
+    def test_streamk_one_axis_cluster_avoids_multicast_overhead(self, tmp_path, shape, multicast):
+        cfg = _write_variant(tmp_path, "streamk.yaml", fork_overrides={
+            "TileProcessingStrategy": ["StreamK"], "ClusterDim": [shape],
+            "StreamKFixupTreeReduction": [1]})
+        states = _derive_states(cfg)
+        assert states
+        for state in states:
+            assert streamKCluster(state)
+            assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
+            assert state["Multicast"] is multicast
+            assert state["ClusterBarrier"] is multicast
+
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
                              fork_overrides={"StreamKAtomic": [1]})
@@ -298,6 +313,15 @@ class TestMulticastGate:
     def test_multicast_on_when_flag_true(self):
         st = _mc_state(Multicast=True)
         assert streamKMulticast(st)
+
+    def test_independent_spatial_loads_have_no_cluster_handshake(self):
+        from Tensile.Components.WorkAssignment import StaticGrid
+        assignment = StaticGrid()
+        for method in (assignment.persistentMulticastPrologueSignal,
+                       assignment.persistentClusterNextTileArrive,
+                       assignment.persistentMulticastZeroIterClusterWait):
+            module = method(writer=None, kernel=_mc_state(ClusterDim=[2, 1], ClusterBarrier=False))
+            assert not list(module.flatitems())
 
     def test_next_tile_arrive_inert_without_cluster(self):
         from Tensile.Components.WorkAssignment import StaticGrid
