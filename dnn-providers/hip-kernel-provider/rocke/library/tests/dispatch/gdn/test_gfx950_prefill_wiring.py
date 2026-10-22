@@ -303,7 +303,18 @@ def test_split_tile_agrees_with_the_builder_it_mirrors():
 
 
 @pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
-@pytest.mark.parametrize("field", ["batch", "seqlen", "num_k_heads", "num_v_heads", "head_k_dim", "head_v_dim", "chunk_size"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "batch",
+        "seqlen",
+        "num_k_heads",
+        "num_v_heads",
+        "head_k_dim",
+        "head_v_dim",
+        "chunk_size",
+    ],
+)
 @pytest.mark.parametrize("npint", [np.int32, np.int64], ids=["int32", "int64"])
 def test_numpy_integral_fields_dispatch(algorithm, field, npint):
     """A numpy integer is an integer: every int field must dispatch end to end

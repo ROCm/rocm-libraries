@@ -116,8 +116,12 @@ def _scan_tile(req: GdnPrefillRequest, value_splits: int) -> KdaTileSpec:
     # so canonicalize it exactly like _scan_spec's head dims.
     chunk = req.effective_chunk_size
     return KdaTileSpec(
-        chunk=int(chunk) if isinstance(chunk, Integral) and not isinstance(chunk, bool) else chunk,
-        **tile
+        chunk=(
+            int(chunk)
+            if isinstance(chunk, Integral) and not isinstance(chunk, bool)
+            else chunk
+        ),
+        **tile,
     )
 
 
@@ -165,8 +169,7 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
         # identity cannot serialize.
         kv_group=(
             int(req.kv_group)
-            if isinstance(req.kv_group, Integral)
-            and not isinstance(req.kv_group, bool)
+            if isinstance(req.kv_group, Integral) and not isinstance(req.kv_group, bool)
             else req.kv_group
         ),
     )

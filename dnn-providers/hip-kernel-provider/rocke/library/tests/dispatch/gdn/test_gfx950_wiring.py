@@ -868,9 +868,7 @@ class TestNumpyIntegralFields(unittest.TestCase):
                     self.assertEqual(
                         got.kernel_id.request_hash, ref.kernel_id.request_hash
                     )
-                    self.assertEqual(
-                        got.kernel_id.spec_hash, ref.kernel_id.spec_hash
-                    )
+                    self.assertEqual(got.kernel_id.spec_hash, ref.kernel_id.spec_hash)
                     self.assertEqual(got.grid, ref.grid)
 
     def test_numpy_ints_reach_the_spec_as_plain_ints(self):

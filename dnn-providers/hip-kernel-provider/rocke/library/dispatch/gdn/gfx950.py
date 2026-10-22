@@ -150,7 +150,9 @@ def make_spec(req: GdnDecodeRequest, tile: Tuple[int, int, int]) -> GdnDecodeSpe
     ``is_valid_spec`` still rejects it.
     """
     num_warps, warp_threads_k, blocks_per_v_dim = tile
-    cast_dim = lambda v: int(v) if isinstance(v, Integral) and not isinstance(v, bool) else v
+    cast_dim = lambda v: (
+        int(v) if isinstance(v, Integral) and not isinstance(v, bool) else v
+    )
     return dc.replace(
         GdnDecodeSpec(),
         num_k_heads=cast_dim(req.num_k_heads),
