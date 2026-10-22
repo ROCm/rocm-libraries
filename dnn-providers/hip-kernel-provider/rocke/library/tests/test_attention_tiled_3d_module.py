@@ -97,12 +97,12 @@ def _segment(**kw):
     return UnifiedAttention3DTiledSpec(**base)
 
 
-def _strided_request(head_size, block_size, batch, dtype="fp16"):
+def _strided_request(head_size, block_size, batch, dtype="fp16", nhead_q=32):
     from dispatch.attention import AttentionRequest
 
     return AttentionRequest(
         batch=batch,
-        nhead_q=32,
+        nhead_q=nhead_q,
         nhead_k=8,
         seqlen_q=1,
         seqlen_k=4096,
@@ -115,12 +115,12 @@ def _strided_request(head_size, block_size, batch, dtype="fp16"):
     )
 
 
-def _runtime_specs(head_size, block_size, batch, dtype="fp16"):
+def _runtime_specs(head_size, block_size, batch, dtype="fp16", nhead_q=32):
     """``(segment, reduce)`` that rocKE's strided decode candidate selects."""
     from dispatch.attention.strided_decode import make_candidate
 
     selected = make_candidate().select_spec(
-        _strided_request(head_size, block_size, batch, dtype)
+        _strided_request(head_size, block_size, batch, dtype, nhead_q)
     )
     return selected.kernel_spec, selected.reduce_spec
 
@@ -218,15 +218,23 @@ def _lower(kernel):
     return lowered.llvm_text, lowered.options
 
 
-@pytest.mark.parametrize("head_size, block_size", [(64, 16), (128, 32), (256, 64)])
-def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size):
+@pytest.mark.parametrize("gqa", [1, 4, 16])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("block_size", [16, 32, 64])
+@pytest.mark.parametrize("head_size", [64, 128, 256])
+def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size, dtype, gqa):
     """The catalog drops ``num_seqs`` (batch) from the kernel axes: on the decode
-    grid the segment IR must not depend on it. The reduce comparison is
-    structural only -- the reduce spec has no ``num_seqs`` -- so the segment half
-    and the off-grid control carry the test. Off the decode grid ``num_seqs``
-    sizes the sequence binary search, so the segment IR differs there -- the
-    control that shows this comparison can see a change."""
-    seg_1, _ = _runtime_specs(head_size, block_size, batch=1)
+    grid the segment IR must not depend on it. Covers every catalog D x block x
+    dtype, with the tile the runtime picks for (D, block), at GQA ratios 1/4/16
+    (8 KV heads). The reduce comparison is structural only -- the reduce spec has
+    no ``num_seqs`` -- so the segment half and the off-grid control carry the
+    test. Off the decode grid ``num_seqs`` sizes the sequence binary search, so
+    the segment IR differs there -- the control that shows this comparison can
+    see a change."""
+    seg_1, _ = _runtime_specs(head_size, block_size, 1, dtype, nhead_q=8 * gqa)
+    expected_tile = block_size // 2 if head_size >= 128 and block_size >= 32 else None
+    assert seg_1.tile_size_override == expected_tile
+    assert seg_1.num_queries_per_kv == gqa and seg_1.dtype == dtype
     # Pin num_segments: the runtime picks it from batch, which this test varies.
     seg_1 = replace(seg_1, num_segments=16)
     seg_64 = replace(seg_1, num_seqs=64)
@@ -243,6 +251,13 @@ def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size):
         for s in (seg_1, seg_64)
     ]
     assert _lower(off_grid[0]) != _lower(off_grid[1])
+
+
+@pytest.mark.parametrize("tile", [None, 16])
+def test_resolved_tile_size_override_is_the_tile_the_kernel_runs(tile):
+    """A catalog records the knob through this accessor; ``None`` is one block."""
+    spec = _segment(block_size=32, tile_size_override=tile)
+    assert spec.resolved_tile_size_override() == spec.tile_size == (tile or 32)
 
 
 def test_module_compiles_to_one_code_object():

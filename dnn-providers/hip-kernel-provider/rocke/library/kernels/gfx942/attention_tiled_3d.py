@@ -227,6 +227,11 @@ class UnifiedAttention3DTiledSpec:
             else self.block_size
         )
 
+    def resolved_tile_size_override(self) -> int:
+        """The KV tile the kernel runs (``None`` -> one block per tile), so a
+        catalog can record the knob as a non-null value."""
+        return self.tile_size
+
     @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
