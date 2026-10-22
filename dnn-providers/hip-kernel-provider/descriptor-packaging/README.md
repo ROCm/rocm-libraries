@@ -305,6 +305,24 @@ argument list back out of the compiled object — sniffing a clang offload bundl
 ELF, and dropping compiler-appended `hidden_` arguments — catching a kernel whose
 parameters changed while its bytes stayed internally consistent.
 
+### Companion code objects
+
+A kernel that launches a second code object after its own -- the split-KV reduce that
+follows an attention segment kernel -- carries it as `companions`, a list of kernel
+sources in launch order. An authored companion is a rocKE source
+(`{"kind": "rocke", "source", "builder", "spec", "target"?}`); it is only accepted beside a
+`hip`, `rocke` or `hsaco` `kernel_source`, because only those run a producer.
+
+The packer compiles each companion as a variant of its own, validates it against its own
+builder's support predicate (a builder with none cannot be a companion), and packs and
+signs it exactly as the UKD's `kernel_source`. It ships as the packed kernel's `companions`
+list of the same five-key `kpack` sources above, and its build inputs are recorded under
+`provenance.companions`. A companion is **not a catalog entry**: it has no metadata, arch
+or priority of its own and is neither matched nor ranked, so the UKD's tuple still selects
+exactly one kernel and the pack that launches it loads each companion by position. A
+companion is asked for no compile observations, since there is no metadata for them to
+agree with.
+
 ## Emitted-bundle census
 
 Native proof executes typed provider registration/loading plus a finalized census;

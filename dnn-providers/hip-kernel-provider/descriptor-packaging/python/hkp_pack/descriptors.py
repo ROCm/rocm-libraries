@@ -250,6 +250,52 @@ def validate_rocke_target(ks, where):
         )
 
 
+# The kinds a companion may be authored as. Only rocke has a producer that needs nothing
+# beyond the source, builder and spec a companion carries; a companion has no `arch` of
+# its own to satisfy an hsaco's requirement, and a hip source would resolve relative to
+# a descriptor that does not own it.
+_COMPANION_KINDS = ("rocke",)
+# The kinds of UKD that run a producer. A UKD shipped as authored (embedded_source) or
+# already packed (kpack) has no compile step to run its companions in.
+_COMPANION_OWNER_KINDS = ("hip", "rocke", "hsaco")
+
+
+def _validate_companions(ukd, where):
+    """An optional `companions` list: further code objects the kernel launches after its own.
+
+    Each is an authored kernel source in its own right, packed and signed like the UKD's
+    `kernel_source`, and shipped as the `companions` of the packed kernel. They are not
+    catalog entries -- no metadata, arch or priority -- so the UKD they belong to alone
+    decides whether they are selected.
+    """
+    if "companions" not in ukd:
+        return
+    companions = ukd["companions"]
+    if not isinstance(companions, list) or not companions:
+        raise HkpPackError(
+            f"{where} 'companions' must be a non-empty list of kernel sources "
+            "(omit the key for none)"
+        )
+    owner = ukd["kernel_source"]["kind"]
+    if owner not in _COMPANION_OWNER_KINDS:
+        raise HkpPackError(
+            f"{where} declares companions on a '{owner}' kernel_source, which "
+            "runs no producer to compile them"
+        )
+    for position, ks in enumerate(companions):
+        label = f"{where} companions[{position}]"
+        if not isinstance(ks, dict) or "kind" not in ks:
+            raise HkpPackError(f"{label} is not a kernel source with a 'kind'")
+        if ks["kind"] not in _COMPANION_KINDS:
+            raise HkpPackError(
+                f"{label} has unsupported kind '{ks['kind']}' "
+                f"(expected one of {', '.join(repr(k) for k in _COMPANION_KINDS)})"
+            )
+        _require(ks, ["source", "builder", "spec"], label)
+        validate_rocke_spec(ks["spec"], label)
+        validate_rocke_target(ks, label)
+
+
 def _reject_nonbare_arch(archs, where):
     """Reject any arch entry that is not a bare gfx base target id.
 
@@ -365,6 +411,7 @@ def _validate_ukd_fields(ukd, where, log=print):
             f"(expected one of {', '.join(repr(k) for k in UKD_KINDS)})"
         )
     _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
+    _validate_companions(ukd, where)
     if kind == "hip":
         _require(ks, ["source", "entry"], where)
         if "build" not in ks:

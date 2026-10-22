@@ -323,13 +323,15 @@ def _shipped_rocke_checks():
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
         pack = json.loads(path.read_text())
         for kernel in pack.get("kernelDescriptors", []):
-            source = kernel["kernel_source"]
-            if source.get("kind") != "rocke":
-                continue
-            target = source.get("target", ROCKE_TARGET_NATIVE)
-            for arch in kernel.get("arch") or pack.get("arch", []):
-                key = (source["source"], source["builder"], target, arch)
-                seen.setdefault(key, source["spec"])
+            # A companion is packed under the same predicate check as the source it
+            # follows, so the shipped ones are covered here as well.
+            for source in [kernel["kernel_source"], *kernel.get("companions", [])]:
+                if source.get("kind") != "rocke":
+                    continue
+                target = source.get("target", ROCKE_TARGET_NATIVE)
+                for arch in kernel.get("arch") or pack.get("arch", []):
+                    key = (source["source"], source["builder"], target, arch)
+                    seen.setdefault(key, source["spec"])
     return [(*key, spec) for key, spec in seen.items()]
 
 

@@ -68,6 +68,30 @@ class InlineUKD:
     # rocke only: the processor the code object was compiled for -- the shard
     # arch for target "native", its LLVM generic processor for "generic".
     compile_target: object = None
+    # The further code objects this kernel launches beside its own, in launch order.
+    companions: list = field(default_factory=list)
+
+
+@dataclass
+class CompanionSource:
+    """One compiled companion of a UKD: a code object the kernel launches after its own.
+
+    Carries the fields `pack_arch` reads off a UKD to pack, key and sign a code object
+    -- and nothing a catalog entry has. A companion has no metadata, arch or priority;
+    the UKD it belongs to is the only thing that selects it, so it takes that UKD's
+    shard and is neither matched nor ranked. `id` is the owning UKD's, so a failure
+    names a descriptor the author can find.
+    """
+
+    id: str
+    symbol: str
+    variant_key: str
+    source: str
+    builder: str
+    spec: dict
+    compile_target: str
+    origin_kind: str = "rocke"
+    rel_file: object = None
 
 
 @dataclass
@@ -212,6 +236,7 @@ def _ukd_extra(ukd):
             "build",
             "arch",
             "provenance",
+            "companions",
         )
     }
 
@@ -365,6 +390,89 @@ def _compile_ukd_variant(
         raise HkpPackError(f"{where} kernel_source has unsupported kind '{kind}'")
     fields["provenance"] = copy.deepcopy(ukd.get("provenance", {}))
     return vk, symbol, fields
+
+
+def _authored_companions(ukd):
+    """The authored `companions` of a UKD: rocke sources, in launch order.
+
+    Validated at load (`descriptors._validate_companions`), so every entry here is a
+    rocke source with its builder and spec.
+    """
+    return ukd.get("companions") or []
+
+
+def _companion_variant_key(ks):
+    """Content-hash key of one companion's compile, the same key a UKD of that source gets.
+
+    Called through this module's global `rocke_variant_key` for the reason
+    `_variant_key_for` is: the walk and the prewarm must not key one variant two ways.
+    """
+    return rocke_variant_key(
+        ks["source"],
+        ks["builder"],
+        ks["spec"],
+        ks.get("target", ROCKE_TARGET_NATIVE),
+    )
+
+
+def _compile_companions(
+    ukd,
+    where,
+    arch,
+    inter_arch_dir,
+    variant_co,
+    variant_symbol,
+    variant_observations,
+    origins,
+):
+    """Compile each companion of `ukd` for arch, deduped into the caches like any variant.
+
+    A companion is checked against its own builder's support predicate by
+    `compile_rocke_variant`, exactly as a UKD's source is, so an out-of-envelope
+    companion fails the pack rather than shipping unvalidated. It is asked for no
+    observations: it has no metadata to agree with, so there is no consumer whose
+    declaration they would be compared against.
+    """
+    records = []
+    for position, ks in enumerate(_authored_companions(ukd)):
+        label = f"{where} companion {position}"
+        source = ks["source"]
+        builder = ks["builder"]
+        spec = ks["spec"]
+        target = ks.get("target", ROCKE_TARGET_NATIVE)
+        vk = _companion_variant_key(ks)
+        if vk not in variant_co:
+            co_path, captured, observations = compile_rocke_variant(
+                source, builder, spec, arch, inter_arch_dir, {}, origins, target
+            )
+            variant_co[vk] = co_path
+            variant_symbol[vk] = captured
+            variant_observations[vk] = observations
+        observations = variant_observations[vk]
+        compile_target = rocke_compile_arch(arch, target)
+        if observations.get("arch") != arch:
+            raise HkpPackError(
+                f"{label}: compile observations were taken for "
+                f"'{observations.get('arch')}', not '{arch}'"
+            )
+        if observations.get("compile_target") != compile_target:
+            raise HkpPackError(
+                f"{label}: compile observations were compiled for "
+                f"'{observations.get('compile_target')}', not '{compile_target}' "
+                f"(kernel_source.target '{target}' on shard '{arch}')"
+            )
+        records.append(
+            CompanionSource(
+                id=ukd["id"],
+                symbol=variant_symbol[vk],
+                variant_key=vk,
+                source=source,
+                builder=builder,
+                spec=spec,
+                compile_target=compile_target,
+            )
+        )
+    return records
 
 
 def _is_passthrough(ukd):
@@ -605,22 +713,43 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
         ):
             rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
             vk = _variant_key_for(ukd, rel_dir)
-            if vk is None or vk in seen:
-                continue
-            seen.add(vk)
-            jobs.append(
-                _VariantJob(
-                    vk=vk,
-                    kind=ukd["kernel_source"]["kind"],
-                    ukd=ukd,
-                    rel_dir=Path(rel_dir).as_posix(),
-                    source_root=str(source_root),
-                    out_dir="",
-                    hipcc="",
-                    arch=arch,
-                    requests=observation_requests.get(vk, {}),
+            if vk is not None and vk not in seen:
+                seen.add(vk)
+                jobs.append(
+                    _VariantJob(
+                        vk=vk,
+                        kind=ukd["kernel_source"]["kind"],
+                        ukd=ukd,
+                        rel_dir=Path(rel_dir).as_posix(),
+                        source_root=str(source_root),
+                        out_dir="",
+                        hipcc="",
+                        arch=arch,
+                        requests=observation_requests.get(vk, {}),
+                    )
                 )
-            )
+            # A companion compiles as a rocke variant of its own, after its UKD's source
+            # so first-seen order stays the walk's. The job's `ukd` is the companion
+            # alone: the worker reads nothing of it but `kernel_source`, and a failure
+            # is named by the id it carries.
+            for ks in _authored_companions(ukd):
+                companion_vk = _companion_variant_key(ks)
+                if companion_vk in seen:
+                    continue
+                seen.add(companion_vk)
+                jobs.append(
+                    _VariantJob(
+                        vk=companion_vk,
+                        kind="rocke",
+                        ukd={"id": ukd.get("id"), "kernel_source": ks},
+                        rel_dir=Path(rel_dir).as_posix(),
+                        source_root=str(source_root),
+                        out_dir="",
+                        hipcc="",
+                        arch=arch,
+                        requests={},
+                    )
+                )
     return jobs
 
 
@@ -1031,6 +1160,16 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     variant_observations,
                     origins,
                 )
+                companions = _compile_companions(
+                    sukd,
+                    where,
+                    arch,
+                    inter_arch_dir,
+                    variant_co,
+                    variant_symbol,
+                    variant_observations,
+                    origins,
+                )
                 if sid in standalone_ukds:
                     continue
                 standalone_ukds[sid] = StandaloneUKD(
@@ -1043,6 +1182,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     extra=_ukd_extra(sukd),
                     filename=sdesc.path.name,
                     rel_dir=sdesc.rel_dir,
+                    companions=companions,
                     **fields,
                 )
                 continue
@@ -1070,12 +1210,27 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 variant_observations,
                 origins,
             )
+            companions = _compile_companions(
+                ukd,
+                where,
+                arch,
+                inter_arch_dir,
+                variant_co,
+                variant_symbol,
+                variant_observations,
+                origins,
+            )
             if fields["origin_kind"] != "hsaco":
                 ukd["kernel_source"] = {
                     "kind": "hsaco",
                     "file": f"{vk}.co",
                     "symbol": symbol,
                 }
+            if companions:
+                ukd["companions"] = [
+                    {"kind": "hsaco", "file": f"{c.variant_key}.co", "symbol": c.symbol}
+                    for c in companions
+                ]
             if fields["build"] is not None:
                 ukd["build"] = fields["build"]
             new_kds.append(ukd)
@@ -1087,6 +1242,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 symbol=symbol,
                 variant_key=vk,
                 extra=_ukd_extra(ukd),
+                companions=companions,
                 **fields,
             )
             ukds.append(record)
@@ -1150,6 +1306,18 @@ def prune(flat, arch):
     )
 
 
+def _kpack_source(arch, rel_dir, group, toc_key, symbol, sha256, signature):
+    """The shipped `kernel_source` of one code object in this shard's archive."""
+    return {
+        "kind": "kpack",
+        "library": _kpack_rel(arch, rel_dir, group),
+        "toc_key": toc_key,
+        "symbol": symbol,
+        "sha256": sha256,
+        "signature": signature,
+    }
+
+
 def _rewrite_ukd_kpack(
     ukd,
     arch,
@@ -1160,6 +1328,7 @@ def _rewrite_ukd_kpack(
     toolchain_fields=None,
     rel_dir=Path("."),
     group=GROUP_NAME,
+    companion_sources=(),
 ):
     """Rewrite a compiled UKD into shipped kpack form.
 
@@ -1203,21 +1372,32 @@ def _rewrite_ukd_kpack(
     provenance = {**ukd.provenance, **provenance}
     if toolchain_fields:
         provenance.update(toolchain_fields)
+    if ukd.companions:
+        # What each companion was built from, in launch order, so a reader can tell the
+        # reduce kernel's spec from the segment kernel's without opening the archive.
+        provenance["companions"] = [
+            {
+                "origin_kind": companion.origin_kind,
+                "source": companion.source,
+                "builder": companion.builder,
+                "spec": companion.spec,
+                "compile_target": companion.compile_target,
+                **(toolchain_fields or {}),
+            }
+            for companion in ukd.companions
+        ]
     doc = {
         "id": ukd.id,
         "name": ukd.name,
-        "kernel_source": {
-            "kind": "kpack",
-            "library": _kpack_rel(arch, rel_dir, group),
-            "toc_key": toc_key,
-            "symbol": ukd.symbol,
-            "sha256": sha256,
-            "signature": signature,
-        },
+        "kernel_source": _kpack_source(
+            arch, rel_dir, group, toc_key, ukd.symbol, sha256, signature
+        ),
         "metadata": ukd.metadata,
         "priority": ukd.priority,
         "provenance": provenance,
     }
+    if companion_sources:
+        doc["companions"] = list(companion_sources)
     if set(doc) & ukd.extra.keys():
         raise HkpPackError(
             f"UKD '{ukd.id}': authored extra names produced UKD field(s) "
@@ -1333,11 +1513,15 @@ def pack_arch(
     standalone = list(inter.standalone_ukds.values())
 
     def _all_ukds():
+        # A companion is packed, keyed and signed exactly as a UKD's own code object, so
+        # it is yielded beside the UKD that carries it.
         for kdp in inter.kdps:
             for ukd in kdp.ukds:
                 yield ukd
+                yield from ukd.companions
         for ukd in standalone:
             yield ukd
+            yield from ukd.companions
 
     variant_bytes = {}
     variant_sha = {}
@@ -1445,6 +1629,20 @@ def pack_arch(
         kpack_path = kpack_dir / _kpack_filename(arch, group)
         archive.write(kpack_path)
 
+    def _companion_sources(ukd, rel_dir):
+        return [
+            _kpack_source(
+                arch,
+                rel_dir,
+                group,
+                companion.variant_key,
+                companion.symbol,
+                variant_sha[companion.variant_key],
+                variant_signature[(companion.variant_key, companion.symbol)],
+            )
+            for companion in ukd.companions
+        ]
+
     for kdp in inter.kdps:
         out_doc = dict(kdp.header)
         # Each shard targets exactly its own arch, so narrow the authored arch
@@ -1479,6 +1677,7 @@ def pack_arch(
                         # not the UKD's own notion of where it came from.
                         rel_dir=kdp.rel_dir,
                         group=group,
+                        companion_sources=_companion_sources(e, kdp.rel_dir),
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
@@ -1498,6 +1697,7 @@ def pack_arch(
             # A standalone UKD is its own file, so it anchors on its own dir.
             rel_dir=ukd.rel_dir,
             group=group,
+            companion_sources=_companion_sources(ukd, ukd.rel_dir),
         )
         _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
