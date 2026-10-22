@@ -101,6 +101,8 @@ class LibraryMetadata:
 
     ``indices`` lists the retained solutions. ``get_problem`` reuses their loaded
     records to construct a workload, without reading more files or using a GPU.
+    Records retain construction metadata; native predicates are checked by the
+    runtime against the matching device library.
     """
 
     directory: Path
@@ -261,7 +263,13 @@ def load_library_metadata(
                 raise ValueError(f"{path}: duplicate solution index {index}")
             seen.add(index)
             if record is not None:
-                records[index] = record
+                # Native predicates and custom-kernel data can dominate catalog
+                # memory. Problem construction uses only these four fields.
+                records[index] = {
+                    key: record[key]
+                    for key in ("name", "kernelName", "problemType", "sizeMapping")
+                    if key in record
+                }
     if wanted is not None and wanted - seen:
         raise KeyError(f"Solution indices not found: {sorted(wanted - seen)}")
     return LibraryMetadata(directory, target, tuple(sorted(records)), MappingProxyType(records))

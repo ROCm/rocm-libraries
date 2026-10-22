@@ -209,6 +209,20 @@ def test_compressed_precedence_missing_and_duplicate_indices(tmp_path):
         load_library_metadata(tmp_path, target="gfx942", solution_indices=[404])
 
 
+def test_catalog_retains_only_problem_construction_metadata(tmp_path):
+    record = solution()
+    record.update(
+        hardwarePredicate={"type": "TruePred"},
+        problemPredicate={"type": "TruePred"},
+        customKernel={"config": "unused kernel configuration"},
+        ideals={"64": 100.0},
+    )
+    write_shard(tmp_path, [record])
+    library = load_library_metadata(tmp_path, target="gfx942")
+    assert set(library._records[17]) == {"name", "kernelName", "problemType", "sizeMapping"}
+    assert library.get_problem(17).k == 256
+
+
 @pytest.mark.parametrize(
     "dtype,bench_type",
     [
