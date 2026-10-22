@@ -323,6 +323,20 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
+    # IR validity gate: lowers the same representative corpus and compiles every
+    # module with the host clang. The tool imports its helper modules by name, so
+    # they install together, next to the harness above. A helper left out is an
+    # ImportError at run time; tests/test_ir_validity_ci_wiring.py checks the
+    # list against the tool's imports. The library packages are staged below and
+    # reach the tool through the entry's PYTHONPATH.
+    install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
     # attention_d256, kda_chunkwise and lightning_indexer families (the one platform -> library
     # exception), so the library packages must be importable by both runners.
@@ -398,6 +412,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              # Reads the source CMakeLists.txt and the provider YAML.
+              PATTERN "test_ir_validity_ci_wiring.py" EXCLUDE
               # Configures source CMake modules; not an installed runtime test.
               PATTERN "test_gpu_references.py" EXCLUDE)
 
@@ -434,6 +450,18 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+
+    # IR validity gate. --strict makes a missing clang, a clang of another flavor
+    # and an UNVALIDATED case outside SKIP_UNVALIDATED fail the entry; without it
+    # a host with no LLVM tools would pass. No GPU is needed: the gate stops at
+    # the hsaco. The timeout is the CTest backstop; a full run takes seconds.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_ir_validity python \"${ROCKE_TEST_CTEST_REL}check_ir_validity.py\" --strict)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_ir_validity PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;ir\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 300)\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Native helpers some Python tests drive, as paths relative to the
