@@ -139,8 +139,11 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
         const int p  = i / (DW_FY * DW_FX);
         const int k  = i - p * (DW_FY * DW_FX);
         const int nc = nc0 + p;
+        // The channel count can reach INT32_MAX, so the filter base is formed in 64 bits.
         lds_wei[i] =
-            nc < planes ? dw_to_float(weights[(nc % channels) * (DW_FY * DW_FX) + k]) : 0.0f;
+            nc < planes
+                ? dw_to_float(weights[static_cast<dw_u64>(nc % channels) * (DW_FY * DW_FX) + k])
+                : 0.0f;
     }
 
     // Eight independent loads per thread are issued before their LDS stores so the global
@@ -266,7 +269,8 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const int nc   = static_cast<int>(t / out_h);
 
     const IO_DTYPE* ip = input + nc * static_cast<dw_u64>(in_h) * in_w;
-    const IO_DTYPE* wp = weights + (nc % channels) * (DW_FY * DW_FX);
+    // The channel count can reach INT32_MAX, so the filter base is formed in 64 bits.
+    const IO_DTYPE* wp = weights + static_cast<dw_u64>(nc % channels) * (DW_FY * DW_FX);
     float wr[DW_FY * DW_FX];
 #pragma unroll
     for(int i = 0; i < DW_FY * DW_FX; ++i)

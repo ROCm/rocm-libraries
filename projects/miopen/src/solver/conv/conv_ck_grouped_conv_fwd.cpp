@@ -65,17 +65,26 @@ struct GenericDepthwiseConfig
     std::size_t threads = 0;
 };
 
-int RoundUp(int v, int m) { return (v + m - 1) / m * m; }
+// The admitted shapes reach INT32_MAX in a single dimension, so every ceiling, every tile
+// count and every row-balancing sum below is formed in int64 and narrowed only once the
+// value is known to fit.
+std::int64_t CeilDiv(std::int64_t v, std::int64_t m) { return v / m + (v % m != 0 ? 1 : 0); }
 
-int Span4(int vo, int sw, int fx, int dw) { return RoundUp((vo - 1) * sw + (fx - 1) * dw + 1, 4); }
+std::int64_t RoundUp(std::int64_t v, std::int64_t m) { return CeilDiv(v, m) * m; }
+
+int Span4(int vo, int sw, int fx, int dw)
+{
+    return static_cast<int>(RoundUp(
+        static_cast<std::int64_t>(vo - 1) * sw + static_cast<std::int64_t>(fx - 1) * dw + 1, 4));
+}
 
 // Returns false when the problem cannot be launched (index or grid size limits).
 bool MakeGenericConfig(const ProblemDescription& problem, bool use_lds, GenericDepthwiseConfig& cfg)
 {
     const auto planes = static_cast<std::int64_t>(problem.GetBatchSize()) *
                         static_cast<std::int64_t>(problem.GetInChannels());
-    const auto ho = static_cast<int>(problem.GetOutHeight());
-    const auto wo = static_cast<int>(problem.GetOutWidth());
+    const auto ho = static_cast<std::int64_t>(problem.GetOutHeight());
+    const auto wo = static_cast<std::int64_t>(problem.GetOutWidth());
     const auto fy = static_cast<int>(problem.GetWeightsHeight());
     const auto fx = static_cast<int>(problem.GetWeightsWidth());
     const auto sh = problem.GetKernelStrideH();
@@ -90,65 +99,74 @@ bool MakeGenericConfig(const ProblemDescription& problem, bool use_lds, GenericD
     if(!use_lds)
     {
         // Measured on MI355X: two outputs per thread for strided filters, eight for narrow rows.
-        cfg.vo             = sw > 1 ? 2 : (wo <= 16 ? 8 : 4);
-        cfg.strips         = (wo + cfg.vo - 1) / cfg.vo;
-        const auto threads = planes * ho * cfg.strips + generic_block_size - 1;
+        cfg.vo            = sw > 1 ? 2 : (wo <= 16 ? 8 : 4);
+        const auto strips = CeilDiv(wo, cfg.vo);
+        // planes and ho each fit int32; divide first so their product cannot wrap int64.
+        if(planes > max_threads / ho)
+            return false;
+        const auto threads = planes * ho * strips + generic_block_size - 1;
         if(threads > max_threads)
             return false;
+        cfg.strips  = static_cast<int>(strips);
         cfg.threads = static_cast<std::size_t>(threads / generic_block_size * generic_block_size);
         return true;
     }
 
     cfg.vo             = (sw == 1 && wo >= 32) ? 8 : 4;
-    const auto in_rows = [&](int th) { return (th - 1) * sh + (fy - 1) * dh + 1; };
-    const auto pitch   = [&](int tw) {
-        const int cols = (tw - 1) * sw + (fx - 1) * dw + 1;
-        const int end  = (tw / cfg.vo - 1) * cfg.vo * sw + Span4(cfg.vo, sw, fx, dw);
+    const auto in_rows = [&](std::int64_t th) {
+        return (th - 1) * sh + static_cast<std::int64_t>(fy - 1) * dh + 1;
+    };
+    const auto pitch = [&](std::int64_t tw) {
+        const auto cols = (tw - 1) * sw + static_cast<std::int64_t>(fx - 1) * dw + 1;
+        const auto end  = (tw / cfg.vo - 1) * cfg.vo * sw + Span4(cfg.vo, sw, fx, dw);
         return RoundUp(std::max(cols, end), 4);
     };
-    const auto lds_need = [&](int th, int tw, int pb) {
-        return static_cast<std::int64_t>(pb) * (in_rows(th) * pitch(tw) + fy * fx);
+    const auto lds_need = [&](std::int64_t th, std::int64_t tw, std::int64_t pb) {
+        return pb * (in_rows(th) * pitch(tw) + static_cast<std::int64_t>(fy) * fx);
     };
 
     // One strip of vo outputs per thread: aim for 256 strips per workgroup.
-    int tile_w = std::min(RoundUp(wo, cfg.vo), 64 * cfg.vo);
+    auto tile_w = std::min(RoundUp(wo, cfg.vo), static_cast<std::int64_t>(64 * cfg.vo));
     while(tile_w > cfg.vo && lds_need(1, tile_w, 1) > generic_lds_floats)
         tile_w -= cfg.vo;
     if(lds_need(1, tile_w, 1) > generic_lds_floats)
         return false;
-    const int strips  = tile_w / cfg.vo;
-    int tile_h        = std::min(ho, (generic_block_size + strips - 1) / strips);
-    const int tiles_h = (ho + tile_h - 1) / tile_h;
-    tile_h            = (ho + tiles_h - 1) / tiles_h; // balance the row tiles
+    const auto strips = tile_w / cfg.vo;
+    auto tile_h       = std::min(ho, CeilDiv(generic_block_size, strips));
+    tile_h            = CeilDiv(ho, CeilDiv(ho, tile_h)); // balance the row tiles
     while(tile_h > 1 && lds_need(tile_h, tile_w, 1) > generic_lds_floats)
         --tile_h;
 
-    const int tiles_w = (wo + tile_w - 1) / tile_w;
-    int tile_planes   = 1;
+    const auto tiles_w       = CeilDiv(wo, tile_w);
+    const auto tiles_h       = CeilDiv(ho, tile_h);
+    std::int64_t tile_planes = 1;
     if(tile_h == ho && tiles_w == 1)
     {
         // Small planes: several planes per workgroup, but keep enough workgroups to fill the GPU.
-        tile_planes = std::max(1, generic_block_size / (ho * strips));
+        tile_planes = std::max<std::int64_t>(1, generic_block_size / (ho * strips));
         while(tile_planes > 1 && lds_need(tile_h, tile_w, tile_planes) > generic_lds_floats)
             --tile_planes;
-        while(tile_planes > 1 && (planes + tile_planes - 1) / tile_planes < 1024)
+        while(tile_planes > 1 && CeilDiv(planes, tile_planes) < 1024)
             tile_planes = (tile_planes + 1) / 2;
     }
-    cfg.tile_h        = tile_h;
-    cfg.tile_w        = tile_w;
-    cfg.tile_planes   = tile_planes;
-    cfg.lds_pitch     = pitch(tile_w);
-    cfg.tiles_w       = tiles_w;
-    cfg.tiles_h       = (ho + tile_h - 1) / tile_h;
-    const auto blocks = static_cast<std::int64_t>(cfg.tiles_w) * cfg.tiles_h *
-                        ((planes + tile_planes - 1) / tile_planes);
-    if(blocks * generic_block_size > max_threads)
+    cfg.tile_h      = static_cast<int>(tile_h);
+    cfg.tile_w      = static_cast<int>(tile_w);
+    cfg.tile_planes = static_cast<int>(tile_planes);
+    cfg.lds_pitch   = static_cast<int>(pitch(tile_w));
+    cfg.tiles_w     = static_cast<int>(tiles_w);
+    cfg.tiles_h     = static_cast<int>(tiles_h);
+    // tiles_w * tiles_h is bounded by the output plane, which fits int32, so multiplying by
+    // the plane-tile count stays well inside int64.
+    const auto blocks = tiles_w * tiles_h * CeilDiv(planes, tile_planes);
+    if(blocks > max_threads / generic_block_size)
         return false;
     cfg.threads = static_cast<std::size_t>(blocks * generic_block_size);
     return true;
 }
 
-bool IsGenericDepthwiseFwdApplicable(const std::string& arch, const ProblemDescription& problem)
+// Shape, layout and geometry gating. It is shared by the two variants, which then differ
+// only in whether they can launch the problem.
+bool IsGenericDepthwiseFwdShapeSupported(const std::string& arch, const ProblemDescription& problem)
 {
     if(!IsGenericArch(arch))
         return false;
@@ -187,9 +205,28 @@ bool IsGenericDepthwiseFwdApplicable(const std::string& arch, const ProblemDescr
        problem.GetOutHeight() * problem.GetOutWidth() > int_max ||
        problem.GetBatchSize() * problem.GetInChannels() > int_max)
         return false;
+    return true;
+}
 
+// The variants have different launch limits: the LDS tile has to fit in 32 KiB, the direct
+// variant only needs its grid to fit. They are independent, so a shape one of them can run is
+// not rejected because the other cannot.
+bool IsGenericVariantApplicable(const std::string& arch,
+                                const ProblemDescription& problem,
+                                bool use_lds)
+{
+    if(!IsGenericDepthwiseFwdShapeSupported(arch, problem))
+        return false;
     GenericDepthwiseConfig cfg;
-    return MakeGenericConfig(problem, false, cfg) && MakeGenericConfig(problem, true, cfg);
+    return MakeGenericConfig(problem, use_lds, cfg);
+}
+
+bool IsGenericDepthwiseFwdApplicable(const std::string& arch, const ProblemDescription& problem)
+{
+    if(!IsGenericDepthwiseFwdShapeSupported(arch, problem))
+        return false;
+    GenericDepthwiseConfig cfg;
+    return MakeGenericConfig(problem, false, cfg) || MakeGenericConfig(problem, true, cfg);
 }
 
 // Heuristic variant choice, from MI355X measurements: reading through the cache wins for 3x3
@@ -304,18 +341,26 @@ void PerformanceConfigConvDepthwiseFwd2D::HeuristicInit(
             loader.FillValidKernels(CKSolverType::DepthwiseFwd, problem, data_type, false);
 
     // CK instances keep the default slot when they exist; the general kernel is appended so
-    // tuning can compare it against them.
-    if(IsGenericDepthwiseFwdApplicable(arch, problem))
+    // tuning can compare it against them. Only the variants that can launch this problem are
+    // listed, so tuning never selects one that cannot build.
+    if(IsGenericDepthwiseFwdShapeSupported(arch, problem))
     {
+        GenericDepthwiseConfig cfg;
+        const bool direct_ok = MakeGenericConfig(problem, false, cfg);
+        const bool lds_ok    = MakeGenericConfig(problem, true, cfg);
         if(GenericPrefersLds(problem))
         {
-            valid_kernels.emplace_back(generic_lds_id);
-            valid_kernels.emplace_back(generic_direct_id);
+            if(lds_ok)
+                valid_kernels.emplace_back(generic_lds_id);
+            if(direct_ok)
+                valid_kernels.emplace_back(generic_direct_id);
         }
         else
         {
-            valid_kernels.emplace_back(generic_direct_id);
-            valid_kernels.emplace_back(generic_lds_id);
+            if(direct_ok)
+                valid_kernels.emplace_back(generic_direct_id);
+            if(lds_ok)
+                valid_kernels.emplace_back(generic_lds_id);
         }
     }
 
@@ -359,7 +404,8 @@ bool PerformanceConfigConvDepthwiseFwd2D::IsValid(
         return false;
 
     if(IsGenericId(kernel_id))
-        return IsGenericDepthwiseFwdApplicable(GetCurrentDeviceName(), problem);
+        return IsGenericVariantApplicable(
+            GetCurrentDeviceName(), problem, kernel_id == generic_lds_id);
 
     const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
@@ -451,9 +497,10 @@ ConvDepthwiseFwd2D::GetSolution(const ExecutionContext& ctx,
 #if MIOPEN_BACKEND_HIP
     if(IsGenericId(config.kernel_id))
     {
-        if(!IsGenericDepthwiseFwdApplicable(ctx.GetStream().GetDeviceName(), problem))
+        const bool use_lds = config.kernel_id == generic_lds_id;
+        if(!IsGenericVariantApplicable(ctx.GetStream().GetDeviceName(), problem, use_lds))
             return ConvSolution{miopenStatusInternalError};
-        auto solution = GetGenericDepthwiseFwdSolution(problem, config.kernel_id == generic_lds_id);
+        auto solution      = GetGenericDepthwiseFwdSolution(problem, use_lds);
         solution.solver_id = SolverDbId();
         return solution;
     }

@@ -168,6 +168,32 @@ auto GetConvGenericTestCases(miopenDataType_t datatype)
         TestCase{{datatype, miopenTensorNCHW, {1, 2, 6, 700}},
                  {datatype, miopenTensorNCHW, {2, 1, 5, 5}},
                  datatype, {{2, 2}, {1, 1}, {1, 1}, 2}},
+        // 113x113 at dilation 8 with a 15x15 filter: the LDS tile would need 13,333 floats,
+        // past the 8,192-float budget, so only the direct variant launches this shape
+        TestCase{{datatype, miopenTensorNCHW, {1, 1, 113, 113}},
+                 {datatype, miopenTensorNCHW, {1, 1, 15, 15}},
+                 datatype, {{0, 0}, {1, 1}, {8, 8}, 1}},
+        // clang-format on
+    };
+}
+
+// Shapes at the edge of the admitted 32-bit index range. No memory is ever allocated for
+// them: they only exercise the solver's applicability and launch configuration, where the
+// ceilings and the row balancing have to stay inside int64.
+auto GetConvGenericIndexLimitTestCases(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
+        // one row of INT32_MAX columns
+        TestCase{{datatype, miopenTensorNCHW, {1, 1, 1, 2147483647}},
+                 {datatype, miopenTensorNCHW, {1, 1, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}, 1}},
+        // INT32_MAX-512 rows of one column
+        TestCase{{datatype, miopenTensorNCHW, {1, 1, 2147483135, 1}},
+                 {datatype, miopenTensorNCHW, {1, 1, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}, 1}},
         // clang-format on
     };
 }
@@ -202,8 +228,10 @@ auto GetGenericTestParams()
     return params;
 }
 
-// Both variants of the general kernel accumulate every output in the same order, so they must
-// agree bit for bit. The solver test above checks the tuned variant against the reference.
+// Where both variants of the general kernel launch a shape they accumulate every output in
+// the same order, so they must agree bit for bit. Some shapes fit only one variant, for
+// instance when the LDS tile is too large; those run the one variant that is offered. The
+// solver test above checks the tuned variant against the reference.
 template <typename T>
 void CheckGenericVariantsAgree(const miopen::unit_tests::ConvTestCase& conv_config)
 {
@@ -229,11 +257,14 @@ void CheckGenericVariantsAgree(const miopen::unit_tests::ConvTestCase& conv_conf
     const auto solver = miopen::solver::conv::ConvDepthwiseFwd2D{};
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
 
+    int launched = 0;
     std::vector<std::vector<T>> results;
     for(const char* id : {"DepthwiseFwd2DGenericLds", "DepthwiseFwd2DGenericDirect"})
     {
         const auto config = miopen::solver::conv::PerformanceConfigConvDepthwiseFwd2D{0, id};
-        ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config)) << id;
+        if(!solver.IsValidPerformanceConfig(ctx, problem, config))
+            continue;
+        ++launched;
         const auto sol = solver.GetSolution(ctx, problem, config);
         ASSERT_TRUE(sol.Succeeded()) << id;
 
@@ -246,8 +277,61 @@ void CheckGenericVariantsAgree(const miopen::unit_tests::ConvTestCase& conv_conf
         handle.Finish();
         results.push_back(handle.Read<T>(out_dev, out.size()));
     }
-    ASSERT_EQ(results[0].size(), results[1].size());
-    EXPECT_EQ(0, std::memcmp(results[0].data(), results[1].data(), results[0].size() * sizeof(T)));
+    ASSERT_GT(launched, 0);
+    if(results.size() == 2)
+    {
+        ASSERT_EQ(results[0].size(), results[1].size());
+        EXPECT_EQ(0,
+                  std::memcmp(results[0].data(), results[1].data(), results[0].size() * sizeof(T)));
+    }
+}
+
+// The index-limit shapes are never allocated. The solver has to apply, every variant it
+// offers has to build, and the grid it asks for has to cover the outputs without passing the
+// 2^31 work-item limit. Before the int64 rewrite the configuration arithmetic wrapped here.
+void CheckGenericLaunchGrid(const miopen::unit_tests::ConvTestCase& conv_config)
+{
+    auto&& handle = get_handle();
+    if(!miopen::StartsWith(handle.GetDeviceName(), "gfx950"))
+        GTEST_SKIP() << "general depthwise kernel is enabled on gfx950 only";
+
+    const auto in_desc   = conv_config.GetXTensorDescriptor();
+    const auto wei_desc  = conv_config.GetWTensorDescriptor();
+    const auto conv_desc = conv_config.GetConv();
+    const auto out_desc =
+        conv_desc.GetForwardOutputTensor(in_desc, wei_desc, conv_config.GetYDataType());
+
+    const auto problem = miopen::conv::ProblemDescription(
+        in_desc, wei_desc, out_desc, conv_desc, miopen::conv::Direction::Forward);
+    auto ctx = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+
+    const auto solver = miopen::solver::conv::ConvDepthwiseFwd2D{};
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+
+    // One thread writes at most eight consecutive outputs.
+    constexpr std::size_t max_threads    = 2147483647;
+    constexpr std::size_t max_per_thread = 8;
+    constexpr std::size_t block_size     = 256;
+    const auto outputs                   = out_desc.GetElementSize();
+
+    int launched = 0;
+    for(const char* id : {"DepthwiseFwd2DGenericLds", "DepthwiseFwd2DGenericDirect"})
+    {
+        const auto config = miopen::solver::conv::PerformanceConfigConvDepthwiseFwd2D{0, id};
+        if(!solver.IsValidPerformanceConfig(ctx, problem, config))
+            continue;
+        ++launched;
+        const auto sol = solver.GetSolution(ctx, problem, config);
+        ASSERT_TRUE(sol.Succeeded()) << id;
+        ASSERT_EQ(std::size_t{1}, sol.construction_params.size()) << id;
+        const auto& kernel = sol.construction_params.front();
+        EXPECT_EQ(block_size, kernel.l_wk[0]) << id;
+        EXPECT_EQ(std::size_t{0}, kernel.g_wk[0] % block_size) << id;
+        EXPECT_LE(kernel.g_wk[0], max_threads) << id;
+        EXPECT_GE(kernel.g_wk[0] * max_per_thread, outputs) << id;
+    }
+    ASSERT_GT(launched, 0);
 }
 
 } // namespace
@@ -374,3 +458,33 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverConvDepthwiseFwd2DGenericDevApplicability_FP16,
                          testing::Combine(testing::Values(GetGenericTestParams()),
                                           testing::Values(GetConvGenericTestCases(miopenHalf)[0])));
+
+// General-shape kernel (gfx950): shapes at the edge of the admitted 32-bit index range
+using GPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimit_FP16 = GPU_UnitTestConvSolverFwd_FP16;
+using CPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimitDevApplicability_FP16 =
+    CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+
+// RunTest is deliberately not called: these shapes are far too large to allocate.
+TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimit_FP16, ConvDepthwiseFwd2D)
+{
+    CheckGenericLaunchGrid(std::get<2>(GetParam()));
+};
+
+TEST_P(CPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimitDevApplicability_FP16,
+       ConvDepthwiseFwd2D)
+{
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd2D{});
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimit_FP16,
+    testing::Combine(testing::Values(GetGenericTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvGenericIndexLimitTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    CPU_UnitTestConvSolverConvDepthwiseFwd2DGenericLimitDevApplicability_FP16,
+    testing::Combine(testing::Values(GetGenericTestParams()),
+                     testing::ValuesIn(GetConvGenericIndexLimitTestCases(miopenHalf))));
