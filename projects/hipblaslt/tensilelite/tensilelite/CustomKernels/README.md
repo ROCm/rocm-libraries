@@ -165,3 +165,27 @@ Two ways to validate:
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tensile-generated    | `InternalSupportParams.KernArgsVersion`                                                                              |
 | External (`Source:`) | All of: `Source.Origin`, `Features` (mapping), `InternalSupportParams.KernArgsVersion`, `Version`, `ProblemType`, `MatrixInstruction`, `CustomKernel` with `args` / `macrotile` / `threads` / `grid` |
+
+# Runtime-group W4A16 kernels (gfx1151)
+
+W4A16 kernels are emitted directly by TensileLite from the gfx1151 Equality
+and FreeSize logic. No W4A16 custom assembly or HIP source is required.
+Prefill uses packed FP16 dequantization or FP32 dequantization with BF16 rounding.
+Decode uses `KernelWriterW4A16Decode` and rocisa's instruction and dependency passes.
+
+The `W4A16Decode` solution parameter contains seven values:
+`[loadWidth, unroll, accumulators, threads, maxN, linearK, nativePermute]`.
+Load width counts packed int4 dwords per lane. The emitter preserves the
+per-element FP16 rounding before FP32 dot products and wave reduction.
+A dword fallback handles K or row strides that do not support the wider load.
+
+All kernels accept runtime quantization groups 32, 64 and 128. Decode predicates
+require batch=1, positive K divisible by 256, and N within the configured bound
+(1 or 4). The 512-thread variant uses 16 waves and computes 16 rows per workgroup.
+The Equality selections retain their original load widths, accumulation order,
+and tile choices. Instruction scheduling is handled by the decode emitter.
+`W4A16DecodePrefetch: 4` stages four wide iterations before consumption, using
+128 VGPRs to hide memory latency in the selected N=1 kernels. The default is 1.
+The scalar N=1 unroll-four schedule reserves 104 VGPRs to reduce resident waves;
+other schedules use 64. Scalar tails below K4096 prefetch the final pair while
+preserving accumulation order. Longer scalar tails retain serial loads.
