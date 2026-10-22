@@ -487,12 +487,22 @@ hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
 runner with no GPU, so it only proves the pointers fetch and the archives
 extract.
 
-To run the category on GPU runners in CI, dispatch the **TheRock Multi-Arch
-dnn-benchmarking** workflow (`therock-multi-arch-ci-dnn-benchmarking.yml`) by
-hand. It runs TheRock's multi-arch build and the `miopenprovider` and
-`hipblasltprovider` test jobs with `TEST_TYPE=dnn_benchmarking`, which selects
-the `dnn_benchmarking` label. No schedule or pull request triggers it, and
-TheRock never selects the `dnn_benchmarking` type on its own.
+To run the category on GPU runners in CI, start **TheRock Multi-Arch CI**
+(`therock-multi-arch-ci.yml`) by hand with a `test_filter:dnn_benchmarking`
+label:
+
+```bash
+gh workflow run therock-multi-arch-ci.yml --repo ROCm/rocm-libraries --ref develop \
+  -f pr_labels=test:miopenprovider,test:hipblasltprovider,test_filter:dnn_benchmarking \
+  -f linux_amdgpu_families=gfx94X -f windows_amdgpu_families=none
+```
+
+On a manual run, a `test_filter:` label sets the test category; only the
+components that opt in to `dnn_benchmarking` in TheRock
+(`miopenprovider`, `hipblasltprovider`) run it. Pull requests, pushes and the
+nightly schedule never select it. TheRock accepts `dnn_benchmarking` only from
+the TheRock commit that adds it (ROCm/TheRock#9312); with an older TheRock pin
+the run stops in setup with `Unrecognized test_filter value`.
 
 hipBLASLt matmul graphs verify on the GPU reference (`GpuMatmulPlan`). On gfx90a
 the 578 `hipblaslt_*` graphs took about 4 minutes. `HIPBLASLT_ENGINE.toml` skips
