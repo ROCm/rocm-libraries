@@ -41,7 +41,7 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocsparse
-# -c builds samples + tests + benchmarks; -d fetches build dependencies (incl. googletest)
+# -c builds samples + tests + benchmarks; -d installs distro build dependencies (not googletest)
 ./install.sh -dc -a gfx942
 # equivalently, out-of-source from this directory:
 cmake -B build/release -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
@@ -136,8 +136,9 @@ naturally expressed through its YAML pipeline rather than as standalone units:
 * **Auxiliary API tests:** `clients/tests/test_auxiliary.cpp` (`TEST(auxiliary_pre_checkin, ...)`)
   covers handle create/destroy and descriptor management directly.
 
-**Framework:** GoogleTest (pinned to `v1.15.2` in `deps/external-gtest.cmake`; auto-downloaded when
-absent via `deps/CMakeLists.txt` `BUILD_GTEST=ON`).
+**Framework:** GoogleTest (1.11.0 or later, found with `find_package(GTest)` in
+`cmake/rocsparse_gtest.cmake`; otherwise built from `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`, or `v1.15.2`
+is downloaded with `-DALLOW_FETCH_DEPS=ON`).
 
 **Location / structure:** unit tests live in `clients/unittests/` (`unit_test_*.cpp` +
 `rocsparse_unit_test_main.cpp`), with the internal library `.cpp` files under test compiled directly

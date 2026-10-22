@@ -31,12 +31,21 @@ To compile and run rocSPARSE, the `AMD ROCm Platform <https://github.com/ROCm/RO
 Building rocSPARSE from source also requires the following components and dependencies:
 
 *  `git <https://git-scm.com/>`_
-*  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
+*  `CMake <https://cmake.org/>`_ (Version 3.19 or later)
+*  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later)
 *  `rocPRIM <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_
 *  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Optional: for the library)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
+
+By default, the CMake build doesn't download ROCm CMake or GoogleTest. If CMake can't find one of them,
+the configuration step stops with an error naming it.
+Add the install prefix of the dependency to ``CMAKE_PREFIX_PATH`` if it isn't installed in a default location.
+To download ROCm CMake and GoogleTest when they aren't installed, configure with ``-DALLOW_FETCH_DEPS=ON``.
+This requires network access during configuration.
+If GoogleTest isn't installed, you can instead build it from a local source tree without network access
+by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 
 When building rocSPARSE from source, select supported versions of the math library
 dependencies (:doc:`rocPRIM <rocprim:index>` and optionally :doc:`rocBLAS <rocblas:index>`). Given a version of rocSPARSE,
@@ -107,7 +116,7 @@ The following table lists the common ways to use ``install.sh`` to build the roc
    :widths: 40, 90
 
    "``./install.sh -h``", "Print the help information."
-   "``./install.sh -d``", "Build the dependencies and library in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of the script, it isn't necessary to rebuild the dependencies."
+   "``./install.sh -d``", "Install the build dependencies using the distribution package manager, then build the library in your local directory. The ``-d`` flag only needs to be used once."
    "``./install.sh``", "Build the library in your local directory. The script assumes the dependencies are available."
    "``./install.sh -i``", "Build the library, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -i -a gfx908``", "Build the library specifically for the gfx908 architecture, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
@@ -123,11 +132,11 @@ the library, dependencies, and clients are listed in the table below.
    :widths: 40, 90
 
    "``./install.sh -h``", "Print the help information."
-   "``./install.sh -dc``", "Build the dependencies, library, and client in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of the script, it isn't necessary to rebuild the dependencies"
+   "``./install.sh -dc``", "Install the build dependencies using the distribution package manager, then build the library and client in your local directory. The ``-d`` flag doesn't install GoogleTest, which the client requires. The ``-d`` flag only needs to be used once."
    "``./install.sh -c``", "Build the library and client in your local directory. The script assumes the dependencies are available."
-   "``./install.sh -idc``", "Build the library, dependencies, and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic``", "Build the library and client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
-   "``./install.sh -idc -a gfx908``", "Build the library specifically for the gfx908 architecture, build the dependencies and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -idc -a gfx908``", "Install the build dependencies, build the library specifically for the gfx908 architecture and build the client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic -a gfx908``", "Build the library specifically for the gfx908 architecture, build the client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -o``", "Build the client executables using an already installed version of the library."
 
@@ -145,7 +154,7 @@ You can build rocSPARSE using the following commands:
 
 .. note::
 
-   CMake 3.5 or later is required to build rocSPARSE.
+   CMake 3.19 or later is required to build rocSPARSE.
 
 .. code-block:: shell
 
@@ -166,17 +175,13 @@ You can build rocSPARSE with the dependencies and clients using the following co
 
 .. note::
 
-   GoogleTest is required to build rocSPARSE clients.
+   GoogleTest is required to build rocSPARSE clients. Install it, for example the ``libgtest-dev`` or
+   ``gtest-devel`` package, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it.
 
 .. code-block:: shell
 
-   # Install GoogleTest
-   mkdir -p build/release/deps ; cd build/release/deps
-   cmake ../../../deps
-   make -j$(nproc) install
-
-   # Change to build directory
-   cd ..
+   # Create and change to build directory
+   mkdir -p build/release ; cd build/release
 
    # Default install path is /opt/rocm, use -DCMAKE_INSTALL_PREFIX=<path> to adjust it
    CXX=/opt/rocm/bin/amdclang++ cmake ../.. -DBUILD_CLIENTS_TESTS=ON \
@@ -193,8 +198,9 @@ Resolving common build problems
 -------------------------------------------------
 
 If you encounter the error message
-"Could not find a package configuration file provided by "ROCm" with any of the following names: ROCMConfig.cmake, rocm-config.cmake"
-during the build, install the `ROCm CMake modules <https://github.com/ROCm/rocm-cmake>`_.
+"ROCmCMakeBuildTools >= 0.11.0 not found"
+during the build, install the `ROCm CMake modules <https://github.com/ROCm/rocm-cmake>`_,
+or configure with ``-DALLOW_FETCH_DEPS=ON`` to download them.
 
 Testing rocSPARSE
 ==============================

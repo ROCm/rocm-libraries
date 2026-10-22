@@ -31,7 +31,8 @@ To compile and run rocSPARSE, the `AMD ROCm Platform <https://github.com/ROCm/RO
 Building rocSPARSE from source also requires the following components and dependencies:
 
 *  `git <https://git-scm.com/>`_
-*  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
+*  `CMake <https://cmake.org/>`_ (Version 3.19 or later)
+*  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it)
 *  `rocPRIM <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_
 *  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Optional: for the library)
 *  `vcpkg <https://github.com/Microsoft/vcpkg.git>`_

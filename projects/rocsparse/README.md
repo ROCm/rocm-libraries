@@ -31,13 +31,17 @@ cmake -DBUILD_DOCS=ON ...
 ## Requirements
 
 * Git
-* CMake (3.5 or later)
+* CMake (3.19 or later)
+* [ROCm CMake](https://github.com/ROCm/rocm-cmake) (0.11.0 or later)
 * AMD [ROCm] 3.5 platform or later
 
 Optional:
 * [GoogleTest](https://github.com/google/googletest) (required only for tests)
   * Use `GTEST_ROOT` to specify a location
-  * If you don't have GoogleTest installed, CMake automatically downloads and builds it
+  * Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree
+
+By default, CMake doesn't download any of these. Configure with `-DALLOW_FETCH_DEPS=ON` to download
+ROCm CMake and GoogleTest when they're missing.
 
 ## Build and install
 
