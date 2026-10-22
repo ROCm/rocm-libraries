@@ -359,6 +359,45 @@ std::size_t GetWorkspaceSizeCommon(const miopen::conv::ProblemDescription& probl
     return ws;
 }
 
+// Native-output factories are exact-precision only; TF32 lists remain unchanged.
+template <template <typename, typename> class DeviceOpPtrs, typename CKArgsType, typename DataType>
+std::vector<std::string> FillNativeOutputKernels(const miopen::conv::ProblemDescription& problem,
+                                                 bool use_tf32)
+{
+    if constexpr(std::is_same_v<DataType, float> || std::is_same_v<DataType, ck::half_t> ||
+                 std::is_same_v<DataType, ck::bhalf_t>)
+    {
+        if((std::is_same_v<DataType, float> && use_tf32) ||
+           !miopen::solver::internal::IsNativeOutputForwardApplicable(problem))
+            return {};
+        const CKArgsType args{problem};
+        std::vector<std::string> kernels;
+        for(const auto& op : DeviceOpPtrs<DataType, DataType>::GetInstances())
+            if(args.IsSupportedBy(op))
+                kernels.push_back(op->GetTypeString());
+        return kernels;
+    }
+    return {};
+}
+
+template <template <typename, typename> class DeviceOpPtrs, typename CKArgsType, typename DataType>
+bool IsNativeOutputKernelSupported(const miopen::conv::ProblemDescription& problem,
+                                   const std::string& kernel_id,
+                                   bool use_tf32)
+{
+    if constexpr(std::is_same_v<DataType, float> || std::is_same_v<DataType, ck::half_t> ||
+                 std::is_same_v<DataType, ck::bhalf_t>)
+    {
+        if((std::is_same_v<DataType, float> && use_tf32) ||
+           !miopen::solver::internal::IsNativeOutputForwardApplicable(problem))
+            return false;
+        auto instances = DeviceOpPtrs<DataType, DataType>::GetInstances();
+        const auto it  = miopen::solver::FindConvPtrByID(instances, kernel_id);
+        return it != instances.end() && CKArgsType{problem}.IsSupportedBy(*it);
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // DispatchByDataType — collapses data-type switch blocks into a single call.
 // ---------------------------------------------------------------------------

@@ -19,11 +19,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Borrowed individual FP16/BF16 grouped-CK NCHW/NCDHW operands when their packed layout transpose is an identity and aligned caller tensors and reserved workspace have disjoint spans; aliases, nondefault scalars and nonqualifying operands retain staging and the original workspace reservation.
 * [Conv] Omitted the redundant old-output layout copy on gfx1250 for selected, fully initialized 3D FP16/BF16 grouped CK backward-data XDL-v1 invocations; other devices, kernels, aliases and nondefault scalars retain staged behavior and CK's required output clear.
 * [Conv] Extend gfx1250 3D grouped CK XDL-v1 backward-data old-output copy elision to FP32, preserving native FP32 arithmetic, the full CK clear, alias fallback, and existing workspace reservations.
+* [Conv] Omit redundant old-output staging for selected unmerged 3D grouped CK XDL-v3 forward convolutions on gfx1250 in FP32/FP16/BF16; preserve precision, workspace reservations, and staged alias/nondefault-scalar fallbacks.
 * [Conv] Omitted the redundant old-output layout copy for selected, fully initialized 2D FP16/BF16 grouped CK forward and backward-data invocations with disjoint tensors and workspace and default scalars; unsupported kernel families and aliases retain staged behavior.
 * [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
 * [Conv] Omit old-dW staging for selected packed 2D FP16/BF16 grouped CK WMMA-v3 backward-weights at explicit split one on gfx1250; preserve kernel arithmetic, native clears, scratch reservations, and alias/scalar fallbacks.
-* [Conv] Omit redundant old-output staging for selected unmerged 3D grouped CK XDL-v3 forward convolutions on gfx1250 in FP32/FP16/BF16; preserve precision, workspace reservations, and staged alias/nondefault-scalar fallbacks.
 * [Conv] Use CK's gfx1250 packed-weight Tensor Data Mover forward path for eligible 2D/3D FP16/BF16/FP32 convolutions; keep the existing layout conversion, precision, kernel IDs, and workspace contracts.
+* [Conv] Add gfx1250 native-output CK tuning candidates for packed non-pointwise NCHW/NCDHW forward convolutions in FP16/BF16/exact FP32 with alpha=1 and beta=0. Selected invocations retain input/weight conversions but omit output staging and conversion; existing candidates remain available.
 
 ### Resolved Issues
 * [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.
