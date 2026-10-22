@@ -117,7 +117,7 @@ def _create_gfx1250_kernel(mt_a, mt_b, mi_wave_group=None, depth_u=64):
 def _create_writer_gfx1250(kernel):
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_W32
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16_W32
 
     writer = SimpleNamespace()
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr,
@@ -193,7 +193,7 @@ class TestGfx1250SubtileCodegen:
                              ids=[f"{a}x{b}_wg{w[0]}x{w[1]}" for a, b, w in CONFIGS_MULTI_WAVE])
     def test_lr_tile_assignment_multi_wave(self, mt_a, mt_b, wg):
         """LR tile assignment with multi-wave TDM produces valid assembly."""
-        from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
+        from tensilelite.Components.Subtile.SubtileLREmit import lraTileAssignment
         kernel = _create_gfx1250_kernel(mt_a, mt_b, mi_wave_group=wg)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -210,7 +210,7 @@ class TestGfx1250SubtileCodegen:
                              ids=[f"{a}x{b}" for a, b, _ in CONFIGS_1x1])
     def test_ds_read_dual_load(self, mt_a, mt_b, wg):
         """Wave32 8-VGPR tiles emit two DSLoadB128 (lo + hi K-halves)."""
-        from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
         kernel = _create_gfx1250_kernel(mt_a, mt_b)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -229,7 +229,7 @@ class TestGfx1250SubtileCodegen:
 
     def test_select_d_geometry_wave32(self):
         """selectDGeometry returns CD_F32_W32 for wave32 kernels."""
-        from Tensile.Components.Subtile.Kernel import selectDGeometry, CD_F32_W32
+        from tensilelite.Components.Subtile.Kernel import selectDGeometry, CD_F32_W32
         kernel = _create_gfx1250_kernel(64, 64)
         assert selectDGeometry(kernel) is CD_F32_W32
 
@@ -237,7 +237,7 @@ class TestGfx1250SubtileCodegen:
 
     def test_zero_tiles_wmma(self):
         """gfx1250 tile zeroing uses v_wmma_f32_16x16x4_f32 with acc2_imm=0."""
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         kernel = _create_gfx1250_kernel(32, 32)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -253,8 +253,8 @@ class TestGfx1250SubtileCodegen:
     def test_initd_preloop_op_wmma_zeroing_gfx1250(self):
         """Scheduler preloop initD op zeros accumulators via WMMA on gfx1250."""
         from types import SimpleNamespace
-        from Tensile.Components.Subtile.Kernel import TileInfo, selectDGeometry
-        from Tensile.Components.Subtile.LogicalScheduler import (
+        from tensilelite.Components.Subtile.Kernel import TileInfo, selectDGeometry
+        from tensilelite.Components.Subtile.LogicalScheduler import (
             LogicalScheduler, SchedulerConfig, ReadGranularity, Pass,
         )
 
@@ -296,7 +296,7 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_gr_lds_buffer_swap_tdm(self, tc):
         """TDM LDS buffer swap emits XOR on tracking SGPR."""
-        from Tensile.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
+        from tensilelite.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
         kernel = _create_gfx1250_kernel(64, 64, mi_wave_group=[2, 2])
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -310,7 +310,7 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_gr_ptr_updates_tdm(self, tc):
         """TDM pointer update increments Address and syncs descriptor."""
-        from Tensile.Components.Subtile.SubtileGREmit import globalReadPtrUpdates
+        from tensilelite.Components.Subtile.SubtileGREmit import globalReadPtrUpdates
         kernel = _create_gfx1250_kernel(64, 64, mi_wave_group=[2, 2])
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -326,7 +326,7 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_buffer_load_tdm(self, tc):
         """TDM emitSingleBufferLoad emits tensor_load_to_lds."""
-        from Tensile.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
+        from tensilelite.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
         kernel = _create_gfx1250_kernel(64, 64)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -369,7 +369,7 @@ class TestIterateMode:
     def test_buffer_load_iterate_passes_group2_group3(self, tc):
         """In iterate mode, emitSingleBufferLoad passes non-None Group2 and Group3."""
         from unittest.mock import patch
-        from Tensile.Components.Subtile import SubtileGREmit
+        from tensilelite.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs_iterate(writer)
@@ -390,7 +390,7 @@ class TestIterateMode:
     def test_buffer_load_normal_omits_group2_group3(self, tc):
         """Non-iterate mode: emitSingleBufferLoad passes None for both Group2 and Group3."""
         from unittest.mock import patch
-        from Tensile.Components.Subtile import SubtileGREmit
+        from tensilelite.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=NORMAL_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -408,7 +408,7 @@ class TestIterateMode:
 
     def test_iterate_mode_flag_on_states(self):
         """isSubtileIterateMode returns correct results for iterate vs normal kernel configs."""
-        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
         kernel_iter = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         assert isSubtileIterateMode(kernel_iter, "A") is True
         assert isSubtileIterateMode(kernel_iter, "B") is True
@@ -425,6 +425,6 @@ class TestIterateMode:
     ], ids=["at-limit", "just-over", "well-under", "double"])
     def test_iterate_mode_boundary_bf16(self, depth_u, expected):
         """Boundary check: iterate mode triggers at DepthU*bpe > 1024 for bf16."""
-        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
         kernel = _create_gfx1250_kernel(64, 64, depth_u=depth_u)
         assert isSubtileIterateMode(kernel, "A") is expected

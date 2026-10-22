@@ -32,6 +32,7 @@ from rocke import (
     BF8E5M2,
     F16,
     F32,
+    F64,
     FP8E4M3,
     I8,
     I16,
@@ -224,6 +225,7 @@ class TestCoreIR(unittest.TestCase):
             (F16, "global_load_f16", "half", 2),
             (BF16, "global_load_bf16", "bfloat", 2),
             (F32, "global_load_f32", "float", 4),
+            (F64, "global_load_f64", "double", 8),
             (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
             (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
         ]
@@ -1065,6 +1067,16 @@ class TestInstances(unittest.TestCase):
 # ---------------------------------------------------------------------
 
 
+def _scalar_f64_global_accesses(ll: str) -> list[str]:
+    """The scalar (not vector) f64 global load and store lines of ``ll``."""
+    return [
+        line.strip()
+        for line in ll.splitlines()
+        if "load double, ptr addrspace(1)" in line
+        or ("store double " in line and "ptr addrspace(1)" in line)
+    ]
+
+
 class TestElementwiseInstance(unittest.TestCase):
     def test_unary_builds(self):
         from rocke.instances import ElementwiseSpec, build_elementwise
@@ -1102,14 +1114,52 @@ class TestElementwiseInstance(unittest.TestCase):
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("fadd double", ll)
 
+    def test_f64_scalar_tail_is_8_byte_aligned(self):
+        # The scalar tail loads and stores claim the 8-byte element alignment,
+        # so their codegen does not depend on the target's unaligned-access
+        # mode. vec=2 add: two loads and one store per tail lane.
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(kernel, arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 6)
+        for line in accesses:
+            self.assertTrue(line.endswith(", align 8"), line)
+
+    def test_f64_abs_clears_the_sign_bit(self):
+        # f64 abs is one sign-bit clear (llvm.fabs.f64), not max(x, -x), whose
+        # maxnum costs several instructions under IEEE mode. f32 keeps max(x, -x).
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="abs", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        self.assertIn("call double @llvm.fabs.f64(double", ll)
+        self.assertNotIn("llvm.maxnum.f64", ll)
+        hip = lower_kernel_to_hip(kernel)
+        self.assertIn(" = fabs(", hip)
+        self.assertNotIn("fabsf", hip)
+
+        ll_f32 = lower_kernel_to_llvm(
+            build_elementwise(ElementwiseSpec(op="abs")), arch="gfx950"
+        )
+        self.assertIn("llvm.maxnum.f32", ll_f32)
+        self.assertNotIn("llvm.fabs", ll_f32)
+
     def test_f64_rejects_transcendental_ops_and_wide_vec(self):
         from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
+        # The reason names the rejected op or vector width, so a spec refused
+        # for some other reason cannot pass.
         for op in ("exp2", "tanh", "silu", "gelu_tanh"):
-            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            ok, reason = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
             self.assertFalse(ok, op)
-        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+            self.assertEqual(reason, f"op '{op}' not supported for f64")
+        ok, reason = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2} for f64")
 
 
 class TestLayerNormInstance(unittest.TestCase):
@@ -1150,18 +1200,64 @@ class TestReduceInstance(unittest.TestCase):
             self.assertIn("define amdgpu_kernel void", ll)
 
     def test_f64_path_builds(self):
+        # An f64 reduction must accumulate in double, not just load double:
+        # every combine step is a double op, no float op appears, and the
+        # LDS pool holds one 8-byte partial per thread (block_size * 8 bytes).
         from rocke.instances import Reduce2DSpec, build_reduce2d
 
-        for op in ("sum", "max", "mean"):
+        combine = {
+            "sum": "fadd double",
+            "max": "@llvm.maxnum.f64(",
+            "mean": "fadd double",
+        }
+        for op, double_combine in combine.items():
             spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
             ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
-            self.assertIn("double", ll)
+            self.assertIn(double_combine, ll, op)
+            self.assertNotIn("fadd float", ll, op)
+            self.assertNotIn("llvm.maxnum.f32", ll, op)
+            pool_bytes = spec.block_size * 8
+            self.assertRegex(ll, rf"@smem_pool\.\S+ = .*\[{pool_bytes} x i8\]", op)
+            lds_stores = [
+                line.strip()
+                for line in ll.splitlines()
+                if line.lstrip().startswith("store ") and "ptr addrspace(3)" in line
+            ]
+            self.assertTrue(lds_stores, op)
+            for line in lds_stores:
+                self.assertTrue(line.startswith("store double "), line)
+
+    def test_f64_output_store_is_8_byte_aligned(self):
+        # The one f64 result store per row claims the 8-byte element alignment.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=4096, op="sum", dtype="f64", vec=2)
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 1)
+        self.assertTrue(accesses[0].endswith(", align 8"), accesses[0])
+
+    def test_f64_mean_divides_by_n(self):
+        # The f64 mean is the sum divided by N (one rounding), not the sum
+        # times 1/N, which rounds twice. N=3072 has no exact reciprocal; its
+        # double bit pattern is 0x40A8000000000000.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=3072, op="mean", dtype="f64", vec=2)
+        ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+        divides = [line.strip() for line in ll.splitlines() if " = fdiv " in line]
+        self.assertEqual(len(divides), 1, divides)
+        self.assertRegex(divides[0], r"= fdiv double %\w+, 0x40A8000000000000$")
+        self.assertNotIn("fmul double", ll)
 
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
 
-        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        # f64 allows only vec=2 (one 16-byte access); the reason says so.
+        ok, reason = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2}")
 
 
 class TestTransposeInstance(unittest.TestCase):
