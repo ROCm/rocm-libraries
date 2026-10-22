@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.state``.
+``tensilelite.Common.Utilities.state``.
 
 Pins the tuple-unpacking branch of ``state``: when an entry in a class's
 ``StateKeys`` is a 2-tuple ``(key, attr)``, the original code unpacks it so the
@@ -15,7 +15,7 @@ which would raise ``TypeError`` (None is not iterable) instead of unpacking.
 
 import pytest
 
-from Tensile.Common.Utilities import state
+from tensilelite.Common.Utilities import state
 
 pytestmark = pytest.mark.unit
 

@@ -208,19 +208,25 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
 
     // The rung itself needs a named engine to check applicability against; claim
     // enforcement already ran in TestBody() and is not affected by this return.
+    //
+    // Worded after whichever asked for the rung, so a --skip-graph-validation run is
+    // not told about an enforcement_level its bundle never set.
+    const bool fromFlag = _deps.policy.skipGraphValidation;
     if(!_engineUnderTest.has_value())
     {
-        return unverifiable("enforcement_level requires --test-engine");
+        return unverifiable(std::string(fromFlag ? "--skip-graph-validation" : "enforcement_level")
+                            + " requires --test-engine");
     }
 
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
+    const std::string asked = fromFlag ? "--skip-graph-validation" : "enforcement_level=" + rung;
 
     // Same applicability answer the claim verdict and the executor read.
     if(!session.engines.accepted)
     {
-        return unverifiable("Engine " + _engineUnderTest->name
-                            + " does not support this graph (enforcement_level=" + rung + ")");
+        return unverifiable("Engine " + _engineUnderTest->name + " does not support this graph ("
+                            + asked + ")");
     }
 
     if(level == EnforcementLevel::APPLICABILITY)
@@ -317,9 +323,15 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
                                            "from_binary failed: " + session.buildError);
     }
 
-    if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
+    // --skip-graph-validation caps every bundle at the applicability rung, the same one
+    // a bundle can ask for with enforcement_level. Claim enforcement has already run in
+    // TestBody() and is not affected: a broken claim fails before this is reached.
+    const EnforcementLevel level = _deps.policy.skipGraphValidation
+                                       ? EnforcementLevel::APPLICABILITY
+                                       : _bundle->metadata.enforcementLevel;
+    if(level != EnforcementLevel::FULL)
     {
-        return enforceAtLevel(_bundle->metadata.enforcementLevel, session);
+        return enforceAtLevel(level, session);
     }
 
     if(_bundle->outputTensorUids.empty())

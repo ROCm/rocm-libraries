@@ -5,10 +5,12 @@
  * frag-length / accumulator-dtype tables consulted by rocke_b_mma.
  *
  * rocke_b_mma sizes its tile.mma result vector as <c_frag_len x acc_elem>,
- * where c_frag_len comes from the op_id frag-length table and acc_elem is i32
- * for integer WMMA atoms (else f32). This test pins that mapping for a
- * representative set of atoms and checks the unknown-op_id error path, so a
- * table edit that changes a result width/dtype is caught here.
+ * where c_frag_len comes from the op_id frag-length table and acc_elem is the
+ * IR type of the instruction's accumulator dtype in the arch catalog (fp32 for
+ * an op_id the catalog does not list). This test pins that mapping for a
+ * representative set of atoms, checks that every catalog accumulator has an IR
+ * type, and checks the unknown-op_id error path, so a table edit that changes
+ * a result width/dtype is caught here. Mirrors tests/core/test_mma_frag_tables.py.
  *
  * Plain executable: returns non-zero on the first failed check (a clean run is
  * the pass criterion). Registered via tests/CMakeLists.txt so it is installed
@@ -122,6 +124,27 @@ int main(void)
      * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
     check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
     check_emulated_atom(&b, "mfma_f32_32x32x16_xf32", 8, 16);
+
+    /* No catalog row (fragment information only): accumulates in fp32. */
+    CHECK(rocke_arch_mma_op_id_c_dtype("mfma_f32_4x4x4_f16") == NULL,
+          "mfma_f32_4x4x4_f16 has no catalog row");
+    check_atom(&b, "mfma_f32_4x4x4_f16", 4, false);
+
+    /* Every catalog accumulator has an IR type, and the op_id lookup rocke_b_mma
+     * uses returns the row's accumulator dtype. */
+    int num_arches = 0;
+    const char* const* arches = rocke_known_arches(&num_arches);
+    for(int i = 0; i < num_arches; ++i)
+    {
+        const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(arches[i]);
+        for(int j = 0; arch && j < arch->mma.num_ops; ++j)
+        {
+            const rocke_mma_op_t* op = &arch->mma.ops[j];
+            const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op->op_id);
+            CHECK(rocke_dtype_to_ir_type(op->c_dtype) != NULL, op->op_id);
+            CHECK(c_dtype != NULL && strcmp(c_dtype, op->c_dtype) == 0, op->op_id);
+        }
+    }
 
     /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
      * matrix operands are <16 x i32>, so fragment length is 16 elements, not

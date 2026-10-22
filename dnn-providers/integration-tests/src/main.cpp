@@ -121,8 +121,9 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--skip-graph-validation")
             .default_value(false)
             .implicit_value(true)
-            .help("PASS immediately after confirming engine support, "
-                  "without executing or validating the graph");
+            .help("PASS immediately after confirming engine support, without executing or "
+                  "validating the graph. Bundles stop at the applicability rung and need "
+                  "--test-engine; support claims are still enforced.");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
         parser.add_argument("--reference-executor")
