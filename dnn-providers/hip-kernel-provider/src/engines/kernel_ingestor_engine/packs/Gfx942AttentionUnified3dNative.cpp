@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -46,7 +47,9 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArguments.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dQueryOffsets.hpp"
 
 /**
  * @file Gfx942AttentionUnified3dNative.cpp
@@ -962,12 +965,13 @@ double scoreKernel(const MatchContext& context,
 constexpr const char* BUFFER_KIND = "global_buffer";
 constexpr const char* BY_VALUE_KIND = "by_value";
 constexpr uint32_t PTR_BYTES = 8;
-constexpr uint32_t I32_BYTES = 4;
-constexpr uint32_t I64_BYTES = 8;
 
 /**
  * @brief The segment launch's argument list: `_3d_signature(dtype, strided_kv=True)`
  *        (`kernels/common/attention_unified.py`), 19 base arguments then 8 strided-K/V.
+ *
+ * Derived from gfx942Unified3dSegmentArguments(), the list launch() passes, so the
+ * recorded-signature check in prepare() also checks the launch's names, kinds and order.
  *
  * NAMES ARE LOAD-BEARING: requireSignatureMatch compares kind and size always and names
  * when both sides carry one; hkp_pack records the builder's own parameter names. Offsets
@@ -977,41 +981,16 @@ std::vector<KernelArgument> segmentSignature()
 {
     std::vector<KernelArgument> signature;
     uint32_t offset = 0;
-    const auto add = [&](const char* kind, uint32_t size, const char* name) {
+    for(const auto& argument : gfx942Unified3dSegmentArguments(0, 0.0F, {}, {}))
+    {
+        const uint32_t size = argument.bytes();
         offset = (offset + size - 1) / size * size;
-        signature.push_back(KernelArgument{kind, size, offset, name});
+        signature.push_back(KernelArgument{
+            argument.kind == Gfx942Unified3dArgumentKind::POINTER ? BUFFER_KIND : BY_VALUE_KIND,
+            size,
+            offset,
+            argument.name});
         offset += size;
-    };
-    for(const char* name : {"segm_output_ptr",
-                            "segm_max_ptr",
-                            "segm_expsum_ptr",
-                            "query_ptr",
-                            "key_cache_ptr",
-                            "value_cache_ptr",
-                            "sink_ptr",
-                            "block_tables_ptr",
-                            "seq_lens_ptr",
-                            "alibi_slopes_ptr",
-                            "qq_bias_ptr",
-                            "query_start_len_ptr"})
-    {
-        add(BUFFER_KIND, PTR_BYTES, name);
-    }
-    for(const char* name : {"scale", "k_scale", "v_scale", "softcap"})
-    {
-        add(BY_VALUE_KIND, I32_BYTES, name); // f32
-    }
-    for(const char* name : {"num_seqs", "block_table_stride", "qq_bias_stride_0"})
-    {
-        add(BY_VALUE_KIND, I32_BYTES, name);
-    }
-    for(const char* prefix : {"k", "v"})
-    {
-        const std::string p(prefix);
-        add(BY_VALUE_KIND, I64_BYTES, (p + "_stride_batch_bytes").c_str());
-        add(BY_VALUE_KIND, I64_BYTES, (p + "_stride_head_bytes").c_str());
-        add(BY_VALUE_KIND, I32_BYTES, (p + "_stride_token_bytes").c_str());
-        add(BY_VALUE_KIND, I32_BYTES, (p + "_span_bytes").c_str());
     }
     return signature;
 }
@@ -1027,94 +1006,45 @@ std::vector<KernelArgument> reduceSignature()
             KernelArgument{BUFFER_KIND, PTR_BYTES, 32, "seq_lens_ptr"}};
 }
 
-/// One K or V tensor's stride arguments (`KvTensorLayout.arguments`), in bytes.
-struct StridedKvArguments
-{
-    int64_t strideBatchBytes = 0;
-    int64_t strideHeadBytes = 0;
-    int32_t strideTokenBytes = 0;
-    int32_t spanBytes = 0;
-};
-
-/// From a tensor graph_match validated with stridedKvRefusal, which bounds every product.
-StridedKvArguments stridedKvArguments(const data_objects::TensorAttributes& tensor)
+/// gfx942StridedKvArguments for a tensor graph_match validated with stridedKvRefusal.
+Gfx942StridedKvArguments stridedKvArguments(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
-    StridedKvArguments args;
-    args.strideBatchBytes = strides->Get(BATCH_AXIS) * BYTES_PER_ELEMENT;
-    args.strideHeadBytes = strides->Get(HEAD_AXIS) * BYTES_PER_ELEMENT;
-    args.strideTokenBytes = static_cast<int32_t>(strides->Get(SEQ_AXIS) * BYTES_PER_ELEMENT);
-    // KvTensorLayout.head_span_bytes: 2 * ((capacity - 1) * stride_S + D).
-    args.spanBytes = static_cast<int32_t>(
-        BYTES_PER_ELEMENT
-        * ((dims->Get(SEQ_AXIS) - 1) * strides->Get(SEQ_AXIS) + dims->Get(HEAD_SIZE_AXIS)));
-    return args;
+    const auto axes = {BATCH_AXIS, HEAD_AXIS, SEQ_AXIS, HEAD_SIZE_AXIS};
+    std::array<int64_t, 4> logicalDims{};
+    std::array<int64_t, 4> logicalStrides{};
+    size_t i = 0;
+    for(const uint32_t axis : axes)
+    {
+        logicalDims[i] = dims->Get(axis);
+        logicalStrides[i] = strides->Get(axis);
+        ++i;
+    }
+    return gfx942StridedKvArguments(logicalDims, logicalStrides);
+}
+
+void* allocatePinnedHost(size_t bytes)
+{
+    void* host = nullptr;
+    return hipHostMalloc(&host, bytes) == hipSuccess ? host : nullptr;
 }
 
 /**
- * @brief Pinned host memory holding `cu_seqlens_q = [0, 1, ..., B]`, the source of the
- *        launch-time copy into the workspace.
+ * @brief The process-lifetime pinned `[0, 1, 2, ...]` every plan copies its
+ *        `cu_seqlens_q[B+1]` prefix from (see Gfx942GrowOnlyArange for source, lifetime and
+ *        thread safety).
  *
- * Source: the strided entry of `run_unified_attention_torch` takes caller-owned int32
- * `[B+1]` query offsets `[0, 1, ..., B]`; the segment kernel reads `cu_q[seq]` and
- * `cu_q[seq + 1]` for the query row and length. A dense hipDNN graph has no such tensor, so
- * the engine synthesizes it.
- * Lifetime: allocated once at prepare() and owned by the prepared dispatch; never written
- * after construction, so concurrent in-flight copies from it are safe. Pinned (not
- * pageable) so hipMemcpyAsync is truly asynchronous: a pageable source would make the copy
- * wait for the stream on the host. hipHostFree in the destructor synchronizes the device
- * before releasing it, so no copy can still be reading it.
+ * Shared by all plans and never freed: an in-flight hipMemcpyAsync from any block stays
+ * valid with no destructor synchronization. Pinned (hipHostMalloc), so the copy is truly
+ * asynchronous; a pageable source would make it wait for the stream on the host.
  */
-class PinnedQueryOffsets
+Gfx942GrowOnlyArange& pinnedQueryOffsets()
 {
-public:
-    explicit PinnedQueryOffsets(int64_t batch)
-        : _count(static_cast<size_t>(batch) + 1)
-    {
-        void* host = nullptr;
-        const hipError_t status = hipHostMalloc(&host, _count * sizeof(int32_t));
-        if(status != hipSuccess || host == nullptr)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_ALLOC_FAILED,
-                "gfx942 unified 3d: cannot allocate pinned host memory for cu_seqlens_q: "
-                    + std::string(hipGetErrorString(status)));
-        }
-        _data = static_cast<int32_t*>(host);
-        for(size_t i = 0; i < _count; ++i)
-        {
-            _data[i] = static_cast<int32_t>(i);
-        }
-    }
-
-    ~PinnedQueryOffsets()
-    {
-        if(_data != nullptr)
-        {
-            static_cast<void>(hipHostFree(_data));
-        }
-    }
-
-    PinnedQueryOffsets(const PinnedQueryOffsets&) = delete;
-    PinnedQueryOffsets& operator=(const PinnedQueryOffsets&) = delete;
-    PinnedQueryOffsets(PinnedQueryOffsets&&) = delete;
-    PinnedQueryOffsets& operator=(PinnedQueryOffsets&&) = delete;
-
-    const int32_t* data() const
-    {
-        return _data;
-    }
-
-    size_t bytes() const
-    {
-        return _count * sizeof(int32_t);
-    }
-
-private:
-    size_t _count = 0;
-    int32_t* _data = nullptr;
-};
+    // Intentionally leaked: a static destructor would run after HIP may have shut down.
+    static auto* s_offsets = new Gfx942GrowOnlyArange(&allocatePinnedHost);
+    return *s_offsets;
+}
 
 /// Everything launch() needs, owning nothing that points back into the MatchContext or
 /// BoundTokens it came from.
@@ -1123,8 +1053,8 @@ struct Unified3dLaunchState
     Unified3dBinding binding;
     Unified3dProblem problem;
     Gfx942AttentionUnified3dWorkspace workspace;
-    StridedKvArguments k;
-    StridedKvArguments v;
+    /// The segment launch's arguments; pointer slots resolved per launch.
+    Gfx942Unified3dSegmentArguments segmentArguments;
 };
 
 class PreparedGfx942AttentionUnified3d : public PreparedDispatch
@@ -1136,7 +1066,6 @@ public:
         : _segment(std::move(segment))
         , _reduce(std::move(reduce))
         , _state(state)
-        , _queryOffsets(std::make_unique<PinnedQueryOffsets>(state.problem.batch))
     {
     }
 
@@ -1155,17 +1084,21 @@ public:
         return _state;
     }
 
-    const PinnedQueryOffsets& queryOffsets() const
-    {
-        return *_queryOffsets;
-    }
-
 private:
     IngestorKernelCode _segment;
     IngestorKernelCode _reduce;
     Unified3dLaunchState _state;
-    std::unique_ptr<PinnedQueryOffsets> _queryOffsets;
 };
+
+/// Launches @p kernel with one argument per word (see gfx942Unified3dArgumentWords).
+template <size_t... I>
+void launchWords(const compilation::IRunnableKernel& kernel,
+                 hipStream_t stream,
+                 const std::array<uint64_t, sizeof...(I)>& words,
+                 std::index_sequence<I...> /*indices*/)
+{
+    kernel.launch(stream, words[I]...);
+}
 
 void requireAligned(const void* pointer, const char* role)
 {
@@ -1281,8 +1214,14 @@ public:
         Unified3dLaunchState state;
         state.binding = binding;
         state.problem = problemFor(*q, *k);
-        state.k = stridedKvArguments(*k);
-        state.v = stridedKvArguments(*v);
+        state.segmentArguments
+            = gfx942Unified3dSegmentArguments(static_cast<int32_t>(state.problem.batch),
+                                              binding.scale,
+                                              stridedKvArguments(*k),
+                                              stridedKvArguments(*v));
+        // Grow the shared pinned cu_seqlens_q source now, so launch() never allocates.
+        static_cast<void>(
+            pinnedQueryOffsets().acquire(static_cast<size_t>(state.problem.batch) + 1));
         state.workspace = gfx942AttentionUnified3dWorkspace(state.problem.batch,
                                                             state.problem.numQueryHeads,
                                                             traits->numSegments,
@@ -1309,8 +1248,8 @@ public:
      *  1. seqused_k[B] = Skv (hipMemsetD32Async). Source: the strided entry's int32 `[B]`
      *     KV lengths; a dense graph's every sequence has all Skv keys. Lifetime: one launch;
      *     region `sequsedK` of the workspace. Precondition: none (overwritten every launch).
-     *  2. cu_seqlens_q[B+1] = [0..B] (hipMemcpyAsync from PinnedQueryOffsets). Same
-     *     lifetime; region `cuSeqlensQ`.
+     *  2. cu_seqlens_q[B+1] = [0..B] (hipMemcpyAsync of a prefix of the process-lifetime
+     *     pinned pinnedQueryOffsets(), never freed). Same lifetime; region `cuSeqlensQ`.
      *  3. The segment launch. It writes every (row, head, segment) slot of segm_output /
      *     segm_max / segm_expsum, an empty segment included (`-inf` max, 0 sum), so the f32
      *     scratch needs no initialization. Lifetime: one launch; regions `segmOutput`,
@@ -1318,9 +1257,8 @@ public:
      *  4. The reduce launch, ALWAYS: O is written only here. hipDNN does not zero the
      *     workspace, and the reduce is what reads it back.
      *
-     * Sinks, block tables, ALiBi and QQ bias are null (graph_match refuses them; the
-     * kernel's `block_table_stride` is 0 as `run_unified_attention_torch` passes for
-     * strided KV); k_scale = v_scale = 1 and softcap = 0 (no FP8, no softcap).
+     * The segment arguments are gfx942Unified3dSegmentArguments() (built at prepare), with
+     * pointer slots resolved here by gfx942Unified3dArgumentWords().
      */
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
@@ -1368,49 +1306,27 @@ public:
                                      static_cast<size_t>(problem.batch),
                                      stream),
                    "filling seqused_k");
-        const auto& offsets = dispatch.queryOffsets();
-        requireHip(hipMemcpyAsync(
-                       cuSeqlensQ, offsets.data(), offsets.bytes(), hipMemcpyHostToDevice, stream),
-                   "copying cu_seqlens_q");
+        const size_t offsetCount = static_cast<size_t>(problem.batch) + 1;
+        const int32_t* offsets = pinnedQueryOffsets().acquire(offsetCount);
+        requireHip(
+            hipMemcpyAsync(
+                cuSeqlensQ, offsets, offsetCount * sizeof(int32_t), hipMemcpyHostToDevice, stream),
+            "copying cu_seqlens_q");
 
-        // A named null: launch() passes each argument's address, and a nullptr_t object's
-        // bytes are unspecified.
-        void* null = nullptr;
-        const float kScale = 1.0F;
-        const float vScale = 1.0F;
-        const float softcap = 0.0F;
-        const auto numSeqs = static_cast<int32_t>(problem.batch);
-        const int32_t blockTableStride = 0;
-        const int32_t qqBiasStride0 = 0;
-        // Changing this list means changing segmentSignature() with it.
-        dispatch.segmentForStream(stream).launch(stream,
-                                                 segmOutput,
-                                                 segmMax,
-                                                 segmExpsum,
-                                                 q.ptr,
-                                                 k.ptr,
-                                                 v.ptr,
-                                                 null, // sink_ptr
-                                                 null, // block_tables_ptr
-                                                 sequsedK, // seq_lens_ptr
-                                                 null, // alibi_slopes_ptr
-                                                 null, // qq_bias_ptr
-                                                 cuSeqlensQ, // query_start_len_ptr
-                                                 binding.scale,
-                                                 kScale,
-                                                 vScale,
-                                                 softcap,
-                                                 numSeqs,
-                                                 blockTableStride,
-                                                 qqBiasStride0,
-                                                 state.k.strideBatchBytes,
-                                                 state.k.strideHeadBytes,
-                                                 state.k.strideTokenBytes,
-                                                 state.k.spanBytes,
-                                                 state.v.strideBatchBytes,
-                                                 state.v.strideHeadBytes,
-                                                 state.v.strideTokenBytes,
-                                                 state.v.spanBytes);
+        Gfx942Unified3dBufferAddresses addresses;
+        addresses.segmOutput = segmOutput;
+        addresses.segmMax = segmMax;
+        addresses.segmExpsum = segmExpsum;
+        addresses.query = q.ptr;
+        addresses.key = k.ptr;
+        addresses.value = v.ptr;
+        addresses.sequsedK = sequsedK;
+        addresses.cuSeqlensQ = cuSeqlensQ;
+        const auto words = gfx942Unified3dArgumentWords(state.segmentArguments, addresses);
+        launchWords(dispatch.segmentForStream(stream),
+                    stream,
+                    words,
+                    std::make_index_sequence<GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT>{});
         // Changing this list means changing reduceSignature() with it.
         dispatch.reduceForStream(stream).launch(
             stream, o.ptr, segmOutput, segmMax, segmExpsum, sequsedK);

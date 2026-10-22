@@ -327,13 +327,18 @@ launch_surface:
 
   - name: kernargs
     python_source: kernels/common/attention_unified.py:_3d_signature
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:segmentSignature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArguments.hpp:gfx942Unified3dSegmentArguments
     kmd_fields: []
     guard: >
-      segment = _3d_signature(dtype, strided_kv=True), 19 base + 8 strided-KV
-      arguments; reduce = _reduce_signature(dtype) without LSE. prepare()
-      compares both launches' recorded lists (names included) before loading
-      either. launch() passes null sink/block-table/ALiBi/QQ-bias pointers,
+      gfx942Unified3dSegmentArguments() is the ordered 27-argument segment
+      list launch() passes (19 base + 8 strided-KV, _3d_signature(dtype,
+      strided_kv=True)): null sink/block-table/ALiBi/QQ-bias pointers,
       k_scale = v_scale = 1, softcap 0, num_seqs = B, block_table_stride 0,
-      and KvTensorLayout.arguments() byte strides and per-head span.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dSignature.cpp
+      and gfx942StridedKvArguments() = KvTensorLayout.arguments() byte strides
+      and per-head span. segmentSignature() is derived from it, and prepare()
+      compares it and the reduce list (_reduce_signature(dtype) without LSE)
+      with both launches' recorded lists (names included) before loading
+      either. A rocKE-generated table pins every value and the order for
+      BHSD, BSHD, padded-row, padded-capacity and mixed K/V layouts, kept
+      current by a quick pytest drift guard.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dArguments.cpp
