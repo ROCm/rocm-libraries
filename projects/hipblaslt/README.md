@@ -28,6 +28,9 @@ broadcasts to all D columns.
 For the supported data types, see
 [Supported data types](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/data-type-support.html).
 
+To exercise a selected GPU function, see
+[Choose one GEMM problem from a solution index](docs/how-to/choose-gemm-for-solution.md).
+
 ## Getting started
 
 > [!NOTE]
