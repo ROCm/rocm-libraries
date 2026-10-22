@@ -3,7 +3,7 @@
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
 - **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. The hip-kernel-provider exports the plugin hooks for its kernel ingestor engines (#13315), and the hipDNN test plugins also implement them.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-10-22 against `develop` (0bb1c36e8f7) with #13315 applied
 - Scope: frontend, backend, engine plugin API, test plugin implementation, hip-kernel-provider
   ingestor implementation
 
@@ -155,15 +155,19 @@ hooks only when the plugin exports all three.
 
 The plugin payload contract is byte-level:
 
-- The plugin allocates and owns `serialized_context` for the duration of the serialize call.
-- hipDNN copies the bytes into `plugin_payload`.
-- hipDNN calls the plugin destroy hook after copying.
+- The plugin allocates the `serialized_context` bytes and owns them. The bytes must stay valid
+  until hipDNN calls the destroy hook.
+- hipDNN copies the bytes into `plugin_payload`. hipDNN refuses a null or empty payload with
+  `HIPDNN_STATUS_PLUGIN_ERROR`.
+- After each successful serialize call, hipDNN calls the destroy hook one time, also when it
+  refuses the payload. After a failed serialize call, hipDNN does not call the destroy hook. The
+  plugin must then free its own memory.
 - hipDNN passes the same bytes back during deserialization.
 - Plugin payload versioning and compatibility are plugin-owned.
 
 ## Backend Object Model
 
-`ExecutionPlanDescriptor` now supports two construction paths:
+`ExecutionPlanDescriptor` supports two construction paths:
 
 1. Normal build path: finalize from an `EngineConfigDescriptor`, graph, and plugin resource manager.
 2. Deserialized path: finalize from `SerializedExecutionPlan` bytes and a restored plugin execution
@@ -233,8 +237,9 @@ The body contains this data:
 - The workspace size in bytes.
 - The UIDs of the runtime pass-by-value tensors.
 - The dispatch data: the versioned dispatch name and the named, typed launch values.
-- The kernel image: the source kind, the kernel symbol, the GPU target, the SHA-256 of the code
-  object, the recorded argument signature, and the uncompressed code object.
+- The kernel image: the source kind, the kernel symbol, the target (the base architecture of the
+  GPU that saved the plan), the SHA-256 of the code object, the recorded argument signature, and
+  the uncompressed code object.
 - The provider version. The provider version is for diagnostics only.
 
 The launch values are the inputs from which the dispatch handler calculates a launch. The payload
@@ -277,9 +282,9 @@ Never change the fields of the first 48 bytes of the header, in any version. A r
 refuse a payload.
 
 `IngestorPlanPayload.hpp` holds `INGESTOR_PLAN_SCHEMA_SHA256` next to the format version constants.
-This value is the SHA-256 of `ingestor_plan.fbs` with LF line ends. A unit test calculates the
-SHA-256 of the schema file and compares it with this value. After each schema change, decide the
-version change and then update the value.
+This value is the SHA-256 of `ingestor_plan.fbs` with LF line ends. The build calculates the
+SHA-256 of the schema file, and a unit test compares it with this value. After each schema change,
+decide the version change and then update the value.
 
 The dispatch handler contract has a separate version. That version is part of the dispatch name.
 It is not the format version of the saved file. The dispatch version identifies the contract between
@@ -316,8 +321,12 @@ The load hook then does these checks in this order. The first check that fails s
 9. The workspace size and the source kind are valid. The kernel SHA-256 text is valid and matches
    the code object. The launch values are valid. Each of these refusals is `INVALID_VALUE`.
 10. The plan has no runtime pass-by-value tensors (`NOT_APPLICABLE`).
-11. The device of the handle can run the stored GPU target (`NOT_APPLICABLE`). A kpack target
-    matches by prefix, as kpack archive entries do. Other source kinds need the exact target.
+11. The device of the handle can run the stored GPU target (`NOT_APPLICABLE`). For a kpack plan,
+    the stored target is the base architecture of the GPU that saved the plan, for example
+    `gfx942`. A device matches when its architecture name is that target, with or without feature
+    flags. A generic archive entry does not extend this match. A plan whose build read a generic
+    entry loads only on the base architecture that saved it. Other source kinds need the exact
+    target.
 12. A dispatch handler is registered under the dispatch name (`NOT_APPLICABLE`).
 13. The handler supports restore (`NOT_APPLICABLE`).
 14. The recorded argument signature matches the arguments that the handler launches
@@ -332,7 +341,9 @@ load, not the first execute. Another device loads its own module from the stored
 ### Statuses and Messages
 
 The plugin uses two statuses for a refusal. Each status has one message prefix for a load and one
-for a save.
+for a save. One save refusal uses the load prefix: a code object that is too large for the payload
+format gives `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` with the prefix
+`ingestor plan is valid but cannot be saved or loaded here: `.
 
 | Cause | Plugin status | Load message prefix | Save message prefix |
 | --- | --- | --- | --- |
