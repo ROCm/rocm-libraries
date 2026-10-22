@@ -1421,6 +1421,31 @@ namespace TensileLite
             return m_mxBlockB;
         }
 
+        /// True when the MX scale buffers this caller supplies are already in the
+        /// gfx950 host-pre-swizzle layout (the 6-D e8m0_shuffle permutation applied
+        /// by DGen::preSwizzleScalesGFX950), rather than the compact row-major
+        /// E8M0 array every other layout uses.
+        ///
+        /// This is a property of the *caller's buffer*, not of the arch or of the
+        /// selected kernel, and it is what the MXScaleHostPreSwizzle problem
+        /// predicate matches against each solution's MXScaleFormat. hipBLASLt sets
+        /// it from ScalingFormat::Block_32_UE8M0_32_8_EXT; the TensileLite
+        /// benchmark client sets it from --mx-scale-format.
+        ///
+        /// Both MXScaleFormat NoSwizzle and InMemorySwizzle read a compact buffer
+        /// (InMemorySwizzle permutes in the kernel), so only HostPreSwizzle
+        /// corresponds to true here. See DataInitialization.hpp, which applies the
+        /// host swizzle only for problemType.mxScaleFormat == 1.
+        void setMXScaleHostPreSwizzle(bool preSwizzled)
+        {
+            m_mxScaleHostPreSwizzle = preSwizzled;
+        }
+
+        bool mxScaleHostPreSwizzle() const
+        {
+            return m_mxScaleHostPreSwizzle;
+        }
+
         /// True when the MX scale buffer for A that this caller hands to an
         /// *external* custom kernel is packed with the compact ceil(K/mxBlock)
         /// leading dimension, even though mxsa() carries the gfx950 padding
@@ -1755,6 +1780,7 @@ namespace TensileLite
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
         bool             m_customKernelMXScaleAIsPacked = false;
         bool             m_customKernelMXScaleBIsPacked = false;
+        bool             m_mxScaleHostPreSwizzle        = false;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;

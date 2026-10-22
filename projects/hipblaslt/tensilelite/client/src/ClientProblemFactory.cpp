@@ -101,6 +101,8 @@ namespace TensileLite
             , m_mxBlockFreeB(args["mx-b-free-block"].as<int>())
             , m_mxScalePadding(MXScalePadding::Gfx1250)
             , m_mxScalesPacked(args["mx-scales-packed"].as<bool>())
+            , m_mxScaleHostPreSwizzle(args.count("mx-scale-format")
+                                      && args["mx-scale-format"].as<int>() == 1)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
@@ -617,6 +619,7 @@ namespace TensileLite
                             // above, so the scale stride it hands a custom kernel
                             // keeps matching this buffer.
                             rv.back().setCustomKernelMXScalesArePacked(m_mxScalesPacked);
+                            rv.back().setMXScaleHostPreSwizzle(m_mxScaleHostPreSwizzle);
                             if(m_mxBlockA)
                             {
                                 rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_mxScalePadding, m_mxBlockFreeA);

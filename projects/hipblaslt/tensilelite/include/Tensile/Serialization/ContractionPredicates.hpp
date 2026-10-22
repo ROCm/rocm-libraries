@@ -139,6 +139,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::MXBlockFreeB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
+                     Base::template Pair<Predicates::Contraction::MXScaleHostPreSwizzle>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
                      Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
@@ -647,6 +648,11 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleHostPreSwizzle, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleHostPreSwizzle, IO>
         {
         };
     } // namespace Serialization
