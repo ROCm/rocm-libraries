@@ -319,6 +319,69 @@ def test_gfx1250_keeps_legacy_maxvgpr_occupancy():
     assert kw.getVgprOccupancy(numThreads=256, vgprs=300, doubleVgpr=True) == 6
 
 
+class _RecordingPool:
+    """Stands in for a rocisa RegisterPool; records the occupancy limit it is given."""
+
+    def __init__(self):
+        self.limit = None
+
+    def setOccupancyLimit(self, maxSize, size):
+        self.limit = (maxSize, size)
+
+
+def _set_limits(isa, wave, numThreads, vgprs, ldsBytes, doubleVgpr=None):
+    """Run the setOccupancy sequence on a stub writer; returns (kw, maxVgprs, occupancy)."""
+    kw = _make_writer(_init_rocisa(isa), isa)
+    kw.states.kernel["WavefrontSize"] = wave
+    # production: wave32 (or ArchAccUnifiedRegs) implies doubleVgpr
+    kw.states.doubleVgpr = (wave == 32) if doubleVgpr is None else doubleVgpr
+    kw.vgprPool, kw.sgprPool = _RecordingPool(), _RecordingPool()
+    maxVgprs, occ = kw.getMaxRegsForOccupancy(numThreads, vgprs, 40, ldsBytes, 0, kw.states.doubleVgpr)
+    kw.setOccupancyLimits({"ISA": tuple(isa), "NumThreads": numThreads}, maxVgprs, occ)
+    return kw, maxVgprs, occ
+
+
+@pytest.mark.parametrize("isa", [(11, 0, 0), (11, 5, 0), (11, 5, 1)])
+@pytest.mark.parametrize("wave", [32, 64])
+@pytest.mark.parametrize("numThreads", [128, 256])
+@pytest.mark.parametrize("vgprs,ldsBytes", [(64, 4096), (96, 8192), (128, 16384), (160, 4096)])
+def test_gfx11_vgpr_pool_limit_keeps_modeled_occupancy(isa, wave, numThreads, vgprs, ldsBytes):
+    """Growing the VGPR pool up to its occupancy limit must not lower the modeled occupancy.
+
+    gfx11 occupancy counts workgroups that each take numThreads/(wave*4) waves per SIMD, so
+    the legacy PhysicalMaxVgpr // occupancy limit let e.g. a gfx1151 wave32 256-thread kernel
+    grow to 192 VGPRs (occupancy 8 -> 4); the limit is the model's own per-wave budget instead.
+    """
+    kw, maxVgprs, occ = _set_limits(isa, wave, numThreads, vgprs, ldsBytes)
+    limit = kw.vgprPool.limit[1]
+    assert limit == maxVgprs
+    assert kw.getOccupancy(numThreads, limit, 40, ldsBytes, 0, kw.states.doubleVgpr) == occ
+
+
+def test_gfx11_vgpr_pool_limit_stays_non_binding_when_nothing_fits():
+    """If the current allocation already fits no workgroup, the limit stays non-binding.
+
+    gfx1151 wave32, 1024 threads = 8 waves per SIMD: 200 VGPRs -> 216 * 8 > 1536, so
+    occupancy is 0 and getMaxRegsForOccupancy falls back to (vgprs, 1).
+    """
+    kw, maxVgprs, occ = _set_limits((11, 5, 1), 32, 1024, 200, 4096)
+    assert (maxVgprs, occ) == (200, 1)
+    assert kw.vgprPool.limit[1] == kw.states.regCaps["PhysicalMaxVgpr"] // occ
+
+
+def test_non_gfx11_vgpr_pool_limit_unchanged():
+    """Other architectures keep PhysicalMaxVgpr // occupancy."""
+    kw, _, occ = _set_limits((9, 4, 2), 64, 256, 64, 4096, doubleVgpr=True)
+    assert kw.vgprPool.limit[1] == kw.states.regCaps["PhysicalMaxVgpr"] // occ
+    assert kw.sgprPool.limit[1] == kw.states.regCaps["PhysicalMaxSgpr"] // occ
+
+
+@pytest.mark.parametrize("isa", [(12, 0, 1), (11, 7, 0)])
+def test_gfx12_and_gfx117x_set_no_pool_limits(isa):
+    kw, _, _ = _set_limits(isa, 32, 256, 64, 4096)
+    assert kw.vgprPool.limit is None and kw.sgprPool.limit is None
+
+
 @pytest.mark.parametrize(
     "isa,expected",
     [

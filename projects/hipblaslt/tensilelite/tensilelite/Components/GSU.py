@@ -952,11 +952,7 @@ class GSUOn(GSU):
             # Use VGPR up to next occupancy threshold:
             maxVgprs, occupancy = writer.getMaxRegsForOccupancy(kernel["NumThreads"], writer.vgprPool.size(), writer.sgprPool.size(), \
                 writer.getLdsSize(kernel), writer.agprPool.size(), writer.states.doubleVgpr)
-            # Set occupancy limit for register pools
-            # TODO: Support gfx12 and gfx117x
-            if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
-                writer.vgprPool.setOccupancyLimit(writer.states.regCaps["MaxVgpr"], writer.states.regCaps["PhysicalMaxVgpr"] // occupancy)
-                writer.sgprPool.setOccupancyLimit(writer.states.regCaps["MaxSgpr"], writer.states.regCaps["PhysicalMaxSgpr"] // occupancy)
+            writer.setOccupancyLimits(kernel, maxVgprs, occupancy)
 
             if ss.numVgprsPerElement:
                 numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
