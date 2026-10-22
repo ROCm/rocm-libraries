@@ -310,7 +310,7 @@ public:
         }
         catch(const hipError_t& status)
         {
-            rocsparse_clients_log_hip_error("hipFree", status);
+            rocsparse_clients_log_hip_error("rocsparse_allocator::free", status);
         }
     };
 

@@ -333,13 +333,14 @@ public:
             switch(MODE)
             {
             case memory_mode::host:
-                rocsparse_clients_log_hip_error("hipHostFree", rocsparse_hipHostFree(d));
+                rocsparse_clients_log_hip_error("rocsparse_hipHostFree", rocsparse_hipHostFree(d));
                 break;
             case memory_mode::device:
-                rocsparse_clients_log_hip_error("hipFree", rocsparse_hipFree(d));
+                rocsparse_clients_log_hip_error("rocsparse_hipFree", rocsparse_hipFree(d));
                 break;
             case memory_mode::managed:
-                rocsparse_clients_log_hip_error("hipFree", rocsparse_hipFreeManaged(d));
+                rocsparse_clients_log_hip_error("rocsparse_hipFreeManaged",
+                                                rocsparse_hipFreeManaged(d));
                 break;
             }
             throw;
