@@ -4075,7 +4075,7 @@ inline void rpp_bilinear_load_u8pkd3_to_f32pln3_avx(Rpp8u** srcRowPtrsForInterp,
                          xmm_pxMask04To07))); /* Contains BottomRow B02 for all the dst locations */
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4178,7 +4178,7 @@ inline void rpp_bilinear_load_u8pln1_to_f32pln1_avx(Rpp8u** srcRowPtrsForInterp,
             pxTemp[4], xmm_pxMask04To07))); /* Contains 2nd pixels of 8 locations from Bottom row */
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4345,7 +4345,7 @@ inline void rpp_bilinear_load_i8pkd3_to_f32pln3_avx(Rpp8s** srcRowPtrsForInterp,
                                                         all the dst locations */
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4454,7 +4454,7 @@ inline void rpp_bilinear_load_i8pln1_to_f32pln1_avx(Rpp8s** srcRowPtrsForInterp,
             pxTemp[4], xmm_pxMask04To07))); /* Contains 2nd pixels of 8 locations from Bottom row */
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4637,7 +4637,7 @@ inline void rpp_bilinear_load_f32pkd3_to_f32pln3_avx(Rpp32f** srcRowPtrsForInter
                                    49); /* Permute to obtain B02 of 8 dst pixels in Bottom Row*/
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4713,7 +4713,7 @@ inline void rpp_bilinear_load_f32pln1_to_f32pln1_avx(Rpp32f** srcRowPtrsForInter
     p[3] = _mm256_setr_m128(pTemp[1], pTemp[3]);
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4779,7 +4779,7 @@ inline void rpp_bilinear_load_f16pkd3_to_f32pln3_avx(Rpp16f** srcRowPtrsForInter
     p[11] = _mm256_loadu_ps(bottomRow1[2]);
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
@@ -4828,7 +4828,7 @@ inline void rpp_bilinear_load_f16pln1_to_f32pln1_avx(Rpp16f** srcRowPtrsForInter
     p[3] = _mm256_loadu_ps(bottomRow1);
 
     if (hasLocBelowMin)  // If any src location below min src location is encountered
-                                   // replace the source pixel loaded with first pixel of the row
+                         // replace the source pixel loaded with first pixel of the row
     {
         __m256 pLowerBoundMask = _mm256_castsi256_ps(_mm256_cmpgt_epi32(
             avx_px0, pxSrcLoc));  // Mask set to true if the location is below min src location
