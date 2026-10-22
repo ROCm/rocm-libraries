@@ -5,6 +5,7 @@
 #include "code.hpp"
 #include "container.hpp"
 #include "instruction/common.hpp"
+#include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 
 #include <gtest/gtest.h>
@@ -52,6 +53,19 @@ TEST(RocisaCore, EmitsGfx950Assembly) {
   expectContains(text, "s_waitcnt vmcnt(0)");
   expectContains(text, "v_add_f32 v3, v2, v2");
   expectContains(text, "s_endpgm");
+}
+
+TEST(RocisaCore, EmitsScaledPackedFp8ToBf16Convert) {
+  selectGfx950();
+  rocisa::Module module("cvt");
+  module.addT<rocisa::VCvtScalePkFP8toBF16>(rocisa::vgpr(78), rocisa::vgpr(0),
+                                            rocisa::vgpr(76));
+  module.addT<rocisa::VCvtScalePkFP8toBF16>(rocisa::vgpr(0), rocisa::vgpr(0),
+                                            rocisa::vgpr(76), std::nullopt,
+                                            rocisa::VOP3PModifiers({1, 0, 0}));
+  std::string text = module.toString();
+  expectContains(text, "v_cvt_scalef32_pk_bf16_fp8 v78, v0, v76");
+  expectContains(text, "v_cvt_scalef32_pk_bf16_fp8 v0, v0, v76 op_sel:[1,0,0]");
 }
 
 } // namespace
