@@ -20,12 +20,13 @@ namespace ck_tile {
 // KV tile; reads page IDs from a vLLM 2D block table or an SGLang 1D page list while preserving
 // the QR M128/N128 compute layout.
 //
-// Experimental, gfx1250 only: BF16, group mode, linear [page, token, kv_head, dim] K/V pools,
-// D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window), optional
-// LSE output, no sink, dropout or bias. Build each instance in its own translation unit with the
-// scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero):
-// the launch contract below rests on measurements of that generated code, and the generated code
-// was observed to change when several instances share a translation unit.
+// Experimental, gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] K/V
+// pools, D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window),
+// optional LSE output, no sink, dropout or bias. Build each instance in its own translation unit
+// with the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
+// -fgpu-flush-denormals-to-zero): the launch contract below rests on measurements of that generated
+// code, and the generated code was observed to change when several instances share a translation
+// unit.
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaBatchPrefillQrTdmPageTileKernel
     : private FmhaBatchPrefillWithPagedKVCacheKernel<FmhaPipeline_, EpiloguePipeline_>
