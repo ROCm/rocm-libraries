@@ -312,6 +312,34 @@ _CASES = (
             row_ring=True,
         ),
     ),
+    # One tap per weight slot (tap_ring): deep chunks, a 3-deep ring, stride
+    # 2 and dilation.
+    (
+        dict(N=1, H=18, W=33, C=256, K=128),
+        dict(tiles_k=2, tiles_p=2, ck=128, tap_ring=True),
+    ),
+    (
+        dict(N=2, H=17, W=20, C=200, K=96),
+        dict(tiles_k=2, tiles_p=2, stages=3, prefetch=True, tap_ring=True),
+    ),
+    (
+        dict(N=2, H=13, W=21, C=96, K=64, stride=2, PAD=1, dil_w=2),
+        dict(tiles_k=1, tiles_p=2, tile_w=8, ck=64, tap_ring=True),
+    ),
+    # Padding past the filter's reach along the undilated axis: whole
+    # (sub-)halos of the edge tiles are padding.
+    (
+        dict(N=1, H=8, W=12, C=64, K=32, PAD=4, dil_w=4),
+        dict(waves_k=1, waves_p=2, tiles_k=2, tiles_p=1, tile_w=16),
+    ),
+    (
+        dict(N=2, H=9, W=12, C=64, K=32, PAD=4, dil_w=4),
+        dict(waves_k=2, waves_p=2, tiles_k=1, tiles_p=1, tile_w=16, ck=64),
+    ),
+    (
+        dict(N=1, H=8, W=12, C=64, K=32, PAD=4, dil_w=4),
+        dict(waves_k=1, waves_p=2, tiles_k=2, tiles_p=1, tile_w=16, row_ring=True),
+    ),
     # Dilation, per axis, and with stride 2.
     (dict(N=2, H=13, W=21, C=64, K=32, PAD=2, dil_w=2), dict(tiles_k=1, tiles_p=2)),
     (dict(N=2, H=13, W=11, C=64, K=32, PAD=1, dil_h=3), dict(tiles_k=1, tiles_p=2)),

@@ -151,6 +151,17 @@ class DirectFwdWmmaSpec:
     # in two slots, for all KH rows. A third of the weight LDS per stage, so
     # wider tiles (more register blocking) and deeper chunks fit.
     row_ring: bool = False
+    # As row_ring, one filter tap per weight slot (KH * KW steps per chunk):
+    # the smallest weight slot, for the widest tiles and deepest chunks.
+    tap_ring: bool = False
+
+    @property
+    def ring_taps(self) -> int:
+        """Taps per weight slot."""
+        p = self.problem
+        if self.tap_ring:
+            return 1
+        return p.KW if self.row_ring else p.KH * p.KW
 
     @property
     def phases_w(self) -> int:
@@ -241,8 +252,7 @@ class DirectFwdWmmaSpec:
     @property
     def wei_elems(self) -> int:
         p = self.problem
-        taps = p.KW if self.row_ring else p.KH * p.KW
-        return taps * self.block_k * self.x_pitch
+        return self.ring_taps * self.block_k * self.x_pitch
 
     @property
     def halo_slack(self) -> int:
@@ -252,7 +262,7 @@ class DirectFwdWmmaSpec:
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
-        if self.row_ring:
+        if self.row_ring or self.tap_ring:
             ring = (
                 2 * (self.halo_elems + self.halo_slack) + self.stages * self.wei_elems
             )
@@ -289,6 +299,7 @@ class DirectFwdWmmaSpec:
             "we" if self.wave_epilogue else "",
             "ps" if self.phase_split else "",
             "rr" if self.row_ring else "",
+            "tr" if self.tap_ring else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -381,8 +392,10 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         return "an image tile must hold whole 16-pixel tiles"
     if spec.tile_n > spec.waves_k * spec.waves_p - 1:
         return "tile_n needs one more wave than images (one X transfer per image)"
-    if spec.row_ring and (G > 1 or spec.split_barrier):
-        return "row_ring serves unpacked tiles without split_barrier"
+    if (spec.row_ring or spec.tap_ring) and (G > 1 or spec.split_barrier):
+        return "row_ring / tap_ring serve unpacked tiles without split_barrier"
+    if spec.row_ring and spec.tap_ring:
+        return "row_ring and tap_ring are exclusive"
     if spec.phase_split:
         if p.stride != 2:
             return "phase_split serves stride 2 only"
@@ -586,9 +599,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     # One LDS block: the halo ring, then the weight ring; the TDM epilogue
     # reuses it from offset 0 once the last chunk is consumed.
-    RR = spec.row_ring
+    RR = spec.row_ring or spec.tap_ring
     NHS = 2 if RR else NS  # halo slots
-    WTAPS = KW if RR else TAPS  # taps per weight slot
+    WTAPS = spec.ring_taps  # taps per weight slot
+    NG = TAPS // WTAPS  # weight slots (steps) per chunk
     WEI0 = NHS * HALO_STAGE
     lds = b.smem_alloc(io_type, [1, spec.lds_bytes() // 2], name_hint="fw_lds")
     halo_addr = b.trunc(b.smem_addr_of(lds), I32)
@@ -597,8 +611,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     # Halo origin in X coordinates and the edge shifts (module docstring).
     h0 = b.sub(h_tile if S == 1 else b.mul(h_tile, b.const_i32(S)), b.const_i32(PAD))
     w0 = b.sub(w_tile if S == 1 else b.mul(w_tile, b.const_i32(S)), b.const_i32(PAD))
-    hs = b.smax(b.sub(c0, h0), c0)
-    h_start = b.add(h0, hs)
+    # Leading zero rows / columns; a padding wider than the filter's reach
+    # (dilation along one axis only) can zero a whole (sub-)halo, never more.
+    hs = b.smin(b.smax(b.sub(c0, h0), c0), b.const_i32(HALO_H))
+    h_start = b.smax(b.add(h0, hs), c0)
     x_h_ext = b.smax(b.sub(c_H, h_start), c0)
     x_tile2 = b.sub(b.const_i32(HALO_H), hs)
     # Per (phase) sub-halo: (first input column, leading zero columns, zeroed
@@ -609,11 +625,12 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         wa = b.add(w0, b.const_i32(a)) if a else w0
         if PS:
             sw = b.smax(b.div(b.sub(b.const_i32(S - 1), wa), c_S), c0)
-            w_start = b.add(wa, b.mul(sw, c_S))
+            sw = b.smin(sw, b.const_i32(HC))
+            w_start = b.smax(b.add(wa, b.mul(sw, c_S)), c0)
             w_ext = b.div(b.add(b.sub(c_W, w_start), b.const_i32(S - 1)), c_S)
         else:
-            sw = b.smax(b.sub(c0, wa), c0)
-            w_start = b.add(wa, sw)
+            sw = b.smin(b.smax(b.sub(c0, wa), c0), b.const_i32(HC))
+            w_start = b.smax(b.add(wa, sw), c0)
             w_ext = b.sub(c_W, w_start)
         w_ext = b.smax(b.smin(w_ext, b.sub(b.const_i32(HC), sw)), c0)
         z_elems = b.mul(b.add(b.mul(hs, b.const_i32(HC)), sw), b.const_i32(XP))
@@ -627,7 +644,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     w_base = b.mul(b.add(k_grp, k_base), w_row)
 
     # ---- zero the halo cells no transfer writes (top / left image edge).
-    max_z = (PAD * HC + spec.lead_cols) * XP
+    max_z = (min(PAD, HALO_H) * HC + min(spec.lead_cols, HC)) * XP
     if max_z:
         zero_v = b.zero_vec(io_type, 8)
         for a, (_, z_elems, _) in enumerate(sub_halos):
@@ -662,7 +679,12 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                 # Wave im (phase 1: wave NB + 1 + im) moves image im's
                 # (sub-)halo; an image past N transfers zeros.
                 issuer = im if a == 0 else NB + 1 + im
-                with b.scf_if(b.cmp_eq(wave_id, b.const_i32(issuer))):
+                # A (sub-)halo that is all padding (its zeroing covers it)
+                # issues no transfer: a zero-row tile is not a no-op.
+                issue = b.land(
+                    b.cmp_eq(wave_id, b.const_i32(issuer)), b.cmp_lt(c0, x_tile2)
+                )
+                with b.scf_if(issue):
                     img_off = b.add(stage_off, b.const_i32(im * IMG + a * PSTR))
                     img = b.add(b.add(x_base, k0), b.mul(b.const_i32(im), xs_n))
                     src = b.global_ptr_add(Xp, b.mul(img, c2))
@@ -685,14 +707,14 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                         )
                     )
 
-    def _issue_wei(chunk: Value, stage: Value, row: Value | None = None) -> None:
-        """Weights of ``chunk`` (all taps, or filter row ``row``) into weight
-        slot ``stage``."""
+    def _issue_wei(chunk: Value, stage: Value, grp: Value | None = None) -> None:
+        """Weights of ``chunk`` (all taps, or tap group ``grp`` of WTAPS
+        consecutive taps) into weight slot ``stage``."""
         k0, c_ext = _chunk_ext(chunk)
         with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
             off = b.add(w_base, k0)
-            if row is not None:
-                off = b.add(off, b.mul(row, b.mul(c_cpg0, b.const_i32(KW))))
+            if grp is not None:
+                off = b.add(off, b.mul(grp, b.mul(c_cpg0, b.const_i32(WTAPS))))
             src = b.global_ptr_add(Wp, b.mul(off, c2))
             dst = b.add(wei_addr, b.mul(stage, b.const_i32(WEI * 2)))
             b.tensor_load_to_lds(
@@ -808,7 +830,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             else:
                 tap_off = (r * DH * HALO_W + s * DW) * XP + ks * WMMA_K
             bf = [_read16(halo_base, px_off[tn], tap_off) for tn in range(TN)]
-            tap = s if RR else r * KW + s
+            tap = (r * KW + s) % WTAPS
             w_off = tap * BK * XP + ks * WMMA_K
             af = [_read16(wei_base, wei_off[m], w_off) for m in range(TM)]
             return af, bf
@@ -832,15 +854,15 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         b.s_setprio(0)
         return accs
 
-    n_steps = b.mul(n_chunks, b.const_i32(KH))
+    n_steps = b.mul(n_chunks, b.const_i32(NG))
 
     def _chunk_rr(kc: Value, accs: list[Value]) -> list[Value]:
-        """``row_ring``: chunk ``kc`` as KH (filter row) steps, each on its own
-        weight slot; the chunk's halo slot stays for all of them."""
+        """``row_ring`` / ``tap_ring``: chunk ``kc`` as NG (tap group) steps,
+        each on its own weight slot; the chunk's halo slot stays for all."""
         hslot = b.mod(kc, c2)
         halo_base = b.mul(hslot, b.const_i32(HALO_STAGE))
-        for r in range(KH):
-            u = b.add(b.mul(kc, b.const_i32(KH)), b.const_i32(r))
+        for r in range(NG):
+            u = b.add(b.mul(kc, b.const_i32(NG)), b.const_i32(r))
             # The weight issuer waits for step u's weights; at a chunk's first
             # row the halo issuers wait for its halo (their only transfer in
             # flight: the next chunk's goes out below, after the barrier).
@@ -860,14 +882,18 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             b.sync_lds_only()
             nxt = b.add(u, b.const_i32(NS - 1))
             with b.scf_if(b.cmp_lt(nxt, n_steps)):
-                nc = b.div(nxt, b.const_i32(KH))
-                _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(KH)))
+                nc = b.div(nxt, b.const_i32(NG))
+                _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
             if r == 0:
                 nc = b.add(kc, c1)
                 with b.scf_if(b.cmp_lt(nc, n_chunks)):
                     _issue_halo(nc, b.mod(nc, c2))
             wslot = b.mod(u, b.const_i32(NS))
-            row_steps = [(ks, r, s) for ks in range(CK // WMMA_K) for s in range(KW)]
+            row_steps = [
+                (ks, t // KW, t % KW)
+                for ks in range(CK // WMMA_K)
+                for t in range(r * WTAPS, (r + 1) * WTAPS)
+            ]
             accs = _multiply(row_steps, halo_base, b.mul(wslot, b.const_i32(WEI)), accs)
         return accs
 
@@ -1016,7 +1042,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         _issue_halo(c0, c0)
         for st in range(NS - 1):
             with b.scf_if(b.cmp_lt(b.const_i32(st), n_steps)):
-                _issue_wei(b.const_i32(st // KH), b.const_i32(st), b.const_i32(st % KH))
+                _issue_wei(b.const_i32(st // NG), b.const_i32(st), b.const_i32(st % NG))
     else:
         for st in range(NS - 1):
             with b.scf_if(b.cmp_lt(b.const_i32(st), n_chunks)):
