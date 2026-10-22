@@ -62,6 +62,11 @@ private:
 
 /// Work left over after the caller-thread stage: for an ingestor engine, the per-variant
 /// catalog loop. Each engine derives its own State and is the only one that reads it.
+/// Pointer lifetime: a pending check holds raw pointers to the graph passed to
+/// beginApplicability, to the ApplicabilityScope, and into the scope's device properties
+/// and catalog key; it owns none of them. The caller keeps all of them alive, and does not
+/// replace the scope's device, until every finishApplicability of the call has returned.
+/// A pending check never outlives its call.
 class PendingApplicability
 {
 public:

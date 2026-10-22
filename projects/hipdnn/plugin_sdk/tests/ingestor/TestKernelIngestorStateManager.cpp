@@ -610,6 +610,35 @@ TEST(TestKernelIngestorStateManager, AGraphTheMatchDeclinesEmptiesTheCatalogWith
     EXPECT_EQ(counters().kernelCalls, 0);
 }
 
+TEST(TestKernelIngestorStateManager, CachedVerdictIsAMissUntilMatchedThenApplicable)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(24));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto key = StateManager::cacheKey(context);
+    ASSERT_TRUE(key.has_value());
+
+    EXPECT_FALSE(manager->cachedVerdict(context, *key).has_value());
+    ASSERT_FALSE(manager->unsortedDefinitions(context).empty());
+    EXPECT_EQ(manager->cachedVerdict(context, *key), std::optional<bool>(true));
+}
+
+TEST(TestKernelIngestorStateManager, CachedVerdictForADeclinedGraphIsAHitThatSaysNo)
+{
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(25));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto key = StateManager::cacheKey(context);
+    ASSERT_TRUE(key.has_value());
+
+    ASSERT_TRUE(manager->unsortedDefinitions(context).empty());
+    EXPECT_EQ(manager->cachedVerdict(context, *key), std::optional<bool>(false));
+}
+
 TEST(TestKernelIngestorStateManager, AnEngineWithNoGraphMatchStillMatchesOnItsCriteria)
 {
     // A graph_match is optional: an engine that declares none is admitted or declined by

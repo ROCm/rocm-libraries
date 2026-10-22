@@ -104,6 +104,8 @@ public:
     /// the caller thread cannot settle it cheaply. The device and catalog key come from
     /// @p scope when an earlier engine already resolved them through the same resolver,
     /// and are recorded there when this engine is the first.
+    /// The returned pending check borrows @p opGraph and @p scope, and what @p scope holds:
+    /// keep them alive until its finishApplicability() has returned (see PendingApplicability).
     StagedApplicability beginApplicability(const THandle& handle,
                                            const IGraph& opGraph,
                                            ApplicabilityScope& scope) const

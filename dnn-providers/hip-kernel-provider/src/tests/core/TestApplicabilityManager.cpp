@@ -19,6 +19,13 @@
 
 #include <gtest/gtest.h>
 
+#ifdef __linux__
+#include <dlfcn.h>
+#include <pthread.h>
+
+#include <cerrno>
+#endif
+
 #include "core/ApplicabilityManager.hpp"
 #include "core/ApplicabilityPool.hpp"
 #include "core/Container.hpp"
@@ -38,6 +45,38 @@
 #endif
 
 using namespace hip_kernel_provider::core;
+
+#ifdef __linux__
+namespace
+{
+/// Thread creations left before pthread_create starts failing; negative means unlimited.
+std::atomic<int> threadCreationsAllowed{-1};
+} // namespace
+
+/// Test-only interposer. The executable's definition wins over libpthread's for every
+/// caller, std::thread included, so a test can make thread creation fail the way a
+/// process at its thread limit does. Transparent unless a test arms it.
+extern "C" int
+    pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*start)(void*), void* arg)
+{
+    using Real = int (*)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+    static const Real real = reinterpret_cast<Real>(dlsym(RTLD_NEXT, "pthread_create"));
+
+    auto allowed = threadCreationsAllowed.load();
+    while(allowed >= 0)
+    {
+        if(allowed == 0)
+        {
+            return EAGAIN;
+        }
+        if(threadCreationsAllowed.compare_exchange_weak(allowed, allowed - 1))
+        {
+            break;
+        }
+    }
+    return real(thread, attr, start, arg);
+}
+#endif
 
 namespace
 {
@@ -231,6 +270,68 @@ TEST(TestApplicabilityPool, DestructionJoinsEveryWorker)
     }
     EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
 }
+
+#ifdef __linux__
+
+namespace
+{
+/// Lets @p count more threads start, then fails every later creation until destroyed.
+class ScopedThreadCreationLimit
+{
+public:
+    explicit ScopedThreadCreationLimit(int count)
+    {
+        threadCreationsAllowed.store(count);
+    }
+    ~ScopedThreadCreationLimit()
+    {
+        threadCreationsAllowed.store(-1);
+    }
+    ScopedThreadCreationLimit(const ScopedThreadCreationLimit&) = delete;
+    ScopedThreadCreationLimit& operator=(const ScopedThreadCreationLimit&) = delete;
+};
+} // namespace
+
+TEST(TestApplicabilityPool, RunsNothingAndReturnsTheBudgetWhenNoThreadCanStart)
+{
+    WorkerBudget budget{4};
+    const auto baseline = ApplicabilityPool::liveThreads();
+    ApplicabilityPool pool{budget};
+    std::atomic<int> runs{0};
+
+    const ScopedThreadCreationLimit limit{0};
+    EXPECT_FALSE(pool.tryRun(4, 3, [&](std::size_t) { runs.fetch_add(1); }));
+
+    EXPECT_EQ(runs.load(), 0);
+    EXPECT_EQ(pool.threadCount(), 0u);
+    EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
+    EXPECT_EQ(budget.available(), 4u);
+}
+
+TEST(TestApplicabilityPool, FinishesEveryTaskWithTheThreadsThatDidStart)
+{
+    WorkerBudget budget{4};
+    const auto baseline = ApplicabilityPool::liveThreads();
+    ApplicabilityPool pool{budget};
+    std::array<std::atomic<int>, 6> runs{};
+
+    {
+        // Three workers are granted; only the first thread starts.
+        const ScopedThreadCreationLimit limit{1};
+        ASSERT_TRUE(
+            pool.tryRun(runs.size(), 3, [&](std::size_t index) { runs[index].fetch_add(1); }));
+    }
+
+    for(const auto& count : runs)
+    {
+        EXPECT_EQ(count.load(), 1);
+    }
+    EXPECT_EQ(pool.threadCount(), 1u);
+    EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline + 1);
+    EXPECT_EQ(budget.available(), 4u);
+}
+
+#endif // __linux__
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
