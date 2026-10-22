@@ -9042,6 +9042,11 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
 # every config estimated at or below it compiles spill-free, while 293 (13x13,
 # block_w 8) already spills.
 _DW_STREAM_REG_BUDGET = 288
+# The channel-packed kernel (cpl > 1) is built for wave32 targets only (see
+# the AOT grid), whose larger register file holds more. Calibrated on gfx1250
+# bf16: 7x7 at cpl 4, block_w 4 (estimate 388) compiles to 558 VGPRs without
+# spilling.
+_DW_STREAM_CPL_REG_BUDGET = 400
 
 
 def depthwise_stream_register_reason(spec) -> Optional[str]:
@@ -9061,10 +9066,12 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
     cols = spec.block_w if isinstance(spec, DirectDepthwiseSpec) else 1
     n_cols = (cols - 1) * p.stride + p.KW
     pf = min(p.KH, -(-16 // n_cols))
-    live = (p.KH * p.KW + p.KH * cols + pf * n_cols) * getattr(spec, "cpl", 1)
-    if live > _DW_STREAM_REG_BUDGET:
+    cpl = getattr(spec, "cpl", 1)
+    live = (p.KH * p.KW + p.KH * cols + pf * n_cols) * cpl
+    budget = _DW_STREAM_REG_BUDGET if cpl == 1 else _DW_STREAM_CPL_REG_BUDGET
+    if live > budget:
         return (
-            f"~{live} live registers per lane exceed the {_DW_STREAM_REG_BUDGET} "
+            f"~{live} live registers per lane exceed the {budget} "
             f"the row-streaming kernel holds without spilling"
         )
     return None
