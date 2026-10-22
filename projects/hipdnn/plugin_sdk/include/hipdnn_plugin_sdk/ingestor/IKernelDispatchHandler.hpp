@@ -37,9 +37,11 @@ public:
     ///
     /// The state manager drops any kernel whose launch-name set differs from this one when
     /// it builds its catalog, so a kernel that reaches `prepare` carries exactly these
-    /// launches. Standing in for the `launches[]` dispatch-descriptor program, which does not
-    /// exist yet: the handler also owns launch order, workspace and the hand-off between
-    /// stages.
+    /// launches.
+    ///
+    /// This declaration is provisional: it stands in for the `launches[]` dispatch-descriptor
+    /// program, which does not exist yet. Until it does, the handler also owns launch order,
+    /// workspace and the hand-off between stages.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual std::set<std::string> launchNames() const
     {

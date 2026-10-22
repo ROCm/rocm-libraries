@@ -20,7 +20,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1229,10 +1228,9 @@ inline bool isLaunchName(std::string_view name)
 
 /// The `sources` map of a multi-launch UKD: at least two entries, each a launch name
 /// mapped to a complete `kpack` kernel source. One entry says what `kernel_source` says, so
-/// it is refused rather than accepted as a second spelling of one fact. Two entries naming
-/// the same (library, toc_key, symbol) are refused too: one kernel would answer for two
-/// launches. Entries that share a library and toc_key but differ in symbol are the normal
-/// case -- one module, several kernels.
+/// it is refused rather than accepted as a second spelling of one fact. Entries may share a
+/// library and toc_key (one module, several kernels) and may even name the same symbol: a
+/// kernel launched twice, for example under two grid shapes, is one entry per launch.
 ///
 /// A repeated key is not detected here: the DOM keeps the last value, as it does for every
 /// other descriptor object, and the packer never emits one.
@@ -1247,30 +1245,28 @@ inline std::map<std::string, KernelSource> parseKernelSources(const nlohmann::js
     }
 
     std::map<std::string, KernelSource> sources;
-    std::map<std::tuple<std::string, std::string, std::string>, std::string> launchOf;
     for(const auto& item : root.items())
     {
         const std::string& name = item.key();
         if(!isLaunchName(name))
         {
-            fail("launch name '" + name + "' in " + where
-                 + " must be a lowercase identifier matching ^[a-z][a-z0-9_]*$");
+            std::string message = "launch name '";
+            message += name;
+            message += "' in ";
+            message += where;
+            message += " must be a lowercase identifier matching ^[a-z][a-z0-9_]*$";
+            fail(message);
         }
-        const std::string entryWhere = where + " launch '" + name + "'";
+        std::string entryWhere = where;
+        entryWhere += " launch '";
+        entryWhere += name;
+        entryWhere += "'";
         auto source = parseKernelSource(item.value(), entryWhere);
         if(source.kind != KernelSourceKind::KPACK)
         {
             fail(entryWhere
                  + " must be a 'kpack' kernel source: the launches of one kernel are "
                    "exported by a packed code object");
-        }
-        const auto [existing, inserted]
-            = launchOf.emplace(std::make_tuple(source.library, source.tocKey, source.symbol), name);
-        if(!inserted)
-        {
-            fail(entryWhere + " names the same kernel (library '" + source.library + "', toc_key '"
-                 + source.tocKey + "', symbol '" + source.symbol + "') as launch '"
-                 + existing->second + "'");
         }
         sources.emplace(name, std::move(source));
     }

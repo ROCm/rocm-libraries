@@ -2062,11 +2062,23 @@ INSTANTIATE_TEST_SUITE_P(
         ViolationCase{
             "sources_under_version_1_0",
             [](Documents& documents) { spellAsMultiLaunch(documents)["version"] = "1.0"; }},
-        // One kernel answering for two launches is the same fact spelled twice.
-        ViolationCase{"two_launches_name_one_kernel",
+        ViolationCase{"launch_name_has_interior_uppercase",
                       [](Documents& documents) {
                           auto& sources = spellAsMultiLaunch(documents).at("sources");
-                          sources["merge"]["symbol"] = sources.at("decode").at("symbol");
+                          sources["segMent"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_has_a_hyphen",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["seg-1"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_is_empty",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources[""] = sources.at("merge");
+                          sources.erase("merge");
                       }},
         ViolationCase{"launch_is_an_embedded_source",
                       [](Documents& documents) {
@@ -5409,6 +5421,68 @@ TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelInAStandaloneUkd)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.front().kernels.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.front().sources.size(), 2u);
+}
+
+/// One kernel may be launched under two launch names (the same grid-shape-independent kernel
+/// run twice with different arguments): the loader keeps both entries, whichever spelling
+/// carries them.
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_ukd"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    inlineKernel["sources"]["merge"]["symbol"] = inlineKernel["sources"]["decode"]["symbol"];
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+}
+
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_inline"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_inline");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["merge"]["symbol"] = sources.at("decode").at("symbol");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, kernel.sources.at("decode").symbol);
+    EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
+}
+
+/// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
+/// part of the name.
+TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("launch_name_chars"));
+    auto documents = makeSetDocuments('1', "test:launch_name_chars");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["seg_1"] = sources.at("decode");
+    sources["seg_2"] = sources.at("merge");
+    sources.erase("decode");
+    sources.erase("merge");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_TRUE(kernel.sources.count("seg_1"));
+    EXPECT_TRUE(kernel.sources.count("seg_2"));
 }
 
 /// Both spellings of the exactly-one rule are refused with the rule's own message. The

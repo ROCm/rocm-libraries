@@ -156,6 +156,21 @@ TEST(TestLaunchKernelDefinition, ResolvesTheLaunchItWasAskedFor)
     EXPECT_EQ(decode.source.signature.size(), 2u);
 }
 
+TEST(TestLaunchKernelDefinition, TwoLaunchesNamingOneKernelResolveToEqualDefinitions)
+{
+    KernelDefinition kernel = makeDecodeKernel();
+    kernel.sources.at("reduce") = kernel.sources.at("decode");
+
+    const KernelDefinition decode = launchKernelDefinition(kernel, "decode");
+    const KernelDefinition reduce = launchKernelDefinition(kernel, "reduce");
+
+    EXPECT_EQ(reduce.source.library, decode.source.library);
+    EXPECT_EQ(reduce.source.tocKey, decode.source.tocKey);
+    EXPECT_EQ(reduce.source.symbol, decode.source.symbol);
+    EXPECT_EQ(reduce.source.symbol, "rocke_decode");
+    EXPECT_EQ(reduce.source.signature.size(), decode.source.signature.size());
+}
+
 TEST(TestLaunchKernelDefinition, ClearsTheLaunchesOnTheCopy)
 {
     const KernelDefinition merge = launchKernelDefinition(makeDecodeKernel(), "merge");

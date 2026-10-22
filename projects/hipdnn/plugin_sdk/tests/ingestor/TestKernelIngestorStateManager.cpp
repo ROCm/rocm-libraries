@@ -1356,6 +1356,42 @@ TEST(TestKernelIngestorStateManager, KeepsAMultiLaunchKernelWhoseLaunchesTheHand
     EXPECT_EQ(definitions.front().sources.at("merge").symbol, "merge_kernel");
 }
 
+/// Two launch names may name one kernel (the same library, toc_key and symbol): the handler
+/// declares both names, so the kernel is kept and both entries reach the definition.
+TEST(TestKernelIngestorStateManager, KeepsAKernelWhoseTwoLaunchesNameOneKernel)
+{
+    auto kernel = makeMultiLaunchKernel(testId(0x8C), "twice", 64, {"decode", "merge"});
+    kernel.sources.at("merge") = kernel.sources.at("decode");
+
+    const auto definitions = definitionsUnderHandler({"decode", "merge"}, {kernel});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    ASSERT_EQ(definitions.front().sources.size(), 2U);
+    EXPECT_EQ(definitions.front().sources.at("merge").symbol, "decode_kernel");
+    EXPECT_EQ(definitions.front().sources.at("decode").symbol, "decode_kernel");
+}
+
+/// A multi-launch kernel is adaptable only if every launch is: with all launches adaptable it
+/// is kept, and one launch this build has no adapter for drops the whole kernel (alone -- its
+/// sibling still serves) even though the other launch is adaptable.
+TEST(TestKernelIngestorStateManager, AMultiLaunchKernelIsAdaptableOnlyIfEveryLaunchIs)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    auto allAdaptable
+        = makeMultiLaunchKernel(testId(0x8D), "all_adaptable", 64, {"decode", "merge"});
+    auto oneNot = makeMultiLaunchKernel(testId(0x8E), "one_not", 128, {"decode", "merge"});
+    oneNot.sources.at("merge").kind = KernelSourceKind::HSACO_FILE;
+
+    const auto definitions = definitionsUnderHandler({"decode", "merge"}, {allAdaptable, oneNot});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "all_adaptable");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'one_not'"))
+        << recorder.getRecordedLogsAsString();
+}
+
 /// The default handler launches one kernel from `kernel_source`: a two-launch kernel under it
 /// would reach prepare() with no `source` to read. Dropped alone -- its sibling still serves.
 TEST(TestKernelIngestorStateManager, DropsAMultiLaunchKernelUnderASingleLaunchHandler)
