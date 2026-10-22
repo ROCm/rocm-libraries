@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
@@ -130,6 +131,10 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
+    # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
+    # filter's (y, x, c). Changes the store and the problems served (see
+    # identity_supports_problem). Left out of the hash while False.
+    patch: bool = False
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -204,6 +209,8 @@ class KernelIdentity:
             del fields["prefetch_addr"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
+        if not fields["patch"]:
+            del fields["patch"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -274,8 +281,13 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
     from kernels.common.conv_implicit_gemm_dgrad import (
         compute_tilde,
         enumerate_sub_gemms,
+        patch_sub_gemms,
     )
 
+    if identity.patch:
+        return patch_sub_gemms(
+            problem, identity.tile_m, identity.tile_n, tile_k=identity.tile_k
+        )
     return enumerate_sub_gemms(
         problem,
         compute_tilde(problem),
@@ -418,6 +430,20 @@ def identity_supports_problem(
         extents = ((kpg, "kpg"), (cpg, "cpg"), (cpg, "cpg"))
     else:
         extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
+    if identity.patch:
+        # One GEMM over the filter's (y, x, c): dY along K, W along Y*X*C,
+        # dX along the X*C of one filter row, which starts at a multiple of
+        # sW*C and of the row Wi*C.
+        from kernels.common.conv_implicit_gemm_dgrad import is_patch_problem
+
+        if not is_patch_problem(problem):
+            return False, (
+                "patch kernel serves patch embeddings only (2-D, ungrouped, "
+                "no padding or dilation, stride >= filter)"
+            )
+        C, X, Y = int(problem.C), int(problem.X), int(problem.Y)
+        run = math.gcd(X * C, int(problem.sW) * C, int(problem.Wi) * C)
+        extents = ((kpg, "kpg"), (Y * X * C, "Y*X*C"), (run, "dX run"))
     gm = max(1, int(identity.group_merge))
     if gm > 1:
         ok, why = _group_merge_fits(identity, problem, gm)
