@@ -362,6 +362,14 @@
           "sha256": "ad8ffd227e6aa5d3dfe9181bbde83f5b82a93d7f796e5e256017b644825e29ed",
           "status": "ok"
         },
+        "attention_dense/gfx950/hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 325096,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_nphqminswz",
+          "sha256": "091599f50697dda3b9f9b6dd0cf94f8336ed9848d4c36ad9cfbadf0dfb63895e",
+          "status": "ok"
+        },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
           "bytes": 320730,
@@ -440,6 +448,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
           "sha256": "8f96ead8fc44baf050a380486d8e6aa731a7c453ca4413440d425294c8fe118b",
+          "status": "ok"
+        },
+        "attention_dense/gfx950/persist_hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 308319,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hqminswz",
+          "sha256": "758151a7bcac901e2e62005a53997d23504fdadf0b7aaeb78cf028b6b25a7d5b",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
@@ -1901,15 +1917,15 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 160
         },
         "expected_failures": 4,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 44,
+          "attention_dense": 46,
           "conv": 16,
           "conv_dgrad": 11,
           "conv_direct": 21,
@@ -1924,10 +1940,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 222
+        "ok_cases": 236
       }
     },
     "llvm22": {
@@ -2292,6 +2309,14 @@
           "sha256": "fc9f47a1dbd2433baf4da66be2bb098b85c768cdc60b3a9937f5b2e9fd3a7d3d",
           "status": "ok"
         },
+        "attention_dense/gfx950/hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 325196,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_nphqminswz",
+          "sha256": "b3800a0d94c38ebd1c6e3c1ef5f131f59f2d5740b5a7ab072c9805a12219e9e8",
+          "status": "ok"
+        },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
           "bytes": 320830,
@@ -2370,6 +2395,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
           "sha256": "64039c6e1113c45b83a1f4655552afc09e5c35b05438fabf4dad0958ef4f0fb1",
+          "status": "ok"
+        },
+        "attention_dense/gfx950/persist_hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 308419,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hqminswz",
+          "sha256": "e9459964e2c614ee0f1f09f1f73e6898c3cc0784147d513926ed77e95acff78b",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
@@ -3831,15 +3864,15 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 160
         },
         "expected_failures": 4,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 44,
+          "attention_dense": 46,
           "conv": 16,
           "conv_dgrad": 11,
           "conv_direct": 21,
@@ -3854,10 +3887,11 @@
           "gemm": 13,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 222
+        "ok_cases": 236
       }
     },
     "llvm23": {
@@ -4222,6 +4256,14 @@
           "sha256": "304595cfd13fbc1ad44ac20986974ec7e6442d88f126ac007ddc720c6e7091e8",
           "status": "ok"
         },
+        "attention_dense/gfx950/hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 325260,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_causal_lazyrs_nphqminswz",
+          "sha256": "31d6b442f10c18fc1f5833be9ee32ac60a02688683a847697a5b33d266566def",
+          "status": "ok"
+        },
         "attention_dense/gfx950/lazy_off_sq512": {
           "arch": "gfx950",
           "bytes": 320894,
@@ -4300,6 +4342,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
           "sha256": "80d77c90ffd776ef8404b22437b91a21dcc4357fe814486e034d981aec2d0017",
+          "status": "ok"
+        },
+        "attention_dense/gfx950/persist_hqswz_sq512": {
+          "arch": "gfx950",
+          "bytes": 308483,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hqminswz",
+          "sha256": "08402632a00c4a97cf0d9f3551c4a03560949da70854aaf206777feb08f45eba",
           "status": "ok"
         },
         "attention_dense/gfx950/persist_intl_sq512": {
@@ -5776,15 +5826,15 @@
           "gfx1201": 8,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 42,
-          "gfx950": 151
+          "gfx942": 47,
+          "gfx950": 160
         },
         "expected_failures": 0,
         "families": {
-          "attention": 33,
+          "attention": 35,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 44,
+          "attention_dense": 46,
           "conv": 16,
           "conv_dgrad": 11,
           "conv_direct": 21,
@@ -5799,10 +5849,11 @@
           "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
+          "lightning_indexer": 10,
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 226
+        "ok_cases": 240
       }
     }
   },

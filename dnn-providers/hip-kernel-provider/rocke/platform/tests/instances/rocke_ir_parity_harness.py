@@ -3116,6 +3116,7 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
@@ -3156,6 +3157,14 @@ def cases():
         (
             "persist_hkvmaj_sq512",
             {"persistent": True, "num_persistent": 256, "persist_decode": "hkv_major"},
+        ),
+        (
+            "persist_hqswz_sq512",
+            {
+                "persistent": True,
+                "num_persistent": 256,
+                "persist_decode": "hq_minor_swz",
+            },
         ),
         (
             "persist_intl_sq512",

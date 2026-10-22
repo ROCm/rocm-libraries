@@ -226,6 +226,7 @@ class NonpersistQbMinor(NonpersistDecode):
         return (_spec_nqb(spec), spec.num_query_heads, spec.batch)
 
     def emit_decode(self, shape, bx, by, bz):
+        del shape
         return Decoded(bx, by, bz)
 
 
