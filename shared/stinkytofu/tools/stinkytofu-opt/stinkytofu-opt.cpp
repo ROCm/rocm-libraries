@@ -587,6 +587,11 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--wmma-refill-to-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaRefillToCycles =
                 std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
+        } else if (a == "--queue-start-force-wmma-burst") {
+            passFeatureConfig.dagFeatures.queueStartForceWmmaBurst = true;
+        } else if (a.starts_with("--queue-start-min-wmma-burst=")) {
+            passFeatureConfig.dagFeatures.queueStartMinWmmaBurst =
+                std::stoi(a.substr(std::string("--queue-start-min-wmma-burst=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {

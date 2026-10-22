@@ -1918,10 +1918,17 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 // The region's bursts: one at the region start when the queue starts empty there, one at each
 // barrier wait's planned window. A burst is wmmaQueueDepth WMMAs, cut at the next barrier, and
 // shortened so the ds_loads of the stage it opens still fit (with their drain) before the stage
-// ends. Those loads open after the burst.
+// ends. Those loads open after the burst. dagFeatures.queueStartForceWmmaBurst lengthens a
+// shortened burst to queueStartMinWmmaBurst WMMAs (still cut at the next barrier).
 void CDNA5ReadyQueue::planBursts(std::vector<DsSpreadPacer::Load>& loads, int drainWindows) {
     if (!fillQueueAfterResetOn() || wmmaTotalThisRegion_ <= 0) return;
     const int total = wmmaTotalThisRegion_;
+    const auto& dagFeatures = getPassContext().getPassFeatureConfig().dagFeatures;
+    const int forcedWmmas =
+        !dagFeatures.queueStartForceWmmaBurst ? 0
+        : dagFeatures.queueStartMinWmmaBurst < 0
+            ? wmmaQueueDepth()
+            : std::clamp(dagFeatures.queueStartMinWmmaBurst, 1, wmmaQueueDepth());
     std::vector<int> cuts;
     for (const auto& [barrier, window] : barrierWmmaThresholds_) cuts.push_back(window);
     std::sort(cuts.begin(), cuts.end());
@@ -1943,6 +1950,7 @@ void CDNA5ReadyQueue::planBursts(std::vector<DsSpreadPacer::Load>& loads, int dr
             const int stageEnd = end == INT_MAX ? total : std::min(end, total) - drainWindows;
             length = std::min(length, stageEnd - start - computeWmmaWindowsNeeded(count));
         }
+        length = std::max(length, std::min(forcedWmmas, segEnd - start));
         // At least one shadow WMMA is left for the spreads to divide by.
         length = std::min(length, total - 1 - burstWmmasPlanned_);
         PASS_DEBUG(std::cerr << "[CDNA5 fillQueue] burst start=" << start

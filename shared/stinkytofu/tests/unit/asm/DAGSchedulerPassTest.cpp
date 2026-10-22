@@ -2666,6 +2666,176 @@ TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_KeepDsWindowsShortensTheBurst) 
     EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 24) << shape;
 }
 
+// queueStartForceWmmaBurst on the same ds-dense header: the burst takes the longer of the
+// shortened length and queueStartMinWmmaBurst (-1 = the queue depth; capped at it), and the
+// ds_loads catch up behind it.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_TakesTheLongerBurst) {
+    const int forced[4] = {-2, -1, 4, 12};  // -2: not forced
+    std::string shapes[4];
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        const int beforeCount = countStinkyInstructions(*bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = forced[v] != -2;
+        pfc.dagFeatures.queueStartMinWmmaBurst = forced[v];
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_NE(shapes[0].substr(0, 8), "WWWWWWWW") << shapes[0];
+    EXPECT_EQ(shapes[1].substr(0, 9), "WWWWWWWWd") << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 24) << shapes[1];
+    EXPECT_EQ(shapes[2].substr(0, 5), "WWWWd") << shapes[2];
+    EXPECT_EQ(shapes[3], shapes[1]);
+}
+
+// A forced burst never shortens the computed one: with no ds_loads to make room for, the
+// computed burst is the full queue depth, and queueStartMinWmmaBurst = 4 keeps it.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_KeepsALongerComputedBurst) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        pfc.dagFeatures.queueStartMinWmmaBurst = 4;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0].substr(0, 9), "WWWWWWWWd") << shapes[0];
+    EXPECT_EQ(shapes[1], shapes[0]);
+}
+
+// Without queueStartForceWmmaBurst, queueStartMinWmmaBurst changes nothing: the ds-dense
+// header keeps its shortened burst for every value.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_MinIsIgnoredWhenNotForced) {
+    const int mins[3] = {-1, 0, 4};
+    std::string shapes[3];
+    for (int v = 0; v < 3; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartMinWmmaBurst = mins[v];
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_NE(shapes[0].substr(0, 4), "WWWW") << shapes[0];
+    EXPECT_EQ(shapes[1], shapes[0]);
+    EXPECT_EQ(shapes[2], shapes[0]);
+}
+
+// Forced, queueStartMinWmmaBurst is clamped to 1..wmmaQueueDepth and any negative value means
+// the depth. 32 ds_loads leave no window for a computed burst, so the planned length is the
+// clamped minimum.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_MinIsClamped) {
+    const int mins[4] = {-2, 0, -5, 12};  // -2: not forced
+    const int expected[4] = {0, 1, 8, 8};
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 32; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = mins[v] != -2;
+        pfc.dagFeatures.queueStartMinWmmaBurst = mins[v];
+        ctx.setPassFeatureConfig(pfc);
+        PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+        std::ostringstream captured;
+        std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+        pass->run(*func, ctx, am);
+        std::cerr.rdbuf(oldBuf);
+        PassManagerDebugConfig::clearDebugOnly();
+        const std::string want =
+            "[CDNA5 fillQueue] burst start=0 length=" + std::to_string(expected[v]) + " ";
+        EXPECT_NE(captured.str().find(want), std::string::npos)
+            << "min=" << mins[v] << " want '" << want << "'";
+    }
+}
+
+// The forced burst also applies after a barrier wait: the ds-dense stage after the wait
+// shortens the computed burst to one WMMA, and forcing queueStartMinWmmaBurst = 4 issues four
+// WMMAs before the first ds_load.
+TEST_F(DAGSchedulerPassTest, QueueStartForceWmmaBurst_AfterABarrierWait) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        {
+            AsmIRBuilder builder(*bb, arch);
+            builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch))
+                ->addSrcReg(StinkyRegister(-1));
+            builder.create(getMCIDByUOp(GFX::s_barrier_wait, arch))->addSrcReg(StinkyRegister(-1));
+        }
+        // Address v500 keeps the ds_loads off the WMMA accumulators.
+        for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 500, i + 1);
+        for (int i = 8; i < 24; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.queueStartForceWmmaBurst = v == 1;
+        pfc.dagFeatures.queueStartMinWmmaBurst = 4;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        const int waitPos = lastBarrierWaitPosition(*bb);
+        ASSERT_GE(waitPos, 0);
+        shapes[v] = wdShape(mnemonicSequence(*bb)).substr(waitPos + 1);
+    }
+    EXPECT_EQ(shapes[0].substr(0, 2), "Wd") << shapes[0];
+    EXPECT_EQ(shapes[1].substr(0, 5), "WWWWd") << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 24) << shapes[1];
+}
+
 // The loop-head deferral wins: when the latch ends in a WMMA and the header region is cut from
 // the block start, its first WMMA waits for other work, and no burst runs there.
 TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {

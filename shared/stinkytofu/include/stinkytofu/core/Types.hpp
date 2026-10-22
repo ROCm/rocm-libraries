@@ -116,6 +116,14 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
+        /// The WMMA burst at the loop head and after a barrier wait is normally shortened so the
+        /// ds_loads of the stage it opens still fit, and skipped when nothing is left. Force:
+        /// the burst is max(that length, queueStartMinWmmaBurst) WMMAs (cut at the next
+        /// barrier), and the stage's ds_loads catch up after it (DsCatchUpPace).
+        bool queueStartForceWmmaBurst = false;
+        /// Minimum WMMAs in a forced burst: 1..wmmaQueueDepth (clamped), -1 = wmmaQueueDepth.
+        /// Only the burst length changes; the queue model keeps wmmaQueueDepth.
+        int queueStartMinWmmaBurst = -1;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
