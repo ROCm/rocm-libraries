@@ -12,6 +12,11 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
+* Improved CK Tile TDM GEMM performance on gfx1250 for tile shapes that lost their LDS padding to avoid wrong results, such as tiles whose LDS rows are not a power of two, by padding them at an interval that divides the LDS row.
+
+### Fixed
+
+* Fixed CK Tile TDM GEMM tile shapes on gfx1250 failing to build because their LDS padding exceeded the LDS size; the padding is now dropped for the operand that needs the most LDS.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
@@ -32,7 +37,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Improved FMHA forward performance for head dimension 128 on gfx11 and gfx12 targets by retuning tile selection.
 * Improved FMHA forward performance on gfx1250 for bf16 and fp16 head dimension 128 by padding the LDS layout in the qr_tdm pipeline.
 * Improved memory coalescing of microscaling (MX) scale loads on gfx1250 by unifying the scale16 layout with scale32.
-* Improved CK Tile TDM GEMM performance on gfx1250 for tile shapes that lost their LDS padding to avoid wrong results, such as tiles whose LDS rows are not a power of two, by padding them at an interval that divides the LDS row.
 
 ### Changed
 
@@ -55,7 +59,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results from the CK Tile compute v3 intrawave GEMM pipeline with eight-warp block arrangements on gfx1250.
 * Fixed out-of-bounds asynchronous loads in the CK Tile compute async WMMA GEMM pipeline caused by a missing element validity check.
 * Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
-* Fixed CK Tile TDM GEMM tile shapes on gfx1250 failing to build because their LDS padding exceeded the LDS size; the padding is now dropped for the operand that needs the most LDS.
 * Fixed accuracy loss in the bf16 fast GELU element-wise operation on gfx1250 by using the non-native implementation.
 * Fixed a build failure caused by the compiler change from vector to ext_vector types.
 * Fixed a CMake failure when building instance libraries for multiple offload targets.
