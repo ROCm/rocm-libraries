@@ -137,8 +137,9 @@ build a kernel for an MI: large tiles often overflow registers or LDS for every 
 tuning run then spends its budget on kernels that fail code generation. For GEMM types with a list in
 [`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
 TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
-search space's fork ranges. One list serves the generic and heuristic search spaces (heuristic's ranges
-are narrower, so it can build no MI generic cannot); subtile kernels (the subtile search space and
+search space's fork ranges. One list serves generic (GA) and heuristic runs: it is computed for the generic
+space, and the heuristic space (the older exhaustive search, rarely used) offers only a few values generic does
+not, e.g. FP32 DepthU 16, so a heuristic run can miss the rare MI that builds only with one of them. Subtile kernels (the subtile search space and
 gfx950 MX) are not covered and keep every candidate. Lists are generated with StreamK off: the persistent
 StreamK kernels need slightly more VGPRs, so the StreamK-off list holds every MI the StreamK-on one does
 plus a few tiles at the register limit, and one list serves runs with either setting. Without a list MI

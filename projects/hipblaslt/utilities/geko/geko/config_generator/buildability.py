@@ -3,38 +3,18 @@
 
 """Which candidate MatrixInstructions can TensileLite build? Code generation only (CPU, no GPU).
 
-An MI is *buildable* for a GEMM type when at least one kernel for it, with every other
-parameter inside the generic (GA) search space's fork ranges, passes TensileLite code
-generation: Solution validation, then KernelWriterAssembly._initKernel and _getKernelSource,
-which is where a tuning run's "Generating kernel source resulted in error N" failures
-(VGPR / AGPR / SGPR / LDS / occupancy overflow) are raised. Nothing is assembled or run.
-One list serves every search space but subtile: the heuristic space (exhaustive Tensile
-search, rarely used) is narrower than generic, so it can build no MI generic cannot.
-One list also serves both StreamK settings: lists are generated with StreamK off (LIST_STREAMK).
+An MI is *buildable* for a GEMM type when TensileLite code generation builds at least one kernel
+for it with every other parameter inside geko's generic (GA) tuning ranges, i.e. a kernel a geko
+GA run can produce. Kernels that cannot build fail with register / LDS / occupancy overflows.
+Lists are generated with StreamK off, which also covers StreamK-on runs; heuristic runs read the
+same list. Subtile kernels are not covered.
 
-The fork ranges are geko's own: the generic tuning config geko's config generator writes for
-PROBE_SIZE (MI Designer on every candidate), read back with TensileLite's own loader. So every
-value used to prove an MI buildable is one a GA tuning run for that GEMM type can sample.
-
-Search, per MI and per MI group entry MI Designer can emit for it (one per local split U), stopping
-at the first kernel that builds. DepthU is "smallest legal" relative to the MFMA (>= K x LSU) and
-global-read widths move the same bytes whatever the element size:
-  1. PRESETS: three settings found on gfx950 BBS TN; on gfx950 they decide 1171 of the 1171
-     buildable BBS TN MIs and 822 of the 838 buildable F8BS TN MIs.
-  2. CORE factorial: the parameters that decide register and LDS use (DepthU, prefetch,
-     LDS buffering, local-read clustering, global-read widths, LDS transpose, MIArchVgpr) and
-     every entry of every non-MI group (e.g. DirectToLds / UseSgprForGRO pairs), at their
-     lowest-resource values the envelope allows. TransposeLDS 0 (vs auto) trades VGPRs for LDS;
-     with PrefetchGlobalRead 2 it is what builds large gfx950 FP32 NN tiles. TransposeLDS 2 is
-     what builds most LDS-limited gfx950 BF16 / FP8 NN, NT and TT tiles.
-  3. One parameter at a time: every value of every parameter and group in the envelope, and
-     every MI entry, for up to OFAT_PASSES passes from each of up to MULTI_STARTS of the
-     kernels closest to fitting (the closest per over-used resource first). A single start can
-     sit where no one change helps while a slightly worse kernel is two changes from building.
-An MI none of these build is reported unbuildable, with how far the closest kernel overflows.
-
-Every buildable MI is then also searched at each DepthU of the space, climbing from the DepthU its
-witness used (buildable_depthus), and its list line records the DepthUs at which it builds.
+Search per MI, stopping at the first kernel that builds:
+  1. Presets: three settings that build most tiles.
+  2. Factorial: every combination of the parameters that decide register and LDS use, over the
+     values the architecture's space tunes.
+  3. One parameter at a time, starting from the kernels closest to fitting.
+Each buildable MI is then searched at every DepthU of the space (buildable_depthus).
 """
 
 from __future__ import annotations
@@ -56,14 +36,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 from geko.config_generator.constants import dataSize, library_logic_architecture
 from geko.config_generator.mi_candidates import MI, enumerate_candidate_mis
 
-# Any ordinary size: geko's generic profiles do not read the problem size, so every such size yields
-# the same fork ranges (checked on gfx950 / gfx942, 10 data types, 4 layouts, 40 sizes). Avoid
-# M = 1 or N = 1, for which geko's gfx942 BBS / HHS generic config carries no DepthU.
+# Any ordinary size: the generic ranges do not depend on it (M or N = 1 drops DepthU on gfx942).
 PROBE_SIZE = [4096, 4096, 1, 4096]
 
-# The minimal settings of the gfx950 BBS TN study (see the module docstring for how many MIs they
-# decide). DepthU "K" is the smallest legal DepthU (>= MFMA K x LSU); a positive global-read width is
-# in 2-byte elements and is scaled to the data type (2 BF16 elements = 4 FP8 elements).
+# DepthU "K" = smallest legal DepthU; positive read widths are 2-byte elements, scaled to the type.
 PRESETS = [
     {
         "DepthU": "K",
@@ -97,11 +73,8 @@ PRESETS = [
     },
 ]
 
-# Base value of parameters outside the core factorial, where the envelope allows it: usually the
-# lowest-resource one (gfx950 BF16 study: the alternatives cost registers). Not always: for tiles at the
-# VGPR cap, SourceSwap=True (gfx950 FP8 NN/NT) and TailloopInNll=True (FP32, StreamK off) save the last
-# few VGPRs. The one-at-a-time stage finds those; adding them to the factorial would quadruple it for no
-# further MI (checked on every VGPR-limited gfx950 rejection within 20% of fitting).
+# Base values of parameters outside the factorial: the cheapest the space allows. Stage 3 tries
+# the rest (e.g. SourceSwap / TailloopInNll, which save the last few VGPRs of some tiles).
 LOW_RESOURCE = {
     "MIArchVgpr": False,
     "TransposeLDS": -1,
@@ -121,21 +94,15 @@ LOW_RESOURCE = {
 OFAT_PASSES = 2
 MULTI_STARTS = 4
 
-# Stop after _initKernel when a register pool is already this far over its cap. The pools only grow
-# during body generation (rocisa RegisterPool) and checkResources fails a kernel whose pool exceeds the
-# cap, so such a kernel cannot build; skipping the body saves ~0.5 s. Kernels within the margin are
-# generated in full so the one-at-a-time stage still ranks near misses by their exact overflow.
+# Stop after _initKernel when a register pool is this far over its cap: pools only grow, so the
+# kernel cannot build. Near misses are generated in full so stage 3 can rank them by overflow.
 EARLY_EXIT_MARGIN = 1.2
 
 
-# The search space whose fork ranges define "buildable": the GA's.
+# The search space whose ranges define "buildable": the GA's.
 LIST_SEARCH_SPACE = "generic"
 
-# Lists are generated with StreamK off. StreamK changes the kernel kind (persistent StreamK kernels
-# vs one workgroup per tile), and the persistent kernels need slightly more VGPRs: on gfx950 the
-# StreamK-off lists hold every MI the StreamK-on ones do, plus 95 VGPR-edge tiles (FP8 TN, SSS). So
-# a StreamK-off list excludes no MI a run with either setting can build; StreamK-on runs carry the
-# few edge tiles that fail for them.
+# StreamK kernels need slightly more registers, so a StreamK-off list also covers StreamK-on runs.
 LIST_STREAMK = False
 
 
@@ -523,12 +490,22 @@ class SettingSearch:
             "GlobalReadVectorWidthA": width,
             "GlobalReadVectorWidthB": width,
             "TransposeLDS": [-1, 0, 2],
+            "DirectToVgprA": [False, True],
+            "DirectToVgprB": [False, True],
             "MIArchVgpr": [False],
         }
         values = {
             name: ([v for v in vals if v in env[name]] or [env[name][0]])
             for name, vals in wanted.items()
             if name in env
+        }
+        # DirectToVgpr loads an operand straight into the registers its MFMA reads, so that operand's
+        # global-read width must match the MFMA's input per thread (M or N x K x B / 64 lanes), or twice
+        # it for small-K FP32 MFMAs; neither factorial width gives it. Tried only with DirectToVgpr on.
+        m = entry["MatrixInstruction"]
+        dtv_widths = {
+            ab: [w for w in (per, 2 * per) if w in env.get(f"GlobalReadVectorWidth{ab}", [])]
+            for ab, per in (("A", m[0] * m[2] * m[3] // 64), ("B", m[1] * m[2] * m[3] // 64))
         }
         names = list(values) + list(self.space.groups)
         choices = list(values.values()) + list(self.space.groups.values())
@@ -537,6 +514,12 @@ class SettingSearch:
             s = dict(base)
             s.update(zip(names, combo))
             yield s
+            for ab in ("A", "B"):
+                grvw = f"GlobalReadVectorWidth{ab}"
+                if s.get(f"DirectToVgpr{ab}") and grvw in values and s[grvw] == values[grvw][0]:
+                    for w in dtv_widths[ab]:
+                        if w not in values[grvw]:
+                            yield dict(s, **{grvw: w})
 
     def one_at_a_time(
         self, start: Dict[str, Any], entries: Sequence[Dict[str, Any]]
@@ -725,21 +708,11 @@ def write_buildable_list(
 
     buildable = [v for v in verdicts if v.buildable]
     lines = [
-        f"# Buildable MatrixInstructions for {gemm_name} on {library_logic_architecture(arch)}.\n",
-        "# Generated by scripts/generate_buildable_mis.py; do not edit by hand. Regenerate when TensileLite\n",
-        "# code generation or geko's fork-parameter ranges change.\n",
-        "#\n",
-        "# An MI is listed when TensileLite code generation builds at least one kernel for it with its other\n",
-        "# parameters inside geko's widest tuning ranges (the generic search space) and StreamK off, which\n",
-        "# together build the most MIs. One list therefore serves every search space but subtile, and tuning\n",
-        "# runs with StreamK on or off. MI Designer reads this list instead of enumerating MIs.\n",
-    ]
-    if any(v.depthu for v in buildable):
-        lines.append(
-            "# Each MI's comment gives its macro tile and every DepthU in those ranges at which it builds.\n"
-        )
-    lines += [
-        f"# {len(buildable)} of {len(verdicts)} candidate MIs are buildable; the others are listed at the end.\n",
+        f"# Buildable MatrixInstructions for {gemm_name} on {library_logic_architecture(arch)}:\n",
+        "# MIs with at least one kernel TensileLite builds within geko's generic (GA) ranges.\n",
+        "# MI Designer proposes only these. Each line: MI, macro tile, DepthUs it builds at.\n",
+        f"# {len(buildable)} of {len(verdicts)} candidates buildable; the rest are at the end.\n",
+        "# From scripts/generate_buildable_mis.py; rerun when TensileLite or geko changes.\n",
         "\n",
         f"Architecture: {library_logic_architecture(arch)}\n",
         f"GemmType: {gemm_name}\n",
@@ -752,8 +725,7 @@ def write_buildable_list(
 
     lines += [f"  - [{', '.join(map(str, v.mi))}]  # {note(v)}\n" for v in buildable]
     lines.append(
-        "\n# Not buildable within those ranges (closest kernel: how far its most over-used resource\n"
-        "# exceeds the cap, and TensileLite's reason):\n"
+        "\n# Not buildable (closest kernel: overflow of its most over-used resource, and why):\n"
     )
     for v in verdicts:
         if not v.buildable:
