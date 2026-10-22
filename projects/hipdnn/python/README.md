@@ -17,6 +17,9 @@ python/
 │   └── src/
 │       ├── module.cpp                     # Main nanobind module entry point
 │       ├── bindings.hpp                   # Shared binding declarations
+│       ├── device_buffer.hpp              # hipdnn.DeviceBuffer
+│       ├── dlpack_adapter.cpp             # DLPack (__dlpack__) import for variant packs and tensor_like
+│       ├── dlpack_adapter.hpp
 │       ├── autotune_bindings.cpp
 │       ├── graph_bindings.cpp
 │       ├── handle_bindings.cpp
