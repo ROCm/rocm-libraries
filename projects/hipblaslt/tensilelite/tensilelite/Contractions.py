@@ -501,6 +501,25 @@ class ProblemType:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
+# MXScaleFormat (a Solution-level knob) as the small int ContractionSolution's
+# problemType carries. Anything not named here -- including "Auto", which is a
+# request for Solution.py to derive a value and never survives into a shipped
+# logic file -- is NoSwizzle.
+MX_SCALE_FORMAT_CODES = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2}
+
+def mxScaleFormatCode(state):
+    """MXScaleFormat of one solution dict, as the 0/1/2 code."""
+    return MX_SCALE_FORMAT_CODES.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+def mxScaleHostPreSwizzle(state):
+    """True when this solution reads MX scales through the gfx950 host-pre-swizzle
+    permutation, i.e. when the caller's scale buffer must already be shuffled.
+
+    InMemorySwizzle is False on purpose: that kernel permutes the scales itself
+    and still reads the compact buffer. This matches DataInitialization, which
+    pre-swizzles only for problemType.mxScaleFormat == 1."""
+    return mxScaleFormatCode(state) == 1
+
 # Dict-valued Assert* keys and the runtime predicate each one emits per index.
 ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeEqual": "SizeEqual",
@@ -688,6 +707,21 @@ class ProblemPredicate(Properties.Predicate):
 
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+
+        # MX scale-buffer layout. A kernel built for MXScaleFormat HostPreSwizzle
+        # indexes the scale tensor through the gfx950 e8m0_shuffle permutation; one
+        # built for NoSwizzle or InMemorySwizzle reads a compact row-major E8M0
+        # array. The two buffers have identical extents and element type, so no
+        # other predicate separates them and a mismatch is silently wrong answers
+        # rather than a failed launch.
+        #
+        # Emitted per solution rather than from ProblemType.predicates(), because
+        # MXScaleFormat is a Solution-level knob: the file-level ProblemType does
+        # not carry it, and a library-level predicate built from that ProblemType
+        # would read NoSwizzle for every file and reject whole HostPreSwizzle
+        # libraries.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleHostPreSwizzle', value=mxScaleHostPreSwizzle(state))]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
@@ -1074,9 +1108,7 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        rv.problemType.mxScaleFormat = mxScaleFormatCode(d)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

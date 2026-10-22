@@ -3380,6 +3380,54 @@ namespace TensileLite
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
                 }
             };
+
+            /// Matches the MX scale-buffer layout the caller supplies against the one
+            /// the kernel reads.
+            ///
+            /// A kernel built for MXScaleFormat HostPreSwizzle indexes the scale
+            /// tensor through the gfx950 e8m0_shuffle permutation; one built for
+            /// NoSwizzle or InMemorySwizzle reads a compact row-major E8M0 array.
+            /// Nothing in the problem geometry distinguishes the two buffers -- they
+            /// have the same extents and the same element type -- so without this
+            /// predicate a NoSwizzle kernel is selectable for a pre-swizzled caller
+            /// and silently returns wrong answers.
+            ///
+            /// `value` is true only for MXScaleFormat HostPreSwizzle. InMemorySwizzle
+            /// is false: the kernel permutes the scales itself and still wants the
+            /// compact buffer.
+            struct MXScaleHostPreSwizzle
+                : public Predicate_CRTP<MXScaleHostPreSwizzle, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                MXScaleHostPreSwizzle() = default;
+                MXScaleHostPreSwizzle(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXScaleHostPreSwizzle";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxScaleHostPreSwizzle() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxScaleHostPreSwizzle(), "==", "sol", value);
+                }
+            };
         } // namespace Contraction
 
         /**

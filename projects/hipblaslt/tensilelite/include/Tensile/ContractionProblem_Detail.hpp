@@ -168,6 +168,10 @@ namespace TensileLite
                                              rhs.mxTypeA(),
                                              lhs.mxTypeB(),
                                              rhs.mxTypeB(),
+                                             // The MXScaleHostPreSwizzle predicate
+                                             // selects on this, so it keys the lookup.
+                                             lhs.mxScaleHostPreSwizzle(),
+                                             rhs.mxScaleHostPreSwizzle(),
                                              lhs.getParams().smCountTarget(),
                                              rhs.getParams().smCountTarget(),
                                              lhs.getParams().streamKTileSchedulingMode(),
@@ -247,6 +251,7 @@ namespace std
                                           problem.mxBlockB(),
                                           problem.mxTypeA(),
                                           problem.mxTypeB(),
+                                          problem.mxScaleHostPreSwizzle(),
                                           problem.getParams().smCountTarget(),
                                           problem.getParams().streamKTileSchedulingMode(),
                                           problem.getParams().uniformSummationOrder()),
