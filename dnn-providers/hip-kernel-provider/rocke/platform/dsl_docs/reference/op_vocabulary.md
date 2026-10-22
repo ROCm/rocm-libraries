@@ -176,12 +176,33 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.for`    | `scf_for`              | header / body / latch / exit blocks + phi (induction) |
 | `scf.for_iter` | `scf_for_iter`       | header / body / latch / exit + phi for each iter_var  |
 | `scf.if`     | `scf_if` (ctx manager) | conditional branch + then block + join block          |
-| `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if  |
+| `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
+| `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
 
 A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
 
 `static_for` and `unroll` are Python-time helpers that emit no `scf.for`; they execute their body in Python and emit straight-line IR.
+
+An `scf_if_else` with `result_types` yields one value per type: each branch ends in `scf_yield` of
+values of those types, and the builder's `results` are the values of the branch that ran. LLVM gets a
+`phi` per result in the join block; HIP declares the results before the `if` and assigns them at the
+end of both branches. A branch that does not end that way is refused by the builder, the verifier
+and both lowerings. A buffer descriptor (`buffer_rsrc`) cannot be a result, for the same reason a
+loop cannot carry one (above): yield what it is built from and build it after the if/else. Nor can
+an LDS allocation (`smem_alloc`): allocate before the if/else and yield an offset into it. Portable
+IR (the recorded recipe and the IR JSON importer) does not carry an if/else with results yet and
+refuses one; lower such a kernel directly.
+
+```python
+branch = b.scf_if_else(ok, result_types=[VectorType(F16, 8)])
+with branch as (then_ctx, else_ctx):
+    with then_ctx:
+        b.scf_yield(b.buffer_load_vN(rsrc, voffset, soffset, F16, 8))
+    with else_ctx:
+        b.scf_yield(b.zero_vec_f16(8))
+(value,) = branch.results
+```
 
 ## Compile-Time Helpers
 
