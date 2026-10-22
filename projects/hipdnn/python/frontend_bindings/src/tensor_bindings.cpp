@@ -177,6 +177,12 @@ void tensorBindings(nb::module_& m)
              "data_type, else the tensor's current type, else inferred from value "
              "(bool -> BOOLEAN, int -> INT64, float -> FLOAT). Resets dims and strides to "
              "[1]; the tensor must have one element.")
+        .def("set_compile_time_constant",
+             &setValue,
+             nb::arg("value"),
+             nb::arg("data_type") = nb::none(),
+             nb::rv_policy::reference_internal,
+             "Alias of set_value(): store a compile-time constant scalar.")
         .def("get_is_pass_by_value", &TensorAttributes::get_is_pass_by_value)
         .def("get_is_runtime_pass_by_value", &TensorAttributes::get_is_runtime_pass_by_value)
         .def("set_is_pass_by_value",
