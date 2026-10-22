@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -185,8 +185,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->nrow_ = nrowb * blockdim;
         this->ncol_ = ncolb * blockdim;
@@ -213,8 +212,7 @@ namespace rocalution
         assert(this->nnz_ >= 0);
         assert(this->mat_.blockdim > 1);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *row_offset = this->mat_.row_offset;
         *col        = this->mat_.col;
