@@ -9,8 +9,15 @@
 #define MIOPEN_PROVIDER_VERSION_MAJOR @MIOPEN_PROVIDER_VERSION_MAJOR@
 #define MIOPEN_PROVIDER_VERSION_MINOR @MIOPEN_PROVIDER_VERSION_MINOR@
 #define MIOPEN_PROVIDER_VERSION_PATCH @MIOPEN_PROVIDER_VERSION_PATCH@
+// The build's git commit. Provenance only (it is part of MIOPEN_PROVIDER_VERSION_STRING,
+// which the plugin reports as its version): nothing that decides compatibility may read
+// it, or every commit would silently invalidate what the previous one produced.
 #define MIOPEN_PROVIDER_VERSION_TWEAK "@MIOPEN_PROVIDER_VERSION_TWEAK@"
 #define MIOPEN_PROVIDER_VERSION_STRING "@MIOPEN_PROVIDER_VERSION_STRING@"
+// major.minor.patch from version.json alone, with no commit: the deliberately versioned
+// provider identity, and the one to use in any compatibility key (the L1 selector
+// revision in engines/MiopenEngine.cpp).
+#define MIOPEN_PROVIDER_VERSION "@MIOPEN_PROVIDER_VERSION@"
 // NOLINTEND(modernize-macro-to-enum)
 // clang-format on
 
