@@ -5358,11 +5358,23 @@ class Solution(collections.abc.Mapping):
     # tile dim and whole lanes along the unroll; lanes are handed out with shifts and
     # masks, so the decomposition must also be power-of-two and the workgroup's waves
     # must tile the LSC x LSP load exactly once.
+    # The kernel pads K to swizzleK but the host layout pads it to layoutK, so only K
+    # that needs no padding (ASEM % layoutK == 0) gets matching row-block strides.
     for tc in ("A", "B"):
       if state["ProblemType"]["SwizzleTensor%s"%tc] and not state["DirectToVgpr%s"%tc]:
         swzMorN = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
         MorN = "M" if tc == "A" else "N"
-        laneSize = swizzleGeometry(state, tc)["laneSize"]
+        geometry = swizzleGeometry(state, tc)
+        laneSize = geometry["laneSize"]
+        if state["ISA"][0] != 11:
+          reject(state, printRejectionReason,
+                 "LDS-staged SwizzleTensor%s is only validated on gfx11"%tc)
+          return
+        if state["AssertSummationElementMultiple"] % geometry["layoutK"] != 0:
+          reject(state, printRejectionReason,
+                 "LDS-staged SwizzleTensor%s needs AssertSummationElementMultiple (%u) to be a multiple of the swizzle layout K (%u)"
+                 %(tc, state["AssertSummationElementMultiple"], geometry["layoutK"]))
+          return
         kGroupsPerWave = state["WavefrontSize"] // swzMorN
         mBlocks = state["LSP%s"%tc] // swzMorN
         kChunk = kGroupsPerWave * laneSize

@@ -501,6 +501,8 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
 
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
+# The host pre-tiler (hipblasLtOrder_t COL16_4R*) pads K to four 16-byte lane groups.
+SWIZZLE_LAYOUT_K_BYTES = 4 * SWIZZLE_LOAD_BYTES
 
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
@@ -512,6 +514,10 @@ def swizzleGeometry(solution, tc: str) -> dict:
     (gfx10/gfx11 WMMA), so only half the lanes are distinct; 1 for MFMA and gfx12.
     loadsPerLane is >1 where a lane's operand exceeds one load (gfx11 fp16: 32 bytes);
     the remainder sits in the next block along the unroll dimension.
+
+    layoutK is the K padding of the host layout. It equals swizzleK for wave64 MFMA but
+    exceeds it where fewer lanes are distinct (gfx11 WMMA: 32 vs 8 for fp16), so kernels
+    that pad K to swizzleK only match the host layout when K % layoutK == 0.
 
     `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
@@ -530,10 +536,19 @@ def swizzleGeometry(solution, tc: str) -> dict:
         "packK":        packK,
         "laneSize":     laneSize,
         "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        "layoutK":      SWIZZLE_LAYOUT_K_BYTES // bpe,
         "lanesUsed":    lanesUsed,
         "dupFactor":    dupFactor,
         "loadsPerLane": miOperand // laneSize,
     }
+
+def swizzleBlockLanes(geometry: dict, miMorN: int) -> int:
+    """Size of one swizzle block (miMorN rows x swizzleK), in laneSize units.
+
+    The pre-tiled row block holding rows [miMorN*b, miMorN*(b+1)) starts at
+    b * numKr * swizzleBlockLanes * laneSize, numKr = ceil(K / swizzleK).
+    """
+    return miMorN * geometry["swizzleK"] // geometry["laneSize"]
 
 # Compatibility for external callers of the spatial-cluster helpers.
 streamKCluster = persistentSpatialCluster

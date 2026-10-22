@@ -3946,8 +3946,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
         elif not kernel["DirectToVgpr%s"%tc]:
           # LDS-staged: tReg is a plain tile index m; only the address is redirected.
-          #   addr_tile(m) = (m / swzMorN) * (numKr * swzBlockSize)   [block along M]
-          #                + (m % swzMorN) * laneSize                 [row inside block]
+          #   addr_tile(m) = (m / swzMorN) * (numKr * swzMorN * swizzleK)   [block along M]
+          #                + (m % swzMorN) * laneSize                        [row inside block]
           # An address, not an index: the two terms have different coefficients, so
           # no single stride downstream can linearise it, and numKr depends on K so
           # the block coefficient is runtime. laneSize divides both terms and is
@@ -3958,9 +3958,9 @@ class KernelWriterAssembly(KernelWriter):
           swzMorN = kernel["MatrixInstM"] if tP["isA"] else kernel["MatrixInstN"]
           swzStride = tP["swizzleK"]
           laneSize = tP["swizzleLaneSize"]
-          swzBlockSize = swzMorN * swzStride
+          swzBlockLanes = tP["swizzleBlockLanes"]
           module.addComment0("SWZ-%s: gro%s%s_0 = [(m/%u)*numKr*%u + m%%%u] * laneSize(%u)"
-                             %(tc, tP["tensorChar"], tP["tileChar"], swzMorN, swzMorN, swzMorN, laneSize))
+                             %(tc, tP["tensorChar"], tP["tileChar"], swzMorN, swzBlockLanes, swzMorN, laneSize))
           # Outlives this block: the increment loop below consumes it. Wave-uniform,
           # so it stays scalar.
           swzStepSgpr = self.sgprPool.checkOut(1, tag="graTileOffsets_swz_step")
@@ -3968,8 +3968,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddU32(sgpr(swzStepSgpr), sgpr("SizesSum"), swzStride-1, comment="align K to %u"%swzStride))
           module.add(SLShiftRightB32(dst=sgpr(swzStepSgpr), src=sgpr(swzStepSgpr), shiftHex=hex(log2(swzStride)),
                                      comment="numKr = align(K,%u) / %u"%(swzStride, swzStride)))
-          module.add(SMulI32(dst=sgpr(swzStepSgpr), src0=sgpr(swzStepSgpr), src1=hex(swzMorN),
-                             comment="blkStride = numKr * %u, in laneSize(%u) units"%(swzMorN, laneSize)))
+          module.add(SMulI32(dst=sgpr(swzStepSgpr), src0=sgpr(swzStepSgpr), src1=hex(swzBlockLanes),
+                             comment="blkStride = numKr * %u, in laneSize(%u) units"%(swzBlockLanes, laneSize)))
           module.add(VLShiftRightB32(dst=vgpr(tmpV), shiftHex=hex(log2(swzMorN)), src=vgpr(tP["gpr"]["tReg"]),
                                      comment="m / %u"%swzMorN))
           module.add(VMulLOU32(dst=vgpr(tmpV), src0=sgpr(swzStepSgpr), src1=vgpr(tmpV), comment="* blkStride"))

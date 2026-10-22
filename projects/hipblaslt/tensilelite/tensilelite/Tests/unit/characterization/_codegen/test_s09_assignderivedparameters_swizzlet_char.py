@@ -16,9 +16,9 @@ Solution.py lines that fire during the rejected derivation (probe-confirmed):
   3867       SwizzleTensorB TN-only combined transpose check (runs whenever
              SwizzleTensorB is set).
 
-Swizzle no longer requires DirectToVgpr: a fork without it is LDS-staged, and
-MT16 with DepthU 64 gives LSP 8 < MI 16, so the LDS-staging guard rejects it
-(A is checked first, so the both-off fork reports A only).
+Swizzle no longer requires DirectToVgpr: a fork without it is LDS-staged, which
+is only enabled on gfx11, so the LDS-staging guard rejects it here (A is checked
+first, so the both-off fork reports A only).
 
 Every fork rejects during derivation, so
 ``len(solutions_from_config(...)) == 0`` pins the reachable-invalid reject
@@ -53,8 +53,8 @@ def test_s09_assignderivedparameters_swizzlet_rejects_with_reason(monkeypatch, c
         monkeypatch,
         capsys,
         {
-            "reject: LDS-staged SwizzleTensorA needs LSPA (8) to be a multiple of MI_M (16)": 2,
-            "reject: LDS-staged SwizzleTensorB needs LSPB (8) to be a multiple of MI_N (16)": 1,
+            "reject: LDS-staged SwizzleTensorA is only validated on gfx11": 2,
+            "reject: LDS-staged SwizzleTensorB is only validated on gfx11": 1,
             "reject: DirectToVgprA + DirectToVgprB disabled": 1,
         },
     )
