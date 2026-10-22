@@ -10,54 +10,23 @@
 #include <utility>
 #include <variant>
 
-// Design history, tradeoffs, and C++23 migration:
+// Expected<T, E> holds either a value of type T or an error of type E, such as
+// an enum that names the failure. HostNumerics returns it for failures that a
+// caller can handle, for example an unsupported layout that has a fallback.
+// Exceptions are reserved for terminal errors: HostNumerics never catches one to
+// choose another path, so recoverable failures must be part of the return type.
 //
-// Layout, scalar conversion, storage, and descriptor checks need a value or a
-// typed failure so callers can choose a fallback without classifying exception
-// messages. bool or optional would lose the failure reason and context; separate
-// result structs for each domain would duplicate construction/access conventions.
-// Callers need construction, state checks, payload access/move, and explicit
-// propagation, rather than the full std::expected interface.
+// This is a subset of C++23 std::expected. HostNumerics and its consumers build
+// as C++20, and inline headers that return Expected would otherwise raise their
+// language standard. Existing backports such as TartanLlama/expected implement
+// the full interface; one would add a large external header for the few
+// operations used here.
 //
-// The original helper wrapped std::variant. We then tried an established backport
-// to reduce the amount of result code we maintain: TartanLlama/expected v1.3.1
-// behind a restricted facade. Its converting-result lifetime defect (upstream
-// https://github.com/TartanLlama/expected/issues/180) and boolean-conversion
-// pitfalls required explicit propagation.
-// expected-lite v0.10.0 was also considered, but a throwing value conversion
-// incorrectly terminated in our probe because of its noexcept specification.
-// At evaluation, Beman/expected described itself as in development and did not
-// support MSVC. These findings concern the evaluated versions, not future releases.
-// Backport constexpr/noexcept differences were acceptable where consumers allowed
-// them; passing upstream tests alone did not establish our consumers' contract.
-//
-// We returned to this small variant wrapper after checking the actual consumers.
-// The backport covered a much larger API than they need and still required a
-// local facade and pinned dependency. This wrapper leaves less code to maintain.
-// std::variant supplies storage, lifetimes, copy, move, and destruction without
-// maintaining a manual union. Assignment is disabled to prevent throwing changes
-// between alternatives from leaving a live result valueless. The wrapper adds no
-// allocation or exception translation; payloads may still allocate or throw.
-// TartanLlama's CC0 license permitted bundling without another license file, so
-// licensing did not rule it out. The chosen wrapper copies no third-party code
-// and uses the existing HostNumerics MIT license.
-//
-// std::expected is the intended replacement once all affected C++ consumers and
-// compiler/standard-library combinations can use C++23. ROCm libraries/systems
-// still include C++17/20 consumers, and inline layout/scalar helpers include this
-// header: putting it in detail does not hide a C++23 parsing requirement. Public
-// C ABIs need not change, but the affected C++ source baseline would. Moving these
-// helpers behind a compiled C++23 implementation could keep C++20 headers, at the
-// cost of a larger refactor, so we retain C++20 here for now.
-//
-// At that transition, migrate this internal interface and its callers together to
-// std::expected/std::unexpected, update exported CMake requirements, and rerun the
-// contract, package, sanitizer, and consumer tests on supported toolchains.
-// Recheck constexpr/noexcept, ownership, conversion/propagation, and the scalar
-// no-exceptions/no-allocation leaf. Retain explicit propagation until converting
-// result behavior is verified; do not require a drop-in alias or expose additional
-// standard APIs just to replace storage. No source or ABI compatibility is promised
-// for this internal helper, and no automatic per-toolchain backend switch is used.
+// Each operation kept here behaves as in std::expected. Assignment, conversion
+// between result types, value(), value_or(), and the monadic operations are
+// omitted. When HostNumerics can require C++23, replace Expected and Unexpected
+// with std::expected and std::unexpected, raise the exported C++ standard, and
+// delete this header.
 
 namespace roc::hostnumerics::detail {
 // Explicitly marks an error, including when the value and error types match.
@@ -114,8 +83,8 @@ template <typename T, typename E>
 inline constexpr bool IsExpectedV<Expected<T, E>> = true;
 }  // namespace result_detail
 
-// A value or typed failure for internal C++20 helpers. std::variant manages
-// storage and lifetimes; callers check the state before accessing a payload.
+// std::variant manages storage and lifetimes. Callers check has_value() before
+// accessing a payload; accessing the inactive one is checked by assertions.
 template <typename T, typename E>
 class [[nodiscard]] Expected {
     static_assert(std::is_object_v<T> && std::is_object_v<E>);
