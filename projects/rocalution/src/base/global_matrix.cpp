@@ -4075,14 +4075,12 @@ namespace rocalution
 #endif
 
         // The matrix-matrix formulation has no distributed implementation yet
-        // LCOV_EXCL_START
         if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
         {
             LOG_INFO("GlobalMatrix::RSMMExtPIInterpolation() is not implemented for more than "
                      "one process");
             FATAL_ERROR(__FILE__, __LINE__);
         }
-        // LCOV_EXCL_STOP
 
         this->matrix_interior_.RSMMExtPIInterpolation(CFmap, S, &prolong->matrix_interior_);
 
@@ -4108,14 +4106,12 @@ namespace rocalution
         }
 
         // Truncation has no distributed implementation yet
-        // LCOV_EXCL_START
         if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
         {
             LOG_INFO("GlobalMatrix::RSInterpolationTruncation() is not implemented for more "
                      "than one process");
             FATAL_ERROR(__FILE__, __LINE__);
         }
-        // LCOV_EXCL_STOP
 
         this->matrix_interior_.RSInterpolationTruncation(trunc_factor, max_elmts);
 
@@ -4147,14 +4143,12 @@ namespace rocalution
 #endif
 
         // The matrix-matrix formulation has no distributed implementation yet
-        // LCOV_EXCL_START
         if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
         {
             LOG_INFO("GlobalMatrix::RSMMExtPEInterpolation() is not implemented for more than "
                      "one process");
             FATAL_ERROR(__FILE__, __LINE__);
         }
-        // LCOV_EXCL_STOP
 
         this->matrix_interior_.RSMMExtPEInterpolation(CFmap, S, &prolong->matrix_interior_);
 
