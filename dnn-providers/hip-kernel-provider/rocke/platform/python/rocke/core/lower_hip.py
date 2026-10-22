@@ -34,6 +34,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
@@ -1722,6 +1723,7 @@ class _Lowerer:
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
         # u8 -> f32: a uint8_t converts exactly.
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
