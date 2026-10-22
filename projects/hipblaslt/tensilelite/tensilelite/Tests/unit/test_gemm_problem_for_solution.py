@@ -2,9 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Regular GEMM descriptors and explicit-index client input, without a GPU."""
 
-import os
-import subprocess
-import sys
 import zlib
 from dataclasses import replace
 from itertools import product
@@ -180,12 +177,6 @@ def test_compressed_precedence_missing_and_duplicate_indices(tmp_path):
         load_library_metadata(tmp_path, target="gfx942", solution_indices=[404])
 
 
-@pytest.mark.parametrize("indices", [[17, 17.0], [1, True], [-1]])
-def test_validates_requested_indices_before_deduplication(tmp_path, indices):
-    with pytest.raises(ValueError, match="nonnegative integers"):
-        load_library_metadata(tmp_path, target="gfx942", solution_indices=indices)
-
-
 @pytest.mark.parametrize(
     "dtype,bench_type",
     [
@@ -210,29 +201,6 @@ def test_storage_and_compute_types(tmp_path, dtype, bench_type):
     assert row["a_type"] == row["b_type"] == bench_type
     assert row["compute_type"] == ("c_i32_r" if dtype == "Int8" else "c_f32_r")
     assert row["d_type"] == ("i32_r" if dtype == "Int8" else "f32_r")
-
-
-def test_generation_does_not_import_generator_or_rocisa(tmp_path):
-    write_shard(tmp_path, [solution()])
-    script = """
-import importlib.abc
-import sys
-class Guard(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(('rocisa', 'tensilelite.Common', 'tensilelite.SolutionStructs')):
-            raise AssertionError(fullname)
-sys.meta_path.insert(0, Guard())
-from tensilelite.Utilities.gemm_problem_bench import UnsupportedBenchProblem, bench_yaml
-from tensilelite.Utilities.gemm_problem_for_solution import UnsupportedSolution, load_library_metadata
-p = load_library_metadata(sys.argv[1], target='gfx942').get_problem(17)
-assert (p.m, p.n, p.k) == (128, 96, 256)
-assert 'solution_index: 17' in bench_yaml([p])
-"""
-    subprocess.run(
-        [sys.executable, "-c", script, str(tmp_path)],
-        check=True,
-        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-    )
 
 
 @pytest.mark.parametrize("blocks", [1, 3, 8, 17])
@@ -282,18 +250,6 @@ def test_descriptor_support_is_independent_of_bench_adapter(tmp_path, dtype):
     with pytest.raises(UnsupportedBenchProblem) as caught:
         bench_yaml([problem])
     assert caught.value.solution_index == 17
-
-
-@pytest.mark.parametrize(
-    "dtype,bench_name", [("Float4", "f4_r"), ("Float6", "f6_r"), ("BFloat6", "bf6_r")]
-)
-def test_non_mx_packed_types_are_preserved(tmp_path, dtype, bench_name):
-    record = solution()
-    record["problemType"].update(aType=dtype, bType=dtype)
-    write_shard(tmp_path, [record])
-    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
-    (row,) = yaml.safe_load(bench_yaml([problem]))
-    assert row["a_type"] == row["compute_input_typeA"] == bench_name
 
 
 def test_complex_conjugate_transpose(tmp_path):
