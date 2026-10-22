@@ -13,7 +13,9 @@ zeroes the K / V rows of those pages. A kernel that follows the id reads a NaN
 canary (or leaves the allocation) and the output is NaN or the launch faults;
 table entries the sequences never reach (padding) hold garbage and are not read.
 Pages smaller than a key tile (one lookup per loaded row) and at least one tile
-(one lookup per tile) are both covered.
+(one lookup per tile) are both covered. A stale ``seqused_k`` past
+``seqlen_k`` is clamped to it: the table padding it would reach points at a
+NaN page, so following it shows up in O.
 """
 
 from __future__ import annotations
@@ -86,7 +88,7 @@ class _Dev:
             self.rt.free(ptr)
 
 
-def _make_case(npdt, ps, bad, seed):
+def _make_case(npdt, ps, bad, seed, stale=False):
     """Logical K / V / Q, the page-permuted caches and the table, plus the
     reference (K / V rows on bad pages zeroed) of every sequence."""
     rng = np.random.default_rng(seed)
@@ -127,6 +129,13 @@ def _make_case(npdt, ps, bad, seed):
         t0, t1 = pg * ps, min(_LENS_K[bi], (pg + 1) * ps)
         kz[bi][t0:t1] = 0.0
         vz[bi][t0:t1] = 0.0
+    if stale:
+        # The first spare page holds NaN K / V; sequence 0's table padding maps
+        # it, so a kernel that reads past seqlen_k keys picks the NaN up.
+        spare = int(order[sum(pages)])
+        k_cache[spare] = np.nan
+        v_cache[spare] = np.nan
+        table[0, pages[0] :] = spare
     return dict(
         nb=nb,
         k_cache=k_cache,
@@ -152,14 +161,16 @@ def _reference(qs, kz, vz):
     return np.concatenate(outs)
 
 
-def _run(kind, dtype, ps, bad_key):
+def _run(kind, dtype, ps, bad_key, stale_seqused_k=False):
     ml_dtypes = pytest.importorskip("ml_dtypes")
     from rocke.helpers import compile_kernel
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.packing import pack_args
 
     npdt = ml_dtypes.bfloat16 if dtype == "bf16" else np.float16
-    case = _make_case(npdt, ps, _BAD[bad_key], seed=sum(map(ord, bad_key + kind)))
+    bad = _BAD[bad_key] if bad_key else ()
+    seed = sum(map(ord, (bad_key or "stale") + kind))
+    case = _make_case(npdt, ps, bad, seed=seed, stale=stale_seqused_k)
     ref = _reference(case["qs"], case["kz"], case["vz"])
     B = len(_LENS_K)
     total_q = sum(_LENS_Q)
@@ -189,7 +200,12 @@ def _run(kind, dtype, ps, bad_key):
             window_right=-1,
             write_lse=1,
             cu_seqlens_q=dev.put(cu_q),
-            seqused_k=dev.put(np.array(_LENS_K, np.int32)),
+            # A stale seqused_k runs two pages past seqlen_k (still inside
+            # sequence 0's table row, into its padding).
+            seqused_k=dev.put(
+                np.array(_LENS_K, np.int32)
+                + np.array([2 * ps if stale_seqused_k else 0, 0], np.int32)
+            ),
             block_table=dev.put(case["table"]),
             block_table_v=dev.put(case["table"]),
             block_table_stride=case["table"].shape[1],
@@ -292,3 +308,12 @@ def _run(kind, dtype, ps, bad_key):
 @pytest.mark.parametrize("kind", ["prefill", "decode"])
 def test_bad_block_table_entries_read_as_zero_pages(kind, bad, ps, dtype):
     _run(kind, dtype, ps, bad)
+
+
+@pytest.mark.gpu
+@_NEEDS_RDNA
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("ps", [8, 64], ids=["rows_ps8", "tiles_ps64"])
+@pytest.mark.parametrize("kind", ["prefill", "decode"])
+def test_seqused_k_past_seqlen_k_is_clamped(kind, ps, dtype):
+    _run(kind, dtype, ps, None, stale_seqused_k=True)
