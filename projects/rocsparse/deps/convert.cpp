@@ -272,9 +272,10 @@ bool write_bin_matrix(
     out.write((char*)col, nnz * sizeof(int));
     out.write((char*)val, nnz * sizeof(T));
 
+    // close flushes the buffered data, so its result is part of the write
     out.close();
 
-    return true;
+    return !out.fail();
 }
 
 bool coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
@@ -368,7 +369,7 @@ int main(int argc, char* argv[])
 
     if(!status)
     {
-        std::cerr << "Cannot open [write] " << argv[2] << std::endl;
+        std::cerr << "Cannot write " << argv[2] << std::endl;
         return -1;
     }
 
