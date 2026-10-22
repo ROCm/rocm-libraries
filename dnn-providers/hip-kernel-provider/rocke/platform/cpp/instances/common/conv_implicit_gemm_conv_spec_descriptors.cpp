@@ -300,6 +300,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.k0_k1_split = false;
     s.groups = 1;
     s.group_merge = 1; /* inert: every merged-aware site reduces to the unmerged form */
+    s.split_k = 1; /* inert: the plain (unsplit) forward binary */
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
@@ -383,7 +384,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     self.acc_epilogue.tag(),
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
      *            "unroll": self.unroll_k,
-     *            f"gm{group_merge}": group_merge > 1}) */
+     *            f"gm{group_merge}": group_merge > 1,
+     *            "splitk": split_k > 1}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -392,8 +394,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char tag_buf[256];
     char gm_buf[24];
     const char* parts[6];
-    const char* flag_names[4];
-    int flag_on[4];
+    const char* flag_names[5];
+    int flag_on[5];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -441,8 +443,12 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     snprintf(gm_buf, sizeof(gm_buf), "gm%d", s->group_merge);
     flag_names[3] = gm_buf;
     flag_on[3] = s->group_merge > 1 ? 1 : 0;
+    /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
+     * so only the variant reaches the name. */
+    flag_names[4] = "splitk";
+    flag_on[4] = s->split_k > 1 ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 4, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 5, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -504,6 +510,66 @@ int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spe
     /* Conv groups actually launched; gridDim.z is grid_groups. */
     int gm = s->group_merge > 1 ? s->group_merge : 1;
     return s->problem.groups / gm;
+}
+
+/* ---- split-K forward admission ------------------------------------------ *
+ *
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
+ * (mem / wavelet) run over one slice, with an fp32 store into the workspace
+ * slab. The paths that drive the K loop differently, remap the grid, merge
+ * groups, or take the pointwise fast path are not wired for it. */
+bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                      const char* family,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+#define ROCKE_SPLITK_REJECT(...)                       \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+        {                                              \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        }                                              \
+        return false;                                  \
+    } while(0)
+
+    if(s->split_k < 1)
+    {
+        ROCKE_SPLITK_REJECT("split_k must be >= 1 (got %d)", s->split_k);
+    }
+    if(family == NULL || strcmp(family, "wmma") != 0)
+    {
+        ROCKE_SPLITK_REJECT("split-K forward is WMMA-only (built and tested on wave32)");
+    }
+    {
+        const struct
+        {
+            bool on;
+            const char* label;
+        } flags[] = {
+            {s->async_dma, "async_dma"},
+            {s->unroll_k, "unroll_k"},
+            {s->chiplet_swizzle, "chiplet_swizzle"},
+            {s->group_merge > 1, "group_merge"},
+            {rocke_conv_problem_is_pointwise(&s->problem), "the pointwise fast path"},
+            {s->problem.is_3d, "3-D convolution"},
+        };
+        for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i)
+        {
+            if(flags[i].on)
+            {
+                ROCKE_SPLITK_REJECT("split-K forward does not support %s", flags[i].label);
+            }
+        }
+    }
+    if(s->epilogue != NULL && strcmp(s->epilogue, "default") == 0 && s->has_vector_size_c
+       && s->vector_size_c > 1)
+    {
+        ROCKE_SPLITK_REJECT("split-K forward with the default epilogue stores scalars "
+                            "(vector_size_c must be 1)");
+    }
+    return true;
+#undef ROCKE_SPLITK_REJECT
 }
 
 bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t* s,
@@ -1054,7 +1120,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
-            int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            /* The split-K binary stages its fp32 partial tile, whatever dtype_d is. */
+            int c_dtype_bytes
+                = ((s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) || s->split_k > 1) ? 4 : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
         {
@@ -1131,6 +1199,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         }
         /* grouped conv IS supported on WMMA: the grid-per-group index +
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
+    }
+
+    if(s->split_k > 1)
+    {
+        if(!rocke_conv_fwd_split_k_available(s, family, reason, reason_cap))
+        {
+            return false;
+        }
     }
 
     /* The tile loaders (Python: the async_tile_loaders / _sync_load_vecs block

@@ -328,6 +328,18 @@ class ImplicitGemmConvSpec:
     # cshuffle store width derived from kpg is a separate Gm=1 change.)
     group_merge: int = 1
 
+    # Split-K (WMMA only). ``split_k > 1`` builds the split-K binary, not a
+    # fixed degree: the degree and the slice width arrive as the ``ks_count`` /
+    # ``ks`` kernargs (as in wgrad), so one binary serves every degree and the
+    # AOT cache records it as 2. Every CTA reduces one slice of the
+    # [Z*]Y*X*cpg reduction and stores its fp32 partial tile into slab
+    # ``slice`` of the ``ws_ptr`` workspace, laid out ``[ks_count][M][K]``;
+    # Stage 2 (:mod:`kernels.common.conv_fwd_split_k_reduce`) sums the slabs and
+    # casts into D. Every slab element is written by exactly one CTA (a slice
+    # past the reduction stores zeros), so the workspace needs no clearing and
+    # the result is deterministic. 1 (the default) emits none of this.
+    split_k: int = 1
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -424,6 +436,9 @@ class ImplicitGemmConvSpec:
                 # without it two degrees collide on one name and the compile
                 # cache hands the second the first's binary.
                 f"gm{self.group_merge}": self.group_merge > 1,
+                # The split-K binary has its own ABI and epilogue; the degree is
+                # a kernarg, so only the variant reaches the name.
+                "splitk": self.split_k > 1,
             },
         )
 
@@ -606,6 +621,34 @@ def fwd_group_merge_available(
 # ---------------------------------------------------------------------
 
 
+def fwd_split_k_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
+    """Why ``spec``'s split-K forward cannot be built, or ``None``.
+
+    The split-K body is the plain WMMA K loop (``mem`` / ``wavelet``) run over
+    one slice, with an fp32 store into the workspace slab. The paths that drive
+    the K loop differently (async DMA, ``unroll_k``), remap the grid
+    (``chiplet_swizzle``), merge groups, or take the pointwise fast path are not
+    wired for it.
+    """
+    if spec.split_k < 1:
+        return f"split_k must be >= 1 (got {spec.split_k})"
+    if family != "wmma":
+        return "split-K forward is WMMA-only (built and tested on wave32)"
+    for flag, label in (
+        (spec.async_dma, "async_dma"),
+        (spec.unroll_k, "unroll_k"),
+        (spec.chiplet_swizzle, "chiplet_swizzle"),
+        (spec.group_merge > 1, "group_merge"),
+        (spec.problem.is_pointwise, "the pointwise fast path"),
+        (spec.problem.is_3d, "3-D convolution"),
+    ):
+        if flag:
+            return f"split-K forward does not support {label}"
+    if spec.epilogue == "default" and (spec.vector_size_c or 1) > 1:
+        return "split-K forward with the default epilogue stores scalars (vector_size_c must be 1)"
+    return None
+
+
 def is_valid_spec_for_problem(
     spec: ImplicitGemmConvSpec, problem: ConvProblem, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -663,7 +706,8 @@ def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, 
     _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
-    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
+    # The split-K binary stages its fp32 partial tile, whatever dtype_d is.
+    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" or spec.split_k > 1 else 2
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
@@ -853,6 +897,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
+
+    if spec.split_k > 1:
+        _why = fwd_split_k_reason(spec, family)
+        if _why is not None:
+            return False, _why
 
     # The tile loaders. An explicit vector width (or the async chunk width the
     # tile admits) has to split the tile evenly over the block's threads; the
@@ -1203,6 +1252,14 @@ def _build_implicit_gemm_conv_impl(
     # Magic-number pairs, one per unmerge divisor (host-precomputed).
     p_num_pid_m = params["p_num_pid_m"]
     p_num_pid_n = params["p_num_pid_n"]
+    # Split-K (see ImplicitGemmConvSpec.split_k): the fp32 workspace, then the
+    # slice width and degree -- the same trailing pair wgrad takes.
+    split = spec.split_k > 1
+    if split:
+        p_ws = b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
+        p_ws_bytes = b.param("ws_bytes", I32)
+        p_ks = b.param("ks", I32)
+        p_ks_count = b.param("ks_count", I32)
 
     def _magic(prefix: str, name: str):
         """The ``(mult, shift)`` SSA pair for one unmerge divisor."""
@@ -1322,8 +1379,22 @@ def _build_implicit_gemm_conv_impl(
     # every group count Gm divides, so the build-time problem's count cannot
     # decide whether block_id_z is needed.
     grouped = p.groups > 1 or merged
+    if split:
+        # The group and the K slice share z: z = group * ks_count + slice, as
+        # in wgrad. Slice ``s`` reduces [s*ks, (s+1)*ks); the host rounds ks
+        # to whole K tiles, and the tail past K_gemm reads zero through the
+        # descriptor bounds, so every slice runs the same bound computation.
+        z_id = b.block_id_z()
+        if grouped:
+            group_z = b.to_sgpr_u32(b.div(z_id, p_ks_count))
+            slice_id = b.sub(z_id, b.mul(group_z, p_ks_count))
+        else:
+            group_z = None
+            slice_id = z_id
+        split_k_lo = b.to_sgpr_u32(b.mul(slice_id, p_ks))
+        split_k_hi = b.to_sgpr_u32(b.add(split_k_lo, p_ks))
     if grouped:
-        group_idx = b.block_id_z()
+        group_idx = group_z if split else b.block_id_z()
         # Merged: the base advances by the merged kpg, which is Gm exactly
         # (depthwise only), so it is the build-time constant, not p_kpg.
         k_out_group_base = b.mul(group_idx, c_gm if merged else p_kpg)
@@ -1973,12 +2044,30 @@ def _build_implicit_gemm_conv_impl(
         # Merged: g is the merged group and the merged kpg is Gm, so the same
         # expression yields k_out = merged_group*Gm + g_n.
         _k_out_grp_base = (
-            b.mul(b.block_id_z(), c_gm if merged else p_kpg) if grouped else None
+            b.mul(group_idx if split else b.block_id_z(), c_gm if merged else p_kpg)
+            if grouped
+            else None
         )
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             k_out = n_val if _k_out_grp_base is None else b_.add(_k_out_grp_base, n_val)
             return D_desc.offset(b_, m=m_val, k_out=k_out)
+
+    if split:
+        # Stage 1 stores into slab ``slice`` of the [ks_count][M][K] fp32
+        # workspace. The slab is a packed N[D]HWK tensor like D, so D's
+        # descriptor addresses it; only the slab base is added.
+        _slab_base = b.mul(slice_id, b.mul(p_M, p_K))
+        _d_addr_out = d_addr
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            off, valid = _d_addr_out(b_, m_val, n_val)
+            return b_.add(_slab_base, off), valid
+
+        d_rsrc = make_buffer_resource(b, p_ws, num_bytes=p_ws_bytes).rsrc
+        _epi_spec = dc_replace(spec, data=dc_replace(spec.data, dtype_d="fp32"))
+    else:
+        _epi_spec = spec
 
     # The GEMM-N extent the tile covers: kpg, or kpg*Gm == Gm under merge. The
     # true kpg (1 on depthwise) would clamp away Gm-1 of every Gm real outputs
@@ -2000,7 +2089,7 @@ def _build_implicit_gemm_conv_impl(
         """Store the accumulators through ``d_addr`` with runtime bounds."""
         if spec.epilogue == "cshuffle":
             cshuffle_kwargs = {
-                "out_dtype": spec.data.dtype_d,
+                "out_dtype": _epi_spec.data.dtype_d,
                 "max_store_vec": _max_store_vec,
                 "no_alias": spec.cshuffle_no_alias,
             }
@@ -2026,7 +2115,7 @@ def _build_implicit_gemm_conv_impl(
             # predates the helper-based path.
             emit_direct_epilogue_wmma(
                 b,
-                spec,
+                _epi_spec,
                 op,
                 final_accs_in,
                 warp_m_idx,
@@ -2146,8 +2235,8 @@ def _build_implicit_gemm_conv_impl(
             tid=tid,
             n_math_warps=n_math_warps,
             math_block_size=spec.block_size,
-            k_lo=c0,
-            k_hi=c_K_gemm,
+            k_lo=split_k_lo if split else c0,
+            k_hi=split_k_hi if split else c_K_gemm,
             block_k=block_k,
             A_smem=A_smem,
             B_smem=B_smem,
@@ -2219,7 +2308,11 @@ def _build_implicit_gemm_conv_impl(
         final_accs = for_op.results
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.
-        for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
+        for_op = (
+            b.scf_for_iter(split_k_lo, split_k_hi, c_block_k, accs, iv_name="k0")
+            if split
+            else b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
+        )
         with for_op as (k0, iter_vars):
             emit_load_phase(k0, A_smem, B_smem)
             b.sync()

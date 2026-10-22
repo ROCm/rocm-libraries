@@ -356,6 +356,18 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
 
+    /* ---- forward split-K state (spec.split_k > 1; all NULL / false off it) ----
+     * The trailing ws_ptr / ws_bytes / ks / ks_count kernargs, the CTA's K
+     * slice (z = group * ks_count + slice), and the slab base the epilogue adds
+     * to every D offset. Mirrors the Python builder's `split` locals. */
+    bool fwd_split;
+    rocke_value_t* fwd_p_ws;
+    rocke_value_t* fwd_p_ws_bytes;
+    rocke_value_t* fwd_p_ks;
+    rocke_value_t* fwd_p_ks_count;
+    rocke_value_t* fwd_slice_id;
+    rocke_value_t* fwd_slab_base;
+
     /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
      * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
      * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
@@ -786,6 +798,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* ir_c_K_pw,
                                           const rocke_tensor_descriptor_t* D_desc,
                                           rocke_value_t* k_out_group_base,
+                                          rocke_value_t* slab_base,
                                           rocke_value_t* bound_m,
                                           rocke_value_t* bound_n);
 
@@ -802,6 +815,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,
+                                       rocke_value_t* slab_base,
+                                       const char* out_dtype,
                                        rocke_value_t* bound_m,
                                        rocke_value_t* bound_n);
 

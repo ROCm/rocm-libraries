@@ -347,6 +347,78 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
     }
 }
 
+/* Split-K forward (split_k > 1) on gfx1250 WMMA. Keep in lockstep with
+ * _split_k_spec() in conv_implicit_gemm_emit.py.
+ *   36: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+ *   37: mem/cshuffle, 64x64 tile, 2x2 warps
+ *   38: mem/default (vector_size_c=1), 32x32x32 tile
+ *   39: grouped (groups=2) wavelet/cshuffle */
+static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    const rocke_conv_problem_t small_m
+        = rocke_conv_problem_make(1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t csh_64
+        = rocke_conv_problem_make(2, 12, 12, 128, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t dflt
+        = rocke_conv_problem_make(1, 9, 9, 64, 40, 3, 3, 1, 1, 1, 1, 1, 1);
+    rocke_conv_problem_t grouped
+        = rocke_conv_problem_make(1, 10, 10, 128, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    grouped.groups = 2;
+
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->tile_m = 16;
+    spec->tile_n = 16;
+    spec->tile_k = 64;
+    spec->warp_m = 1;
+    spec->warp_n = 1;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->wave_size = 32;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->pipeline = "wavelet";
+    spec->epilogue = "cshuffle";
+    spec->num_load_waves = 1;
+    spec->split_k = 2;
+    *arch = "gfx1250";
+
+    switch(idx)
+    {
+    case 36:
+        spec->problem = small_m;
+        return 0;
+    case 37:
+        spec->problem = csh_64;
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->pipeline = "mem";
+        return 0;
+    case 38:
+        spec->problem = dflt;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->epilogue = "default";
+        spec->vector_size_c = 1;
+        spec->pipeline = "mem";
+        return 0;
+    case 39:
+        spec->problem = grouped;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -354,7 +426,12 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
  * conv_implicit_gemm_emit.py. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(make_cfg_raw(idx, spec, arch) != 0)
+    if(idx >= 36 && idx <= 39)
+    {
+        if(make_cfg_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(make_cfg_raw(idx, spec, arch) != 0)
         return -1;
     if(strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
     {

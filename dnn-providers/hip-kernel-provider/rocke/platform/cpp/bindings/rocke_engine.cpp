@@ -45,6 +45,7 @@ extern "C" {
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
+#include "rocke/instance_conv_fwd_split_k_reduce.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
@@ -1624,6 +1625,12 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
     s.groups = dict_int(d, "groups", s.groups);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
+    /* Split-K forward: a different ABI and epilogue; dropped, the engine would
+     * build the plain kernel. */
+    s.split_k = dict_int(d, "split_k", s.split_k);
+    /* The wavelet load-wave count sizes the launch block and the load-wave
+     * loaders; dropped, a non-default count builds a different kernel. */
+    s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
@@ -2729,6 +2736,62 @@ std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::
                              rocke_wgrad_reduce_spec_t,
                              conv_wgrad_reduce_build_spec,
                              rocke_build_wgrad_workspace_reduce_new(&b, &s, arch.c_str()));
+}
+
+/* ================= conv_fwd_split_k_reduce (fwd split-K Stage 2) =============== */
+
+rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dict& d,
+                                                                   std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_fwd_split_k_reduce_spec_t s = rocke_fwd_split_k_reduce_spec_default();
+    s.vec = dict_int(d, "vec", s.vec);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    /* The unrolled fold bakes the slab count: it must match the launch's
+     * ks_count, so it is parsed rather than left at the runtime-loop default. */
+    s.degree = dict_int(d, "degree", s.degree);
+    {
+        std::string v;
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    return s;
+}
+
+std::string conv_fwd_split_k_reduce_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_split_k_reduce_spec_t s = conv_fwd_split_k_reduce_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_split_k_reduce_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_fwd_split_k_reduce_lower_llvm");
+}
+
+std::string conv_fwd_split_k_reduce_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_fwd_split_k_reduce_serialize_ir",
+                                rocke_fwd_split_k_reduce_spec_t,
+                                conv_fwd_split_k_reduce_build_spec,
+                                rocke_build_conv_fwd_split_k_reduce_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_fwd_split_k_reduce_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_fwd_split_k_reduce_verify",
+                             rocke_fwd_split_k_reduce_spec_t,
+                             conv_fwd_split_k_reduce_build_spec,
+                             rocke_build_conv_fwd_split_k_reduce_new(&b, &s, arch.c_str()));
 }
 
 /* ---- pooling (nested problem, generic lower, build takes arch) ---- */
@@ -4575,6 +4638,11 @@ PYBIND11_MODULE(rocke_engine, m)
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,
          conv_wgrad_reduce_verify);
+    /* ---- fwd split-K Stage 2 (folds the [ks_count][M][K] fp32 slabs) ---- */
+    reg3("conv_fwd_split_k_reduce",
+         conv_fwd_split_k_reduce_lower_llvm,
+         conv_fwd_split_k_reduce_serialize_ir,
+         conv_fwd_split_k_reduce_verify);
     m.def(
         "conv_wgrad_workspace_bytes",
         [](const py::dict& d) -> size_t {

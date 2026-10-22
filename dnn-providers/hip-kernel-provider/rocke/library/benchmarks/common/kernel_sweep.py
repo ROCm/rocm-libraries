@@ -844,6 +844,18 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
 
     tm, tn, tk = identity.tile_m, identity.tile_n, identity.tile_k
     if direction == "fwd":
+        if "ws_ptr" in extras:
+            # Split-K forward: the degree and the workspace, with the slice
+            # width rounded to the binary's tile_k.
+            return ConvArgs.from_problem(
+                problem, tile_m=tm, tile_n=tn, tile_k=tk
+            ).to_launch_values(
+                *ptrs,
+                *sizes,
+                split_k=extras["split_k"],
+                ws_ptr=extras["ws_ptr"],
+                ws_bytes=extras["ws_bytes"],
+            )
         return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).to_launch_values(
             *ptrs, *sizes
         )
