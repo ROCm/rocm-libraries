@@ -52,7 +52,10 @@ prunes them.
 {"kdp": <KDP path relative to the root>, "name": <UKD name>, "kind": <authored
 kernel_source.kind>, "arch": <the pass the UKD packs under: `--arch` or a generic>},
 one entry per kept UKD, for hkp_probe_assert.py. Entries of kinds whose packed output is
-a pass-through also carry the authored "kernel_source".
+a pass-through also carry the authored "kernel_source". An entry whose UKD authors `sources`
+(a multi-launch kernel) instead carries "launches": {<launch name>: <authored role or null>}.
+Such a UKD is one compile group keyed by every launch's group fields, and a sweep field
+covers the values of each launch's block, keyed `<launch>.<field>`.
 
 Files are written only when their content differs and files absent from the
 derived set are removed, so deriving twice leaves every mtime of the derived root
@@ -153,9 +156,27 @@ def _load(src, table, filters):
         raise DeriveError(str(exc)) from exc
 
 
-def _check_kind(ukd, where):
-    """Return (kernel_source, kind); DeriveError when the kind is unregistered."""
+def _entries(ukd):
+    """The kernel sources a UKD authors, as [(launch, source)] in launch-name order.
+
+    A single-launch UKD authors `kernel_source`: one entry whose launch is None. A
+    multi-launch UKD authors `sources`: one entry per launch. A UKD authoring neither
+    has none."""
+    sources = ukd.get("sources")
+    if isinstance(sources, dict):
+        return sorted(sources.items())
     source = ukd.get("kernel_source")
+    return [] if source is None else [(None, source)]
+
+
+def _check_kind(ukd, where):
+    """Return (entries, kind); DeriveError when the kind is unregistered.
+
+    `entries` is `_entries(ukd)`; the kind is that of its first. The packer's loader has
+    already refused a UKD whose launches are not all `rocke`, so one kind covers a UKD.
+    """
+    entries = _entries(ukd)
+    source = entries[0][1] if entries else None
     kind = source.get("kind") if isinstance(source, dict) else None
     if kind not in KINDS:
         raise DeriveError(
@@ -165,20 +186,25 @@ def _check_kind(ukd, where):
             "packer work first; until then keep such UKDs in a KDP that does not "
             "ship for the probed arch"
         )
-    return source, kind
+    return entries, kind
 
 
 def _group_key(ukd, where):
-    source, kind = _check_kind(ukd, where)
-    for f in KINDS[kind].group_by:
-        if f not in source:
-            raise DeriveError(
-                f"{where} of kind {kind!r} has no kernel_source field {f!r}, which "
-                "the compile group key of that kind requires"
-            )
-    return (kind,) + tuple(
-        json.dumps(source[f], sort_keys=True) for f in KINDS[kind].group_by
-    )
+    entries, kind = _check_kind(ukd, where)
+    key = (kind,)
+    for launch, source in entries:
+        for f in KINDS[kind].group_by:
+            if f not in source:
+                raise DeriveError(
+                    f"{where} of kind {kind!r} has no kernel_source field {f!r}, which "
+                    "the compile group key of that kind requires"
+                )
+        if launch is not None:
+            key += (launch,)
+        key += tuple(
+            json.dumps(source[f], sort_keys=True) for f in KINDS[kind].group_by
+        )
+    return key
 
 
 def _standalone_error(rel, entry):
@@ -202,14 +228,23 @@ _ABSENT = object()
 
 
 def _sweep_values(ukd, field, where):
-    """Map each field of `ukd`'s kernel_source[field] object to its canonical JSON."""
-    block = ukd["kernel_source"].get(field)
-    if not isinstance(block, dict):
-        raise DeriveError(
-            f"{where} kernel_source field {field!r} is not an object, so its values "
-            "cannot be swept"
+    """Map each field of `ukd`'s kernel_source[field] object to its canonical JSON.
+
+    A multi-launch UKD maps every launch's block, its fields keyed `<launch>.<field>`.
+    """
+    values = {}
+    for launch, source in _entries(ukd):
+        block = source.get(field)
+        if not isinstance(block, dict):
+            raise DeriveError(
+                f"{where} kernel_source field {field!r} is not an object, so its values "
+                "cannot be swept"
+            )
+        prefix = "" if launch is None else f"{launch}."
+        values.update(
+            {prefix + k: json.dumps(v, sort_keys=True) for k, v in block.items()}
         )
-    return {k: json.dumps(v, sort_keys=True) for k, v in block.items()}
+    return values
 
 
 def _select(members, field, rel):
@@ -313,15 +348,22 @@ def _plan(src, arch, table, ukds=None, filters=((), ())):
         kdp = dict(kdp, kernelDescriptors=kept)
         files[rel] = (json.dumps(kdp, indent=2) + "\n").encode("utf-8")
         for u in kept:
+            entries, kind = _check_kind(u, f"{rel}: UKD '{u.get('id', '?')}'")
             entry = {
                 "kdp": rel,
                 "name": u["name"],
-                "kind": u["kernel_source"]["kind"],
+                "kind": kind,
                 "arch": packed_as,
             }
-            if KINDS[entry["kind"]].output == "passthrough":
+            if entries[0][0] is not None:
+                # What the packer must ship: one launch per authored one, each with the
+                # role it authored (null for the builder's primary kernel).
+                entry["launches"] = {
+                    launch: source.get("role") for launch, source in entries
+                }
+            elif KINDS[kind].output == "passthrough":
                 # The packer ships the block as authored; the assertion compares it.
-                entry["kernel_source"] = u["kernel_source"]
+                entry["kernel_source"] = entries[0][1]
             expect.append(entry)
 
     if filters != ((), ()):
