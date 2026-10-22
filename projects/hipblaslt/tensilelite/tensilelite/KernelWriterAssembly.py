@@ -74,6 +74,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
+from .Components.TileProcessingStrategy import TileProcessingStrategy
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -925,6 +926,7 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.use64bShadowLimit:
       self.removeSgprVarFromPool("ShadowLimitA")
       self.removeSgprVarFromPool("ShadowLimitB")
+    self.removeSgprVarFromPool("InputBiasBufferLimit")
     if self.states.use64bShadowLimitMX:
       if kernel["ProblemType"]["MXBlockA"]:
         self.removeSgprVarFromPool("ShadowLimitMXSA")
@@ -1041,6 +1043,10 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSB")
+
+    if self.states.staggerUCode and any(self.canHoistUnusedBufferInput(kernel, tc) for tc in ("A", "B")):
+      module.add(self.defineSgpr("InputBiasBufferLimit", 1))
+      self.addSgprVarToPool("InputBiasBufferLimit")
 
     if self.states.staggerUCode:
       module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
@@ -5236,6 +5242,10 @@ class KernelWriterAssembly(KernelWriter):
           wg+=1
     moduleLoadGeneralBatch.add(SCmpEQU32(src0=sgpr("SizesSum"), src1=hex(0), comment="Don't dereference Pointer array if SizesSum == 0"))
     moduleLoadGeneralBatch.add(SCBranchSCC1(labelName=stridedBatchedGemmLoad_End.getLabelName()))          
+    if self.isUnusedInputAtAlphaZero(kernel, tc):
+      moduleLoadGeneralBatch.add(BranchIfZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(),
+                                             stmp, self.states.laneSGPRCount,
+                                             stridedBatchedGemmLoad_End, kernel["WavefrontSize"]))
     moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
@@ -5287,6 +5297,8 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMovB32(dst=sgpr("Srd%s+3"%tc), src="Srd127_96", comment="Set bits 127_96 in SRD"))
     if use64bShadowLimit and not useFixedSrd2:
       module.add(self.shiftSrd(tc))
+    if self.canHoistUnusedBufferInput(kernel, tc):
+      module.add(self.suppressUnusedBufferInput(kernel, tc, clearShadow=True))
 
     #if tP["isB"]:
     #  module.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup1"), 0xA))
@@ -8938,6 +8950,20 @@ class KernelWriterAssembly(KernelWriter):
     if kernel.get("LDSSegmentBRotate"):
       module.add(self._bRotateUnswapAcc(kernel))
 
+    if self.needsAlphaZeroInputBiasReduction(kernel):
+      productReady = Label(self.labels.getNameInc("InputBiasProductReady"), "")
+      module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), productReady))
+      # Even zero-filled unused operands can produce NaN with an infinite bias
+      # source. Discard the GEMM product before partial publication or epilogue
+      # scaling, without touching the independent ValuSum bias accumulators.
+      for i in range(self.states.totalAgprs):
+        module.add(VAccvgprWrite(dst=accvgpr(i), src=0,
+                                  comment="alpha-zero input bias: discard GEMM product"))
+      for i in range(self.states.c.numVgprValu):
+        module.add(VMovB32(dst=vgpr("ValuC+%u" % i), src=0,
+                            comment="alpha-zero input bias: discard GEMM product"))
+      module.add(productReady)
+
     if isOptNLL:
       vbegin = self.states.startVgprMisc
       vsize = self.states.lastVgprForReads - vbegin
@@ -10832,7 +10858,8 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SCmpEQU32(src0=sgpr("ShadowLimit%s+1"%tc), src1=0, comment="are we within 2^32?"))
       if self.states.staggerUCode:
         # staggerU case, need to restore BufferLimit when ShadowLimit goes to negative value
-        imod.add(SCSelectB32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("ShadowLimit%s+0"%tc), src1="BufferLimit", comment="Move shadow to real if we are within 2^32"))
+        fallback = sgpr("InputBiasBufferLimit") if self.canHoistUnusedBufferInput(self.states.kernel, tc) else "BufferLimit"
+        imod.add(SCSelectB32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("ShadowLimit%s+0"%tc), src1=fallback, comment="Move shadow to real if we are within 2^32"))
       else:
         imod.add(SCMovB32(dst=sgpr("Srd%s+2"%tc), src=sgpr("ShadowLimit%s+0"%tc), comment="Move shadow to real if we are within 2^32"))
       imod.add(self.shiftSrd(tc))
@@ -11534,7 +11561,7 @@ class KernelWriterAssembly(KernelWriter):
                                   addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                   soffset=soffset, offset=offset, \
                                   glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                                  tr=isTr, hi16=hi16, \
+                                  tr=isTr, tensorChar=tc, hi16=hi16, \
                                   comment=comment, scope=scope, th=th, nv=nv))
                         tmpVgprIdx += 1
 
@@ -11549,7 +11576,7 @@ class KernelWriterAssembly(KernelWriter):
                                 addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                 soffset=soffset, offset=offset, \
                                 glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                                tr=isTr, hi16=hi16, \
+                                tr=isTr, tensorChar=tc, hi16=hi16, \
                                 comment=comment, scope=scope, th=th, nv=nv))
                       loadCnt = loadCnt + 1
                   if unrollMirrorWithSoffset:
@@ -11962,6 +11989,10 @@ class KernelWriterAssembly(KernelWriter):
     imod = StructuredModule("globalReadDo%s_%u"%(tc,mode))
     if not self.do["GlobalRead%s"%tP["tensorChar"]]:
       return imod
+
+    if mode == 2 and self.canHoistUnusedBufferInput(kernel, tc):
+      # Tail setup can rewind the SRD and restore its bound from ShadowLimit.
+      imod.header.add(self.suppressUnusedBufferInput(kernel, tc, clearShadow=True))
 
     loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
     # The last PrefetchGlobalRead sections of the resident block have their TDM
@@ -12392,7 +12423,7 @@ class KernelWriterAssembly(KernelWriter):
                           addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                           soffset=soffset, offset=instOffset, \
                           glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                          tr=isTr, hi16=isHigh16Bits , \
+                          tr=isTr, tensorChar=tc, hi16=isHigh16Bits , \
                           comment="G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp), scope=scope, th=th, nv=nv))
 
                 if unrollMirrorWithSoffset:
@@ -17576,9 +17607,26 @@ class KernelWriterAssembly(KernelWriter):
                        addr0, addr1, soffset, offset, \
                        glc=False, slc=False, nt=False, lds=False, \
                        tr=False, hi16=0, comment="load C", \
-                       scope=CacheScope.SCOPE_NONE, th=TemporalHint.TH_NONE, nv=NonVolatile.NV_NONE):
+                       scope=CacheScope.SCOPE_NONE, th=TemporalHint.TH_NONE, nv=NonVolatile.NV_NONE, tensorChar=None):
     # rpv = regs per vector
     rpv = bpl/4.0
+
+    if tr and self.isUnusedInputAtAlphaZero(self.states.kernel, tensorChar):
+      # Transpose loads have no SRD bounds. Skip the memory instruction
+      # and initialize its VGPR result explicitly, including in the tail.
+      guarded = Module("Alpha-zero unused global input")
+      nonzero = Label(self.labels.getNameInc(f"InputBias{tensorChar}GlobalLoad"), "")
+      done = Label(self.labels.getNameInc(f"InputBias{tensorChar}GlobalDone"), "")
+      guarded.add(BranchIfNotZero("Alpha", self.states.kernel["ProblemType"]["ComputeDataType"].toEnum(), nonzero))
+      for i in range(max(1, ceil(rpv))):
+        guarded.add(VMovB32(dst=vgpr(_vgprOffset(destVgpr, i)), src=0,
+                           comment="alpha-zero unused global input"))
+      guarded.add(SBranch(labelName=done.getLabelName()))
+      guarded.add(nonzero)
+      guarded.add(self.chooseGlobalRead(useBuffer, bpl, destVgpr, addr0, addr1, soffset, offset,
+                                       glc, slc, nt, lds, tr, hi16, comment, scope, th, nv))
+      guarded.add(done)
+      return guarded
 
     if useBuffer:
       rv = Module("Global Read")
@@ -17687,6 +17735,11 @@ class KernelWriterAssembly(KernelWriter):
       else:
         bufferLoadImpl(soffset)
 
+      if (self.isUnusedInputAtAlphaZero(self.states.kernel, tensorChar)
+          and not self.canHoistUnusedBufferInput(self.states.kernel, tensorChar)):
+        guarded = self.suppressUnusedBufferInput(self.states.kernel, tensorChar)
+        guarded.add(rv)
+        return guarded
       return rv
     elif tr:
       # global_load offset field is 24-bit.
@@ -20388,6 +20441,68 @@ class KernelWriterAssembly(KernelWriter):
     selectByParity(scratchIdx, ldsBoundB, ldsBoundA, "ldsSplit = parity ? B : A")
     return sgpr(scratchIdx)
 
+  @staticmethod
+  def needsAlphaZeroInputBiasReduction(kernel):
+    return ((isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel))
+            and TileProcessingStrategy.needsInputBiasReduction(kernel))
+
+  def isUnusedInputAtAlphaZero(self, kernel, tc):
+    return (tc in ("A", "B") and self.needsAlphaZeroInputBiasReduction(kernel)
+            and tc != kernel["ProblemType"]["BiasSrc"])
+
+  def canHoistUnusedBufferInput(self, kernel, tc):
+    """Whether forward SRD increments preserve a zero unused-input bound."""
+    return (self.isUnusedInputAtAlphaZero(kernel, tc)
+            and kernel["BufferLoad"] and not kernel["enableTDM" + tc]
+            and self.states.use64bShadowLimit
+            and not kernel.get("UseSubtileImpl")
+            and not kernel.get("PrefetchAcrossPersistent")
+            and not kernel["ProblemType"]["Sparse"]
+            and not kernel["ProblemType"].get("SwizzleTensor" + tc)
+            and not kernel["ProblemType"]["MirrorDims" + tc]
+            and len(kernel["ProblemType"]["IndicesSummation"]) == 1)
+
+  def suppressUnusedBufferInput(self, kernel, tc, clearShadow=False):
+    mod = Module("Alpha-zero unused buffer input")
+    ready = Label(self.labels.getNameInc(f"InputBias{tc}BufferReady"), "")
+    if clearShadow and self.states.staggerUCode:
+      mod.add(SMovB32(dst=sgpr("InputBiasBufferLimit"), src="BufferLimit"))
+    mod.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), ready))
+    mod.add(SMovB32(dst=sgpr(f"Srd{tc}+2"), src=0,
+                     comment=f"alpha-zero unused {tc}: suppress buffer reads"))
+    if self.states.version[:2] == (12, 5):
+      mod.add(SAndB32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"),
+                      src1=0x1ffffff, comment="clear low record-count bits on gfx125x"))
+    if clearShadow:
+      # A negative sentinel keeps the high word nonzero through forward
+      # increments and stagger rewinds, so incrementSrd cannot restore a real
+      # bound. Stagger's out-of-range fallback must also remain zero. Normal
+      # alpha retains the original shadow and BufferLimit, with no loop checks.
+      mod.add(SMovB32(dst=sgpr(f"ShadowLimit{tc}"), src=0))
+      mod.add(SMovB32(dst=sgpr(f"ShadowLimit{tc}+1"), src=0x80000000,
+                       comment="keep unused input shadow out of the 32-bit range"))
+      if self.states.staggerUCode:
+        mod.add(SMovB32(dst=sgpr("InputBiasBufferLimit"), src=0))
+    mod.add(ready)
+    return mod
+
+  def suppressUnusedTDMInput(self, kernel, tc, group1):
+    """Zero-fill the unused operand without dropping TDM completion or multicast."""
+    mod = Module(f"Suppress unused TDM input {tc}")
+    if not self.isUnusedInputAtAlphaZero(kernel, tc):
+      return mod
+    ready = Label(self.labels.getNameInc(f"InputBias{tc}TensorReady"), "")
+    mod.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), ready))
+    # A zero tensor_dim0 makes every element out of bounds. Keep the tile
+    # dimensions and enable word intact so the transfer still fills LDS and
+    # completes its token, including on multicast peers and in the tail.
+    mod.add(SAndB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), 0x0000ffff,
+                     comment=f"alpha-zero unused {tc}: tensor_dim0 low = 0"))
+    mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), 0xffff0000,
+                     comment=f"alpha-zero unused {tc}: tensor_dim0 high = 0"))
+    mod.add(ready)
+    return mod
+
   def _resolveTDMGlobalAddr(self, kernel: Mapping, tc: str, dstAddr: str,
                             tmpSgprResource: ContinuousRegister,
                             restoreDescriptorType: bool = False) -> Module:
@@ -20410,8 +20525,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCBranchSCC0(labelName=addressReady.getLabelName(),
                         comment="Keep the direct matrix address"))
 
-    # Match loadBatchedAddress: a null A/B pointer array is valid when the
-    # contraction is unused (K==0 or alpha==0), so do not dereference it.
+    # No input is needed at K==0. At alpha==0 only the bias source is
+    # needed; the unused operand may have a null pointer array.
     mod.add(SMovB32(dst=sgpr(tmpSgpr), src=1, comment="check summation size"))
     for i in range(self.states.numSgprSizesSum):
       mod.add(SMulI32(dst=sgpr(tmpSgpr),
@@ -20421,12 +20536,16 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=0,
                      comment="skip pointer dereference when summation size is zero"))
     mod.add(SCBranchSCC1(labelName=addressReady.getLabelName()))
-    mod.add(BranchIfZero("Alpha",
-                        kernel["ProblemType"]["ComputeDataType"].toEnum(),
-                        tmpSgpr,
-                        laneSC,
-                        addressReady,
-                        kernel["WavefrontSize"]))
+    # The bias source is still read at alpha zero; the other operand may
+    # remain null and is zero-filled by suppressUnusedTDMInput.
+    if not (self.needsAlphaZeroInputBiasReduction(kernel)
+            and tc == kernel["ProblemType"]["BiasSrc"]):
+      mod.add(BranchIfZero("Alpha",
+                          kernel["ProblemType"]["ComputeDataType"].toEnum(),
+                          tmpSgpr,
+                          laneSC,
+                          addressReady,
+                          kernel["WavefrontSize"]))
 
     mod.add(SMulI32(dst=sgpr(tmpSgpr),
                    src0=sgpr("WorkGroup2"),
@@ -20657,6 +20776,7 @@ class KernelWriterAssembly(KernelWriter):
                                  strideRefName=strideRefName,
                                  remainRowsSgpr=remainRowsSgpr)
 
+    mod.add(self.suppressUnusedTDMInput(kernel, tc, descSgprName(1)))
     return mod
 
   def tdmWaveLdsAddr(self, kernel, tc: str, numComp: int, pieceBytes: int, ldsConstOffset: int,
@@ -20908,6 +21028,7 @@ class KernelWriterAssembly(KernelWriter):
     # Multi-wave TDMSplit recomputes the LDS/global split increments transiently at
     # point of use (see _tdmSplitMultiWaveInc); nothing is initialized here.
 
+    mod.add(self.suppressUnusedTDMInput(kernel, tc, descSgprName(1)))
     return mod
 
   def _tdmSharedScaleDispatch(self, kernel, tPA, tPB, waveIdxSgpr, emitFor, what: str) -> Module:
@@ -21884,6 +22005,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, 0, isMXS))
       else:
         mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, tdmDescIdx, self, sizeShifter, isMXS, isSparseTrack, isMetadata))
+    mod.add(self.suppressUnusedTDMInput(kernel, tc, descSgprName(1)))
     return mod
 
   def resetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:

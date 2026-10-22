@@ -704,8 +704,10 @@ def _make_writer(kernel):
     # calculateGSUIterOffset; both come from the real writer so the test cannot
     # drift from production's chunk arithmetic.
     for m in ["strideRef", "allocTmpSgpr", "s_mul_u64_u32",
-              "gsuMaskHex", "calculateLoopNumIterOffsetGsu", "cmpNamedArgTypeEq"]:
+              "gsuMaskHex", "calculateLoopNumIterOffsetGsu", "cmpNamedArgTypeEq",
+              "isUnusedInputAtAlphaZero"]:
         setattr(w, m, types.MethodType(getattr(KWA, m), w))
+    w.needsAlphaZeroInputBiasReduction = KWA.needsAlphaZeroInputBiasReduction
     w.sgprPool.checkOut(6)  # reserve hardware sgprs (s0:1 kernarg ptr, etc.)
     return w
 
