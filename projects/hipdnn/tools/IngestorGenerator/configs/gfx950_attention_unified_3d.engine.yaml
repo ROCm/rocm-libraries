@@ -10,7 +10,9 @@
 # The kernel is rocKE's gfx950 split-KV unified attention for DECODE (one query token per
 # sequence): a segment kernel (build_unified_attention_3d_tiled) that writes per-segment
 # partial softmax state, then a reduce kernel (build_unified_attention_reduce_tiled) that
-# combines it. The reduce kernel ships as each kernel's companion code object. Like
+# combines it. Both kernels ship as one code object built by
+# build_unified_attention_3d_tiled_module, launched as the `segment` and `reduce` launches
+# of a multi-launch descriptor (UKD 1.1 `sources`). Like
 # Unified2D it reads a paged K/V cache plus block_tables / seq_lens / query_start_len, which
 # the provider derives on the host (identity block table over the graph's contiguous BSHD
 # K/V) and stages in the plan's workspace beside the segment scratch. See
@@ -110,28 +112,25 @@ pack: gfx950_attention_unified_3d
 arch: gfx950
 provider_root: dnn-providers/hip-kernel-provider
 source: kernels/gfx950/attention_tiled_3d.py
-builder: build_unified_attention_3d_tiled
+builder: build_unified_attention_3d_tiled_module
 kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_seg{num_segments}.gfx950
 
-# The reduce kernel every segment kernel launches after itself, derived from the segment
-# kernel's own spec. registry_enumerator checks the derivation reproduces the reduce spec
-# the registry pairs with each kernel.
-companions:
-  - source: kernels/gfx950/attention_tiled_3d.py
-    builder: build_unified_attention_reduce_tiled
-    spec_from:
-      head_size: head_size
-      num_query_heads: num_query_heads
-      num_kv_heads: num_kv_heads
-      dtype: dtype
-      num_segments: num_segments
+# The module's two kernels, each one launch of every descriptor: the segment kernel (the
+# module's primary) and the reduce kernel (its `reduce` companion, whose spec the module
+# derives from the segment spec: rocKE's reduce_spec_for). The registry pairs every 3D
+# candidate with a reduce, so registry_enumerator refuses this manifest without them.
+launches:
+  segment: {}
+  reduce: {role: reduce}
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
-  # One geometry: 16 KV splits, a one-page KV tile. The sweep-widened geometries are a
-  # follow-up that needs measurements.
+  # Three KV split counts at a one-page KV tile, one pinned candidate each: 16 (the cell's
+  # default, as on the branch's first catalog), then 32 and 64 in `also`. A count only
+  # splits the KV loop, so any computes the same output; variant reduction across
+  # num_segments picks per cell (agreed at the knob checkpoint, 2026-10-22).
   pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg16_t1xb}
   # Request fields every cell shares. seqlen_q 1 is what makes these decode-grid kernels;
   # batch and seqlen_k are a reference shape only (they bake num_seqs 1, which the decode
@@ -175,47 +174,62 @@ enumerate:
     - fields: [mask_type]
       values: [TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
   sweep_level: production
-  space: slice
-  free_fields: []
-  spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, num_seqs, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load, causal_top_left, right_bound, use_i64_kv_addr]
-  # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 116
-  # The bf16 D256 decode cohort (rocKE's d256_decode route). That route is route-only and
-  # builds the generic 3D spec with a segment count chosen per shape, which no single
-  # binary can reproduce; this section pins the registry's own split-rule variant
-  # (segauto) evaluated at the reference shape above, so each kernel's segment count is
-  # what the rule picks for batch 1 at 4096 keys. The segment count (and the page-id
-  # loader, which follows it) only splits the KV loop: any value computes the same output.
+  # Full space per split count; the K/V loader flags and waves_per_eu the sweep varies
+  # inside one candidate are held at the registry default (reduction.fields.ignored).
+  space: full
+  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, num_seqs, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load, causal_top_left, right_bound, use_i64_kv_addr]
   also:
-    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_segauto_t1xb}
-      fixed: {arch: gfx950, kv_block_size: 16, batch: 1, seqlen_q: 1, seqlen_k: 4096}
-      cells:
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg32_t1xb}
+      fixed: &fixed {arch: gfx950, kv_block_size: 16, batch: 1, seqlen_q: 1, seqlen_k: 4096}
+      cells: &cells
         - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
           values:
-            - [256, 256, 8, 1]
-            - [256, 256, 8, 8]
-            - [256, 256, 16, 2]
-            - [256, 256, 16, 4]
-            - [256, 256, 16, 16]
-            - [256, 256, 32, 4]
-            - [256, 256, 32, 8]
-            - [256, 256, 32, 32]
-            - [256, 256, 64, 8]
+            - [64, 64, 8, 1]
+            - [64, 64, 8, 8]
+            - [64, 64, 10, 10]
+            - [64, 64, 12, 12]
+            - [64, 64, 16, 2]
+            - [64, 64, 16, 16]
+            - [64, 64, 20, 20]
+            - [64, 64, 32, 4]
+            - [64, 64, 32, 8]
+            - [64, 64, 32, 32]
+            - [64, 64, 64, 8]
+            - [64, 64, 128, 128]
+            - [128, 128, 24, 24]
+            - [128, 128, 4, 4]
+            - [128, 128, 8, 1]
+            - [128, 128, 8, 2]
+            - [128, 128, 8, 8]
+            - [128, 128, 9, 9]
+            - [128, 128, 16, 2]
+            - [128, 128, 16, 16]
+            - [128, 128, 32, 4]
+            - [128, 128, 32, 8]
+            - [128, 128, 32, 32]
+            - [128, 128, 40, 10]
+            - [128, 128, 40, 40]
+            - [128, 128, 64, 4]
+            - [128, 128, 64, 8]
+            - [128, 128, 64, 64]
+            - [128, 128, 128, 8]
         - fields: [dtype]
-          values: [bf16]
+          values: [bf16, fp16]
         - fields: [mask_type]
           values: [TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
-      free_fields: []
-      spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, num_seqs, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load, causal_top_left, right_bound, use_i64_kv_addr]
-      max_kernels: 18
+      spec_fields: *spec_fields
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg64_t1xb}
+      fixed: *fixed
+      cells: *cells
+      spec_fields: *spec_fields
 
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, mask_type, sliding_window, block_size, use_decode_grid]
+    # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid]
     performance:
       - {name: num_segments}
-      - {name: waves_per_eu}
-    ignored: []
+    ignored: [waves_per_eu, use_kv_lds_swizzle, use_wave_page_id_load]
   aot_budget_per_arch: 400
 
 ground_truth:
@@ -268,9 +282,10 @@ launch_surface:
       kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the candidate is not a decode-grid kernel or the graph's
-      seqlen_q is not 1, or the candidate carries no companion. A NO_MASK graph is matched
-      as mask_type 2 (bottom-right causal), which is the same computation at one query
-      row. head_size 256 is bf16 only. score() ranks the fewest segments first.
+      seqlen_q is not 1. A NO_MASK graph is matched as mask_type 2 (bottom-right causal),
+      which is the same computation at one query row. head_size 256 is bf16 only. score()
+      ranks the fewest segments first. The handler's launchNames() is {segment, reduce},
+      which the state manager requires of every kernel's `sources`.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified3DMatchers.cpp
 
   - name: kernargs
