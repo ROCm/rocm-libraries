@@ -311,3 +311,48 @@ class TestSetValue:
             hipdnn.Tensor().set_value(1.5, hipdnn.DataType.INT32)
         with pytest.raises(TypeError, match="cannot infer"):
             hipdnn.Tensor().set_value("2.5")
+
+
+class TestScalarValueGetters:
+    """Getters return the stored scalar as a plain Python value."""
+
+    @pytest.mark.parametrize(
+        "data_type, value, python_type",
+        [
+            (hipdnn.DataType.FLOAT, 2.5, float),
+            (hipdnn.DataType.DOUBLE, 0.1, float),
+            (hipdnn.DataType.HALF, 2.5, float),
+            (hipdnn.DataType.BFLOAT16, 2.5, float),
+            (hipdnn.DataType.UINT8, 200, int),
+            (hipdnn.DataType.INT32, -7, int),
+            (hipdnn.DataType.INT64, 1 << 40, int),
+            (hipdnn.DataType.BOOLEAN, True, bool),
+        ],
+    )
+    def test_value_variant_returns_plain_python_scalar(
+        self, data_type, value, python_type
+    ):
+        tensor = hipdnn.Tensor().set_value(value, data_type)
+
+        result = tensor.get_value_variant()
+
+        assert type(result) is python_type
+        assert result == value
+
+    def test_getters_follow_the_scalar_state(self):
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
+
+        assert tensor.get_value_variant() is None
+        assert tensor.get_compile_time_constant() is None
+        assert tensor.get_pass_by_value() is None
+
+        tensor.set_value(2.5)
+        assert tensor.get_compile_time_constant() == 2.5
+        assert tensor.get_pass_by_value() is None
+
+        tensor.set_is_pass_by_value(True)
+        assert tensor.get_pass_by_value() == 2.5
+        assert tensor.get_compile_time_constant() is None
+
+        tensor.clear_value()
+        assert tensor.get_value_variant() is None

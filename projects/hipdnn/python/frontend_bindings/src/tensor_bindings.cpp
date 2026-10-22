@@ -15,6 +15,8 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -110,6 +112,32 @@ TensorAttributes&
     }
 }
 
+// Converts a stored scalar to a plain Python value; an empty value becomes None.
+nb::object valueToPython(const TensorAttributes::ValueVariant& value)
+{
+    return std::visit(
+        [](const auto& v) -> nb::object {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr(std::is_same_v<T, std::monostate>)
+            {
+                return nb::none();
+            }
+            else if constexpr(std::is_same_v<T, bool>)
+            {
+                return nb::bool_(v);
+            }
+            else if constexpr(std::is_integral_v<T>)
+            {
+                return nb::int_(static_cast<int64_t>(v));
+            }
+            else
+            {
+                return nb::float_(static_cast<double>(v));
+            }
+        },
+        value);
+}
+
 } // namespace
 
 void tensorBindings(nb::module_& m)
@@ -175,5 +203,19 @@ void tensorBindings(nb::module_& m)
              &TensorAttributes::set_ragged_offset,
              nb::arg("value").none(),
              nb::rv_policy::reference_internal)
+        .def("get_value_variant",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(tensor.get_value_variant());
+             })
+        .def("get_pass_by_value",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(
+                     tensor.get_pass_by_value().value_or(TensorAttributes::ValueVariant{}));
+             })
+        .def("get_compile_time_constant",
+             [](const TensorAttributes& tensor) {
+                 return valueToPython(
+                     tensor.get_compile_time_constant().value_or(TensorAttributes::ValueVariant{}));
+             })
         .def("validate", &TensorAttributes::validate);
 }
