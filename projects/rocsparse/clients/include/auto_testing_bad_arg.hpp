@@ -177,7 +177,15 @@ public:
     {
         if(rocsparse_clients_envariables::get(rocsparse_clients_envariables::TEST_DEBUG_ARGUMENTS))
         {
-            CHECK_ROCSPARSE_THROW_ERROR(rocsparse_argdescr_create(&argdescr));
+            const rocsparse_status status = rocsparse_argdescr_create(&argdescr);
+            if(status != rocsparse_status_success)
+            {
+                rocsparse_clients_log_rocsparse_error("rocsparse_argdescr_create", status);
+#ifdef GOOGLE_TEST
+                ADD_FAILURE() << "rocsparse_argdescr_create failed";
+#endif
+                argdescr = nullptr;
+            }
         }
     }
 

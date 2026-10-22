@@ -24,6 +24,7 @@
 #include <cstring>
 
 #include "rocsparse_clients_test_hip_debug.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -823,27 +824,35 @@ namespace rocsparse_clients_test
         return this->m_enabled;
     }
 
+    static void report_hip_debug_failure(const char* call)
+    {
+        std::cerr << "// rocsparse_clients_test_hip_debug error: " << call << " failed."
+                  << std::endl;
+        if(::testing::UnitTest::GetInstance()->current_test_info() == nullptr)
+        {
+            exit(EXIT_FAILURE);
+        }
+        ADD_FAILURE() << call << " failed";
+    }
+
     void hip_debug_t::enable()
     {
-        this->m_enabled = true;
         if(rocsparse_hip_debug_enable() != rocsparse_status_success)
         {
-            std::cerr
-                << "// rocsparse_clients_test_hip_debug error: rocsparse_hip_debug_enable failed."
-                << std::endl;
-            exit(1);
+            report_hip_debug_failure("rocsparse_hip_debug_enable");
+            return;
         }
+        this->m_enabled = true;
     }
 
     void hip_debug_t::disable()
     {
-        this->m_enabled = false;
         if(rocsparse_hip_debug_disable() != rocsparse_status_success)
         {
-            std::cerr
-                << "// rocsparse_clients_test_hip_debug error: rocsparse_hip_debug_disable failed."
-                << std::endl;
+            report_hip_debug_failure("rocsparse_hip_debug_disable");
+            return;
         }
+        this->m_enabled = false;
     }
 
     void hip_debug_t::set_hip_debug_report_filename(const char* value)

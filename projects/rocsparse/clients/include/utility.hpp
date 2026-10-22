@@ -1069,14 +1069,7 @@ namespace rocsparse_clients
         const int32_t n_sub_calls  = arguments.iters_inner;
         const int32_t n_calls      = arguments.iters;
 
-        hipStream_t            stream;
-        const rocsparse_status stream_status = rocsparse_get_stream(handle, &stream);
-        if(stream_status != rocsparse_status_success)
-        {
-            std::cerr << "error " << __FUNCTION__ << ": cannot get the handle stream, exit program."
-                      << std::endl;
-            exit(stream_status);
-        }
+        const hipStream_t stream = handle.get_stream();
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
@@ -1084,7 +1077,7 @@ namespace rocsparse_clients
             if(status != rocsparse_status_success)
             {
                 std::cerr << "error " << __FUNCTION__ << ": cold call failed." << std::endl;
-                exit(status);
+                throw status;
             }
         }
 

@@ -161,11 +161,7 @@ std::string rocsparse_datapath()
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us(void)
 {
-    const hipError_t status = hipDeviceSynchronize();
-    if(status != hipSuccess)
-    {
-        throw status;
-    }
+    CHECK_HIP_THROW_ERROR(hipDeviceSynchronize());
 
     auto now = std::chrono::steady_clock::now();
     auto duration
@@ -185,8 +181,6 @@ rocsparse_clients::timer::timer(hipStream_t stream)
     if(status != hipSuccess)
     {
         rocsparse_clients_log_hip_error("hipEventDestroy", hipEventDestroy(this->m_start));
-        this->m_start = nullptr;
-        this->m_stop  = nullptr;
         throw status;
     }
 }
