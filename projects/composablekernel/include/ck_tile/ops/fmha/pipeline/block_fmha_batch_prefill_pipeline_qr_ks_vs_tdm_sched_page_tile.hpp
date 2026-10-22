@@ -34,7 +34,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     static_assert(Problem::kPageBlockSize % Problem::BlockFmhaShape::kN0 == 0 ||
                       Problem::BlockFmhaShape::kN0 % Problem::kPageBlockSize == 0,
                   "supported pages satisfy P % N == 0 or N % P == 0");
-    static_assert(Problem::kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT);
+    // Linear pages, or the vectorized layout with 8 x 16-bit vectors (the window issue lands both
+    // in the same LDS image).
+    static_assert(Problem::kKVMemoryLayout ==
+                      BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT ||
+                  (Problem::kKVMemoryLayout ==
+                       BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT &&
+                   Problem::kVectorSize == 8));
     static_assert(Problem::kKVLookupTable ==
                       BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D ||
                   Problem::kKVLookupTable ==
