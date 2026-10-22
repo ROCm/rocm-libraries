@@ -328,6 +328,11 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1250: {
         // TODO: Update with real gfx1250 constants when available
         auto c                       = get_gfx950_arch_constants(std::nullopt);
+        // L2 and HBM read rates measured on gfx1250 (L2 at a 64 MB footprint), scaled to the
+        // clock GEMMs settle at under load. The gfx950 values model HBM far below what gfx1250
+        // reaches and L2 below HBM.
+        c.mem1_perf_ratio            = 47.0;
+        c.mem3_perf_ratio            = 19.0;
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
         c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
         c.simds_per_cu               = 4;
