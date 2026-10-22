@@ -903,6 +903,23 @@ def _wmma_gfx1250_b_scale(builder, lane, slot):
     return builder.const_i32(slot), col
 
 
+def integer_mma_op_ids(op_id: str, bits: int) -> Tuple[str, str, str, str]:
+    """The op_ids of one integer matrix instruction, one per operand signedness.
+
+    The instruction takes the signedness of A and B as flags, so each
+    combination is its own catalog row: ``op_id`` for signed A and B, then
+    ``op_id`` with ``_u<bits>_i<bits>`` (A unsigned), ``_i<bits>_u<bits>`` (B
+    unsigned) and ``_u<bits>_u<bits>`` appended, for example
+    ``wmma_gfx12_i32_16x16x16_iu8_u8_i8``.
+    """
+    return (
+        op_id,
+        f"{op_id}_u{bits}_i{bits}",
+        f"{op_id}_i{bits}_u{bits}",
+        f"{op_id}_u{bits}_u{bits}",
+    )
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
@@ -1055,15 +1072,22 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # --- WMMA iu8 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <4 x i32> (16 int8 packed 4-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
-    "wmma_i32_16x16x16_iu8": _FragInfo(
-        4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_acc_16x16
-    ),
+    # Each signedness combination (integer_mma_op_ids) has the same fragments.
+    **{
+        op_id: _FragInfo(
+            4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_acc_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_i32_16x16x16_iu8", 8)
+    },
     # --- WMMA iu4 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <2 x i32> (16 int4 packed 8-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
-    "wmma_i32_16x16x16_iu4": _FragInfo(
-        2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_acc_16x16
-    ),
+    **{
+        op_id: _FragInfo(
+            2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_acc_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_i32_16x16x16_iu4", 4)
+    },
     # --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) -------------------------------
     # No cross-half duplication: A/B are <8 x half> per lane; column-distributed
     # accumulator. Lane maps verified by examples/gfx1201/wmma_probe.py.
@@ -1093,9 +1117,37 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "wmma_gfx12_f32_16x16x16_bf8_bf8": _FragInfo(
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),
-    "wmma_gfx12_i32_16x16x16_iu8": _FragInfo(
-        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
-    ),
+    **{
+        op_id: _FragInfo(
+            8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x16_iu8", 8)
+    },
+    # --- WMMA i4 -> i32 (wave32, gfx12), every signedness combination --------
+    # Eight (K 16) or sixteen (K 32) i4 per lane, packed in one or two words:
+    # lane l holds row l % 16 of A (column l % 16 of B) and the contiguous K
+    # run starting at (l // 16) * 8 or (l // 16) * 16, slots counted in i4
+    # values from the low bits of the first word. The public matrix instruction
+    # calculator gives these maps exactly. The K-32 map is the one the gfx1250
+    # 16x16x32 atoms use; the result map is the gfx12 accumulator's.
+    **{
+        op_id: _FragInfo(
+            8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x16_iu4", 4)
+    },
+    **{
+        op_id: _FragInfo(
+            16,
+            16,
+            8,
+            32,
+            _wmma_gfx1250_a_16x16x32,
+            _wmma_gfx1250_b_16x16x32,
+            _wmma_gfx12_acc_16x16,
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x32_iu4", 4)
+    },
     "wmma_gfx12_f16_16x16x16_f16": _FragInfo(
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),

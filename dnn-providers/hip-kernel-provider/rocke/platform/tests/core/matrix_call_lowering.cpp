@@ -6,8 +6,8 @@
  *
  * The same cases as tests/core/test_matrix_calls.py, against the C++ engine:
  * the per-flavor declaration a call derives, each operand form (as-is,
- * zero-padded words, even half-slots) and its refusal, the schema checks, and
- * the table's entries. Each case lowers a call this test builds into a lowerer
+ * zero-padded words, even half-slots) and its refusal, the schema checks, the
+ * signedness flags, and the table's entries. Each case lowers a call this test builds into a lowerer
  * set up the way the engine's entry point sets one up, and compares the
  * emitted lines and error texts with the Python engine's, written out here.
  *
@@ -582,6 +582,81 @@ static void test_a_table_entry_must_match_the_hand_written_declaration_it_names(
           message.c_str());
 }
 
+/* ------------------------------------------------------- signedness flags */
+
+static void test_signedness()
+{
+    static const rocke_matrix_arg_t k_flag_for_c[]
+        = {{ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_C}, kA, kB, kC};
+    const rocke_matrix_call_t flag_for_c = {"llvm.amdgcn.x",
+                                            k_flag_for_c,
+                                            4,
+                                            as_is("i32", 2),
+                                            as_is("i32", 2),
+                                            as_is("i32", 8),
+                                            as_is("i32", 8),
+                                            NULL};
+    check_equal(error_of([&] { rocke_matrix_call_check(&flag_for_c); }),
+                "a signedness flag precedes the A or B operand, got C",
+                "a signedness flag precedes A or B");
+
+    /* Each flag follows the operand's dtype in the catalog row: A u4 -> 0,
+     * B i4 -> 1. */
+    {
+        Lowerer lw("gfx12-generic", ROCKE_LLVM_FLAVOR_LLVM20);
+        const rocke_type_t *i32x2 = lw.vec(rocke_i32(), 2), *i32x8 = lw.vec(rocke_i32(), 8);
+        MmaOp m(i32x2, i32x2, i32x8, i32x8);
+        const char* op_id = "wmma_gfx12_i32_16x16x32_iu4_u4_i4";
+        rocke_ll_emit_matrix_call(&lw.L, &m.op, op_id, rocke_matrix_call_for(op_id));
+        const std::vector<std::string> lines = lw.lines();
+        CHECK(lines.size() == 1, "one call");
+        if(lines.size() == 1)
+            check_equal(lines[0],
+                        "%d = call <8 x i32> @llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32("
+                        "i1 0, <2 x i32> %a, i1 1, <2 x i32> %b, <8 x i32> %c, i1 0)",
+                        "signedness flags follow the row");
+    }
+
+    /* A flag needs an integer operand. */
+    {
+        static const rocke_matrix_arg_t k_flagged[]
+            = {{ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_A}, kA, kB, kC};
+        const rocke_matrix_call_t flagged = {"llvm.amdgcn.x",
+                                             k_flagged,
+                                             4,
+                                             as_is("f16", 8),
+                                             as_is("f16", 8),
+                                             as_is("f32", 8),
+                                             as_is("f32", 8),
+                                             NULL};
+        Lowerer lw("gfx12-generic", ROCKE_LLVM_FLAVOR_LLVM20);
+        const rocke_type_t *f16x8 = lw.vec(rocke_f16(), 8), *f32x8 = lw.vec(rocke_f32(), 8);
+        MmaOp m(f16x8, f16x8, f32x8, f32x8);
+        check_equal(error_of([&] {
+                        rocke_ll_emit_matrix_call(
+                            &lw.L, &m.op, "wmma_gfx12_f32_16x16x16_f16", &flagged);
+                    }),
+                    "tile.wmma_gfx12_f32_16x16x16_f16 operand a is fp16; a signedness flag is "
+                    "derived from an integer operand (i4, i8, u4, u8, i16, i32, i64)",
+                    "a signedness flag needs an integer operand");
+    }
+
+    /* A target whose catalog does not list the op refuses it. */
+    {
+        Lowerer lw("gfx1151", ROCKE_LLVM_FLAVOR_LLVM20);
+        const rocke_type_t *i32x2 = lw.vec(rocke_i32(), 2), *i32x8 = lw.vec(rocke_i32(), 8);
+        MmaOp m(i32x2, i32x2, i32x8, i32x8);
+        const char* op_id = "wmma_gfx12_i32_16x16x16_iu8";
+        check_equal(error_of([&] {
+                        rocke_ll_emit_matrix_call(
+                            &lw.L, &m.op, op_id, rocke_matrix_call_for(op_id));
+                    }),
+                    "tile.wmma_gfx12_i32_16x16x16_iu8 is not available on gfx1151: its MMA "
+                    "catalog does not list it",
+                    "a signedness flag needs the target's row");
+    }
+}
+
 /* ------------------------------------------------------- the table, entry by entry */
 
 static void test_every_table_entry()
@@ -611,6 +686,7 @@ int main()
     test_even_halves();
     test_the_schema();
     test_a_table_entry_must_match_the_hand_written_declaration_it_names();
+    test_signedness();
     test_every_table_entry();
     if(g_failures)
     {

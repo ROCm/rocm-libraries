@@ -318,7 +318,13 @@
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"},
         {"family": "wmma", "a": "i8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
-        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+        {"family": "wmma", "a": "u8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8_u8_i8"},
+        {"family": "wmma", "a": "i8", "b": "u8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8_i8_u8"},
+        {"family": "wmma", "a": "u8", "b": "u8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8_u8_u8"},
+        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"},
+        {"family": "wmma", "a": "u4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4_u4_i4"},
+        {"family": "wmma", "a": "i4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4_i4_u4"},
+        {"family": "wmma", "a": "u4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4_u4_u4"}
       ]
     },
     "gfx12-generic": {
@@ -348,6 +354,17 @@
         {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_bf8_fp8"},
         {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_bf8_bf8"},
         {"family": "wmma", "a": "i8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu8"},
+        {"family": "wmma", "a": "u8", "b": "i8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu8_u8_i8"},
+        {"family": "wmma", "a": "i8", "b": "u8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu8_i8_u8"},
+        {"family": "wmma", "a": "u8", "b": "u8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu8_u8_u8"},
+        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu4"},
+        {"family": "wmma", "a": "u4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu4_u4_i4"},
+        {"family": "wmma", "a": "i4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu4_i4_u4"},
+        {"family": "wmma", "a": "u4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_i32_16x16x16_iu4_u4_u4"},
+        {"family": "wmma", "a": "i4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx12_i32_16x16x32_iu4"},
+        {"family": "wmma", "a": "u4", "b": "i4", "c": "i32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx12_i32_16x16x32_iu4_u4_i4"},
+        {"family": "wmma", "a": "i4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx12_i32_16x16x32_iu4_i4_u4"},
+        {"family": "wmma", "a": "u4", "b": "u4", "c": "i32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx12_i32_16x16x32_iu4_u4_u4"},
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp16", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f16_16x16x16_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "bf16", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_bf16_16x16x16_bf16"}
       ]

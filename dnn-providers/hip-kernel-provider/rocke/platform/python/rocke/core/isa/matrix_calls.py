@@ -24,7 +24,21 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
-from ..ir import F16, F32, I1, I16, I32, I64, Type, VectorType, type_bits
+from ..arch.target import integer_mma_op_ids
+from ..dtypes import DTypeCategory, dtype_info, dtype_names
+from ..ir import (
+    F16,
+    F32,
+    I1,
+    I16,
+    I32,
+    I64,
+    Type,
+    VectorType,
+    _is_unsigned,
+    dtype_to_ir_type,
+    type_bits,
+)
 from ..lower_llvm import LLVM_FLAVOR_LLVM22
 from .matrix_operand_forms import (
     AsIs,
@@ -83,19 +97,66 @@ class Imm:
 
 
 @dataclass(frozen=True)
+class Signedness:
+    """The ``i1`` flag an integer WMMA takes before matrix operand ``operand``.
+
+    The flag is 1 when that operand's dtype in the selected catalog row is a
+    signed integer and 0 when it is an unsigned one (the IR's own unsigned
+    test, so a new unsigned type needs no entry here). It is the
+    only place an integer WMMA flag is produced: the flag follows the row, so an
+    instruction has one row (and one op_id) per signedness combination and no
+    table entry or handler writes a flag literal. ``immarg`` changes only the
+    ``declare`` text, as for :class:`Imm`.
+    """
+
+    operand: MatrixOperand
+    immarg: bool = True
+
+    def __post_init__(self) -> None:
+        if self.operand not in (MatrixOperand.A, MatrixOperand.B):
+            raise ValueError(
+                f"a signedness flag precedes the A or B operand, got {self.operand.name}"
+            )
+
+    def flag(self, catalog_op) -> int:
+        """1 or 0 for this operand of ``catalog_op`` (an :class:`MmaOp`)."""
+        dtype = (
+            catalog_op.a_dtype
+            if self.operand is MatrixOperand.A
+            else catalog_op.b_dtype
+        )
+        if dtype_info(dtype).category is not DTypeCategory.INTEGER:
+            raise ValueError(
+                f"tile.{catalog_op.op_id} operand {self.operand.value} is {dtype}; "
+                f"a signedness flag is derived from an integer operand "
+                f"({', '.join(dtype_names(DTypeCategory.INTEGER))})"
+            )
+        return 0 if _is_unsigned(dtype_to_ir_type(dtype)) else 1
+
+    def argument(self, catalog_op) -> str:
+        """The call-site text for ``catalog_op``, such as ``i1 1``."""
+        return f"i1 {self.flag(catalog_op)}"
+
+    def parameter(self) -> str:
+        """The declaration text, such as ``i1 immarg``."""
+        return "i1 immarg" if self.immarg else "i1"
+
+
+@dataclass(frozen=True)
 class MatrixCall:
     """One MMA instruction's intrinsic call, described as data.
 
     ``intrinsic`` is the full LLVM name including overload suffixes
     (``llvm.amdgcn....``). ``args`` lists the call's arguments in order: each of
-    :class:`MatrixOperand` A, B and C exactly once, and any :class:`Imm`.
+    :class:`MatrixOperand` A, B and C exactly once, and any :class:`Imm` or
+    :class:`Signedness`.
     ``decl_key`` names the declaration-table entry; it defaults to the
     intrinsic. A ``decl_key`` that names a hand-written entry adds nothing to
     the table, and the hand-written text must equal :meth:`declaration`.
     """
 
     intrinsic: str
-    args: tuple[MatrixOperand | Imm, ...]
+    args: tuple[MatrixOperand | Imm | Signedness, ...]
     a: MatrixOperandForm
     b: MatrixOperandForm
     c: MatrixOperandForm
@@ -136,7 +197,7 @@ class MatrixCall:
         parameters = [
             (
                 arg.parameter()
-                if isinstance(arg, Imm)
+                if isinstance(arg, (Imm, Signedness))
                 else _llvm_type(self.form(arg).register_type_at(flavor))
             )
             for arg in self.args
@@ -166,17 +227,18 @@ def _cdna_mfma(intrinsic: str, operand: RegisterType, accumulator: Type) -> Matr
     )
 
 
-def _gfx12_wmma(
+def _wmma(
     intrinsic: str,
     operand: Type,
     accumulator: Type,
-    args: tuple[MatrixOperand | Imm, ...] = (
+    args: tuple[MatrixOperand | Imm | Signedness, ...] = (
         MatrixOperand.A,
         MatrixOperand.B,
         MatrixOperand.C,
     ),
+    decl_key: str | None = None,
 ) -> MatrixCall:
-    """A gfx12 WMMA 16x16x16: A and B in one register type, the accumulator and
+    """A gfx11 or gfx12 WMMA: A and B in one register type, the accumulator and
     the result in another, the arguments in ``args`` order."""
     return MatrixCall(
         intrinsic=f"llvm.amdgcn.{intrinsic}",
@@ -185,20 +247,39 @@ def _gfx12_wmma(
         b=AsIs(operand),
         c=AsIs(accumulator),
         result=AsIs(accumulator),
+        decl_key=decl_key,
     )
 
 
-# gfx12 integer WMMA: (signed A, A, signed B, B, C, clamp). The flag before
-# each operand is 1 when it is signed; the catalog row's operands are i8, so
-# both flags are 1. The result is not clamped.
-_GFX12_IU8_ARGS = (
-    Imm(I1, 1),
+def _integer_wmma(op_id: str, bits: int, call: MatrixCall) -> dict[str, MatrixCall]:
+    """``call`` under each op_id of one integer WMMA, one per operand
+    signedness (:func:`~rocke.core.arch.target.integer_mma_op_ids`). The rows
+    share one call; its :class:`Signedness` arguments read each row's operand
+    dtypes."""
+    return {row: call for row in integer_mma_op_ids(op_id, bits)}
+
+
+# Integer WMMA: (signed A, A, signed B, B, C, clamp). Each flag comes from its
+# operand's dtype in the catalog row; the result is not clamped.
+_INTEGER_WMMA_ARGS = (
+    Signedness(MatrixOperand.A),
     MatrixOperand.A,
-    Imm(I1, 1),
+    Signedness(MatrixOperand.B),
     MatrixOperand.B,
     MatrixOperand.C,
     Imm(I1, 0),
 )
+# The same arguments for the gfx11 integer WMMAs, whose hand-written
+# declarations spell the three i1 parameters without immarg.
+_GFX11_INTEGER_WMMA_ARGS = (
+    Signedness(MatrixOperand.A, immarg=False),
+    MatrixOperand.A,
+    Signedness(MatrixOperand.B, immarg=False),
+    MatrixOperand.B,
+    MatrixOperand.C,
+    Imm(I1, 0, immarg=False),
+)
+
 # gfx12 16-bit-output WMMA: (A, B, C, op_sel). Eight results fill the
 # <8 x half> / <8 x i16> register, so op_sel is 0, as the gfx12 builtin
 # (which has no op_sel argument) always passes.
@@ -248,32 +329,80 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
         "mfma_f32_32x32x16_bf8_fp8": _cdna_mfma(
             "mfma.f32.32x32x16.bf8.fp8", _FP8_X8, _F32_X16
         ),
+        # gfx11 i8 -> i32: sixteen i8 per lane in four words; i4 -> i32:
+        # sixteen i4 per lane in two words.
+        **_integer_wmma(
+            "wmma_i32_16x16x16_iu8",
+            8,
+            _wmma(
+                "wmma.i32.16x16x16.iu8.v8i32.v4i32",
+                _I32_X4,
+                _I32_X8,
+                _GFX11_INTEGER_WMMA_ARGS,
+                "wmma.i32.16x16x16.iu8",
+            ),
+        ),
+        **_integer_wmma(
+            "wmma_i32_16x16x16_iu4",
+            4,
+            _wmma(
+                "wmma.i32.16x16x16.iu4.v8i32.v2i32",
+                _I32_X2,
+                _I32_X8,
+                _GFX11_INTEGER_WMMA_ARGS,
+                "wmma.i32.16x16x16.iu4",
+            ),
+        ),
         # gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words.
-        "wmma_gfx12_f32_16x16x16_fp8_fp8": _gfx12_wmma(
+        "wmma_gfx12_f32_16x16x16_fp8_fp8": _wmma(
             "wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32", _I32_X2, _F32_X8
         ),
-        "wmma_gfx12_f32_16x16x16_fp8_bf8": _gfx12_wmma(
+        "wmma_gfx12_f32_16x16x16_fp8_bf8": _wmma(
             "wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32", _I32_X2, _F32_X8
         ),
-        "wmma_gfx12_f32_16x16x16_bf8_fp8": _gfx12_wmma(
+        "wmma_gfx12_f32_16x16x16_bf8_fp8": _wmma(
             "wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32", _I32_X2, _F32_X8
         ),
-        "wmma_gfx12_f32_16x16x16_bf8_bf8": _gfx12_wmma(
+        "wmma_gfx12_f32_16x16x16_bf8_bf8": _wmma(
             "wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32", _I32_X2, _F32_X8
         ),
         # gfx12 i8 -> i32: eight i8 per lane in two words.
-        "wmma_gfx12_i32_16x16x16_iu8": _gfx12_wmma(
-            "wmma.i32.16x16x16.iu8.v8i32.v2i32", _I32_X2, _I32_X8, _GFX12_IU8_ARGS
+        **_integer_wmma(
+            "wmma_gfx12_i32_16x16x16_iu8",
+            8,
+            _wmma(
+                "wmma.i32.16x16x16.iu8.v8i32.v2i32",
+                _I32_X2,
+                _I32_X8,
+                _INTEGER_WMMA_ARGS,
+            ),
+        ),
+        # gfx12 i4 -> i32: eight i4 per lane in one word (K 16), sixteen in
+        # two words (K 32).
+        **_integer_wmma(
+            "wmma_gfx12_i32_16x16x16_iu4",
+            4,
+            _wmma("wmma.i32.16x16x16.iu4.v8i32.i32", I32, _I32_X8, _INTEGER_WMMA_ARGS),
+        ),
+        **_integer_wmma(
+            "wmma_gfx12_i32_16x16x32_iu4",
+            4,
+            _wmma(
+                "wmma.i32.16x16x32.iu4.v8i32.v2i32",
+                _I32_X2,
+                _I32_X8,
+                _INTEGER_WMMA_ARGS,
+            ),
         ),
         # gfx12 f16 -> f16 and bf16 -> bf16: eight 16-bit values per lane; the
         # bf16 form takes and returns them as <8 x i16>.
-        "wmma_gfx12_f16_16x16x16_f16": _gfx12_wmma(
+        "wmma_gfx12_f16_16x16x16_f16": _wmma(
             "wmma.f16.16x16x16.f16.v8f16.v8f16",
             VectorType(F16, 8),
             VectorType(F16, 8),
             _GFX12_16BIT_OUT_ARGS,
         ),
-        "wmma_gfx12_bf16_16x16x16_bf16": _gfx12_wmma(
+        "wmma_gfx12_bf16_16x16x16_bf16": _wmma(
             "wmma.bf16.16x16x16.bf16.v8i16.v8i16",
             VectorType(I16, 8),
             VectorType(I16, 8),
