@@ -3108,9 +3108,10 @@ namespace TensileLite
         //
         // It IS gated on the caller: only a caller whose scale buffer really is
         // packed may take this path.  hipBLASLt hands the custom kernel the user's
-        // raw Block_32_UE8M0 pointer, which is packed; the TensileLite benchmark
-        // client allocates the scale buffer from the padded descriptor itself and
-        // hands that same buffer over, so for it the descriptor is the truth and
+        // raw Block_32_UE8M0 pointer, which is packed.  The TensileLite benchmark
+        // client also allocates packed whenever every kernel in the run is an
+        // external capture; when it instead allocates a padded buffer (because a
+        // Tensile-generated kernel is in the run) the descriptor is the truth and
         // the compact value would mis-address every odd scale row.
         auto scaleStrideFor = [&](TensorDescriptor const& scaleDesc,
                                   TensorDescriptor const& dataDesc,

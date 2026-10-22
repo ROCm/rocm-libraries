@@ -111,6 +111,8 @@ def test_read_cache_match_returns_code_objects(tmp_path, monkeypatch):
     assert M._readCacheIfValid(str(path), step, "m") == {
         "CodeObjectFiles": ["a.co", "b.co"],
         "LibraryFile": "lib.dat",
+        # Absent from this cache: it predates the packed MX scale layout.
+        "MXScalesPacked": False,
     }
 
 
@@ -160,6 +162,7 @@ def test_load_cache_if_matches(tmp_path, monkeypatch):
     assert M._loadCacheIfMatches(str(tmp_path), step) == {
         "CodeObjectFiles": ["z.co"],
         "LibraryFile": "lib.dat",
+        "MXScalesPacked": False,
     }
 
 

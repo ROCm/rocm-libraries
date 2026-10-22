@@ -72,13 +72,13 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
     auto problem = mxProblem(64, 64, 128);
     ASSERT_FALSE(problem.customKernelMXScalesArePacked());
 
-    rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_TRUE(problem.customKernelMXScalesArePacked());
 
     auto viaB = mxProblem(64, 64, 128);
     ASSERT_FALSE(viaB.customKernelMXScalesArePacked());
-    rocblaslt::setHostMXScaleB(viaB, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleB(viaB, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(viaB.mxBlockB(), 32u);
     EXPECT_TRUE(viaB.customKernelMXScalesArePacked());
 }
@@ -89,28 +89,29 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
 TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 {
     auto problem = mxProblem(64, 64, 128);
-    problem.setMXScaleA(rocisa::DataType::E8, 32, {}, /*padScaleTensorFreeDim*/ true);
-    problem.setMXScaleB(rocisa::DataType::E8, 32, {}, /*padScaleTensorFreeDim*/ true);
+    problem.setMXScaleA(rocisa::DataType::E8, 32, {}, TensileLite::MXScalePadding::Gfx950);
+    problem.setMXScaleB(rocisa::DataType::E8, 32, {}, TensileLite::MXScalePadding::Gfx950);
 
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_EQ(problem.mxBlockB(), 32u);
     EXPECT_FALSE(problem.customKernelMXScalesArePacked());
 }
 
-// The helper must still be a faithful wrapper: the padding argument is the one
-// thing it forwards, and it is what makes the descriptor disagree with the packed
-// pitch in the first place. ceil(128/32) = 4, padded up to a multiple of 8.
+// The helper must still be a faithful wrapper: the padding mode is the one thing
+// it forwards, and it is what makes the descriptor disagree with the packed pitch
+// in the first place. ceil(128/32) = 4; Gfx950 rounds that up to a multiple of 8,
+// while Gfx1250 rounds it up to a multiple of 128/32 = 4 and so leaves it at 4.
 TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
 {
     auto padded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(padded, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
-    rocblaslt::setHostMXScaleB(padded, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
+    rocblaslt::setHostMXScaleA(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
+    rocblaslt::setHostMXScaleB(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(padded.mxsa().strides()[1], 8u);
     EXPECT_EQ(padded.mxsb().strides()[1], 8u);
 
     auto unpadded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(unpadded, rocisa::DataType::E8, 32, /*padFreeDim*/ false);
-    rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, /*padFreeDim*/ false);
+    rocblaslt::setHostMXScaleA(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
+    rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
     EXPECT_EQ(unpadded.mxsa().strides()[1], 4u);
     EXPECT_EQ(unpadded.mxsb().strides()[1], 4u);
     EXPECT_TRUE(unpadded.customKernelMXScalesArePacked());
