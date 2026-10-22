@@ -171,7 +171,7 @@ endif()
 add_subdirectory(tools)
 
 if(BUILD_CLIENTS_TESTS)
-  include(rocsparse_gtest)
+  include(${CMAKE_CURRENT_LIST_DIR}/../cmake/rocsparse_gtest.cmake)
 
   add_subdirectory(tests)
 
