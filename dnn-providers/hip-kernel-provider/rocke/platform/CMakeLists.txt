@@ -476,6 +476,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
@@ -597,7 +598,35 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
 
-    foreach(_operation sdpa conv)
+    # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
+    # the golden IR hashes, the performance knobs, and dispatch selection. None
+    # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
+    # PYTHONPATH rule as the conv entry.
+    set(_ROCKE_LIBRARY_GDN_TEST_RELPATHS
+        "tests/library/tests/test_gdn_decode_spec.py"
+        "tests/library/tests/test_gdn_decode_fused.py"
+        "tests/library/tests/test_gdn_decode_load_order.py"
+        "tests/library/tests/test_gdn_decode_golden.py"
+        "tests/library/tests/test_gdn_decode_knobs.py"
+        "tests/library/tests/test_gdn_decode_tune.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
+    set(_ROCKE_LIBRARY_GDN_TESTS "")
+    foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_GDN_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_gdn_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 600)\n")
+
+    # cmake/InstallGpuReferences.cmake discovers the operations from library/tests.
+    foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_${_operation}_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
@@ -662,6 +691,7 @@ if(ROCKE_INSTALL_TESTS)
     # RDNA WMMA suites skip on devices without a gfx11/gfx12 generic target.
     set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_correctness.py"
+        "tests/library/tests/test_conv_gradient_correctness.py"
         "tests/library/tests/test_conv_wgrad_correctness.py"
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
@@ -672,6 +702,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
         "tests/library/tests/test_gdn_decode_fused_gfx950_numeric.py"
+        "tests/library/tests/test_gdn_decode_knobs_gfx950_numeric.py"
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
