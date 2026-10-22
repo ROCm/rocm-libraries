@@ -162,6 +162,23 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             f"{where}.sweep_level",
             "a string",
         )
+    companions = manifest.get("companions")
+    _require(
+        companions is None
+        or (
+            isinstance(companions, list)
+            and companions
+            and all(
+                isinstance(c, dict)
+                and isinstance(c.get("source"), str)
+                and isinstance(c.get("builder"), str)
+                for c in companions
+            )
+        ),
+        path,
+        "companions",
+        "a non-empty list of mappings, each with a 'source' and a 'builder'",
+    )
     _require(
         manifest.get("ground_truth") is None
         or isinstance(manifest["ground_truth"], dict),
@@ -367,6 +384,9 @@ class Registry:
         #: ``(cell_key, kernel spec)`` -> the registry's ``tuning_id`` for it, filled
         #: by `space`. Absent for a spec the registry hands back unwrapped.
         self.tuning_ids: dict = {}
+        #: ``(cell_key, kernel spec)`` -> the reduce spec the registry pairs with it, for a
+        #: candidate that launches a second kernel (split-KV 3D). Absent for the rest.
+        self.reduce_specs: dict = {}
         self.space_kind = decl.get("space", "slice")
         if self.space_kind not in ("slice", "full"):
             raise EnumerationError(
@@ -586,7 +606,14 @@ class Registry:
             tuning_id = getattr(item, "tuning_id", None)
             if tuning_id:
                 self.tuning_ids.setdefault((key, _unwrap(item)), str(tuning_id))
+            reduce_spec = getattr(item, "reduce_spec", None)
+            if reduce_spec is not None:
+                self.reduce_specs.setdefault((key, _unwrap(item)), reduce_spec)
         return base, specs
+
+    def reduce_spec(self, cell: dict, spec):
+        """The reduce spec the registry pairs with ``spec`` for this cell, or None."""
+        return self.reduce_specs.get((self.cell_key(cell), spec))
 
     def provenance(self, cell: dict, spec) -> dict:
         """The pin's ``spec_id`` and, when the registry names the kernel, its
@@ -1007,6 +1034,7 @@ def build_config(
         provenance = section.provenance(cell, ks)
         if provenance:
             kernel["provenance"] = provenance
+        _check_companions(manifest, section, cell, ks, kernel["name"], spec)
         kernels.append(kernel)
 
     if registry.space_kind == "full" or registry.also:
@@ -1045,8 +1073,65 @@ def build_config(
     }
     if "reduction" in manifest:
         config["reduction"] = manifest["reduction"]
-    config["packs"] = [{"name": slug, "arch": [manifest["arch"]], "kernels": kernels}]
+    pack = {"name": slug, "arch": [manifest["arch"]]}
+    if manifest.get("companions"):
+        pack["companions"] = json.loads(json.dumps(manifest["companions"]))
+    pack["kernels"] = kernels
+    config["packs"] = [pack]
     return config
+
+
+def _check_companions(manifest: dict, section, cell: dict, ks, name: str, spec: dict):
+    """The manifest's companion derivation must reproduce the reduce spec the registry
+    pairs with this kernel, and a registry pairing with none must have none declared.
+
+    The derivation is what ships, so this is the only place the registry's own reduce
+    spec constrains it: a divergence (a segment count the reduce spec was built with and
+    the derivation did not carry, a waves-per-EU hint) would pack a reduce kernel that is
+    not the one the registry dispatches.
+    """
+    declared = manifest.get("companions") or []
+    paired = section.reduce_spec(cell, ks)
+    if paired is None:
+        if declared:
+            raise EnumerationError(
+                f"the manifest declares companions, but the registry pairs kernel "
+                f"{name!r} with no reduce spec; the companion would have nothing to "
+                f"reproduce."
+            )
+        return
+    if len(declared) != 1:
+        raise EnumerationError(
+            f"the registry pairs kernel {name!r} with a reduce spec "
+            f"({type(paired).__name__}); the manifest must declare exactly one "
+            f"companion for it, got {len(declared)}."
+        )
+    entry = declared[0]
+    derived = dict(entry.get("spec") or {})
+    for companion_field, kernel_field in (entry.get("spec_from") or {}).items():
+        if kernel_field in spec:
+            derived[companion_field] = spec[kernel_field]
+    try:
+        rebuilt = type(paired)(**derived)
+    except (TypeError, ValueError) as exc:
+        raise EnumerationError(
+            f"companion {entry['builder']} cannot build a {type(paired).__name__} for "
+            f"kernel {name!r} from {derived}: {exc}"
+        ) from exc
+    if rebuilt != paired:
+        differing = sorted(
+            f.name
+            for f in dataclasses.fields(paired)
+            if getattr(rebuilt, f.name) != getattr(paired, f.name)
+        )
+        raise EnumerationError(
+            f"companion {entry['builder']} derives a reduce spec that differs from the "
+            f"registry's for kernel {name!r} in {differing}: derived "
+            f"{ {n: getattr(rebuilt, n) for n in differing} }, registry "
+            f"{ {n: getattr(paired, n) for n in differing} }. Carry the field through "
+            f"companions[].spec_from (or state it in spec) and add it to "
+            f"enumerate.spec_fields."
+        )
 
 
 def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) -> dict:

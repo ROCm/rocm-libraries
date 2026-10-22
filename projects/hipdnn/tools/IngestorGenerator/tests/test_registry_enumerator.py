@@ -556,3 +556,119 @@ def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
             1 if gaps else 0
         )
     assert "covered: 1 shapes" in capsys.readouterr().out
+
+
+# --- companions: the second kernel a registry candidate launches ------------------------
+@pytest.fixture
+def split(tmp_path, monkeypatch):
+    """The synthetic split family: a segment kernel paired with a reduce kernel."""
+    root = synth.provider(tmp_path, monkeypatch)
+    return types.SimpleNamespace(root=root, tmp=tmp_path, out=tmp_path / "c.yaml")
+
+
+def _enumerate_split(split, **kwargs):
+    manifest = synth.split_manifest(split.root, **kwargs)
+    path = synth.write_manifest(split.tmp / "s.engine.yaml", manifest)
+    return re_.main(["--manifest", str(path), "--out", str(split.out)])
+
+
+def test_a_registry_reduce_spec_is_declared_once_as_a_pack_companion(split):
+    """The reduce kernel follows from the segment kernel's spec, so the pack states the
+    rule once; the kernels carry no companion of their own."""
+    assert _enumerate_split(split) == 0
+    pack = yaml.safe_load(split.out.read_text())["packs"][0]
+    assert pack["companions"][0]["builder"] == "build_reduce"
+    assert pack["kernels"]
+    assert all("companions" not in k for k in pack["kernels"])
+
+
+def test_a_companion_derivation_the_registry_contradicts_is_refused(split, capsys):
+    """The derivation is what ships. A registry reduce spec it does not reproduce -- here
+    one built with twice the segment count -- would pack a reduce kernel the registry
+    never dispatches, so the enumeration stops and names the differing field."""
+    assert _enumerate_split(split, spec_id="wrong") == 2
+    err = capsys.readouterr().err
+    assert "differs from the registry's" in err
+    assert "['num_segments']" in err
+
+
+def test_a_registry_reduce_spec_with_no_declared_companion_is_refused(split, capsys):
+    """Shipping only the segment kernel would leave its partial results unreduced, with
+    no fault, so a pairing the manifest does not declare is an error."""
+    assert _enumerate_split(split, companions=None) == 2
+    assert "must declare exactly one companion" in capsys.readouterr().err
+
+
+def test_a_declared_companion_with_nothing_to_reproduce_is_refused(
+    tmp_path, monkeypatch, capsys
+):
+    root = synth.provider(tmp_path, monkeypatch)
+    manifest = synth.probe_manifest(root)
+    manifest["companions"] = [{"source": "kernels/x.py", "builder": "build_x"}]
+    path = synth.write_manifest(tmp_path / "p.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--out", str(tmp_path / "o.yaml")]) == 2
+    assert "pairs kernel" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("companions", [[{}], "x", [{"source": "a.py"}], [3]])
+def test_a_malformed_companions_block_is_exit_2_naming_the_field(
+    split, capsys, companions
+):
+    assert _enumerate_split(split, companions=companions) == 2
+    assert "companions" in capsys.readouterr().err
+
+
+def test_a_pack_companion_reaches_every_generated_kernel_and_survives_factorising(
+    split,
+):
+    """The pack's derivation is applied per kernel at load, so each emitted UKD names its
+    own reduce spec, and the compact form keeps the rule rather than dropping it."""
+    assert _enumerate_split(split) == 0
+    out = split.tmp / "out"
+    gen = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "generate.py"),
+            "--config",
+            str(split.out),
+            "--output-dir",
+            str(out),
+            "--force",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert gen.returncode == 0, gen.stderr[-2000:]
+    (kdp_path,) = out.rglob("split.kdp.json")
+    kernels = json.loads(kdp_path.read_text())["kernelDescriptors"]
+    assert kernels
+    for kernel in kernels:
+        spec = kernel["kernel_source"]["spec"]
+        (companion,) = kernel["companions"]
+        assert companion["kind"] == "rocke"
+        assert companion["builder"] == "build_reduce"
+        assert companion["spec"] == {
+            "head_size": spec["head_size"],
+            "dtype": spec["dtype"],
+            "num_segments": spec["num_segments"],
+        }
+
+    compact = split.tmp / "compact.yaml"
+    fac = subprocess.run(
+        [
+            sys.executable,
+            str(_TOOLS / "factorise_config.py"),
+            "--config",
+            str(split.out),
+            "--out",
+            str(compact),
+            "--knobs",
+            "num_segments",
+            "--vocabulary",
+            "dtype:bf16=BF16,fp16=FP16",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert fac.returncode == 0, fac.stderr[-2000:]
+    assert yaml.safe_load(compact.read_text())["packs"][0]["companions"]

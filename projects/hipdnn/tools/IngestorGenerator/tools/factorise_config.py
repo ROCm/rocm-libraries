@@ -465,6 +465,10 @@ def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
         compact_pack["arch"] = list(pack["arch"])
     if pack.get("discriminator"):
         compact_pack["discriminator"] = pack["discriminator"]
+    # A derivation rule applies to every kernel of the pack and is independent of the
+    # knob arms, so it passes through untouched.
+    if pack.get("companions"):
+        compact_pack["companions"] = pack["companions"]
     if default_source:
         compact_pack["kernel_defaults"] = default_source
     compact_pack["variants"] = groups
@@ -617,6 +621,11 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("build", a.kernel_source.build, b.kernel_source.build),
             ("file", a.kernel_source.file, b.kernel_source.file),
             ("symbol", a.kernel_source.symbol, b.kernel_source.symbol),
+            (
+                "companions",
+                [c.as_document() for c in a.companions],
+                [c.as_document() for c in b.companions],
+            ),
             ("arch", a.arch, b.arch),
             ("priority", a.priority, b.priority),
             ("default", a.default, b.default),

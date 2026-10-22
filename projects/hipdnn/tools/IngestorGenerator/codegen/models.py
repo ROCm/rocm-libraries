@@ -282,6 +282,42 @@ class KernelSpec:
     #: Informational ``provenance`` keys (string values) emitted verbatim on the
     #: kernel descriptor, e.g. ``rocke_spec_id``. Nothing selects on them.
     provenance: dict = field(default_factory=dict)
+    #: Further code objects the kernel launches after its own, in launch order, each a
+    #: ``rocke`` source (the split-KV reduce behind an attention segment kernel). Emitted
+    #: as the descriptor's ``companions``; not catalog entries.
+    companions: list = field(default_factory=list)
+
+
+@dataclass
+class CompanionDerivation:
+    """How a pack's kernels derive one companion from their own spec.
+
+    The companion's builder takes a spec whose fields are a subset of the kernel's (the
+    reduce kernel's head size, heads, dtype and segment count are the segment kernel's),
+    so a pack states the mapping once instead of restating a spec per kernel.
+    ``spec_from`` maps companion spec field -> kernel spec field; a field the kernel's
+    spec leaves unset is left unset on the companion, so the builder's own default
+    applies. ``spec`` is constants the companion's spec always carries.
+    """
+
+    source: str
+    builder: str
+    spec_from: dict = field(default_factory=dict)
+    spec: dict = field(default_factory=dict)
+    target: str = ""
+
+    def derive(self, kernel_spec: dict) -> "KernelSource":
+        spec = dict(self.spec)
+        for companion_field, kernel_field in self.spec_from.items():
+            if kernel_field in kernel_spec:
+                spec[companion_field] = kernel_spec[kernel_field]
+        return KernelSource(
+            kind=KERNEL_SOURCE_KIND_ROCKE,
+            source=self.source,
+            builder=self.builder,
+            spec=spec,
+            target=self.target,
+        )
 
 
 @dataclass
@@ -297,6 +333,10 @@ class PackSpec:
     #: Native symbol suffix for this pack's operation-matcher, e.g. "add" ->
     #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack.
     discriminator: str = ""
+    #: How every kernel of the pack derives its companions (`CompanionDerivation`), in
+    #: launch order. Already applied to each kernel's `KernelSpec.companions`; kept so a
+    #: reader can see the rule and not only its results.
+    companions: list = field(default_factory=list)
 
     @property
     def pascal_name(self) -> str:

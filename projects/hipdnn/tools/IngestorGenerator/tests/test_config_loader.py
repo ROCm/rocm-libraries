@@ -3046,3 +3046,83 @@ class TestReductionBlockAndDefaultMarker:
     ):
         with pytest.raises(ConfigError, match=key):
             self._load(tmp_path, {**self.REDUCTION, key: value})
+
+
+class TestPackCompanions:
+    """A pack-level ``companions`` rule: each kernel derives its companion's spec from its
+    own, in launch order."""
+
+    def _raw(self, companions):
+        return {
+            "dialect": "packaged",
+            "authored_subpath": "rocKE/split",
+            "engine": {"name": "hipkernel:Split", "sdk_version": "1.0.0"},
+            "kmd_fields": [{"name": "head_size", "type": "int"}],
+            "kernel_source_kind": "rocke",
+            "packs": [
+                {
+                    "name": "split",
+                    "arch": ["gfx950"],
+                    "companions": companions,
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "rocke",
+                                "source": "kernels/split.py",
+                                "builder": "build_segment",
+                                "spec": {"head_size": 128, "num_segments": 4},
+                            },
+                            "metadata": {"head_size": 128},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _load(self, tmp_path, companions):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(self._raw(companions)))
+        return load_config(path)
+
+    _REDUCE = {
+        "source": "kernels/split.py",
+        "builder": "build_reduce",
+        "spec_from": {"head_size": "head_size", "num_segments": "num_segments"},
+        "spec": {"dtype": "bf16"},
+    }
+
+    def test_the_rule_derives_each_kernels_companion_spec(self, tmp_path):
+        config = self._load(tmp_path, [dict(self._REDUCE)])
+        (companion,) = config.packs[0].kernels[0].companions
+        assert companion.as_document() == {
+            "kind": "rocke",
+            "source": "kernels/split.py",
+            "builder": "build_reduce",
+            "spec": {"dtype": "bf16", "head_size": 128, "num_segments": 4},
+        }
+
+    def test_a_field_the_kernel_spec_lacks_is_left_to_the_builders_default(
+        self, tmp_path
+    ):
+        rule = {**self._REDUCE, "spec_from": {"waves_per_eu": "waves_per_eu"}}
+        config = self._load(tmp_path, [rule])
+        assert "waves_per_eu" not in config.packs[0].kernels[0].companions[0].spec
+
+    @pytest.mark.parametrize(
+        "companions, message",
+        [
+            ([], "non-empty list"),
+            ({"source": "x"}, "non-empty list"),
+            ([{**_REDUCE, "kind": "hip"}], "only 'rocke'"),
+            ([{**_REDUCE, "builder": ""}], "'builder'"),
+            ([{**_REDUCE, "extra": 1}], "unknown key"),
+            ([{**_REDUCE, "spec": {"head_size": 1}}], "both spec_from and spec"),
+            ([{"source": "a.py", "builder": "b"}], "derives no spec"),
+            ([{**_REDUCE, "target": "sideways"}], "known targets"),
+            ([{**_REDUCE, "spec_from": {"head_size": 3}}], "must name a kernel spec"),
+        ],
+    )
+    def test_a_malformed_rule_is_refused(self, tmp_path, companions, message):
+        with pytest.raises(ConfigError, match=message):
+            self._load(tmp_path, companions)

@@ -47,6 +47,7 @@ from .models import (
     EngineSpec,
     GraphMatchSpec,
     IngestorConfig,
+    CompanionDerivation,
     KernelSource,
     KernelSpec,
     KmdField,
@@ -234,6 +235,9 @@ def load_config(path: Path) -> IngestorConfig:
                 defaults["spec"], f"pack '{pack_raw['name']}' kernel_defaults.spec"
             )
         default_spec = dict(defaults.get("spec", {}))
+        derivations = _companion_derivations(
+            pack_raw.get("companions"), f"pack '{pack_raw['name']}' companions"
+        )
         # `kernel_defaults` collapses repetition across kernels; `axes`
         # collapses the multiplicative repetition within a knob-driven variant
         # set. See `_expand_axis_kernels`.
@@ -354,6 +358,9 @@ def load_config(path: Path) -> IngestorConfig:
                         kernel_raw.get("provenance", {}),
                         f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
                     ),
+                    companions=[
+                        derivation.derive(ks_raw["spec"]) for derivation in derivations
+                    ],
                 )
             )
         packs.append(
@@ -364,6 +371,7 @@ def load_config(path: Path) -> IngestorConfig:
                     pack_raw.get("arch", []), f"pack '{pack_raw['name']}' arch"
                 ),
                 discriminator=pack_raw.get("discriminator", ""),
+                companions=derivations,
             )
         )
 
@@ -1158,6 +1166,7 @@ _KNOWN_PACK = frozenset(
         "kernels",
         "kernel_defaults",
         "discriminator",
+        "companions",
         "axes",
         "kernel_template",
         "variants",
@@ -1177,6 +1186,82 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
+#: A pack-level ``companions`` entry's keys. ``kind`` is optional because only ``rocke``
+#: has a producer a companion can use (see hkp_pack's ``_COMPANION_KINDS``).
+_COMPANION_KEYS = frozenset(
+    {"kind", "source", "builder", "spec_from", "spec", "target"}
+)
+
+
+def _companion_derivations(raw, where: str) -> list:
+    """The pack's ``companions`` list as `CompanionDerivation` objects, in launch order.
+
+    A companion is a further code object each kernel of the pack launches after its own.
+    Its spec is derived from the kernel's: ``spec_from`` maps companion spec field ->
+    kernel spec field, and ``spec`` states constants, so the pack carries the rule once.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError(
+            f"{where} must be a non-empty list of companion mappings (omit it for none)."
+        )
+    derivations = []
+    for position, entry in enumerate(raw):
+        label = f"{where}[{position}]"
+        _require_mapping(entry, label)
+        unknown = sorted(set(entry) - _COMPANION_KEYS)
+        if unknown:
+            raise ConfigError(
+                f"{label} has unknown key(s) {unknown}; known: {sorted(_COMPANION_KEYS)}."
+            )
+        kind = entry.get("kind", KERNEL_SOURCE_KIND_ROCKE)
+        if kind != KERNEL_SOURCE_KIND_ROCKE:
+            raise ConfigError(
+                f"{label} kind is {kind!r}; only '{KERNEL_SOURCE_KIND_ROCKE}' companions "
+                f"are packed."
+            )
+        for required in ("source", "builder"):
+            if not isinstance(entry.get(required), str) or not entry[required]:
+                raise ConfigError(f"{label} must name a non-empty '{required}'.")
+        spec_from = entry.get("spec_from", {}) or {}
+        spec = entry.get("spec", {}) or {}
+        _require_mapping(spec_from, f"{label}.spec_from")
+        _require_mapping(spec, f"{label}.spec")
+        for companion_field, kernel_field in spec_from.items():
+            if not isinstance(kernel_field, str) or not kernel_field:
+                raise ConfigError(
+                    f"{label}.spec_from.{companion_field} must name a kernel spec "
+                    f"field, got {kernel_field!r}."
+                )
+        overlap = sorted(set(spec_from) & set(spec))
+        if overlap:
+            raise ConfigError(
+                f"{label} states {overlap} in both spec_from and spec; a field has one "
+                f"source."
+            )
+        if not spec_from and not spec:
+            raise ConfigError(
+                f"{label} derives no spec: a companion needs spec_from or spec, or its "
+                f"builder would run with no inputs."
+            )
+        target = entry.get("target", "")
+        if target and target not in ROCKE_TARGETS:
+            raise ConfigError(
+                f"{label} target is {target!r}; known targets: {list(ROCKE_TARGETS)}."
+            )
+        derivations.append(
+            CompanionDerivation(
+                source=entry["source"],
+                builder=entry["builder"],
+                spec_from=dict(spec_from),
+                spec=dict(spec),
+                target=target,
+            )
+        )
+    return derivations
+
+
 #: Per-kernel ``provenance`` keys a config may author. Informational only; the
 #: compiler-owned ``effective_spec`` and the specialization contract are not among them.
 _KERNEL_PROVENANCE_KEYS = frozenset({"rocke_spec_id", "rocke_tuning_id"})

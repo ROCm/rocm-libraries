@@ -154,6 +154,145 @@ def conv_probe_candidates():
     return [ConvProbeCandidate()]
 
 
+@dataclasses.dataclass(frozen=True)
+class SplitRequest:
+    """A request over the split family: a kernel that launches a second (reduce) kernel."""
+
+    algorithm: str = "split"
+    spec_id: str = "seg4"
+    arch: str = ARCH
+    hdim: int = 64
+    heads: int = 8
+    dtype: str = "bf16"
+
+
+@dataclasses.dataclass(frozen=True)
+class SegmentSpec:
+    head_size: int
+    num_heads: int
+    dtype: str
+    num_segments: int
+    tile: int = 16
+    waves_per_eu: typing.Optional[int] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReduceSpec:
+    head_size: int
+    dtype: str
+    num_segments: int
+    waves_per_eu: typing.Optional[int] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class SplitTuning:
+    """What the registry hands back for a split kernel: both specs and an id."""
+
+    kernel_spec: SegmentSpec
+    reduce_spec: ReduceSpec
+    tuning_id: str
+
+
+class SplitCandidate:
+    """``reduce_wrong`` makes the registry pair a reduce spec the derivation cannot
+    reproduce (a segment count the segment kernel does not have)."""
+
+    def __init__(self, name: str, spec_id: str, segments: int, reduce_wrong=False):
+        self.name, self.algorithm, self.spec_id = name, "split", spec_id
+        self.segments, self.reduce_wrong = segments, reduce_wrong
+
+    def admits(self, request: SplitRequest):
+        if request.arch != ARCH:
+            return False, f"arch {request.arch!r} not in ({ARCH!r},)"
+        return True, ""
+
+    def select_spec(self, request: SplitRequest):
+        segment = SegmentSpec(
+            head_size=request.hdim,
+            num_heads=request.heads,
+            dtype=request.dtype,
+            num_segments=self.segments,
+        )
+        reduce = ReduceSpec(
+            head_size=request.hdim,
+            dtype=request.dtype,
+            num_segments=self.segments * (2 if self.reduce_wrong else 1),
+        )
+        return SplitTuning(segment, reduce, f"{self.spec_id}_{request.hdim}")
+
+    def sweep_space(self, request: SplitRequest):
+        return [self.select_spec(request)]
+
+
+def split_candidates():
+    return [
+        SplitCandidate("split_seg4", "seg4", 4),
+        SplitCandidate("split_seg8", "seg8", 8),
+        SplitCandidate("split_wrong", "wrong", 4, reduce_wrong=True),
+    ]
+
+
+def split_manifest(provider_root, spec_id="seg4", companions="derived") -> dict:
+    """A slice-space manifest over the split family: the segment kernel's spec carries the
+    reduce kernel's fields, so the reduce kernel is declared as a companion."""
+    names = ["dtype", "head_size", "num_heads", "num_segments"]
+    manifest = {
+        "dialect": "packaged",
+        "authored_subpath": "synthetic/split",
+        "engine": {
+            "name": "hipkernel:Split",
+            "sdk_version": "1.0.0",
+            "knobs": ["num_segments"],
+            "heuristic": "native",
+        },
+        "kmd_fields": [
+            {"name": n, "type": "string" if n == "dtype" else "int"} for n in names
+        ],
+        "specialization": {
+            "metadata_fields": names,
+            "matcher_only_fields": [],
+            "vocabulary": {"dtype": {"bf16": "BF16", "fp16": "FP16"}},
+            "bindings": {n: {"field": n} for n in names},
+        },
+        "kernel_source_kind": "rocke",
+        "workspace_policy": "none",
+        "pack": "split",
+        "arch": ARCH,
+        "provider_root": str(provider_root),
+        "source": "kernels/split.py",
+        "builder": "build_segment",
+        "kernel_name_template": "split.{dtype}_d{head_size}_h{num_heads}_s{num_segments}",
+        "enumerate": {
+            "candidates": f"{_MODULE}:split_candidates",
+            "request": f"{_MODULE}:SplitRequest",
+            "pin": {"algorithm": "split", "spec_id": spec_id},
+            "fixed": {"arch": ARCH},
+            "cells": [
+                {"fields": ["hdim", "heads"], "values": [[64, 8], [128, 8]]},
+                {"fields": ["dtype"], "values": ["bf16", "fp16"]},
+            ],
+            "free_fields": [],
+            "sweep_level": "production",
+            "spec_fields": ["head_size", "num_heads", "dtype", "num_segments"],
+        },
+    }
+    if companions == "derived":
+        manifest["companions"] = [
+            {
+                "source": "kernels/split.py",
+                "builder": "build_reduce",
+                "spec_from": {
+                    "head_size": "head_size",
+                    "dtype": "dtype",
+                    "num_segments": "num_segments",
+                },
+            }
+        ]
+    elif companions:
+        manifest["companions"] = companions
+    return manifest
+
+
 def probe_manifest(provider_root, **enumerate_overrides) -> dict:
     """A slice-space manifest over the probe family: two cells, ``tile_n`` free."""
     kmd = [("dtype", "string")] + [

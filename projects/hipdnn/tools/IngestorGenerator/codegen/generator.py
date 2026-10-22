@@ -350,6 +350,7 @@ def _candidate_identity(kernel: KernelSpec) -> str:
     return json.dumps(
         {
             "kernel_source": kernel.kernel_source.as_document(),
+            "companions": [c.as_document() for c in kernel.companions],
             "priority": kernel.priority,
         },
         sort_keys=True,
@@ -534,6 +535,8 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
+        if kernel.companions:
+            entry["companions"] = [c.as_document() for c in kernel.companions]
         if kernel.provenance:
             entry["provenance"] = dict(kernel.provenance)
         # hkp_pack validates the kernel's own arch for hsaco and rejects a
