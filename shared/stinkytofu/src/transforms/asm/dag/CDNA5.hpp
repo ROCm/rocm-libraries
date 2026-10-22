@@ -998,7 +998,7 @@ bool CDNA5ReadyQueue::isBlockedCycle(int pos) const {
 void CDNA5ReadyQueue::appendWindowSegment(const StinkyInstruction& wmma) {
     constexpr int kCoIssueBits = (int)(sizeof(wmma.coIssueWindow) * 8);
     const int latency = wmma.latencyCycles;
-    const uint16_t blocked = wmma.getHwInstDesc()->blockedScaleMask;
+    const uint16_t blocked = hasRealScaleOperand(wmma) ? wmma.getHwInstDesc()->blockedScaleMask : 0;
     for (int b = 0; b < latency; ++b) {
         uint8_t slot = 0;
         if (b < kCoIssueBits && ((wmma.coIssueWindow >> b) & 1u) != 0u) slot |= kValuSlot;

@@ -606,6 +606,14 @@ inline bool isBarrierSignal(const StinkyInstruction& inst) {
     return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal;
 }
 
+// A scale-form WMMA runs an LD_SCALE sub-issue only when it loads a scale: the forced scale=0 form
+// (literal 0 scale operands, the last two sources) loads none.
+inline bool hasRealScaleOperand(const StinkyInstruction& inst) {
+    const auto& src = inst.getSrcRegs();
+    const size_t n = src.size();
+    return n >= 2 && (src[n - 1].isRegister() || src[n - 2].isRegister());
+}
+
 inline bool isBarrierWait(const StinkyInstruction& inst) {
     return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_wait;
 }

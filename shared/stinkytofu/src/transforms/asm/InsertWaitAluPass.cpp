@@ -247,7 +247,8 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
 // both bumping VA_VDST, so software must count 2.
 inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     auto mc = inst.getHwInstDesc()->microcode;
-    return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
+    const bool isPair = (mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3);
+    return isPair && hasRealScaleOperand(inst);
 }
 
 // Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
