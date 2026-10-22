@@ -2150,6 +2150,7 @@ they need off those tensors by position. The pack's matcher (id
   "id":   "8e0f76d6-3522-4099-b5f1-7b1544bde29c",
   "name": "SDPA backward (d128, bf16, gfx942)",
   "sources": {              // replaces kernel_source: one source per Launch name in the pack's UDD
+                            // (abridged: a packed entry also carries toc_key, sha256 and signature)
     "preprocess": {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_preprocess_d128_bf16_gfx942"},
     "dkdv":       {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dkdv_d128_bf16_gfx942"},
     "dq":         {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dq_d128_bf16_gfx942"}
@@ -2162,9 +2163,10 @@ A multi-launch kernel descriptor replaces the single-Launch `kernel_source` obje
 `sources` map keyed by Launch name. Each Launch carries a `name` for diagnostics, wiring
 intermediates, and matching a kernel's source to its slot; `preprocess` writes `$D` and both
 `dkdv` and `dq` read it, so the producer-before-consumer order is explicit. A single-Launch
-dispatch descriptor has one unnamed slot, filled directly by the kernel's `kernel_source`. The
-loader rejects a kernel descriptor that does not fill every Launch the dispatch descriptor
-declares, the same gate that rejects a dispatch symbol the engine's pattern does not bind. A
+dispatch descriptor has one unnamed slot, filled directly by the kernel's `kernel_source`. Once
+`launches[]` exists, the loader rejects a kernel descriptor that does not fill every Launch the
+dispatch descriptor declares, the same gate that rejects a dispatch symbol the engine's pattern
+does not bind; until then the handler's declared launch names stand in for it (below). A
 sibling family member (d64) is one more kernel descriptor supplying its own sources against the
 same dispatch descriptor; because the dispatch descriptor holds the launch structure, a variant
 needing a different Launch count or wiring shares nothing at that level and belongs in its own
@@ -2199,10 +2201,10 @@ may carry a `sources` map keyed by launch name in place of `kernel_source`:
 
 The pack's native dispatch handler launches the entries, in an order it owns, and owns workspace
 and the hand-off between them. Until `launches[]` exists the handler declares the launch names it
-launches (`launchNames()`, provisional), and the provider's kernel state manager drops a kernel
-whose launch names differ from that set when it builds its catalog, so an accepted kernel is always
-launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a single-launch
-handler that reads `kernel_source`.
+launches (`launchNames()`, provisional), and the plugin SDK's kernel ingestor state manager drops
+a kernel whose launch names differ from that set when it builds its catalog, so an accepted kernel
+is always launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a
+single-launch handler that reads `kernel_source`.
 
 ### 15.2 One Graph Split Across Several Engines
 
