@@ -928,7 +928,7 @@ def receipt_accepts(receipt, dtype: str, mode: str, pipeline: FmhaFwdPipeline) -
 class PageTileFactoryGfx125:
     """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear K/V pool, vLLM 2D or SGLang 1D page
     table, group mode, no mask or a causal/sliding window from either corner (optionally with sink
-    tokens and per-head sink logits), optional LSE."""
+    tokens and per-head sink logits), optional tanh logits soft cap, optional LSE."""
 
     arch = GFX125_ARCH
 
@@ -948,13 +948,17 @@ class PageTileFactoryGfx125:
         # them. The masked arm takes any window (causal, sliding, local) from either corner, like
         # the simplified-mask dispatch of the gfx9 kernels.
         pipelines = []
-        for mask, lse, sink, kv_lookup_table in itertools.product(
-            ["s_no", "s_mask"], ["t", "f"], ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
+        for logits, mask, lse, sink, kv_lookup_table in itertools.product(
+            ["t", "f"],
+            ["s_no", "s_mask"],
+            ["t", "f"],
+            ["t", "f"],
+            SUPPORTED_KV_LOOKUP_TABLE,
         ):
             # Sink tokens and sink logits share the sink instance and need a mask, as for gfx9.
             if sink == "t" and mask == "s_no":
                 continue
-            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
+            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", logits, "no", lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
         return pipelines
 
 
