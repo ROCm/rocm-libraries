@@ -1600,6 +1600,14 @@ namespace rocalution
             status = rocsparse_csric0_clear(
                 ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->mat_info_);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+
+            assert(inv_diag != NULL);
+            HIPAcceleratorVector<ValueType>* cast_diag
+                = dynamic_cast<HIPAcceleratorVector<ValueType>*>(inv_diag);
+            assert(cast_diag != NULL);
+
+            cast_diag->Allocate(this->nrow_);
+            this->ExtractInverseDiagonal(cast_diag);
         }
 
         return true;

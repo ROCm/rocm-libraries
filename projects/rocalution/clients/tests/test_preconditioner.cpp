@@ -115,7 +115,7 @@ INSTANTIATE_TEST_CASE_P(preconditioner,
 
 typedef std::tuple<std::string, TriSolverAlg> repeated_move_tuple;
 
-std::string  repeated_move_solver[] = {"GS", "SGS", "ILU", "ILUT", "ItILU0", "LU"};
+std::string  repeated_move_solver[] = {"GS", "SGS", "ILU", "ILUT", "IC", "ItILU0", "LU"};
 TriSolverAlg repeated_move_alg[]    = {TriSolverAlg_Default, TriSolverAlg_Iterative};
 
 class parameterized_repeated_move : public testing::TestWithParam<repeated_move_tuple>

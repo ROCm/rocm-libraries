@@ -915,8 +915,10 @@ namespace rocalution
     {
         log_debug(this, "IC::MoveToHostLocalData_()", this->build_);
 
-        // this->inv_diag_entries_ is NOT needed on accelerator!
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyseClear);
         this->IC_.MoveToHost();
+        this->inv_diag_entries_.MoveToHost();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -924,8 +926,10 @@ namespace rocalution
     {
         log_debug(this, "IC::MoveToAcceleratorLocalData_()", this->build_);
 
-        // this->inv_diag_entries_ is NOT needed on accelerator!
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyseClear);
         this->IC_.MoveToAccelerator();
+        this->inv_diag_entries_.MoveToAccelerator();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
