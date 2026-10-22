@@ -1,7 +1,7 @@
 # hipblaslt-bench test
 
 For one regular GEMM per solution index, see the
-[TensileLite workload generator](../../tensilelite/tensilelite/Utilities/gemm_problem_for_solution.md).
+[GEMM workload guide](../../docs/how-to/choose-gemm-for-solution.md).
 In fixed-count mode, `--iters 0` disables timed launches. With `--cold_iters 0`
 and numerical validation enabled, the client performs one validation execution.
 
