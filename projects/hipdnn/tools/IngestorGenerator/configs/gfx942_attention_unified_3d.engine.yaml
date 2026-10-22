@@ -37,9 +37,11 @@ engine:
   name: hipkernel:Gfx942AttentionUnified3d
   census_name_symbol: GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
   sdk_version: 1.0.0
+  # A dense graph carries no KV block size or split count, so the engine chooses
+  # both. tile_size_override is not a knob: (head_size, block_size) determine it.
   knobs:
-  - num_segments
   - block_size
+  - num_segments
   heuristic: native
 kmd_fields:
 - name: dtype
@@ -58,14 +60,18 @@ kmd_fields:
 - name: sliding_window
   type: int
   default_value: 0
-# KV tile (`kv_block_size` in the request, `block_size` in the spec): keys per
-# inner-loop step. A catalog cell, not a tuning arm, for enumeration: the
-# segment kernel's tile (tile_size_override) depends on (head_size, block_size),
-# so every block size is its own kernel family. A dense graph carries no block
-# size, though, so at runtime it is an engine knob: the native matcher does not
-# compare it with the graph and the scorer (or the knob) picks among the shipped
-# block sizes.
+# KV block (`kv_block_size` in the request, `block_size` in the spec): keys per
+# inner-loop step. A tuning arm, not a catalog cell: a dense graph carries no
+# block size, so the native matcher does not compare it with the graph and the
+# scorer (or the knob) picks among the shipped block sizes.
 - name: block_size
+  type: int
+  default_value: 16
+# KV tile the segment kernel runs, in keys: block_size // 2 at head_size >= 128
+# and block_size >= 32, else block_size (spec value None, recorded resolved via
+# resolved_tile_size_override). Fixed by (head_size, block_size), so it adds no
+# kernels; it is a performance field because it varies with block_size.
+- name: tile_size_override
   type: int
   default_value: 16
 # Number of KV splits the segment kernel is compiled for; also the reduce
@@ -82,6 +88,7 @@ specialization:
   - num_kv_heads
   - sliding_window
   - block_size
+  - tile_size_override
   - num_segments
   matcher_only_fields: []
   vocabulary:
@@ -101,6 +108,8 @@ specialization:
       field: sliding_window
     block_size:
       field: block_size
+    tile_size_override:
+      method: resolved_tile_size_override
     num_segments:
       field: num_segments
 kernel_source_kind: rocke
@@ -116,7 +125,7 @@ builder: build_unified_attention_3d_module
 launches:
   segment: {}
   reduce: {role: reduce}
-kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_b{block_size}_seg{num_segments}.gfx942
+kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_b{block_size}_t{tile_size_override}_seg{num_segments}.gfx942
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
@@ -130,6 +139,11 @@ enumerate:
   # Crossed in order, first group outermost (the catalog order). Every cell is
   # admitted by the candidate (AICK-2683 Task 6 Step 0): D 64/128/256 x fp16/bf16
   # x kv_block_size 16/32/64 x every GQA ratio it takes (1/2/4/8/16).
+  #
+  # List order is the default-arm mechanism: a merged cell's default is its first
+  # combo's pick, and the first combo takes the first value of every selector
+  # group. So each selector group lists first a representative mid-size decode,
+  # kv_block_size 16, batch 32, seqlen_k 8192; the rest follow ascending.
   cells:
     - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
       values:
@@ -206,35 +220,42 @@ enumerate:
     # batch and seqlen_k only drive the split rule (they change the CTA count, hence
     # num_segments); the engine admits any batch and any seqlen_k >= 1.
     - fields: [batch]
-      values: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+      values: [32, 1, 2, 4, 8, 16, 64, 128, 256]
     - fields: [seqlen_k]
-      values: [1, 64, 256, 512, 2048, 8192, 32768, 131072]
+      values: [8192, 1, 64, 256, 512, 2048, 32768, 131072]
   sweep_level: production
   space: full
   # The candidate is rule-driven: one spec per request, num_segments picked from
-  # batch and seqlen_k. They only steer that pick, so the 72 (batch, seqlen_k)
-  # combos of each (head, dtype, block) cell merge into one cell holding every
-  # num_segments the rule picks; its default is the (batch 1, seqlen_k 1) pick.
-  selector_fields: [batch, seqlen_k]
+  # batch and seqlen_k, block_size and its tile from kv_block_size. They only steer
+  # that pick, so the 216 (kv_block_size, batch, seqlen_k) combos of each (head,
+  # dtype) cell merge into one cell holding every (block, num_segments) the rule
+  # picks; its default is the (kv_block_size 16, batch 32, seqlen_k 8192) pick.
+  selector_fields: [kv_block_size, batch, seqlen_k]
   # num_seqs (= batch) is not baked into the decode-grid segment kernel, proven by
   # rocKE's test_num_seqs_is_ir_neutral_on_the_decode_grid
   # (rocke/library/tests/test_attention_tiled_3d_module.py); every kernel carries
-  # the default's num_seqs (1). The rocKE binding requires spec.num_seqs to equal
-  # the problem's, so the runtime launch path, not the catalog, sets it.
+  # the default's num_seqs (32, the default batch). The rocKE binding requires
+  # spec.num_seqs to equal the problem's, so the runtime launch path, not the
+  # catalog, sets it.
   neutral_fields: [num_seqs]
-  # The catalog's build cost, frozen at the enumerated count. The enumerator refuses
-  # more only under `space: slice`; here the reduction's aot_budget_per_arch WARN is
-  # the live check (2092 > 1000, accepted pending owner sign-off).
+  # Required of every shipped manifest (test_config_loader's
+  # test_every_shipped_engine_manifest_loads_through_its_own_loader), but the
+  # enumerator enforces it only under `space: slice`. Under `space: full` it only
+  # records the enumerated count; the aot_budget_per_arch WARN below is the live
+  # check (2092 > 1000, accepted pending owner sign-off).
   max_kernels: 2092
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
-# block_size is a feature (see its KMD field). num_seqs is neutral (above), so it
-# never varies; it is listed ignored to state that it is not a kernel axis.
+# block_size and tile_size_override are performance (see their KMD fields).
+# num_seqs is neutral (above), so it never varies; it is listed ignored to state
+# that it is not a kernel axis.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window]
     performance:
+      - {name: block_size}
+      - {name: tile_size_override, unset_resolves_by: resolved_tile_size_override}
       - {name: num_segments}
     ignored: [num_seqs]
   aot_budget_per_arch: 1000
