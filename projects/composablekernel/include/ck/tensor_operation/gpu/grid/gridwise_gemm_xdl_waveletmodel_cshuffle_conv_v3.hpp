@@ -206,6 +206,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
     static_assert(!(UseTdmB && BBlockLdsExtraNCustom == 0), "TDM doesn't support LDS swizzling");
 
+    static constexpr bool UseLdsTransposeA =
+        UseLdsTranspose && is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value;
+    static constexpr bool UseLdsTransposeB =
+        UseLdsTranspose && is_same<tensor_layout::gemm::RowMajor, BLayout>::value;
+
     // =========================================================================
     // Wave specialization thread groups
     // =========================================================================
@@ -366,11 +371,15 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     }
 
-    template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value, typename DeviceArch>
+    template <typename GridDesc_K0_MN_K1_T,
+              index_t K0Number,
+              index_t K1Value,
+              bool LdsTr,
+              typename DeviceArch>
     __host__ __device__ static auto TransformGrid(const GridDesc_K0_MN_K1_T& desc, DeviceArch)
     {
         // gfx1250 doesn't need swizzling for DirectLoad pipeline
-        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t> || UseLdsTranspose)
+        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t> || LdsTr)
         {
             return desc;
         }
@@ -404,6 +413,20 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 make_tuple(Sequence<0, 1>{}, Sequence<2>{}, Sequence<3>{}),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
         }
+    }
+
+    template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value, typename DeviceArch>
+    __host__ __device__ static auto TransformGridA(const GridDesc_K0_MN_K1_T& desc, DeviceArch)
+    {
+        return TransformGrid<GridDesc_K0_MN_K1_T, K0Number, K1Value, UseLdsTransposeA, DeviceArch>(
+            desc, DeviceArch{});
+    }
+
+    template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value, typename DeviceArch>
+    __host__ __device__ static auto TransformGridB(const GridDesc_K0_MN_K1_T& desc, DeviceArch)
+    {
+        return TransformGrid<GridDesc_K0_MN_K1_T, K0Number, K1Value, UseLdsTransposeB, DeviceArch>(
+            desc, DeviceArch{});
     }
 
     // =========================================================================
@@ -1062,11 +1085,6 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         const index_t num_k_block_main_loop = __builtin_amdgcn_readfirstlane(
             (a_grid_desc_ak0_m_ak1.GetLength(I0) * a_grid_desc_ak0_m_ak1.GetLength(I2)) /
             (KPerBlock * problem.KBatch));
-
-        constexpr bool UseLdsTransposeA =
-            UseLdsTranspose && is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value;
-        constexpr bool UseLdsTransposeB =
-            UseLdsTranspose && is_same<tensor_layout::gemm::RowMajor, BLayout>::value;
 
         // =====================================================================
         // Wave specialization
