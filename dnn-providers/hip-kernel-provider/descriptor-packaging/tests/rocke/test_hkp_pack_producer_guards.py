@@ -300,19 +300,24 @@ def _shipped_rocke_checks():
     ``(source, builder, target, arch)`` the shipped descriptors pack.
 
     ``arch`` is each shard architecture the kernel is packed for: its own ``arch``
-    list when it narrows one, otherwise its pack's.
+    list when it narrows one, otherwise its pack's. A multi-launch kernel contributes
+    every entry of its ``sources`` map; a single-launch one its ``kernel_source``.
     """
     seen = {}
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
         pack = json.loads(path.read_text())
         for kernel in pack.get("kernelDescriptors", []):
-            source = kernel["kernel_source"]
-            if source.get("kind") != "rocke":
-                continue
-            target = source.get("target", ROCKE_TARGET_NATIVE)
-            for arch in kernel.get("arch") or pack.get("arch", []):
-                key = (source["source"], source["builder"], target, arch)
-                seen.setdefault(key, source["spec"])
+            if "sources" in kernel:
+                sources = list(kernel["sources"].values())
+            else:
+                sources = [kernel["kernel_source"]]
+            for source in sources:
+                if source.get("kind") != "rocke":
+                    continue
+                target = source.get("target", ROCKE_TARGET_NATIVE)
+                for arch in kernel.get("arch") or pack.get("arch", []):
+                    key = (source["source"], source["builder"], target, arch)
+                    seen.setdefault(key, source["spec"])
     return [(*key, spec) for key, spec in seen.items()]
 
 
