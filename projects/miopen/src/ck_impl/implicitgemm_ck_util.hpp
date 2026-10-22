@@ -98,6 +98,44 @@ inline bool CanBorrowNCHWOperands(const ConvTensors& tensors,
            DisjointByteRanges(tensors.y, y_bytes, workspace, workspace_bytes);
 }
 
+inline bool IsNativeOutputCKKernel(const std::string& kernel_id)
+{
+    return kernel_id.rfind("NativeOutput:", 0) == 0;
+}
+
+inline bool IsNativeOutputForwardApplicable(const miopen::conv::ProblemDescription& problem)
+{
+    if(!problem.IsDirectionForward() || (!problem.Is2d() && !problem.Is3d()) ||
+       !problem.IsLayoutDefault() || problem.HasNonPackedTensors() ||
+       (!problem.IsFp16() && !problem.IsBfp16() && !problem.IsFp32()) ||
+       problem.GetConv().mode != miopenConvolution || problem.GetGroupCount() == 0 ||
+       problem.GetAlphaBetaCase() != DEFAULT || problem.GetAlpha().GetAsDouble() != 1.0 ||
+       problem.GetBeta().GetAsDouble() != 0.0 ||
+       problem.GetConv().trans_output_pads.size() != problem.GetSpatialDims() ||
+       std::any_of(problem.GetConv().trans_output_pads.begin(),
+                   problem.GetConv().trans_output_pads.end(),
+                   [](int pad) { return pad != 0; }))
+        return false;
+
+    bool non_pointwise         = false;
+    const auto& filter_lengths = problem.GetWeights().GetLengths();
+    for(size_t i = 2; i < filter_lengths.size(); ++i)
+        non_pointwise |= filter_lengths[i] > 1;
+    if(!non_pointwise || !problem.AllTensorsDimsFitIntoInt())
+        return false;
+
+    // These candidates index tensors with int32 coordinates, including flat extents.
+    for(const auto* desc : {&problem.GetIn(), &problem.GetWeights(), &problem.GetOut()})
+    {
+        if(desc->GetElementSpace() > static_cast<size_t>(std::numeric_limits<int>::max()))
+            return false;
+        for(const auto length : desc->GetLengths())
+            if(length == 0)
+                return false;
+    }
+    return true;
+}
+
 } // namespace internal
 
 namespace conv {
@@ -1451,6 +1489,113 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
 #endif
         return result;
     }
+}
+
+template <int ND, typename DeviceOpType, typename CKArgsType>
+ConvSolution InitInvokerFactoryFwdNativeOutput(const ExecutionContext& ctx,
+                                               const miopen::conv::ProblemDescription& problem,
+                                               const std::string& kernel_id)
+{
+    static_assert(ND == 2 || ND == 3);
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    if(ctx.GetStream().GetDeviceName() != "gfx1250" ||
+       !internal::IsNativeOutputForwardApplicable(problem) ||
+       !internal::IsNativeOutputCKKernel(kernel_id))
+        return ConvSolution{miopenStatusInvalidValue};
+
+    auto conv_ptrs = DeviceOpType::GetInstances();
+    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+    if(ptr_iter == conv_ptrs.end())
+        return ConvSolution{miopenStatusInvalidValue};
+
+    auto ck_args = CKArgsType{problem};
+    if(!ck_args.IsSupportedBy(*ptr_iter))
+        return ConvSolution{miopenStatusInvalidValue};
+    ConvSolution result;
+
+    using Input        = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Input>;
+    using Weight       = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Weights>;
+    auto input_solver  = Input{}.MakeTransposeSolver(ctx, problem, ck_args);
+    auto weight_solver = Weight{}.MakeTransposeSolver(ctx, problem, ck_args);
+    MultiBufferWorkspaceTraits workspace_traits(
+        {input_solver.GetOutputTensorSize(), weight_solver.GetOutputTensorSize()});
+    result.workspace_sz        = workspace_traits.GetSize();
+    result.construction_params = {input_solver.GetKernelInfo(), weight_solver.GetKernelInfo()};
+
+    auto input_transpose = internal::TransposeInstanceTagged{
+        input_solver, 0, workspace_traits, 0, internal::ConvOperandTag::Input};
+    auto weight_transpose = internal::TransposeInstanceTagged{
+        weight_solver, 1, workspace_traits, 1, internal::ConvOperandTag::Weights};
+    result.invoker_factory = [ck_args_          = std::move(ck_args),
+                              conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
+                              input_transpose_  = std::move(input_transpose),
+                              weight_transpose_ = std::move(weight_transpose),
+                              x_desc_           = problem.GetIn(),
+                              w_desc_           = problem.GetWeights(),
+                              y_desc_           = problem.GetOut(),
+                              kernel_id_        = kernel_id,
+                              workspace_size_ =
+                                  result.workspace_sz](const std::vector<Kernel>& kernels) mutable {
+        return [ck_args2          = std::move(ck_args_),
+                conv_ptr2         = std::move(conv_ptr_),
+                input_transpose2  = std::move(input_transpose_),
+                weight_transpose2 = std::move(weight_transpose_),
+                x_desc2           = std::move(x_desc_),
+                w_desc2           = std::move(w_desc_),
+                y_desc2           = std::move(y_desc_),
+                kernel_id2        = std::move(kernel_id_),
+                workspace_size2   = workspace_size_,
+                kernels](const Handle& handle, const AnyInvokeParams& parameters) mutable {
+            const auto& data   = parameters.CastTo<miopen::conv::DataInvokeParams>();
+            const auto tensors = GetTensors(data);
+            MIOPEN_THROW_IF(
+                handle.GetDeviceName() != "gfx1250" || data.alpha.GetAsDouble() != 1.0 ||
+                    data.beta.GetAsDouble() != 0.0 || data.workSpaceSize < workspace_size2 ||
+                    !internal::CanBorrowNCHWOperands(
+                        tensors, x_desc2, w_desc2, y_desc2, data.workSpace, workspace_size2),
+                "Invalid native-output forward operands, scalars, or workspace");
+
+            // Validate before either conversion can modify shared invocation buffers.
+            input_transpose2.AssignBuffer(handle, data.workSpace);
+            weight_transpose2.AssignBuffer(handle, data.workSpace);
+            auto argument = ck_args2.MakeArgPtr(conv_ptr2,
+                                                input_transpose2.GetBufferPtr(),
+                                                weight_transpose2.GetBufferPtr(),
+                                                data.tensors.out,
+                                                1.0f,
+                                                0.0f);
+            MIOPEN_THROW_IF(!conv_ptr2->IsSupportedArgument(argument.get()) ||
+                                conv_ptr2->GetWorkSpaceSize(argument.get()) != 0,
+                            "Unsupported native-output forward CK argument");
+
+            handle.ResetKernelTime();
+            input_transpose2.ConvertFrom(handle, kernels, tensors);
+            weight_transpose2.ConvertFrom(handle, kernels, tensors);
+            const float conversion_time =
+                handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
+            auto invoker = conv_ptr2->MakeInvokerPointer();
+            {
+                WorkAroundHipEventProfiler profiler(handle);
+                MIOPEN_LOG_I2("kernel_name = " << kernel_id2);
+                invoker->Run(argument.get(), {handle.GetStream(), false});
+            }
+            if(handle.IsProfilingEnabled())
+            {
+                const float elapsed = conversion_time + handle.GetKernelTime();
+                if(IsLoggingKernel())
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                handle.ResetKernelTime();
+                handle.AccumKernelTime(elapsed);
+            }
+        };
+    };
+    return result;
+#else
+    (void)ctx;
+    (void)problem;
+    (void)kernel_id;
+    return {};
+#endif
 }
 
 template <int ND,

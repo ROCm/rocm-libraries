@@ -104,6 +104,28 @@ using DeviceOpGFwdDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
         DeviceOpGFwdDefault<DataType, ComputeType>>;
 
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGFwdNativeOutput = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
+    NumDimSpatial,
+    InLayout,
+    WeiLayout,
+    ck::Tuple<>,
+    ck::tensor_layout::convolution::NGKDHW,
+    DataType,
+    DataType,
+    ck::Tuple<>,
+    DataType,
+    PassThrough,
+    PassThrough,
+    PassThrough,
+    ComputeType,
+    ComputeType>;
+
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGFwdNativeOutputPtrs =
+    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOpGFwdNativeOutput<DataType, ComputeType>>;
+
 // ---------------------------------------------------------------------------
 // CKArgs -- 3D forward grouped convolution.
 // ---------------------------------------------------------------------------
@@ -196,8 +218,10 @@ struct CKArgs
         {
             (void)alpha;
             (void)beta;
-            static_assert(std::is_same_v<DeviceP, DeviceOpGFwdDefault<DataType, ComputeType>>,
-                          "Default should be fwd pass through");
+            static_assert(
+                std::is_same_v<DeviceP, DeviceOpGFwdDefault<DataType, ComputeType>> ||
+                    std::is_same_v<DeviceP, DeviceOpGFwdNativeOutput<DataType, ComputeType>>,
+                "Default should be fwd pass through");
             return MakeDefaultArgPtr(conv_ptr, in, w, out);
         }
     }
@@ -392,6 +416,17 @@ struct CKArgs
     mutable NarrowedCKArrays3D narrowed;
 };
 
+template <typename DataType>
+struct CKArgsNativeOutput : CKArgs<DataType>
+{
+    explicit CKArgsNativeOutput(const ProblemDescription& problem) : CKArgs<DataType>(problem)
+    {
+        const auto spatial = this->Do * this->Ho * this->Wo;
+        this->out_strides  = {
+            this->K * spatial, this->K1 * spatial, spatial, this->Ho * this->Wo, this->Wo, 1};
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Template helpers — dispatched per alpha/beta case
 // ---------------------------------------------------------------------------
@@ -408,9 +443,21 @@ std::vector<std::string> FillValidKernelsByAlphaBeta(const ProblemDescription& p
         return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdScalePtrs<DataType, ComputeType>,
                                                    CKArgs<DataType, ComputeType>>(problem);
     case DEFAULT:
-    case ERROR_STATE:
-        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
-                                                   CKArgs<DataType, ComputeType>>(problem);
+    case ERROR_STATE: {
+        auto kernels =
+            miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
+                                                CKArgs<DataType, ComputeType>>(problem);
+        if constexpr(std::is_same_v<DataType, ComputeType>)
+        {
+            auto native = FillNativeOutputKernels<DeviceOpGFwdNativeOutputPtrs,
+                                                  CKArgsNativeOutput<DataType>,
+                                                  DataType>(problem, false);
+            kernels.insert(kernels.end(),
+                           std::make_move_iterator(native.begin()),
+                           std::make_move_iterator(native.end()));
+        }
+        return kernels;
+    }
     }
 
     MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
@@ -439,6 +486,11 @@ bool CheckCKApplicabilityByAlphaBeta(const ProblemDescription& problem)
 template <typename DataType, typename ComputeType>
 bool CheckIsArgSupportedByAlphaBeta(const ProblemDescription& problem, const std::string& kernel_id)
 {
+    if(miopen::solver::internal::IsNativeOutputCKKernel(kernel_id))
+        return IsNativeOutputKernelSupported<DeviceOpGFwdNativeOutputPtrs,
+                                             CKArgsNativeOutput<DataType>,
+                                             DataType>(
+            problem, kernel_id, !std::is_same_v<DataType, ComputeType>);
     switch(problem.GetAlphaBetaCase())
     {
     case BILINEAR:
@@ -519,6 +571,8 @@ ck_impl_3d_fwd_get_all_kernel_type_strings(CKKernelListHandle** out_handle)
         for(const auto& ptr : scale_ptrs)
             result->kernels.push_back(ptr->GetTypeString());
         for(const auto& ptr : default_ptrs)
+            result->kernels.push_back(ptr->GetTypeString());
+        for(const auto& ptr : DeviceOpGFwdNativeOutputPtrs<float>::GetInstances())
             result->kernels.push_back(ptr->GetTypeString());
 
         *out_handle = result.release();
@@ -612,6 +666,28 @@ ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
         CK_IMPL_THROW_IF_NULL(problem, CK_IMPL_STATUS_BAD_PARAM, "Null problem");
         CK_IMPL_THROW_IF_NULL(kernel_id, CK_IMPL_STATUS_BAD_PARAM, "Null kernel_id");
         std::string kid(kernel_id);
+
+        if(miopen::solver::internal::IsNativeOutputCKKernel(kid))
+        {
+            auto solution = DispatchByDataType(problem->GetInDataType(), [&](auto type) {
+                using T = decltype(type);
+                if constexpr(std::is_same_v<T, float> || std::is_same_v<T, ck::half_t> ||
+                             std::is_same_v<T, ck::bhalf_t>)
+                {
+                    if(!IsNativeOutputKernelSupported<DeviceOpGFwdNativeOutputPtrs,
+                                                      CKArgsNativeOutput<T>,
+                                                      T>(*problem, kid, use_tf32))
+                        return miopen::solver::ConvSolution{miopenStatusInvalidValue};
+                    return miopen::solver::InitInvokerFactoryFwdNativeOutput<
+                        3,
+                        DeviceOpGFwdNativeOutputPtrs<T>,
+                        CKArgsNativeOutput<T>>(*ctx, *problem, kid);
+                }
+                return miopen::solver::ConvSolution{miopenStatusInvalidValue};
+            });
+            *out_solution = new miopen::solver::ConvSolution(std::move(solution));
+            return;
+        }
 
         auto solution = MakeSolutionGroupConvImplicitGemmXdlops(
             *problem,
