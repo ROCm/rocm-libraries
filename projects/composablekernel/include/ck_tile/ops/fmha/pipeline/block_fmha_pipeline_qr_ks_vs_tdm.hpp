@@ -221,12 +221,14 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kHwGemm1Scale = kBlockScale &&
                                           is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
-    // gemm0 takes k_descale on its B operand the way gemm1 takes v_descale, so k_descale
-    // carries the same power-of-two contract (fmha_fwd_args::k_descale_ptr). q_descale
-    // stays in scale_s: it is uniform over a workgroup.
-    static constexpr bool kHwGemm0Scale = kBlockScale &&
-                                          is_any_of<KDataType, fp8_t, bf8_t>::value &&
-                                          BlockFmhaShape::Gemm0WarpTile::at(number<2>{}) == 128;
+    // k_descale scales whole S columns and is positive, so it commutes with the row max:
+    // max_j(d_g * s_j) == d_g * max_{j in g}(s_j). The softmax folds it into the per-group
+    // row max and into the exp2 argument it already computes, at any positive float value.
+    // Bias adds to the descaled S, so those kernels keep the s_acc sweep; kNWarp > 1 reads S
+    // back from LDS in another distribution, where kv_scale_group does not hold.
+    static constexpr bool kFoldKDescale = kBlockScale &&
+                                          BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                                          !kHasLogitsSoftCap && kNWarp == 1;
 
     // The sink is deferred because P is cast to fp8: pre-seeding m with the sink logit
     // lets it own the max frame and pushes every real P down the fp8 grid. That is a
@@ -282,37 +284,68 @@ struct BlockFmhaPipelineQRKSVSTdm
         return index;
     }
 
-    // gemm0's B scale: one k_descale per N iteration, the same byte over all four K blocks.
-    // The A side is neutral; q_descale is already in scale_s.
-    CK_TILE_DEVICE static auto make_gemm0_scale([[maybe_unused]] const float* k_descale_ptr,
-                                                [[maybe_unused]] const KVScaleIndex& index)
+    // The K and V descales of one KV tile, one per kKVScaleAlign group.
+    struct KVDescale
     {
-        if constexpr(kHwGemm0Scale)
-        {
-            array<int32_t, kKVScaleGroups> k_scale;
-            static_for<0, kKVScaleGroups, 1>{}([&](auto g) {
-                const float s = cast_pointer_to_constant_address_space(k_descale_ptr)[index[g]];
-                k_scale(g)    = static_cast<int32_t>(Packed4Scale_E8M0(s, s, s, s).data());
-            });
-            return make_tuple([](auto, auto) { return e8m0_one(); },
-                              [k_scale](auto n_iter, auto) {
-                                  constexpr index_t g =
-                                      decltype(n_iter)::value * kGemm0KVPerNIter / kKVScaleAlign;
-                                  return k_scale[g];
-                              });
-        }
-        else
-        {
-            using NoScale = typename remove_cvref_t<
-                decltype(Policy::template GetQKBlockGemm<Problem>())>::no_scale;
-            return make_tuple(NoScale{}, NoScale{});
-        }
+        array<float, kKVScaleGroups> k;
+        array<float, kKVScaleGroups> v;
+    };
+
+    CK_TILE_DEVICE static KVDescale load_kv_descale(const float* k_descale_ptr,
+                                                    const float* v_descale_ptr,
+                                                    const KVScaleIndex& index)
+    {
+        KVDescale descale;
+        static_for<0, kKVScaleGroups, 1>{}([&](auto g) {
+            const float k = cast_pointer_to_constant_address_space(k_descale_ptr)[index[g]];
+            // The folded softmax multiplies masked -inf scores by k_descale; an all-zero
+            // block's 0 would turn them into NaN. The smallest normal keeps them at -inf.
+            descale.k(g) = kFoldKDescale ? max(k, numeric<float>::min()) : k;
+            descale.v(g) = cast_pointer_to_constant_address_space(v_descale_ptr)[index[g]];
+        });
+        return descale;
     }
 
-    // Software k_descale for tiles without the scaled MMA (gemm0 warp K != 128).
+    // KV group of an S column: S's N span leads with gemm0's warp N iteration
+    // (asserted where this is used).
+    template <typename ColIdx>
+    CK_TILE_HOST_DEVICE static constexpr index_t kv_scale_group(ColIdx col)
+    {
+        return col.impl_.at(number<0>{}) * kGemm0KVPerNIter / kKVScaleAlign;
+    }
+
+    // Row max of the k-descaled scores without descaling them: one max chain per KV group,
+    // each scaled once at the end (descale > 0).
+    template <typename Tensor>
+    CK_TILE_DEVICE static auto ReduceRowMaxKDescaled(const Tensor& scores, const KVDescale& descale)
+    {
+        constexpr auto spans = Tensor::get_distributed_spans();
+        static_assert(remove_cvref_t<decltype(spans[I1])>::Impl::at(0) == kGemm0NIters,
+                      "qr_tdm pipeline: S's N span must lead with gemm0's warp N iteration");
+        constexpr auto distribution =
+            make_static_tile_distribution(ck_tile::detail::make_reduce_tile_distribution_encoding(
+                Tensor::get_tile_distribution().get_static_tile_distribution_encoding(),
+                sequence<1>{}));
+        auto maxima = make_static_distributed_tensor<SMPLComputeDataType>(distribution);
+        sweep_tile_span(spans[I0], [&](auto row) {
+            thread_buffer<SMPLComputeDataType, kKVScaleGroups> group_max;
+            static_for<0, kKVScaleGroups, 1>{}(
+                [&](auto g) { group_max(g) = -numeric<SMPLComputeDataType>::infinity(); });
+            sweep_tile_span(spans[I1], [&](auto col) {
+                constexpr index_t g    = kv_scale_group(col);
+                group_max(number<g>{}) = max(group_max[number<g>{}], scores[make_tuple(row, col)]);
+            });
+            auto local = -numeric<SMPLComputeDataType>::infinity();
+            static_for<0, kKVScaleGroups, 1>{}(
+                [&](auto g) { local = max(local, group_max[g] * descale.k[g]); });
+            maxima(make_tuple(row)) = local;
+        });
+        return maxima;
+    }
+
+    // Software k_descale for kernels that cannot fold it (bias).
     template <typename SAccTile>
-    CK_TILE_DEVICE static void
-    apply_k_descale(SAccTile& s_acc, const float* k_descale_ptr, const KVScaleIndex& index)
+    CK_TILE_DEVICE static void apply_k_descale(SAccTile& s_acc, const KVDescale& descale)
     {
         // Without the barrier the scheduler sinks gemm1's WMMAs into this
         // sweep; the longer live ranges cost a wave per SIMD.
@@ -321,22 +354,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(remove_cvref_t<decltype(ks_spans[number<1>{}])>::Impl::at(0) == kGemm0NIters,
                       "qr_tdm pipeline: s_acc's N span must lead with gemm0's warp N iteration");
         sweep_tile_span(ks_spans[number<1>{}], [&](auto idx1) {
-            constexpr index_t g   = idx1.impl_.at(number<0>{}) * kGemm0KVPerNIter / kKVScaleAlign;
-            const float k_descale = cast_pointer_to_constant_address_space(k_descale_ptr)[index[g]];
+            const float k_descale = descale.k[number<kv_scale_group(idx1)>{}];
             sweep_tile_span(ks_spans[number<0>{}],
                             [&](auto idx0) { s_acc(make_tuple(idx0, idx1)) *= k_descale; });
         });
     }
 
     template <index_t IK1>
-    CK_TILE_DEVICE static int32_t pack_v_scale(const float* v_descale_ptr,
-                                               const KVScaleIndex& index)
+    CK_TILE_DEVICE static int32_t pack_v_scale(const KVDescale& descale)
     {
         Packed4Scale_E8M0 packed;
         packed.data() = 0;
         static_for<0, kScaleBytes, 1>{}([&](auto i) {
             constexpr index_t g   = (IK1 * kK1 + i * kGemm1KPerByte) / kKVScaleAlign;
-            const float v_descale = cast_pointer_to_constant_address_space(v_descale_ptr)[index[g]];
+            const float v_descale = descale.v[g];
             packed.pack_scale(e8m0_t(v_descale), i);
             // e8m0 keeps only the exponent, so a v_descale that is not a power of two is
             // changed here, silently. Validate it outside this loop: keeping the operands
@@ -446,8 +477,6 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kStagedKPairs =
         Problem::kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
-    static_assert(!kHwGemm0Scale || !Problem::kProgressiveDsLoadK,
-                  "qr_tdm pipeline: RunWithAfterWarp carries no scale operand");
 
     // Unchecked TDM bounds need a stronger, independent range proof. Keep this
     // separate from K staging so padded/group/sink/custom-mask configurations
@@ -868,10 +897,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
-            [[maybe_unused]] const auto kv_scale_index =
-                kBlockScale ? make_kv_scale_index(kv_tile_start, kv_last, block_scale_size_kv)
-                            : KVScaleIndex{};
-            const auto gemm0_scale = make_gemm0_scale(k_descale_ptr, kv_scale_index);
+            [[maybe_unused]] const auto kv_descale =
+                kBlockScale ? load_kv_descale(
+                                  k_descale_ptr,
+                                  v_descale_ptr,
+                                  make_kv_scale_index(kv_tile_start, kv_last, block_scale_size_kv))
+                            : KVDescale{};
 
             block_sync_lds();
             // V uses load_tile_tdm (single-box plain LDS write). Both K and V
@@ -895,9 +926,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                            get_slice_tile(q_tile,
                                           sequence<0, i_k0 * kK0>{},
                                           sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile,
-                           gemm0_scale.at(number<0>{}),
-                           gemm0_scale.at(number<1>{}));
+                           k_tile);
 
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_dram_window, {0, kK0});
@@ -916,12 +945,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                    get_slice_tile(q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
-                   k_tile,
-                   gemm0_scale.at(number<0>{}),
-                   gemm0_scale.at(number<1>{}));
+                   k_tile);
 
-            if constexpr(kBlockScale && !kHwGemm0Scale)
-                apply_k_descale(s_acc, k_descale_ptr, kv_scale_index);
+            if constexpr(kBlockScale && !kFoldKDescale)
+                apply_k_descale(s_acc, kv_descale);
 
             // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1029,7 +1056,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
-            auto m_local = ReduceRowMaxLocal(s_new); // m_local = rowmax(S{j})
+            auto m_local = [&]() { // m_local = rowmax(S{j})
+                if constexpr(kFoldKDescale)
+                    return ReduceRowMaxKDescaled(s_new, kv_descale);
+                else
+                    return ReduceRowMaxLocal(s_new);
+            }();
             ReduceRowSync(m_local, f_max);
 
             const auto m_old = m; // m{j-1}
@@ -1055,6 +1087,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             };
 
+            // The multiplier exp2 already applies, per KV group when k_descale is folded.
+            [[maybe_unused]] array<SMPLComputeDataType, kKVScaleGroups> col_scale;
+            if constexpr(kFoldKDescale)
+                static_for<0, kKVScaleGroups, 1>{}(
+                    [&](auto g) { col_scale(g) = scale_s * kv_descale.k[g]; });
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -1076,6 +1114,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                         if constexpr(kHasLogitsSoftCap)
                         {
                             p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
+                        }
+                        else if constexpr(kFoldKDescale)
+                        {
+                            p_compute(i_j_idx) =
+                                exp2(col_scale[number<kv_scale_group(idx1)>{}] * s_new[i_j_idx] -
+                                     row_max);
                         }
                         else
                         {
@@ -1135,7 +1179,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 if constexpr(kBlockScale)
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(
-                        pack_v_scale<decltype(i_k1)::value>(v_descale_ptr, kv_scale_index));
+                        pack_v_scale<decltype(i_k1)::value>(kv_descale));
                 }
                 else
                 {
@@ -1577,25 +1621,39 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         __builtin_amdgcn_sched_barrier(0);
 
+        // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
+        // physical_seqlen_k_start. k_origin below and the blockscale descale index
+        // (make_kv_scale_index, shared by k_descale and v_descale) address the
+        // same tile, so they share this one expression -- a sink-blind index here
+        // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
+        auto kv_tile_start_of = [&](index_t i_loop) {
+            return (num_sink_loop > i_loop)
+                       ? kv_load_start + i_loop * kN0
+                       : physical_seqlen_k_start + (i_loop - num_sink_loop) * kN0;
+        };
+        // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k;
+        // this also keeps the last iteration's prefetch of a tile past the end in bounds
+        [[maybe_unused]] const index_t kv_last  = mask.GetXTotal() - 1;
+        [[maybe_unused]] auto load_tile_descale = [&](index_t i_loop) {
+            return load_kv_descale(
+                k_descale_ptr,
+                v_descale_ptr,
+                make_kv_scale_index(kv_tile_start_of(i_loop), kv_last, block_scale_size_kv));
+        };
+        // Loaded one mainloop() call ahead, after the current tile's last read of them: scalar
+        // loads return out of order, so the first read of a loaded SGPR waits on kmcnt 0, i.e.
+        // on every scalar load still in flight. Issued earlier, the prefetch would be waited
+        // on by this tile's own descale reads.
+        [[maybe_unused]] KVDescale next_kv_descale{};
+        if constexpr(kBlockScale)
+            next_kv_descale = load_tile_descale(0);
+
         auto mainloop = [&](KDataType* __restrict__ k_lds_write_ptr,
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
-            // physical_seqlen_k_start. k_origin below and the blockscale descale index
-            // (make_kv_scale_index, shared by k_descale and v_descale) address the
-            // same tile, so they share this one expression -- a sink-blind index here
-            // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
-            const index_t kv_tile_start =
-                (num_sink_loop > i_total_loops)
-                    ? kv_load_start + i_total_loops * kN0
-                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
-            // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
-            [[maybe_unused]] const auto kv_scale_index =
-                kBlockScale ? make_kv_scale_index(kv_tile_start, kv_last, block_scale_size_kv)
-                            : KVScaleIndex{};
-            const auto gemm0_scale = make_gemm0_scale(k_descale_ptr, kv_scale_index);
+            const index_t kv_tile_start            = kv_tile_start_of(i_total_loops);
+            [[maybe_unused]] const auto kv_descale = next_kv_descale;
 
             // move V tile windows
             block_sync_lds<k_lds_insts>();
@@ -1756,9 +1814,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                get_slice_tile(q_tile,
                                               sequence<0, i_k0 * kK0>{},
                                               sequence<kM0, (i_k0 + 1) * kK0>{}),
-                               k_tile,
-                               gemm0_scale.at(number<0>{}),
-                               gemm0_scale.at(number<1>{}));
+                               k_tile);
                         k_tile = k_tile_switch;
                     }
                 });
@@ -1784,13 +1840,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                        get_slice_tile(q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
-                       k_tile,
-                       gemm0_scale.at(number<0>{}),
-                       gemm0_scale.at(number<1>{}));
+                       k_tile);
             }
 
-            if constexpr(kBlockScale && !kHwGemm0Scale)
-                apply_k_descale(s_acc, k_descale_ptr, kv_scale_index);
+            if constexpr(kBlockScale && !kFoldKDescale)
+                apply_k_descale(s_acc, kv_descale);
 
             // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1887,7 +1941,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
 
-            auto m_local = ReduceRowMaxLocal(s_new); // m_local = rowmax(S{j})
+            auto m_local = [&]() { // m_local = rowmax(S{j})
+                if constexpr(kFoldKDescale)
+                    return ReduceRowMaxKDescaled(s_new, kv_descale);
+                else
+                    return ReduceRowMaxLocal(s_new);
+            }();
             ReduceRowSync(m_local, f_max);
 
             if constexpr(kUseIglpBulkScheduling)
@@ -1933,6 +1992,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             };
 
+            // The multiplier exp2 already applies, per KV group when k_descale is folded.
+            [[maybe_unused]] array<SMPLComputeDataType, kKVScaleGroups> col_scale;
+            if constexpr(kFoldKDescale)
+                static_for<0, kKVScaleGroups, 1>{}(
+                    [&](auto g) { col_scale(g) = scale_s * kv_descale.k[g]; });
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -1954,6 +2019,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                         if constexpr(kHasLogitsSoftCap)
                         {
                             p_compute(i_j_idx) = exp2(s_new[i_j_idx] - validated_m);
+                        }
+                        else if constexpr(kFoldKDescale)
+                        {
+                            p_compute(i_j_idx) =
+                                exp2(col_scale[number<kv_scale_group(idx1)>{}] * s_new[i_j_idx] -
+                                     row_max);
                         }
                         else
                         {
@@ -2023,6 +2094,18 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
+            // Last reads of this tile's descales: the V scales go to VGPRs here, then the
+            // fence keeps every read above the next tile's loads.
+            [[maybe_unused]] array<int32_t, k1_loops> v_scale_packed;
+            if constexpr(kBlockScale)
+            {
+                static_for<0, k1_loops, 1>{}([&](auto i_k1) {
+                    v_scale_packed(i_k1) = pack_v_scale<decltype(i_k1)::value>(kv_descale);
+                });
+                __builtin_amdgcn_sched_barrier(0);
+                next_kv_descale = load_tile_descale(i_total_loops + 1);
+            }
+
             block_sync_lds<v_lds_insts>();
             // K's sink->normal window jump (prefill path). K is prefetched 2
             // loop-iterations ahead of consumption (ptrk0/ptrk1 ping-pong -- the write
@@ -2047,8 +2130,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             auto v_scale = [&](auto i_k1) {
                 if constexpr(kBlockScale)
                 {
-                    return make_gemm1_scale<decltype(gemm_1)>(
-                        pack_v_scale<decltype(i_k1)::value>(v_descale_ptr, kv_scale_index));
+                    return make_gemm1_scale<decltype(gemm_1)>(v_scale_packed[i_k1]);
                 }
                 else
                 {
