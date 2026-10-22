@@ -532,7 +532,8 @@ configure.
   (prebuilt `.co` files) and C++/runtime paths, and install staging.
 - Device behavior: no kernel is launched, no numerics are checked.
 - Wildcard descriptors on architectures no lane builds (see below for why none ship).
-- That the CI job runs: that is the job of the junit check below.
+- That the CI job runs: a lane that must always have a probe sets
+  `HIPKERNELPROVIDER_MIN_PACKAGING_PROBES` (below).
 
 ### Which architectures are probed
 
@@ -552,9 +553,10 @@ hkp: probe gfx950: derived root <build>/hkp-probes/gfx950/root (17 UKD(s) for gf
 
 A new architecture, or a new pack under one, is therefore probed with no edit anywhere. A
 lane whose `GPU_TARGETS` cover every named architecture declares no probe; that is valid,
-and the manifest then lists `hkp-probe-tools` alone. A lane that must always have a probe
-passes `--min-probes N` to `check_probe_junit.py`, which fails when the manifest names fewer
-than N probes; without it, a tools-only manifest is accepted.
+and only `hkp-probe-tools` is registered. A lane that must always have a probe configures
+with `-DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=N`, which fails configure when fewer than N
+probes are declared, so broken probe discovery cannot pass as a lane with nothing to probe;
+the default, 0, accepts no probe.
 
 **Wildcards are excluded.** A descriptor with no `arch` (absent or empty) names no
 architecture and gets no automatic probe. That is safe: a wildcard ships for whatever the
@@ -713,10 +715,7 @@ cmake --preset hipdnn-dev-all -GNinja -B build-probe \
     -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
     -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 cmake --build build-probe --target hkp_packaging_probes   # or the full build
-ctest --test-dir build-probe -R '^hkp-probe-' --no-tests=error --output-on-failure \
-    --output-junit probe-junit.xml
-python3 .github/scripts/check_probe_junit.py \
-    --junit build-probe/probe-junit.xml --manifest build-probe/hkp-probes/manifest.txt
+ctest --test-dir build-probe -R '^hkp-probe-' --no-tests=error --output-on-failure
 ```
 
 The selector is `^hkp-probe-`, anchored: `-R` is an unanchored regex. It matches every
@@ -724,18 +723,14 @@ probe (`hkp-probe-<NAME>`) and `hkp-probe-tools`, the pytest suite of the probe 
 (`probes/tests/`; the tests that pack rocKE content live in `probes/tests/rocke/` and
 nowhere else, which a build with `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` never collects).
 `--no-tests=error` makes an empty selection a failure instead of a
-green run that proved nothing. `manifest.txt` is written at configure and lists the ctest
-names that must run; the junit check fails unless every one ran and passed (a skipped,
-disabled or missing entry fails), and ignores testcases not in the manifest, so it also
-accepts the junit of a full ctest run. Configuring without the option and running the same
+green run that proved nothing. Configuring without the option and running the same
 build and ctest lines fails (unknown target, then "No tests were found").
 
 In CI both superbuild lanes configure with the option `ON`. The probe packs run in the
 Build step as part of `all`; the probe ctest entries run once, inside the lane's normal
-"Run tests" ctest, which writes `build/ctest-junit.xml`. The "Check packaging probes ran"
-step then runs only `check_probe_junit.py` on that junit against the manifest, with
-`--min-probes 1` because neither lane builds every architecture the production root names
-(drop the flag from a lane that does). It runs whenever "Run tests" ran, pass or fail.
+"Run tests" ctest (`--no-tests=error`). Both lanes configure with
+`HIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1` because neither builds every architecture the
+production root names (drop it from a lane that does).
 
 Locally on Linux the build is quick (the wheel environment plus the probed UKDs) and each
 probe ctest entry takes a few seconds; `hkp-probe-tools` takes longer, since it really
@@ -791,7 +786,7 @@ does not build it, with the default sample; nothing needs declaring.
   archive rule). This is a design decision, not an entry.
 
 After adding an architecture or a probe line, reconfigure and run the local block above:
-the new `hkp-probe-<NAME>` entry and its manifest line must appear. Then run the
+the new `hkp-probe-<NAME>` ctest entry must appear. Then run the
 mutation checks below.
 
 ### Mutation checks when adding a probe

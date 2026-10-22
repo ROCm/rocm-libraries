@@ -822,7 +822,19 @@ matcher-test stubs with `g++`/`clang++`, plus an intentionally broken source con
 plugin/data/flatbuffers SDK and provider sources beside this checkout plus
 `flatbuffers/array.h` under `/opt/rocm/include`, and generates stand-ins for the
 CMake-configured `version.h`/`CacheRootDefaults.h` headers. Missing prerequisites skip
-explicitly.
+explicitly, so a checkout with no compiler or ROCm headers still runs green. Setting
+`HIPDNN_INGESTOR_STUB_INCLUDE_FILE` to a file of include directories (one per line,
+containing `flatbuffers/array.h` and `hip/hip_runtime.h`) replaces the
+`/opt/rocm/include` probe, and a bad value then fails rather than skips.
+
+Under `HIPDNN_ENABLE_TOOLING_TESTS` the hipDNN build runs this suite with the
+`tools/pytest_plugins/hipdnn_strict_skips.py` plugin (`-p hipdnn_strict_skips`), which turns
+every skip into a failure, so a missing compiler, validator binary, `hkp_pack` or
+`rocm_kpack` fails CI instead of passing by not running. A skip that is correct by design
+(an author-supplied input such as `HIPDNN_INGESTOR_SHAPES` or an authoring profile, or the
+POSIX-only sweep tests on Windows) carries `@pytest.mark.allow_skip(reason="...")` beside the
+skip. Run by hand, the plugin is not loaded: `python -m pytest -p hipdnn_strict_skips` (with
+`tools/pytest_plugins` on `PYTHONPATH`) reproduces the CI behavior.
 
 ### Fragment contracts (`tests/test_fragment_contracts.py`)
 
