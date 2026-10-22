@@ -1126,14 +1126,17 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 }
                 else
                 {
+                    using access_length_seq =
+                        std::conditional_t<UseLdsTransposeB, Sequence<1, 0>, Sequence<0, 1>>;
+                    constexpr index_t padding_interval = UseLdsTransposeB ? NPerBlock : KPerBlock;
                     return ThreadGroupTensorSliceTransfer_TDM<TileLoadThreadGroup,
                                                               Sequence<NPerBlock, KPerBlock>,
-                                                              Sequence<0, 1>,
+                                                              access_length_seq,
                                                               BDataType,
                                                               BDataType,
                                                               decltype(b_grid_desc_bk0_n_bk1),
                                                               decltype(b_block_desc_transfer),
-                                                              KPerBlock * sizeof(BDataType),
+                                                              padding_interval * sizeof(BDataType),
                                                               16>(
                         b_grid_desc_bk0_n_bk1,
                         make_multi_index(n_block_data_idx_on_grid, 0),
