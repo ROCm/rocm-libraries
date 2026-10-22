@@ -422,7 +422,12 @@ namespace
                                               &status,
                                               tmp.ptr),
                   rocsparse_status_success);
-        unit_test_throw_hip_error("hipGetLastError", hipGetLastError());
+        const hipError_t launch = hipGetLastError();
+        if(launch != hipSuccess)
+        {
+            ADD_FAILURE() << "validator launch rejected: " << hipGetErrorString(launch);
+            return rocsparse_data_status_inf;
+        }
         return status;
     }
 }

@@ -173,7 +173,7 @@ namespace
         const T c = scalar<T>(1);
         const T s = scalar<T>(0);
         EXPECT_ROC(rocsparse_rot(handle, &c, &s, vp.x, vp.y), rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 
     // Drive rocsparse_spvv end-to-end for one (T, I) combination and index base:
@@ -274,7 +274,7 @@ namespace
                                   &buffer_size,
                                   buf.temp),
                    rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 } // namespace
 
@@ -349,7 +349,7 @@ TEST_F(HostLevel1, gather_ok)
     ASSERT_TRUE(
         vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
     EXPECT_ROC(rocsparse_gather(handle, vp.y, vp.x), rocsparse_status_success);
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
 TEST_F(HostLevel1, scatter_ok)
@@ -358,7 +358,7 @@ TEST_F(HostLevel1, scatter_ok)
     ASSERT_TRUE(
         vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
     EXPECT_ROC(rocsparse_scatter(handle, vp.x, vp.y), rocsparse_status_success);
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
 TEST_F(HostLevel1, axpby_ok_and_quick_return)
@@ -370,7 +370,7 @@ TEST_F(HostLevel1, axpby_ok_and_quick_return)
             vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
         const float alpha = 2, beta = 3;
         EXPECT_ROC(rocsparse_axpby(handle, &alpha, vp.x, &beta, vp.y), rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 }
 

@@ -1304,7 +1304,7 @@ TEST_F(internal_extra_csrgemm_bitmap, tile_limits_i32_i32)
             EXPECT_EQ(workspace.rank, nullptr);
             EXPECT_EQ(workspace.rank_scan, nullptr);
             EXPECT_EQ(workspace.rank_scan_size, 0u);
-            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            EXPECT_EQ(hipGetLastError(), hipSuccess);
         }
     }
 }
