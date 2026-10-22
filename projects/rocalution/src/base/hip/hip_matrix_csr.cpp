@@ -1424,6 +1424,13 @@ namespace rocalution
                                  ? rocsparse_itilu0_option_coo_format
                                  : 0;
 
+            // rocSPARSE evaluates the stopping criteria and records the convergence history
+            // from the residual norm, which it only computes when explicitly requested
+            if((option & (ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory)) > 0)
+            {
+                itilu0_option |= rocsparse_itilu0_option_compute_nrm_residual;
+            }
+
             // Create buffer
             size_t buffer_size = 0;
             status             = rocsparse_csritilu0_buffer_size(
@@ -1487,7 +1494,6 @@ namespace rocalution
             niter[0] = max_iter;
             if(history != NULL)
             {
-                assert((option & ItILU0Option::StoppingCriteria) > 0);
                 if(std::is_same<ValueType, double>{}
                    || std::is_same<ValueType, std::complex<double>>{})
                 {

@@ -423,22 +423,63 @@ void testing_itilu0_convergence_history(Arguments argus)
         EXPECT_GT(history[niter], 0.0);
     }
 
-    // rocSPARSE rejects the history query for the in-place algorithm when residual norms are
-    // not computed; the factorization must still succeed and report an empty history
-    for(ItILU0Algorithm alg : {ItILU0Algorithm::Default, ItILU0Algorithm::AsyncInPlace})
+    LocalVector<T> b;
+    LocalVector<T> x;
+    b.Allocate("b", matrix.GetN());
+    x.Allocate("x", matrix.GetN());
+    b.MoveToAccelerator();
+    x.MoveToAccelerator();
+    b.Ones();
+
+    // Without a norm option, the stopping criteria and the history have to use the residual
+    // norm. Otherwise rocSPARSE stops after the first sweep, which leaves the factors at zero.
+    const int options_without_norm[]
+        = {ItILU0Option::StoppingCriteria,
+           ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory,
+           ItILU0Option::ConvergenceHistory};
+
+    for(int option_without_norm : options_without_norm)
     {
-        SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg << " without residual");
+        for(ItILU0Algorithm alg : {ItILU0Algorithm::Default,
+                                   ItILU0Algorithm::AsyncInPlace,
+                                   ItILU0Algorithm::AsyncSplit,
+                                   ItILU0Algorithm::SyncSplit})
+        {
+            SCOPED_TRACE(testing::Message()
+                         << "ItILU0Algorithm " << alg << ", options " << option_without_norm);
 
-        ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
-        p.SetAlgorithm(alg);
-        p.SetOptions(ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory);
-        p.SetMaxIter(maxiter);
-        p.SetTolerance(1e-6);
-        p.SetOperator(matrix);
-        p.Build();
+            ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+            p.SetAlgorithm(alg);
+            p.SetOptions(option_without_norm);
+            p.SetMaxIter(maxiter);
+            p.SetTolerance(1e-6);
+            p.SetOperator(matrix);
+            p.Build();
 
-        int niter = -1;
-        p.GetConvergenceHistory(&niter);
-        EXPECT_EQ(niter, 0);
+            int           niter   = 0;
+            const double* history = p.GetConvergenceHistory(&niter);
+
+            ASSERT_GT(niter, 1);
+            ASSERT_LE(niter, maxiter);
+
+            if((option_without_norm & ItILU0Option::ConvergenceHistory) > 0)
+            {
+                ASSERT_NE(history, nullptr);
+
+                for(int i = niter; i < 2 * niter; ++i)
+                {
+                    EXPECT_TRUE(std::isfinite(history[i])) << "history[" << i << "]";
+                    EXPECT_GE(history[i], 0.0) << "history[" << i << "]";
+                }
+
+                EXPECT_GT(history[niter], 0.0);
+            }
+
+            // Zero factors make the preconditioner the identity
+            x.Zeros();
+            p.Solve(b, &x);
+            x.ScaleAdd(static_cast<T>(-1), b);
+            EXPECT_GT(x.Norm(), 0.1 * b.Norm());
+        }
     }
 }
