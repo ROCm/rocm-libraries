@@ -622,3 +622,29 @@ def test_explicit_atomic_that_cannot_be_built_raises():
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", STEM, split_k=8, **kw)
     assert resolve_conv_split_k("wgrad", STEM, split_k=1, **kw).split_k == 1
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
+    # gfx1250 16-bit dW with an odd row (wg_N = 27): no packed pair, and WMMA
+    # has no workspace. An auto request runs unsplit; a forced degree raises.
+    p = ConvProblem(N=64, Hi=64, Wi=64, C=3, K=16, Y=3, X=3, pH=1, pW=1)
+    kw = {
+        "arch": "gfx1250",
+        "dtype": dtype,
+        "tile_m": 32,
+        "tile_n": 32,
+        "tile_k": 32,
+        "block_size": 128,
+        "reduction": "atomic",
+        "epilogue": "default",
+    }
+    r = resolve_conv_split_k("wgrad", p, **kw)
+    assert (r.split_k, r.two_stage) == (1, False)
+    assert r.requested > 1  # the policy did ask for a split
+    with pytest.raises(ValueError, match="packed atomic"):
+        resolve_conv_split_k("wgrad", p, split_k=8, **kw)
+    with pytest.raises(ValueError, match="packed atomic"):
+        resolve_conv_split_k("wgrad", p, override=8, **kw)
+    with pytest.raises(ValueError, match="packed atomic"):
+        resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)

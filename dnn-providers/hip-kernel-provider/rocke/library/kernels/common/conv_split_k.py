@@ -269,6 +269,16 @@ def _resolve_wgrad(
             # Selects the arch's WgradSplitPolicy (gfx1250) where it has one.
             dtype_d=dtype,
         )
+        if reduction == "atomic" and not atomic_ok and allow_unsplit:
+            # An auto degree the packed atomic cannot serve runs unsplit, as
+            # on the planner path (e.g. a WMMA 16-bit dW with an odd row: no
+            # packed pair and no workspace). A forced degree still raises.
+            return ConvSplitK(
+                1,
+                False,
+                legacy.split_k,
+                f"CK formula ({legacy.reason}); no split: {atomic_why}",
+            )
         return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
 
     reductions = []
