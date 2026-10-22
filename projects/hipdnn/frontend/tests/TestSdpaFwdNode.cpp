@@ -869,3 +869,106 @@ TEST(TestSdpaFwdNode, PreValidatePagedAttnMaskUsesMaxSeqLenKv)
     err = preValidate(std::move(bad));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
+
+namespace
+{
+constexpr int64_t SINK_HEADS = 8;
+
+SdpaAttributes
+    makeSinkAttrs(DataType ioType, DataType sinkType, const std::vector<int64_t>& sinkDims)
+{
+    auto q = makeTensor4D(2, SINK_HEADS, 16, 64);
+    auto k = makeTensor4D(2, 2, 32, 64);
+    auto v = makeTensor4D(2, 2, 32, 64);
+    q->set_data_type(ioType);
+    k->set_data_type(ioType);
+    v->set_data_type(ioType);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    auto sink = std::make_shared<TensorAttributes>();
+    sink->set_dim(sinkDims);
+    sink->set_data_type(sinkType);
+    attrs.set_sink_token(sink);
+    return attrs;
+}
+
+Error preValidateSink(DataType ioType, DataType sinkType, const std::vector<int64_t>& sinkDims)
+{
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(makeSinkAttrs(ioType, sinkType, sinkDims), graphAttrs);
+    return node.pre_validate_node();
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsFloatSink)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsSinkInQDataType)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::BFLOAT16, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    err = preValidateSink(DataType::HALF, DataType::HALF, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkWrongRank)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {SINK_HEADS});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {1, SINK_HEADS, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkWrongDims)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {2, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {1, SINK_HEADS, 4, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {1, 1, 1, SINK_HEADS});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkHeadMismatch)
+{
+    // One sink per query head: the KV head count (2) is not accepted.
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::FLOAT, {1, 2, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkHalfWithBfloat16Q)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::HALF, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkInt32)
+{
+    auto err = preValidateSink(DataType::BFLOAT16, DataType::INT32, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkMatchingFloat8Q)
+{
+    // The Q-dtype extension covers HALF/BFLOAT16 only.
+    auto err = preValidateSink(DataType::FP8_E4M3, DataType::FP8_E4M3, {1, SINK_HEADS, 1, 1});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateSinkUsesGraphIoDataType)
+{
+    // Unset tensor types resolve to the graph's io_data_type, as fill_from_context does.
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::BFLOAT16);
+    const SdpaFwdNode ok(makeSinkAttrs(DataType::NOT_SET, DataType::NOT_SET, {1, SINK_HEADS, 1, 1}),
+                         graphAttrs);
+    auto err = ok.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    const SdpaFwdNode bad(makeSinkAttrs(DataType::NOT_SET, DataType::HALF, {1, SINK_HEADS, 1, 1}),
+                          graphAttrs);
+    err = bad.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
