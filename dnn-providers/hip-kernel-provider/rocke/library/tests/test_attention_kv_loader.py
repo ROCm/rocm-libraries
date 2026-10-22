@@ -7,6 +7,7 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 from kernels.common._attention_kv_loader import (
     AttentionKVLoaderKind,
@@ -21,7 +22,7 @@ from kernels.common.attention_unified import UnifiedAttentionProblem
     "page,tile", [(1, 32), (16, 16), (16, 32), (32, 32), (64, 32), (64, 64)]
 )
 @pytest.mark.parametrize("layout", ["paged", "strided"])
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_loader_boundary_engine_agreement(
     arch, page, tile, layout, flavor, monkeypatch
 ):
@@ -131,7 +132,7 @@ def test_loader_rejects_unimplemented_gather_geometry_in_both_engines(arch, page
     "arch,transport",
     [("gfx942", "fp8"), ("gfx942", "wide"), ("gfx950", "fp8"), ("gfx950", "i64")],
 )
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_descriptor_transport_native_parity(arch, transport, flavor, monkeypatch):
     engine = pytest.importorskip("rocke_engine")
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -185,7 +186,7 @@ def test_descriptor_transport_native_parity(arch, transport, flavor, monkeypatch
         for transport in ["plain", "i64", "swizzle_page_ids"]
     ],
 )
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_gfx950_whole_page_loader_native_parity(
     page, tile, transport, flavor, monkeypatch
 ):

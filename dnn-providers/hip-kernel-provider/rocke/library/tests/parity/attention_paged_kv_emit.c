@@ -14,12 +14,12 @@ int main(int argc, char** argv)
     if(argc < 2)
         return 2;
     const int idx = atoi(argv[1]);
-    if(idx < 0 || idx >= 48)
+    if(idx < 0 || idx >= 66)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
-    const int use942 = idx < 24;
+    const int use942 = idx < 24 || (idx >= 48 && idx < 57);
     const int ci = idx / 4 % 3;
     const char* arch = use942 ? "gfx942" : "gfx950";
     const char* mode = argc > 2 ? argv[2] : "ll";
@@ -40,6 +40,20 @@ int main(int argc, char** argv)
     s.has_waves_per_eu = true;
     s.waves_per_eu = 3;
     s.num_seqs = 3;
+    /* Append feature cases without changing the original 48 configurations. */
+    if(idx >= 48)
+    {
+        const int feature = (idx - 48) % 9;
+        const int combined = feature >= 4;
+        s.head_size = 128;
+        s.block_size = feature >= 4 && feature < 8 ? blocks[feature - 4] : 1;
+        s.dtype = feature == 8 ? "bf16" : "fp16";
+        s.sliding_window = 33;
+        s.has_softcap = combined || feature == 0;
+        s.use_sinks = combined || feature == 1;
+        s.use_alibi = combined || feature == 2;
+        s.use_qq_bias = combined || feature == 3;
+    }
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "strided_kv") != ROCKE_OK)
         return 1;

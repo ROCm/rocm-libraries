@@ -9,16 +9,15 @@ from importlib import import_module
 from pathlib import Path
 
 import pytest
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from kernels.common.attention_paged_decode import BUFFER_LIMIT, validate_paged_decode
+from tests.parity.attention_paged_kv_emit import CONFIG_COUNT, build, spec_for_index
 
 
-@pytest.mark.parametrize("idx", range(48))
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
-def test_paged_native_parity_and_golden(idx, flavor, monkeypatch):
-    engine = pytest.importorskip("rocke_engine")
+@pytest.fixture(params=range(CONFIG_COUNT))
+def paged_emission(request, flavor, monkeypatch):
+    idx = request.param
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
-    from tests.parity.attention_paged_kv_emit import build, spec_for_index
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     spec, arch = spec_for_index(idx)
@@ -28,12 +27,31 @@ def test_paged_native_parity_and_golden(idx, flavor, monkeypatch):
 
         sizes = re.findall(r"global \[(\d+) x i8\]", expected)
         assert sizes and max(map(int, sizes)) <= 65536
+    return idx, spec, arch, expected
+
+
+@pytest.fixture(params=LLVM_FLAVORS)
+def flavor(request):
+    return request.param
+
+
+def test_paged_python_golden(paged_emission, flavor):
+    idx, _spec, _arch, expected = paged_emission
     golden = json.loads(
         (
             Path(__file__).parent / "golden" / "attention_paged_kv_ir_sha256.json"
         ).read_text()
     )
+    assert set(golden) == set(LLVM_FLAVORS)
+    assert set(golden[flavor]) == {str(i) for i in range(CONFIG_COUNT)}
     assert hashlib.sha256(expected.encode()).hexdigest() == golden[flavor][str(idx)]
+
+
+def test_paged_native_parity(paged_emission):
+    engine = pytest.importorskip("rocke_engine")
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    _idx, spec, arch, expected = paged_emission
     if arch == "gfx950":
         m = import_module(f"kernels.{arch}.attention_tiled_3d")
         reduce = m.UnifiedAttentionReduceTiledSpec(
@@ -1752,7 +1770,7 @@ def test_paged_binding_rejects_raw_bias_stride(paged_binding_case, stage, value)
 @pytest.mark.parametrize(
     "feature", ["softcap", "sinks", "alibi", "qq_bias", "combined"]
 )
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeypatch):
     engine = pytest.importorskip("rocke_engine")
     from dispatch.attention import AttentionRequest, dispatch_attention
