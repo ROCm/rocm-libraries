@@ -136,17 +136,31 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
 {
     // A table, not an if/else chain: the two ops usually ship the same arches, and
     // identical branch bodies trip bugprone-branch-clone.
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 2> SHIPPED{{
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 8> SHIPPED{{
         {"rmsnorm", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM},
         {"rmsnorm_bwd", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM_BWD},
+        {"sdpa_cdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_CDNA},
+        {"sdpa_cdna_dualwave", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_CDNA_DUALWAVE},
+        {"sdpa_cdna_decode", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_CDNA_DECODE},
+        {"sdpa_rdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA},
+        {"sdpa_rdna_decode", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA_DECODE},
+        {"sdpa_aiw", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_AIW},
     }};
     std::string list;
+    bool known = false;
     for(const auto& [name, archList] : SHIPPED)
     {
         if(name == op)
         {
             list = archList;
+            known = true;
         }
+    }
+    // An op name the table lacks would read as "ships nowhere" and turn every missing
+    // object into a skip, which is the gap this table exists to close.
+    if(!known)
+    {
+        ADD_FAILURE() << "no shipped-arch list for FlyDSL op " << op;
     }
     std::vector<std::string> arches;
     std::stringstream stream(list);

@@ -379,6 +379,29 @@ INSTANTIATE_TEST_SUITE_P(
                   }},
         GraphCase{"AZeroEpsilon",
                   [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 0.0F); }},
+        // An epsilon carried as f64 is read as one, so a value f32 holds is served...
+        GraphCase{"AnF64Epsilon",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonF64 = 1e-5;
+                      return rmsNormGraphWith(extras);
+                  }},
+        // ...up to the largest one f32 holds; the refusal suite's AnF64EpsilonPastTheF32Range
+        // is the next double up.
+        GraphCase{"AnF64EpsilonAtTheF32Maximum",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonF64 = static_cast<double>(std::numeric_limits<float>::max());
+                      return rmsNormGraphWith(extras);
+                  }},
+        // The largest x and y one buffer view's 32-bit byte offsets reach: 1049601 rows of
+        // 1023 bf16 is 2^31 - 2 bytes, the other side of 2^31 - 1 from the refusal suite's
+        // PastThirtyTwoBitAddressing...
+        GraphCase{"AtThirtyTwoBitAddressing",
+                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {1049601, 1023}); }},
+        // ...and in f32, 256999 rows of 2089 is 2^31 - 4 bytes.
+        GraphCase{"FloatAtThirtyTwoBitAddressing",
+                  [] { return buildFlydslRmsNormGraph(DataType::FLOAT, {256999, 2089}); }},
         // An f32 gamma beside 16-bit x and y: cuDNN's and PyTorch's usual mixed form.
         GraphCase{"Bfloat16WithAnF32Scale",
                   [] {
@@ -619,6 +642,20 @@ INSTANTIATE_TEST_SUITE_P(
                       extras.virtualTensors.insert(FLYDSL_INV_RMS_UID);
                       return trainingGraph({8, 4096}, extras);
                   }},
+        // The kernel stores the statistic through a pointer, densely: a pass-by-value
+        // inv_rms has no buffer, and a ragged one's rows are not the dense rows written.
+        GraphCase{"PassByValueInvRms",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.passByValueTensors.insert(FLYDSL_INV_RMS_UID);
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"RaggedInvRms",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.raggedTensors.insert(FLYDSL_INV_RMS_UID);
+                      return trainingGraph({8, 4096}, extras);
+                  }},
         GraphCase{"InvRmsAlignedTo2",
                   [] {
                       RmsNormGraphExtras extras;
@@ -815,6 +852,23 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(
                           DataType::BFLOAT16, {8, 4096}, std::numeric_limits<float>::infinity());
+                  }},
+        // A finite f64 epsilon no f32 holds: the kernel takes epsilon as an f32, which
+        // would not be the value asked for (and is +inf further out). The acceptance
+        // suite's AnF64EpsilonAtTheF32Maximum is the double just below this one.
+        GraphCase{"AnF64EpsilonPastTheF32Range",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonF64
+                          = std::nextafter(static_cast<double>(std::numeric_limits<float>::max()),
+                                           std::numeric_limits<double>::infinity());
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"AnF64EpsilonFarPastTheF32Range",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.epsilonF64 = 1e300;
+                      return rmsNormGraphWith(extras);
                   }},
         // The mixed form is a 16-bit x with an f32 gamma, never the reverse: there is no
         // object that reads a 16-bit gamma beside f32 x.
@@ -1621,10 +1675,12 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              return "Rows" + std::to_string(info.param);
                          });
 
-TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
+/// The other half of the epsilon contract. An unusable baked epsilon is declined at
+/// graph_match so another engine takes the graph; one the caller only supplies at execute
+/// has no such escape -- the plan is already built -- so launch() must refuse it with
+/// INVALID_VALUE rather than hand it to the kernel.
+void expectLaunchRefusesAnEpsilonSuppliedAtExecute(float epsilon)
 {
-    SKIP_IF_NO_DEVICES();
-
     KernelDefinition kernel;
     if(!findStagedKernel("bf16", 4096, kernel))
     {
@@ -1632,9 +1688,6 @@ TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
         return;
     }
 
-    // The other half of the epsilon contract. An unusable baked epsilon is declined at
-    // graph_match so another engine takes the graph; one the caller only supplies at
-    // execute has no such escape -- the plan is already built -- so it is an error.
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {4, 4096}, 0.0F, true),
                                packedArchDeviceProperties());
     ASSERT_TRUE(matches(fixture.context())) << "a runtime epsilon must still pass graph_match";
@@ -1650,16 +1703,40 @@ TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
 
     // A pass-by-value scalar is read from host memory, not copied off the device, so this
     // slot legitimately carries a pointer into the stack.
-    float epsilon = -1e-2F;
     withEpsilon.push_back(hipdnnPluginDeviceBuffer_t{FLYDSL_EPSILON_UID, &epsilon});
 
     const Handle handle;
-    EXPECT_THROW(handler.launch(handle,
-                                *prepared,
-                                withEpsilon.data(),
-                                static_cast<uint32_t>(withEpsilon.size()),
-                                nullptr),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    try
+    {
+        handler.launch(handle,
+                       *prepared,
+                       withEpsilon.data(),
+                       static_cast<uint32_t>(withEpsilon.size()),
+                       nullptr);
+        ADD_FAILURE() << "launch() accepted the execute-time epsilon " << epsilon;
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE) << error.what();
+    }
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
+{
+    SKIP_IF_NO_DEVICES();
+    expectLaunchRefusesAnEpsilonSuppliedAtExecute(-1e-2F);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, RejectsANaNEpsilonSuppliedAtExecute)
+{
+    SKIP_IF_NO_DEVICES();
+    expectLaunchRefusesAnEpsilonSuppliedAtExecute(std::numeric_limits<float>::quiet_NaN());
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, RejectsAnInfiniteEpsilonSuppliedAtExecute)
+{
+    SKIP_IF_NO_DEVICES();
+    expectLaunchRefusesAnEpsilonSuppliedAtExecute(std::numeric_limits<float>::infinity());
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, LoadsTheModuleOnceAcrossTwoPrepares)

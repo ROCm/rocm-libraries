@@ -43,12 +43,12 @@ from ._sdpa_rdna_build import LLVM_OPTIONS, WAVE_SIZE, verify_layout
 OP = "sdpa_rdna_decode"
 
 # The two kernels of a decode object. The main kernel: Q, K, V, O, LSE, the split
-# workspace's O and LSE (pointers); the problem's i32 scalars and the split count; the
-# scale; the (batch, sequence, head) strides of Q, K, V, O and LSE; the bias pointer and
-# its (batch, head, query, key) strides; the runtime head_dim (read only by a generic
-# object); the sink pointer and its head stride (read only by a sink object). Each
-# appended, so every decode object has the same list. The merge kernel: O, LSE and the
-# two workspace pointers; seq_len_q, num_heads, lse_on, num_splits; O's and LSE's
+# workspace's O and (max, sum) pairs (pointers); the problem's i32 scalars and the
+# split count; the scale; the (batch, sequence, head) strides of Q, K, V, O and LSE;
+# the bias pointer and its (batch, head, query, key) strides; the runtime head_dim
+# (read only by a generic object); the sink pointer and its head stride (read only by
+# a sink object). Each appended, so every decode object has the same list. The merge
+# kernel: O, LSE and the two workspace pointers; seq_len_q, num_heads, lse_on, num_splits; O's and LSE's
 # strides; the runtime head_dim; the sink pointer and its head stride.
 _DECODE_ARG_NAMES = (
     "Q",
@@ -57,7 +57,7 @@ _DECODE_ARG_NAMES = (
     "O",
     "LSE",
     "WS_O",
-    "WS_LSE",
+    "WS_MAX_SUM",
     "seq_len_q",
     "seq_len_kv",
     "num_heads",
@@ -93,7 +93,7 @@ _MERGE_ARG_NAMES = (
     "O",
     "LSE",
     "WS_O",
-    "WS_LSE",
+    "WS_MAX_SUM",
     "seq_len_q",
     "num_heads",
     "lse_on",
@@ -148,7 +148,7 @@ def _build_decode(
             f"instance declares {knobs['dv_split']}"
         )
     null = flyc.from_c_void_p(fx.Uint8, 0)
-    # Q, K, V, O, LSE, WS_O, WS_LSE; batch, seq_len_q, seq_len_kv, num_heads,
+    # Q, K, V, O, LSE, WS_O, WS_MAX_SUM; batch, seq_len_q, seq_len_kv, num_heads,
     # kv_group, right_bound, left_bound, align_bottom_right, lse_on, num_splits;
     # the scale; fifteen strides; the bias pointer and its four strides; the
     # runtime head_dim; the sink pointer and its head stride.

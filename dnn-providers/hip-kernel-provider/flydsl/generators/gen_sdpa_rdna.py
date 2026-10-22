@@ -7,7 +7,8 @@
 
 Writes ``<content>/sdpa_rdna/<arch>/<instance>.hsaco`` for every row of
 ``_instances.sdpa_instances()``, plus the ``manifest.json`` beside them and
-``<content>/sdpa_rdna/<arch>.SOURCE.md`` next to the folder, all committed.
+``<content>/sdpa_rdna/<arch>.SOURCE.md`` next to the folder. The folder is a DVC
+output (``<arch>.dvc``); SOURCE.md is committed.
 ``<content>`` is FlyDSL's bundle folder under the provider's
 production descriptor root (``_flydsl_env.CONTENT_DIR``). The decode kernel is another
 engine's, built by ``gen_sdpa_rdna_decode``.
@@ -22,8 +23,8 @@ As with RMSNorm, every object's kernarg layout is asserted against the layout
 recorded below before it is written, and the semantic argument names are
 carried into the manifest. FlyDSL emits no argument names, so the loader's
 signature check can see a change of kind, size or offset but not a permutation
-of two same-sized arguments -- and this ABI has many of those (six pointers,
-ten i32, nineteen i64 strides). The names here are what make a permutation
+of two same-sized arguments -- and this ABI has many of those (seven pointers,
+ten i32 and the f32 scale, twenty i64 strides). The names here are what make a permutation
 answerable by reading the manifest.
 """
 

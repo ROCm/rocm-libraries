@@ -325,10 +325,11 @@ PRIORITY_SDPA_GENERIC = {
 }
 
 # The decode family (flash_attn_decode_rdna.py): split-KV with the GQA group packed
-# into 16-row tiles, for graphs with g * Sq <= 128. Its own kernel and its own launch
-# geometry, so a separate set of objects; above the prefill ones in priority, so a
-# graph both serve runs here. Each object also carries the merge kernel that combines
-# its splits, named by `merge_symbol`. The specialized head dims, with and without a
+# into 16-row tiles (g * Sq rows; a bias object takes one tile). Its own kernel and its
+# own launch geometry, so a separate set of objects in its own engine
+# (hipkernel:flydsl_sdpa_rdna_decode); priority ranks only within that engine, so which
+# engine serves a graph both take is autotune's (then UHD's) choice. Each object also
+# carries the merge kernel that combines its splits, named by `merge_symbol`. The specialized head dims, with and without a
 # bias (a baked axis here too: a runtime bias failed the gate, §6), one V head per K
 # head; anything else takes the prefill objects. d256 splits its output columns across
 # two workgroups, as the prefill object does, to fit the register file.
@@ -336,15 +337,15 @@ SDPA_DECODE_HEAD_DIMS = (64, 96, 128, 256)
 # Generic decode objects for every other head_dim that is a multiple of 8: up to 96,
 # and above it up to 256 with the d256 column split. Columns past the actual head_dim
 # are never fetched, so a decode step reads only the bytes its head has; an up-to-128
-# tier does not fit the register file. No bias, as for the generic prefill tier. Above
-# every prefill object in priority and below the specialized decode objects, the
-# narrower tier above the wider.
+# tier does not fit the register file. No bias, as for the generic prefill tier. Below
+# the specialized decode objects in priority, the narrower tier above the wider.
 SDPA_DECODE_GENERIC_HEAD_DIM_MAX = {96: 1, 256: 2}
 PRIORITY_SDPA_DECODE_GENERIC = {96: 145, 256: 140}
 SDPA_DECODE_MERGE_SYMBOL = "flash_attn_decode_merge_rdna_kernel_1"
 # Absorbed multi-head latent attention (DeepSeek-V2/V3, Kimi, GLM: Q/K 576 = a 512-wide
 # latent and a 64-wide rotary part, V 512 = the latent) and DeepSeek-V4's 512/512, both
-# with a single KV head: decode objects only, the output columns split across four
+# built for a single KV head (any GQA group is admitted): decode objects only, the output
+# columns split across four
 # workgroups (dv_split 4) so each holds the d256 objects' 128 columns. No bias.
 SDPA_DECODE_WIDE_HEAD_DIMS = ((576, 512), (512, 512))
 PRIORITY_SDPA_DECODE = 150
@@ -773,8 +774,9 @@ PRIORITY_SDPA_CDNA_DEFAULT = PRIORITY_SPECIALIZED
 PRIORITY_SDPA_CDNA_DEFAULT_SPECIALIZED = 110
 PRIORITY_SDPA_CDNA_COMPANION = 80
 PRIORITY_SDPA_CDNA_COMPANION_SPECIALIZED = 85
-# The decode objects: below every default, above every other companion, so where their
-# rule and a companion's both prefer a graph the decode object wins.
+# The decode objects, in their own engine (hipkernel:flydsl_sdpa_cdna_decode): priority
+# ranks them only against each other; which engine serves a graph is autotune's (then
+# UHD's) choice.
 PRIORITY_SDPA_CDNA_DECODE = 90
 
 _DW, _GEN = "dualwave", "generic"

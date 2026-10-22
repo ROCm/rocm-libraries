@@ -216,6 +216,23 @@ INSTANTIATE_TEST_SUITE_P(
                     RmsNormBwdGraphSpec spec;
                     spec.computeDataType = DataType::UNSET;
                     return spec;
+                }},
+        // The largest row operand one buffer view's 32-bit byte offsets reach: 1049601 rows
+        // of 1023 bf16 is 2^31 - 2 bytes, the refusal suite's PastThirtyTwoBitAddressing
+        // the other side of 2^31 - 1.
+        BwdCase{"AtThirtyTwoBitAddressing",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.xDims = {1049601, 1023};
+                    return spec;
+                }},
+        BwdCase{"FloatAtThirtyTwoBitAddressing",
+                [] {
+                    // 256999 rows of 2089 f32 is 2^31 - 4 bytes.
+                    RmsNormBwdGraphSpec spec;
+                    spec.dataType = DataType::FLOAT;
+                    spec.xDims = {256999, 2089};
+                    return spec;
                 }}),
     bwdCaseName);
 
@@ -249,6 +266,12 @@ INSTANTIATE_TEST_SUITE_P(
                 [] {
                     RmsNormBwdGraphSpec spec;
                     spec.computeDataType = DataType::DOUBLE;
+                    return spec;
+                }},
+        BwdCase{"ComputeTypeInt32",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.computeDataType = DataType::INT32;
                     return spec;
                 }},
         BwdCase{"AnUnsupportedDtype",
@@ -396,6 +419,80 @@ INSTANTIATE_TEST_SUITE_P(
                 [] {
                     RmsNormBwdGraphSpec spec;
                     spec.virtualTensors.insert(FLYDSL_BWD_DSCALE_UID);
+                    return spec;
+                }},
+        // A pass-by-value scalar has no buffer to address, and a ragged operand's rows are
+        // not the dense rows the kernels step through.
+        BwdCase{"PassByValueDy",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_DY_UID);
+                    return spec;
+                }},
+        BwdCase{"PassByValueX",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_X_UID);
+                    return spec;
+                }},
+        BwdCase{"PassByValueGamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_SCALE_UID);
+                    return spec;
+                }},
+        BwdCase{"PassByValueInvRms",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_INV_RMS_UID);
+                    return spec;
+                }},
+        BwdCase{"PassByValueDx",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_DX_UID);
+                    return spec;
+                }},
+        BwdCase{"PassByValueDgamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.passByValueTensors.insert(FLYDSL_BWD_DSCALE_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedDy",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_DY_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedX",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_X_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedGamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_SCALE_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedInvRms",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_INV_RMS_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedDx",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_DX_UID);
+                    return spec;
+                }},
+        BwdCase{"RaggedDgamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.raggedTensors.insert(FLYDSL_BWD_DSCALE_UID);
                     return spec;
                 }},
         // The baked 16-bit objects copy 128-bit vectors from every row operand and gamma.

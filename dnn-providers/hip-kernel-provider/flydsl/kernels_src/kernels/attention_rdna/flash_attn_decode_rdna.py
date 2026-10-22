@@ -26,11 +26,15 @@ kernel turns that around:
   (WMMA reads V transposed); scheduling fences keep a bounded number of loads in flight.
   The waves combine their running max, sum and O through the same LDS at the end.
 * **Output.** With one split the workgroup writes O and the natural-log LSE directly.
-  With more it writes a normalized f32 partial and its LSE to workspace, and the merge
-  kernel -- compiled into the same code object -- combines the splits by their LSEs.
+  With more it writes a normalized f32 partial and its row's max (natural-log units) and
+  sum to workspace, and the merge kernel -- compiled into the same code object -- weighs
+  each split by sum * exp(max - the largest max). Max and sum are kept apart rather than
+  as one LSE because at a max near -FLT_MAX (a lowest-finite bias on every key) max +
+  ln(sum) rounds to the max, which would weigh the splits equally, not by key count.
 
 Masks, scale and strides follow the prefill kernel's runtime arguments; LSE has the same
-semantics (O = 0 and LSE = -inf for a row no key reaches). An additive bias
+semantics (O = 0 and LSE = -inf for a row no key reaches; a row whose sum is NaN gets
+O = NaN and LSE = NaN, as PyTorch's logsumexp, with one split or several). An additive bias
 (``has_bias``, a compile-time variant; f32, or the query's dtype with
 ``bias_query_dtype``, widened to f32 as it is read) is read through its broadcast strides,
 one row per lane, and added to the scaled scores; an object without one ignores the bias arguments.
@@ -660,9 +664,14 @@ def build_flash_attn_decode_module(
                 )
                 fs.append(f)
                 l_all = l_all + ls[w] * f
-            has = l_all > c_zero
+            # Unordered: only l == 0 (no key) is keyless. A NaN sum keeps its NaN, so O
+            # and the LSE are NaN, as PyTorch's logsumexp gives (l > 0 would write -inf).
+            has = l_all != c_zero
             inv_l = has.select(c_one / l_all, c_zero)
-            lse_val = has.select(c_lse_scale * m_all + fx.math.log(l_all), c_ninf)
+            # The split's max in natural-log units; -inf for a split no key reaches (not
+            # scale * -inf, which is NaN at scale 0).
+            m_nat = has.select(c_lse_scale * m_all, c_ninf)
+            lse_val = has.select(m_nat + fx.math.log(l_all), c_ninf)
             single = ns == fx.Int64(1)
             if const_expr(HAS_SINK):
                 # With one split the sink joins here, as one more key with no value,
@@ -685,7 +694,7 @@ def build_flash_attn_decode_module(
                 keep = has.select(fx.math.exp(m_natural - m_top), c_zero)
                 l_total = l_all * keep + fx.math.exp(sink_val - m_top)
                 inv_l = single.select(
-                    (l_total > c_zero).select(keep / l_total, c_zero), inv_l
+                    (l_total != c_zero).select(keep / l_total, c_zero), inv_l
                 )
                 lse_val = single.select(m_top + fx.math.log(l_total), lse_val)
             o_base = b * o_sb + hq * o_sh + qpos * o_ss
@@ -759,7 +768,14 @@ def build_flash_attn_decode_module(
                             Vec.from_elements([lse_val], fx.Float32),
                         )
                 else:
-                    gstore(wsl_ptr, prow, Vec.from_elements([lse_val], fx.Float32))
+                    # The split's max and sum apart, not their LSE: at |m| ~ FLT_MAX
+                    # (a lowest-finite bias on every key) m + ln l rounds to m, and the
+                    # merge would weight the splits equally rather than by l.
+                    gstore(
+                        wsl_ptr,
+                        prow * fx.Int64(2),
+                        Vec.from_elements([m_nat, l_all], fx.Float32),
+                    )
 
     @flyc.kernel(known_block_size=[MERGE_THREADS, 1, 1])
     def flash_attn_decode_merge_rdna_kernel(
@@ -801,10 +817,13 @@ def build_flash_attn_decode_module(
         c_ninf = fx.Float32(float("-inf"))
         c_zero = fx.Float32(0.0)
 
+        # Each split's record is (m_i, l_i): its max in natural-log units and its sum.
+        # A split weighs l_i * exp(m_i - M), which keeps its key count even where
+        # m_i + ln l_i would round to m_i.
         m = c_ninf
         for i, carry in range(fx.Int64(0), ns, fx.Int64(1), init=[m]):
-            li = fx.ptr_load(wsl + fx.Int32(row * ns + i))
-            mx = fx.Float32(carry[0]).maximumf(fx.Float32(li))
+            mi = fx.ptr_load(wsl + fx.Int32((row * ns + i) * fx.Int64(2)))
+            mx = fx.Float32(carry[0]).maximumf(fx.Float32(mi))
             m = yield [mx]
         m_all = m
         m_safe = (m_all == c_ninf).select(c_zero, m_all)
@@ -815,9 +834,16 @@ def build_flash_attn_decode_module(
         init = [c_zero] + [c_zero for _ in range(DPT)]
         res = init
         for i, carry in range(fx.Int64(0), ns, fx.Int64(1), init=init):
-            li = fx.ptr_load(wsl + fx.Int32(row * ns + i))
-            w = fx.math.exp(fx.Float32(li) - m_safe)
-            w = (fx.Float32(li) == c_ninf).select(c_zero, w)
+            ml = Vec(
+                fx.make_view(
+                    wsl + fx.Int32((row * ns + i) * fx.Int64(2)), fx.make_layout(2, 1)
+                ).load()
+            )
+            li = fx.Float32(ml[1])
+            # A split no key reaches (l = 0, m = -inf) weighs 0; a NaN l stays NaN.
+            w = (li == c_zero).select(
+                c_zero, li * fx.math.exp(fx.Float32(ml[0]) - m_safe)
+            )
             acc = []
             for j in range_constexpr(DPT):
                 d = tid + fx.Int64(j * MERGE_THREADS)
@@ -830,7 +856,8 @@ def build_flash_attn_decode_module(
                 acc.append(fx.Float32(carry[1 + j]) + w * fx.Float32(ov))
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = res[0]
-        has = l_all > c_zero
+        # Unordered, as in the main kernel: a NaN sum gives NaN O and LSE.
+        has = l_all != c_zero
         if const_expr(HAS_SINK):
             # The partials leave the sink out; it joins here, as in the main kernel.
             sink_val = fx.Float32(
@@ -844,7 +871,7 @@ def build_flash_attn_decode_module(
             )
             keep = has.select(fx.math.exp(m_safe - m_top), c_zero)
             l_total = l_all * keep + fx.math.exp(sink_val - m_top)
-            inv = (l_total > c_zero).select(keep / l_total, c_zero)
+            inv = (l_total != c_zero).select(keep / l_total, c_zero)
             sink_lse = m_top + fx.math.log(l_total)
         else:
             inv = has.select(fx.Float32(1.0) / l_all, c_zero)

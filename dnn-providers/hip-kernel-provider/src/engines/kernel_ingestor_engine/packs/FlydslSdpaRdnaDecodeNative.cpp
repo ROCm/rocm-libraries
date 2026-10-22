@@ -86,6 +86,10 @@ constexpr int64_t DECODE_MAX_ROW_TILES = 65535;
 constexpr int64_t DECODE_WAVES = 4;
 constexpr int64_t DECODE_TILE = 32;
 constexpr int64_t DECODE_MERGE_THREADS = 64;
+/// f32 statistics per split row of the workspace: the row's max (natural-log units) and its
+/// sum, kept apart so the merge weighs a split by its sum even where max + ln(sum) would
+/// round to the max (a lowest-finite bias on every key).
+constexpr int64_t DECODE_SPLIT_STATS = 2;
 /// Split-count bounds: a split should give each wave at least this many tiles, the splits
 /// together should roughly fill the device, and never more than this many.
 constexpr int64_t DECODE_MIN_TILES_PER_WAVE = 8;
@@ -141,16 +145,19 @@ int64_t decodeSplits(const SdpaProblem& problem, int64_t rowTiles, int computeUn
     return std::min({byWork, byDevice, DECODE_MAX_SPLITS});
 }
 
-/// The split workspace: a normalized f32 partial O and its LSE per (batch, query head,
-/// query position, split), or nothing when one split writes O directly.
+/// The split workspace: a normalized f32 partial O and its row's max and sum per (batch,
+/// query head, query position, split), or nothing when one split writes O directly.
 std::optional<size_t> decodeWorkspaceBytes(const SdpaProblem& problem, int64_t splits)
 {
     if(splits <= 1)
     {
         return size_t{0};
     }
-    const auto elements = checkedProduct(
-        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDimV + 1});
+    const auto elements = checkedProduct({problem.batch,
+                                          problem.numHeads,
+                                          problem.seqLenQ,
+                                          splits,
+                                          problem.headDimV + DECODE_SPLIT_STATS});
     if(!elements.has_value())
     {
         return std::nullopt;
@@ -200,8 +207,11 @@ bool decodeMergeReaches(const MatchContext& context,
                         const SdpaProblem& problem,
                         int64_t splits)
 {
-    const auto workspace = checkedProduct(
-        {problem.batch, problem.numHeads, problem.seqLenQ, splits, problem.headDimV + 1});
+    const auto workspace = checkedProduct({problem.batch,
+                                           problem.numHeads,
+                                           problem.seqLenQ,
+                                           splits,
+                                           problem.headDimV + DECODE_SPLIT_STATS});
     if(!workspace.has_value() || *workspace > INT32_LIMIT)
     {
         return false;
@@ -310,9 +320,9 @@ double flydslSdpaRdnaDecodeScore(const MatchContext& /*context*/,
 /**
  * @brief The decode object's main kernel's argument list (flash_attn_decode_rdna.py).
  *
- * Q, K, V, O, LSE and the split workspace's O and LSE (pointers); seq_len_q, seq_len_kv,
- * num_heads, kv_group, right_bound, left_bound, align_bottom_right, lse_on, num_splits
- * (i32); scale (f32); the (batch, sequence, head) strides of Q, K, V, O and LSE (i64);
+ * Q, K, V, O, LSE and the split workspace's O and (max, sum) pairs (pointers);
+ * seq_len_q, seq_len_kv, num_heads, kv_group, right_bound, left_bound,
+ * align_bottom_right, lse_on, num_splits (i32); scale (f32); the (batch, sequence, head) strides of Q, K, V, O and LSE (i64);
  * the bias (pointer) and its (batch, head, query, key) strides (i64), read only by a
  * has_bias object; the head_dim (i32), read only by a generic object; the sink (pointer)
  * and its head stride (i64), read only by a has_sink object.
@@ -336,7 +346,7 @@ const std::vector<KernelArgument>& flydslSdpaRdnaDecodeSignature()
 /**
  * @brief The decode object's merge kernel's argument list.
  *
- * O, LSE and the split workspace's O and LSE (pointers); seq_len_q, num_heads, lse_on,
+ * O, LSE and the split workspace's O and (max, sum) pairs (pointers); seq_len_q, num_heads, lse_on,
  * num_splits (i32); the (batch, sequence, head) strides of O and LSE (i64); the
  * head_dim (i32), the width of a generic object's workspace and O rows; the sink (pointer)
  * and its head stride (i64), read only by a has_sink object.
@@ -632,15 +642,15 @@ public:
 
         const auto splits = preparedSdpa.splits();
         // The workspace is the partial O (f32, head_dim per row and split) followed by
-        // the partial LSEs; unused with one split.
+        // each split row's (max, sum) pair, DECODE_SPLIT_STATS f32s; unused with one split.
         void* wsO = splits > 1 ? workspace : nullptr;
-        void* wsLse = splits > 1
-                          ? static_cast<void*>(
-                                static_cast<char*>(workspace)
-                                + static_cast<size_t>(problem.batch * problem.numHeads
-                                                      * problem.seqLenQ * splits * problem.headDimV)
-                                      * sizeof(float))
-                          : nullptr;
+        void* wsMaxSum
+            = splits > 1 ? static_cast<void*>(static_cast<char*>(workspace)
+                                              + static_cast<size_t>(problem.batch * problem.numHeads
+                                                                    * problem.seqLenQ * splits
+                                                                    * problem.headDimV)
+                                                    * sizeof(float))
+                         : nullptr;
         const auto lseOn = static_cast<int32_t>(binding.stats == NO_STATS ? 0 : 1);
         // Changing these argument lists means changing flydslSdpaRdnaDecodeSignature() and
         // flydslSdpaRdnaMergeSignature() with them.
@@ -652,7 +662,7 @@ public:
                     o.ptr,
                     stats,
                     wsO,
-                    wsLse,
+                    wsMaxSum,
                     static_cast<int32_t>(problem.seqLenQ),
                     static_cast<int32_t>(problem.seqLenKv),
                     static_cast<int32_t>(problem.numHeads),
@@ -693,7 +703,7 @@ public:
                         o.ptr,
                         stats,
                         wsO,
-                        wsLse,
+                        wsMaxSum,
                         static_cast<int32_t>(problem.seqLenQ),
                         static_cast<int32_t>(problem.numHeads),
                         lseOn,

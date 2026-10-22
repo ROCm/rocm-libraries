@@ -10,14 +10,17 @@ from the following third-party projects.
 - **Version:** commit `89ad52fbbb9e252396829a8a44b12e18b7acd970` (`v0.3.4.1-19-g89ad52f`)
 - **License:** Apache-2.0
 - **Project:** https://github.com/ROCm/FlyDSL
-- **Use:** The kernel sources under `flydsl/kernels_src/` are vendored from FlyDSL at
-  that commit. The two modified files (`kernels/norm/rmsnorm_kernel.py` and
-  `kernels/norm/rmsnorm_bwd_kernel.py`) carry a provenance header naming the upstream,
-  commit and path and listing their modifications; the other seven match upstream up to `black` formatting. The
-  FlyDSL code objects the provider ships
+- **Use:** The kernel sources under `flydsl/kernels_src/kernels/` in `common/`, `norm/`
+  and `attention_cdna/` are vendored from FlyDSL at that commit. The modified ones carry
+  a provenance header naming the upstream, commit and path, and list their
+  modifications there or in their directory's `README.md`: `norm/rmsnorm_kernel.py` and
+  `norm/rmsnorm_bwd_kernel.py`, and the three `attention_cdna/` kernels, whose
+  modifications `attention_cdna/README.md` lists. The rest match upstream up to `black`
+  formatting. The FlyDSL code objects the provider ships
   (`src/engines/kernel_ingestor_engine/descriptors/FlyDSL/`, packed into the
-  installed `.kpack` archives) are compiled from them. Each vendored file carries its
-  upstream SPDX identifier and copyright line.
+  installed `.kpack` archives) are compiled from these sources and from the AITER and
+  AOTriton ones below. Each vendored file carries its upstream SPDX identifier and
+  copyright line.
 
 FlyDSL's `LICENSE` file:
 
@@ -220,6 +223,45 @@ The License it refers to:
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
+```
+
+---
+
+## AITER
+
+- **Version:** commit 8253efc4059516f492df597b80ce5311e9fda8bd
+- **License:** MIT (the repository); the vendored file carries its own Apache-2.0
+  header (FlyDSL Project Contributors), covered by the License above
+- **Project:** https://github.com/ROCm/aiter
+- **Use:** `flydsl/kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` is
+  vendored from AITER's `aiter/ops/flydsl/kernels/flash_attn_func_gfx1201.py`, with the
+  modifications its header lists. `flash_attn_decode_rdna.py` beside it is written for
+  this provider and reuses its operand layouts, masking and online softmax. The
+  `hipkernel:flydsl_sdpa_rdna` and `hipkernel:flydsl_sdpa_rdna_decode` code objects are
+  compiled from them.
+
+```
+Copyright © Advanced Micro Devices, Inc. All rights reserved.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ---

@@ -131,6 +131,12 @@
 #  23. A sink of -inf on a row no key reaches: its max is floored at -FLT_MAX and
 #      1/l at 0 when l is 0, so O = 0 and LSE = -inf rather than NaN (sink objects
 #      only).
+#  24. A row whose softmax sum is NaN (NaN in Q, or NaN/inf in a key it sees) gets
+#      O = NaN and LSE = NaN, as PyTorch's logsumexp gives: the keyless test is
+#      l != 0 (unordered, true for NaN) rather than l > 0, which sent NaN rows to
+#      the keyless LSE of -inf. A row no key reaches still has l = 0 exactly. The
+#      decode kernel beside this one (flash_attn_decode_rdna.py) does the same,
+#      in its main kernel and in its split merge.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -1201,8 +1207,10 @@ def build_flash_attn_func_module(
 
         # A row no key reaches -- possible with a window, or bottom-right causal
         # with more queries than keys -- has l = 0. Its output is zero and its LSE
-        # -inf, as the reference defines them, rather than 0 * inf.
-        row_has_keys = l_final > c_zero_f
+        # -inf, as the reference defines them, rather than 0 * inf. Unordered, so a
+        # NaN sum is not keyless: O and the LSE stay NaN, as PyTorch's logsumexp
+        # (modification 24).
+        row_has_keys = l_final != c_zero_f
         if const_expr(HAS_SINK):
             # The max in natural-log units: unscaled without a bias, scaled with one.
             m_natural = (
@@ -1227,7 +1235,7 @@ def build_flash_attn_func_module(
             )
             keep = row_has_keys.select(fx.math.exp(m_natural - m_top), c_zero_f)
             l_total = l_final * keep + fx.math.exp(sink_val - m_top)
-            inv_l = (l_total > c_zero_f).select(keep / l_total, c_zero_f)
+            inv_l = (l_total != c_zero_f).select(keep / l_total, c_zero_f)
             lse_val = m_top + fx.math.log(l_total)
         else:
             inv_l = row_has_keys.select(c_one_f / l_final, c_zero_f)

@@ -37,6 +37,29 @@ MIN_Q_BLOCKS_XCD_SWIZZLE = 64
 DUALWAVE_SWP_BLOCK_M = 256
 # Reserve an aligned out-of-bounds vector offset below the signed-i32 limit.
 PAGED_FP8_BUFFER_LIMIT_BYTES = (1 << 31) - 16
+# A bias build's floor for the running max of a row no key has reached (modification
+# 28): below every finite score a bf16 or f16 bias gives, the bf16 lowest value
+# (-3.39e38) included, so it lifts only a row of -inf. Not -FLT_MAX: under the kernels'
+# no-infs fast math, max(x, -FLT_MAX) is a no-op LLVM removes, as it removes a -inf bit
+# test on a fast-math result.
+_BIAS_NEG_FLOOR = -3.4e38
+# What a bias build's generic kernel writes over a score its own masks remove (key
+# padding, causal, window; modification 28): -FLT_MAX, below the floor, so its exponent
+# is 0 against any running max. Not -inf: the bias build's exponent subtracts the max
+# first, and under the no-infs fast math LLVM folds `select(c, -inf, s) - m` to `s - m`
+# (the -inf arm is poison), which dropped the key-padding mask and let the keys past a
+# ragged Skv into the softmax.
+_BIAS_MASKED_SCORE = -3.4028234663852886e38
+
+
+def _no_keys(l_sum):
+    """Whether a row's softmax sum is exactly +0, the "no key reached it" test of every
+    O and LSE select (modification 29). Tested on the bits: a row whose sum is NaN (a NaN
+    or +inf score) must keep its NaN O and LSE, as PyTorch's do, but under the kernels'
+    no-NaNs fast math LLVM rewrites the ordered `l == 0` select as `l != 0` (v_cmp_lg,
+    false for NaN), and `l > 0` is false for NaN too. An integer compare it leaves alone.
+    The sum starts at +0 and only adds non-negative terms, so +0 is its only zero."""
+    return fx.Float32(l_sum).bitcast(fx.Int32) == fx.Int32(0)
 
 
 _LDS_ALIAS_DOMAIN = '#llvm.alias_scope_domain<id = "flydsl.dualwave_swp.lds">'
@@ -2896,6 +2919,17 @@ class GenericFlashAttnContext:
         else:
             # A runtime scale argument (modification 2).
             self.c_sm_scale_log2e = self.c_sm_scale * fx.Float32(_LOG2E)
+        if getattr(self, "bias_rsrc", None) is not None:
+            # A bias build scales its scores and adds the bias before the softmax, as
+            # the reference does (modification 28), so the running max, the exponent
+            # and the LSE are in the scaled domain: the scale left for them is 1. A
+            # row the bias masks at the dtype's lowest value stays finite there, and
+            # only a row of -inf meets the floor.
+            self.c_score_scale = self.c_sm_scale
+            self.c_sm_scale = fx.Float32(1.0)
+            self.c_sm_scale_log2e = fx.Float32(_LOG2E)
+            self.c_neg_floor = fx.Float32(_BIAS_NEG_FLOOR)
+            self.c_masked_score = fx.Float32(_BIAS_MASKED_SCORE)
         self.c_zero_v16f32 = Vec.filled(16, 0.0, fx.Float32)
         self.width_i32 = fx.Int32(traits.WARP_SIZE)
         self.shuf_32_i32 = fx.Int32(32)
@@ -4261,8 +4295,8 @@ class GenericSoftmaxHelper:
         return kv_start_i32 + lane_off, moff
 
     def add_bias(self, s_raw_lo, s_raw_hi, kv_start):
-        """Add the bias (modification 12) to the unscaled scores, as bias / scale: the
-        kernel scales scores inside the exponent, so this adds `bias` to the scaled ones.
+        """Scale the scores and add the bias (modification 12): score * scale + bias, the
+        scaled domain the rest of a bias build's softmax works in (modification 28).
         Each lane's 32 scores are 8 runs of 4 consecutive keys, one 8-byte load each."""
         ctx = self.ctx
         traits = ctx.traits
@@ -4279,9 +4313,9 @@ class GenericSoftmaxHelper:
                 vals = Vec(Vec(raw, (4,), ctx.elem_dtype).to(fx.Float32))
                 for e in range_constexpr(4):
                     scores[4 * g + e] = fx.fma(
-                        vals[e],
-                        ctx.c_bias_inv_scale,
                         scores[4 * g + e],
+                        ctx.c_score_scale,
+                        vals[e],
                         fastmath=ctx.fm_fast,
                     )
         return out_lo, out_hi
@@ -4290,8 +4324,12 @@ class GenericSoftmaxHelper:
     def apply_kv_mask(self, s_raw_lo, s_raw_hi, kv_start):
         ctx = self.ctx
         traits = ctx.traits
+        # A masked score: -inf, or in a bias build -FLT_MAX, which fast math cannot
+        # fold out of the bias build's (s - m) exponent (`_BIAS_MASKED_SCORE`).
+        c_masked = ctx.c_neg_inf
         if const_expr(getattr(ctx, "bias_rsrc", None) is not None):
             s_raw_lo, s_raw_hi = self.add_bias(s_raw_lo, s_raw_hi, kv_start)
+            c_masked = ctx.c_masked_score
         kv_start_i32 = fx.Int32(kv_start)
         if const_expr(traits.CAUSAL):
             # below-diagonal tiles skip masking; guard carries the two score lists
@@ -4300,7 +4338,7 @@ class GenericSoftmaxHelper:
             max_kv_col_i32 = kv_start_i32 + fx.Int32(traits.BLOCK_N - 1)
             tile_needs_mask = max_kv_col_i32 > q_start_i32
             col_base_i32, moff = self._kv_mask_lane_off(kv_start_i32)
-            c_neg_inf = ctx.c_neg_inf
+            c_neg_inf = c_masked
             if const_expr(ctx.win_lo_i32 is not None):
                 # The window's lower edge (modification 11): a tile below the block's
                 # last row's edge needs the mask too.
@@ -4349,9 +4387,9 @@ class GenericSoftmaxHelper:
             needs_pad_mask = fx.Int32(kv_tile_end) > seq_len_i32
             for r in range_constexpr(16):
                 kv_col = col_base_i32 + fx.Int32(moff[r])
-                masked_lo = (kv_col >= seq_len_i32).select(ctx.c_neg_inf, s_raw_lo[r])
+                masked_lo = (kv_col >= seq_len_i32).select(c_masked, s_raw_lo[r])
                 masked_hi = (kv_col + fx.Int32(traits.K_SUB_N) >= seq_len_i32).select(
-                    ctx.c_neg_inf, s_raw_hi[r]
+                    c_masked, s_raw_hi[r]
                 )
                 s_raw_lo[r] = (needs_pad_mask).select(masked_lo, s_raw_lo[r])
                 s_raw_hi[r] = (needs_pad_mask).select(masked_hi, s_raw_hi[r])
@@ -4381,13 +4419,23 @@ class GenericSoftmaxHelper:
                 local_max = fx.maxnumf(local_max, s_raw_hi[r])
         row_max = fx.maxnumf(local_max, self.reduction_peer(local_max))
         m_new_raw = fx.maxnumf(m_running, row_max)
-        if const_expr(traits.CAUSAL):
+        # A bias can mask a whole row as causal masking does (modification 28).
+        if const_expr(traits.CAUSAL or getattr(ctx, "bias_rsrc", None) is not None):
             m_new_raw = fx.maxnumf(m_new_raw, ctx.c_neg_floor)
 
         diff_m_scaled = (m_running - m_new_raw) * ctx.c_sm_scale_log2e
         corr = self._exp2(diff_m_scaled)
         neg_scaled_max = ctx.c_zero_f - ctx.c_sm_scale_log2e * m_new_raw
         return m_new_raw, corr, neg_scaled_max
+
+    def _exp2_arg(self, s, m_new_raw, neg_scaled_max):
+        """A score's exponent, (s - m) * scale * log2(e). A bias build takes the
+        difference first (modification 28): near -FLT_MAX, the fused form's s * log2(e)
+        and -m * log2(e) overflow to -inf + inf."""
+        ctx = self.ctx
+        if const_expr(getattr(ctx, "bias_rsrc", None) is not None):
+            return (s - m_new_raw) * ctx.c_sm_scale_log2e
+        return fx.fma(s, ctx.c_sm_scale_log2e, neg_scaled_max, fastmath=ctx.fm_fast)
 
     def online_softmax(self, m_running, l_running, s_raw_lo, s_raw_hi):
         ctx = self.ctx
@@ -4399,16 +4447,12 @@ class GenericSoftmaxHelper:
         p_vals_hi = []
         local_sum = ctx.c_zero_f
         for r in range_constexpr(16):
-            diff_lo = fx.fma(
-                s_raw_lo[r], ctx.c_sm_scale_log2e, neg_scaled_max, fastmath=ctx.fm_fast
-            )
+            diff_lo = self._exp2_arg(s_raw_lo[r], m_new_raw, neg_scaled_max)
             p_lo = self._exp2(diff_lo)
             p_vals_lo.append(p_lo)
             local_sum = local_sum + p_lo
         for r in range_constexpr(16):
-            diff_hi = fx.fma(
-                s_raw_hi[r], ctx.c_sm_scale_log2e, neg_scaled_max, fastmath=ctx.fm_fast
-            )
+            diff_hi = self._exp2_arg(s_raw_hi[r], m_new_raw, neg_scaled_max)
             p_hi = self._exp2(diff_hi)
             p_vals_hi.append(p_hi)
             local_sum = local_sum + p_hi
@@ -4499,6 +4543,7 @@ class GenericSoftmaxHelper:
         s_raw_hi,
         neg_scaled_max,
         v_base,
+        m_new_raw,
     ):
         ctx = self.ctx
         traits = ctx.traits
@@ -4511,18 +4556,12 @@ class GenericSoftmaxHelper:
             p_exp_lo = []
             p_exp_hi = []
             for j in range_constexpr(traits.MFMA_LANE_K):
-                diff_lo = fx.fma(
-                    s_raw_lo[p_base + j],
-                    ctx.c_sm_scale_log2e,
-                    neg_scaled_max,
-                    fastmath=ctx.fm_fast,
+                diff_lo = self._exp2_arg(
+                    s_raw_lo[p_base + j], m_new_raw, neg_scaled_max
                 )
                 p_exp_lo.append(self._exp2(diff_lo))
-                diff_hi = fx.fma(
-                    s_raw_hi[p_base + j],
-                    ctx.c_sm_scale_log2e,
-                    neg_scaled_max,
-                    fastmath=ctx.fm_fast,
+                diff_hi = self._exp2_arg(
+                    s_raw_hi[p_base + j], m_new_raw, neg_scaled_max
                 )
                 p_exp_hi.append(self._exp2(diff_hi))
             for j in range_constexpr(traits.MFMA_LANE_K):
@@ -4578,24 +4617,28 @@ class GenericStoreHelper:
                     )
 
     def with_sink(self, m_final, l_final, q_row):
-        """The row's softmax denominator and natural-log LSE, an attention sink's logit
-        included when one is bound (modification 19): a row that reaches keys adds
-        exp(sink - m) to its denominator, one that reaches none keeps O = 0 and gets
-        LSE = sink. Without a sink, LSE = -inf for such a row, as before."""
+        """The row's softmax denominator, natural-log LSE and O factor, an attention
+        sink's logit included when one is bound (modification 19): a row that reaches
+        keys takes the max over its scores and the sink, m_top = max(m, sink), so its
+        denominator is l * exp(m - m_top) + exp(sink - m_top) and O is scaled by
+        exp(m - m_top) (modification 29); one that reaches none keeps O = 0 and gets
+        LSE = sink. Without a sink, LSE = -inf for such a row, as before. A row whose
+        sum is NaN keeps a NaN LSE (modification 29): "no keys" is l == +0, tested on
+        its bits (`_no_keys`)."""
         ctx = self.ctx
         if ctx.sink is None:
             # A row no key reached has m = -inf and l = 0, so the sum is -inf + -inf by
             # design. Under fast math (no infinities) LLVM may drop it as poison and
             # store a stale register; select -inf instead and take the log without the
             # fast flags (modification 23).
-            lse = (fx.Float32(l_final) > ctx.c_zero_f).select(
+            lse = _no_keys(l_final).select(
+                ctx.c_neg_inf,
                 fx.Float32(
                     m_final * ctx.c_sm_scale
                     + fx.log(l_final, fastmath=fx.arith.FastMathFlags.none)
                 ),
-                ctx.c_neg_inf,
             )
-            return l_final, lse
+            return l_final, lse, None
         head = ctx.q_head_idx
         if const_expr(ctx.traits.PACK_GQA):
             # A packed row's own head; a row past the group reads the group's first.
@@ -4612,22 +4655,26 @@ class GenericStoreHelper:
         sink_val = (fx.Int32(ctx.sink_on) != fx.Int32(0)).select(
             fx.Float32(fx.Float32(raw)), ctx.c_neg_inf
         )
-        has_keys = fx.Float32(l_final) > ctx.c_zero_f
+        no_keys = _no_keys(l_final)
         m_scaled = fx.Float32(m_final * ctx.c_sm_scale)
-        m_safe = has_keys.select(m_scaled, ctx.c_zero_f)
-        l_adj = has_keys.select(
-            fx.Float32(l_final) + fx.math.exp(sink_val - m_safe), ctx.c_zero_f
+        # The max over the scores and the sink (modification 29): exp(sink - m) alone
+        # overflows to +inf once the sink leads the row's max by more than ~88.7.
+        m_top = fx.Float32(m_scaled.maximumf(sink_val))
+        keep = fx.Float32(fx.math.exp(m_scaled - m_top))
+        l_adj = no_keys.select(
+            ctx.c_zero_f,
+            fx.Float32(l_final) * keep + fx.math.exp(sink_val - m_top),
         )
-        lse = has_keys.select(
-            fx.Float32(m_scaled + fx.log(l_adj, fastmath=ctx.fm_fast)), sink_val
+        lse = no_keys.select(
+            sink_val, fx.Float32(m_top + fx.log(l_adj, fastmath=ctx.fm_fast))
         )
-        return l_adj, lse
+        return l_adj, lse, keep
 
     def store_lse(self, m_final, l_final, q_row):
         # LSE = sm_scale * m_raw + ln(l); natural log, softmax scale folded in
         # (fully-masked row has l == 0 -> -inf, or the sink's logit).
         ctx = self.ctx
-        _, lse_val = self.with_sink(m_final, l_final, q_row)
+        _, lse_val, _ = self.with_sink(m_final, l_final, q_row)
         head, pos = ctx.q_head_idx, q_row
         if const_expr(ctx.traits.PACK_GQA):
             # A packed row's own head and position (modification 15).
@@ -4652,20 +4699,25 @@ class GenericStoreHelper:
     def store_partial(self, loop_results, q_row):
         """One split's normalized f32 O and its LSE, to the workspace (modification 14):
         O at (((b * Hq + h) * Sq + row) * splits + split) * Dv + col, the LSE at the same
-        row-and-split index. A split no key reached writes O = 0 and LSE = -inf."""
+        row-and-split index. A split no key reached writes O = 0 and LSE = -inf; one
+        whose sum is NaN writes NaN (modification 29)."""
         ctx = self.ctx
         traits = ctx.traits
         m_final = loop_results[0]
         l_final = loop_results[1]
         o_finals = [loop_results[2 + dc] for dc in range_constexpr(traits.D_CHUNKS)]
-        has_keys = fx.Float32(l_final) > ctx.c_zero_f
-        lse_val = has_keys.select(
+        # "No keys" is l == +0, tested on its bits (`_no_keys`), so a split
+        # whose sum is NaN (a NaN or +inf score) keeps a NaN LSE and O, and the merge
+        # propagates them, rather than storing the empty split's O = 0, LSE = -inf
+        # that the merge skips (modification 29).
+        no_keys = _no_keys(l_final)
+        lse_val = no_keys.select(
+            ctx.c_neg_inf,
             fx.Float32(
                 m_final * ctx.c_sm_scale + fx.log(l_final, fastmath=ctx.fm_fast)
             ),
-            ctx.c_neg_inf,
         )
-        inv_l = has_keys.select(rocdl.rcp(T.f32, l_final), ctx.c_zero_f)
+        inv_l = no_keys.select(ctx.c_zero_f, rocdl.rcp(T.f32, l_final))
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(16)
         row_ok = q_row < ctx.rows_b
         # Each descriptor spans this (batch, head)'s rows exactly -- or, packed, the
@@ -4713,7 +4765,7 @@ class GenericStoreHelper:
                 # blocks the same way).
                 vals = Vec.from_elements(
                     [
-                        has_keys.select(fx.Float32(v_o[grp * 4 + i]), ctx.c_zero_f)
+                        no_keys.select(ctx.c_zero_f, fx.Float32(v_o[grp * 4 + i]))
                         for i in range_constexpr(4)
                     ],
                     fx.Float32,
@@ -4770,14 +4822,21 @@ class GenericStoreHelper:
         if const_expr(traits.RETURN_LSE):
             self.store_lse(loop_results[0], l_final, q_row)
         if ctx.sink is not None:
-            # The sink's share of the denominator (modification 19).
-            l_final, _ = self.with_sink(loop_results[0], l_final, q_row)
-
-        inv_l_rcp = rocdl.rcp(T.f32, l_final)
-        if const_expr(traits.CAUSAL or ctx.sink is not None):
-            inv_l = (fx.Float32(l_final) > ctx.c_zero_f).select(inv_l_rcp, ctx.c_zero_f)
+            # The sink's share of the denominator (modification 19), against the max
+            # over the scores and the sink, which also scales O by keep
+            # (modification 29). A row with l == 0 gets O = 0; a NaN row stays NaN.
+            l_final, _, keep = self.with_sink(loop_results[0], l_final, q_row)
+            inv_l = _no_keys(l_final).select(
+                ctx.c_zero_f, keep * rocdl.rcp(T.f32, l_final)
+            )
         else:
-            inv_l = inv_l_rcp
+            inv_l_rcp = rocdl.rcp(T.f32, l_final)
+            if const_expr(traits.CAUSAL or getattr(ctx, "bias_rsrc", None) is not None):
+                inv_l = (fx.Float32(l_final) > ctx.c_zero_f).select(
+                    inv_l_rcp, ctx.c_zero_f
+                )
+            else:
+                inv_l = inv_l_rcp
         inv_l_vec = Vec.from_elements([inv_l], fx.Float32).broadcast_to(16)
         v_o = [Vec(o_finals[dc]) * inv_l_vec for dc in range_constexpr(traits.D_CHUNKS)]
 
@@ -4920,7 +4979,7 @@ class DualwaveKernelContext:
         self.diag_offset = diag_offset
         self.view_strides = view_strides
 
-    def init_types_and_constants(self, head_dim_runtime=None):
+    def init_types_and_constants(self, head_dim_runtime=None, scaled_scores=False):
         if head_dim_runtime is None:
             head_dim_runtime = self.head_dim_runtime
         traits = self.traits
@@ -4949,6 +5008,19 @@ class DualwaveKernelContext:
         else:
             # Runtime softmax scale (modification 2).
             self.c_sm_scale_log2e = fx.Float32(self.sm_scale) * c_log2e_f
+        self.scaled_scores = scaled_scores
+        if scaled_scores:
+            # A bias build scales its scores and adds the bias before the softmax, as
+            # the reference does (modification 28): the running max is a scaled score,
+            # the exponent takes only log2(e), and the LSE store takes the max in
+            # natural units, since times log2(e) a row the bias masks at the dtype's
+            # lowest value would overflow.
+            if self.sm_scale is None:
+                self.c_score_scale = fx.rsqrt(head_dim_f32, fastmath=self.fm_fast)
+            else:
+                self.c_score_scale = fx.Float32(self.sm_scale)
+            self.c_sm_scale_log2e = c_log2e_f
+            self.c_ln2_f = fx.Float32(1.0)
 
     def init_runtime_indices(
         self, seq_len=None, seq_len_kv=None, stride_q_n=None, stride_kv_n=None
@@ -5576,6 +5648,8 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
     are compared. Upstream instead rounded ``Q * sm_scale * log2e`` to the element
     type before the MFMA. The scale must be positive, which the engine checks;
     ``scaled_max`` turns m_row into the scaled domain the sink and stores expect.
+    A bias build (``scaled_scores``) scales its scores before the bias instead, and
+    keeps the max over them (modification 28).
     """
 
     # The floor for a row with no key yet. Finite after scaling by any scale below
@@ -5590,9 +5664,16 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         return _score_pair_max(v_s, self.c_neg_inf, self.fm_fast)
 
     def floor_masked_max(self, row_max):
+        if const_expr(getattr(self, "scaled_scores", False)):
+            # A bias build's scores are scaled already, and its floor lifts only a row
+            # of -inf, not one the bias masks at the dtype's lowest value (modification 28).
+            return fx.maxnumf(row_max, fx.Float32(_BIAS_NEG_FLOOR))
         return fx.maxnumf(row_max, fx.Float32(self._RAW_NEG_FLOOR))
 
     def scaled_max(self, m_row):
+        if const_expr(getattr(self, "scaled_scores", False)):
+            # Already scaled, and kept in natural units (modification 28).
+            return m_row
         return m_row * self.c_sm_scale_log2e
 
     def _corr(self, m_row, m_new):
@@ -5614,6 +5695,18 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
     def sub_m(self, v_s, row_max):
         if isinstance(v_s[0], list):  # masked tiles arrive as per-element lists
             v_s = _score_lists_to_vecs(v_s)
+        if const_expr(getattr(self, "scaled_scores", False)):
+            # (s - m) * log2(e), the difference first: near -FLT_MAX the fused form's
+            # s * log2(e) and -m * log2(e) overflow to -inf + inf (modification 28).
+            log2e_v = Vec.from_elements(
+                [self.c_sm_scale_log2e], fx.Float32
+            ).broadcast_to(16)
+            s_lo, s_hi = v_s
+            m_v = Vec.from_elements([row_max], fx.Float32).broadcast_to(16)
+            return (
+                as_mlir_value((Vec(s_lo) - m_v) * log2e_v),
+                as_mlir_value((Vec(s_hi) - m_v) * log2e_v),
+            )
         return _scale_sub_score_pair(
             v_s, row_max, self.c_sm_scale_log2e, self.c_zero_f, self.fm_fast
         )
@@ -6208,12 +6301,14 @@ class DualwaveStoreHelper(DualwaveKernelContext):
         )
         # -inf for a row no key reached, selected rather than left to a fast-math
         # -inf + log(0) that LLVM may drop as poison (modification 23).
-        lse_val = (fx.Float32(l_row) > self.c_zero_f).select(
+        # "No keys" is l == +0 (`_no_keys`), so a NaN row keeps a NaN LSE
+        # (modification 29).
+        lse_val = _no_keys(l_row).select(
+            self.c_neg_inf,
             fx.Float32(
                 m_row * self.c_ln2_f
                 + fx.log(l_row, fastmath=fx.arith.FastMathFlags.none)
             ),
-            self.c_neg_inf,
         )
         lse_local = self.q_head_idx * self.seq_len_v + q_row
         # One writer per row: low half-wave + in-bounds q_row; else the dropped OOB sentinel.
@@ -8503,11 +8598,13 @@ class DualwaveSplitKCombineHelper(DualwaveSplitKCombineContext):
             lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_per_batch_bytes
         )
         # As the unsplit store: -inf selected for a row no split reached (modification 23).
-        lse_val = (fx.Float32(den) > self.c_zero_f).select(
+        # "No keys" is den == +0 (`_no_keys`), so a NaN row keeps a NaN LSE
+        # (modification 29).
+        lse_val = _no_keys(den).select(
+            self.c_neg_inf,
             fx.Float32(
                 m_max * self.c_ln2_f + fx.log(den, fastmath=fx.arith.FastMathFlags.none)
             ),
-            self.c_neg_inf,
         )
         lse_in_range = self.row_valid.select(self.local_ml_idx, lse_per_batch_elems)
         lse_off = fx.Index(

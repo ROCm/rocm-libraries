@@ -44,7 +44,7 @@ Layout, per op:
   engine, heuristic, dispatch and the kernel-scoped matcher. One copy, so the
   authored root holds each id once.
 * ``<content>/<op>/<arch>/`` -- that arch's pack (KDP), one UKD per object, and
-  the objects themselves with ``manifest.json``: generated content, committed.
+  the objects themselves with ``manifest.json``: generated content, stored with DVC.
   Its readable summary, ``<arch>.SOURCE.md``, sits beside the folder.
 
 ``--check`` re-derives the documents and compares them to what is checked in,

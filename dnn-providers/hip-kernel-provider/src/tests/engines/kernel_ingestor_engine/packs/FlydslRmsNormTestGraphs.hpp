@@ -144,6 +144,9 @@ struct RmsNormGraphExtras
     /// A second RMS-norm node after the first, over the same tensors.
     bool secondNode = false;
     std::vector<int64_t> epsilonDims;
+    /// A baked epsilon carried as a DOUBLE tensor with this value, in place of the f32 one;
+    /// the only way to express an epsilon no f32 can hold.
+    std::optional<double> epsilonF64;
     /// Gamma's strides; unset means packed for its shape.
     std::optional<std::vector<int64_t>> scaleStrides;
     bool overrideShapeEnabled = false;
@@ -234,17 +237,33 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     // isPassByValueTensor() true, which is what keeps it out of isDeviceOperand().
     const std::vector<int64_t> scalarDims
         = extras.epsilonDims.empty() ? std::vector<int64_t>{1} : extras.epsilonDims;
-    const data_objects::Float32Value epsilonValue(epsilon);
-    tensors.push_back(tensor(
-        builder,
-        FLYDSL_EPSILON_UID,
-        "epsilon",
-        data_objects::DataType::FLOAT,
-        &scalarDims,
-        &scalarDims,
-        runtimeEpsilon ? data_objects::TensorValue::NONE : data_objects::TensorValue::Float32Value,
-        runtimeEpsilon ? flatbuffers::Offset<void>(0) : builder.CreateStruct(epsilonValue).Union(),
-        runtimeEpsilon));
+    if(extras.epsilonF64.has_value() && !runtimeEpsilon)
+    {
+        const data_objects::Float64Value epsilonValue(*extras.epsilonF64);
+        tensors.push_back(tensor(builder,
+                                 FLYDSL_EPSILON_UID,
+                                 "epsilon",
+                                 data_objects::DataType::DOUBLE,
+                                 &scalarDims,
+                                 &scalarDims,
+                                 data_objects::TensorValue::Float64Value,
+                                 builder.CreateStruct(epsilonValue).Union()));
+    }
+    else
+    {
+        const data_objects::Float32Value epsilonValue(epsilon);
+        tensors.push_back(tensor(builder,
+                                 FLYDSL_EPSILON_UID,
+                                 "epsilon",
+                                 data_objects::DataType::FLOAT,
+                                 &scalarDims,
+                                 &scalarDims,
+                                 runtimeEpsilon ? data_objects::TensorValue::NONE
+                                                : data_objects::TensorValue::Float32Value,
+                                 runtimeEpsilon ? flatbuffers::Offset<void>(0)
+                                                : builder.CreateStruct(epsilonValue).Union(),
+                                 runtimeEpsilon));
+    }
 
     if(withBias)
     {

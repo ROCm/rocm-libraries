@@ -125,13 +125,14 @@ _SCHEDULE_KNOBS = (
 # - head_dim 256, the one AOTriton ships, which spills 21-50 and is still 1.36-1.71x
 #   faster than the RDNA kernel's head_dim 256 objects on medium and long sequences;
 # - a mask at head_dim 128 (the f32 one's v8 load holds twice the registers of a 16-bit
-#   one, README modification 5);
+#   one, README modification 5; the non-causal f32 one spills one more since the
+#   natural-log scores of modification 9);
 # - the padded tiers, which carry the column masks on top of their tile's schedule. Those
 #   at 224 and 256 spill the most, and whether they beat the RDNA generic tiers anywhere
-#   is the ranker's to measure (deferred performance item, COVERAGE.md section 8).
+#   is for autotune (then UHD) to measure.
 _SPILL_ALLOWANCE: dict[tuple[int, int, int, int, int], int] = {
     (128, 0, 1, 0, 0): 3,
-    (128, 0, 1, 1, 0): 3,
+    (128, 0, 1, 1, 0): 4,
     (128, 1, 1, 1, 0): 4,
     (256, 0, 0, 0, 0): 21,
     (256, 0, 1, 0, 0): 30,

@@ -25,7 +25,9 @@ file per engine:
 [`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
 and
 [`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
-with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`.
+with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`,
+and the rules RDNA and CDNA apply alike (the mask's bounds, the sink, the scale tensor,
+output aliasing) in `FlydslSdpaShared.hpp`.
 
 **One kernel family per engine.** An engine's objects are one kernel — one algorithm, one
 argument list, one launch rule, one set of knobs every object fills. Two approaches are
@@ -116,13 +118,13 @@ compute it.
 `head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
 additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
 that serves every other `head_dim` that is a multiple of 8 up to 256, and a
-decode path (split-KV, the GQA group packed into one tile, with and without a bias) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode with one KV head at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss) at `head_dim` 64 and 128, prefill and decode. Batch, both sequence lengths,
+decode path (split-KV, the GQA group packed into 16-row tiles, with and without a bias) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode objects at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss) at `head_dim` 64 and 128, prefill and decode. Batch, both sequence lengths,
 head counts (MHA, GQA, MQA), every stride, the scale, the mask bounds (causal at
 either corner, right-side bands, sliding windows) and the LSE output are runtime
 arguments, so each object serves every shape and layout of its class. Inference
-only; not yet served: padding / varlen. Status
-against hipDNN's Tier 0 / Tier 1 and every declined feature with its effort are
-in [COVERAGE.md §5](COVERAGE.md).
+only; not yet served: padding / varlen. Status against common SDPA feature
+requirements and every declined feature with its effort are in
+[COVERAGE.md §5](COVERAGE.md).
 
 **SDPA forward on RDNA4, AOTriton's kernel** (`hipkernel:flydsl_sdpa_aiw`, gfx12-generic, 72
 objects): AOTriton's FlyDSL gfx1201 forward, vendored under
@@ -142,8 +144,13 @@ kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic
 split-KV decode objects (`hipkernel:flydsl_sdpa_cdna_decode`): bf16 and f16 at
 `head_dim` 64, 128 and 256, causal and non-causal; both sequence
 lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
-softmax scale, the causal diagonal and the LSE output are runtime arguments, and
-gfx950 adds a bias in the query's dtype at `head_dim` 64 and 128. Each class ships a default
+softmax scale, the causal diagonal, sliding windows and the LSE output are runtime
+arguments. A bias in the query's dtype is served at `head_dim` 64, 128 and 256 by the
+generic kernel on all three arches, and at 64 and 128 by gfx950's dual-wave kernel;
+attention sinks at 64 and 128 (prefill and decode); every other `head_dim` that is a
+multiple of 8 up to 256 by bucket objects (gfx90a adds 96, 160, 192 and 224 buckets);
+MLA prefill with V 128 and Q/K up to 256, and absorbed-MLA decode at V 512 (Q/K 576).
+100 objects on gfx950, 102 on gfx942 and on gfx90a. Each class ships a default
 object and measured companions -- other tiles for short queries and large problems --
 chosen by timing every candidate on the dnn-benchmarking attention graphs
 ([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries
@@ -296,15 +303,20 @@ objects beside a family set.
 under `kernels_src/`, the generators and their instance table, the docs. The
 per-target folders and summaries are *outputs*, written only by the generators
 (REGEN.md §3). Every manifest records a digest of the inputs its op was generated
-from (`inputs_sha256`): the op's own kernel directories
-(`generators/_manifest.py` `OP_KERNEL_DIRS`, where a new op adds its row), the
-shared kernel helpers and generator machinery, its `gen_<op>.py`, its own rows
-of the instance table, and its target's row of `arch_families.json`. The build's `gen_descriptors.py --check` fails when
+from (`inputs_sha256`): its `gen_<op>.py` and every `generators/` module it
+reaches through imports, the op's own kernel directories, the shared kernel
+helpers (`kernels/common`), and its own rows of the three tables -- the op
+registry (`generators/_ops.py` `OP_KERNEL_DIRS`, where a new op adds its row), the
+instance table, and its target's row of `arch_families.json`. Registering an op,
+or adding a module only some ops import, leaves every other op's objects current;
+`tests/test_inputs_digest.py` refuses an input the digest could miss (a dynamic
+import, a data file, a kernel import outside the op's declared directories). The
+build's `gen_descriptors.py --check` fails when
 the tree's inputs no longer match -- so a source change without a regeneration
 cannot ship objects built from other sources. Ops go stale together when they share
-inputs: `rmsnorm` and `rmsnorm_bwd` both digest the whole `norm/` directory and the
-shared kernel helpers and generator modules, so an edit to the forward-only
-`rmsnorm_kernel.py` invalidates the backward objects too. The digest hashes bytes, so
+inputs: `rmsnorm` and `rmsnorm_bwd` both digest the whole `norm/` directory, so an
+edit to the forward-only `rmsnorm_kernel.py` invalidates the backward objects too,
+and every op digests the shared generator machinery and kernel helpers. The digest hashes bytes, so
 a comment-only edit to any digested file also needs a regeneration (which then
 reproduces byte-identical objects). Regeneration is
 byte-reproducible against the pinned toolchain: a contributor who regenerates

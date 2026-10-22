@@ -196,12 +196,17 @@ struct SdpaGraphSpec
     bool packedQkv = false;
     /// K's dtype, when it should differ from Q's.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> keyDataType;
+    /// V's and O's dtypes, when they should differ from Q's.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> valueDataType;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> outputDataType;
     /// Q's head-dim stride, when it should not be 1.
     std::optional<int64_t> queryHeadDimStride;
     /// V's sequence stride, when it should not be the layout's (e.g. a padded row pitch).
     std::optional<int64_t> valueSequenceStride;
     /// O's batch stride, when it should not be the layout's (e.g. a slice of a larger buffer).
     std::optional<int64_t> outputBatchStride;
+    /// O's sequence stride, when it should not be the layout's (e.g. a padded row pitch).
+    std::optional<int64_t> outputSequenceStride;
     /// The LSE's batch stride, when it should not be the layout's.
     std::optional<int64_t> statsBatchStride;
 
@@ -222,8 +227,14 @@ struct SdpaGraphSpec
     /// unless sinkRank4 asks for [1, Hq, 1, 1].
     bool withSink = false;
     bool sinkRank4 = false;
+    /// The sink's dims as the graph declares them, packed row-major, over the [Hq] or
+    /// [1, Hq, 1, 1] that sinkRank4 picks (graph only).
+    std::vector<int64_t> sinkDims;
     /// Every sink logit -inf (the device values; the graph is unchanged).
     bool sinkNegativeInfinity = false;
+    /// The sink's element stride across query heads, 1 (packed) when unset. Graph only: the
+    /// device harnesses allocate a packed sink.
+    std::optional<int64_t> sinkHeadStride;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> sinkDataType;
     /// The bias as the graph declares it: rank 1 to 4, right-aligned to [B, H, Sq, Skv].
     /// Empty dims mean a packed [1, 1, Sq, Skv]; empty strides mean packed row-major.
@@ -233,6 +244,12 @@ struct SdpaGraphSpec
         = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     /// Every third query row's bias is the dtype's lowest finite value on every key.
     bool biasMasksRows = false;
+    /// The first this-many keys of every query row get a -inf bias, as a boolean key-padding
+    /// mask cast to the bias writes them (the CDNA harness).
+    int64_t biasNegativeInfinityLeadingKeys = 0;
+    /// Every third query row's bias is -inf on every key, a row no key reaches (the CDNA
+    /// harness).
+    bool biasNegativeInfinityRows = false;
     bool withDropout = false;
     /// Marks Q as ragged (THD), which the kernel would read as dense.
     bool raggedQuery = false;
@@ -262,6 +279,20 @@ struct SdpaGraphSpec
     /// Writes fields the spec has no member for; each should name FLYDSL_SDPA_RDNA_AUX_UID.
     std::function<void(hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder&)>
         extraAttributes;
+
+    // Device values only (the graph is unchanged), for the RDNA device harness.
+    /// V = 1 on every key below this one and 0 from it on, every head and column.
+    std::optional<int64_t> valueOnesBelowKey;
+    /// Q's first column NaN at this query position, every batch and head.
+    std::optional<int64_t> queryNanPosition;
+    /// K's first column NaN at this key, every batch and KV head.
+    std::optional<int64_t> keyNanPosition;
+    /// Every sink logit this value (the device values; the graph is unchanged), e.g. one far
+    /// above the scores (the CDNA harness).
+    std::optional<float> sinkValue;
+    /// Tensors (by uid) marked runtime pass-by-value: a host scalar supplied at execute, which
+    /// no operand but the scale can be.
+    std::set<int64_t> passByValueTensors;
 };
 
 /// The bias's dims and strides as @p spec declares them to the graph.
@@ -301,8 +332,8 @@ inline std::vector<int64_t> sdpaPackedQkvStrides(const SdpaGraphSpec& spec)
     return {spec.seqLenQ * row, spec.headDim, row, 1};
 }
 
-/// One tensor of the graph @p spec describes, with the alignment, virtual flag and ragged
-/// offset the spec gives its uid.
+/// One tensor of the graph @p spec describes, with the alignment, virtual and pass-by-value
+/// flags and ragged offset the spec gives its uid.
 inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>
     sdpaTensor(const SdpaGraphSpec& spec,
                flatbuffers::FlatBufferBuilder& builder,
@@ -333,7 +364,7 @@ inline flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttribute
         isVirtual || spec.virtualTensors.count(uid) != 0,
         valueType,
         value,
-        runtime,
+        runtime || spec.passByValueTensors.count(uid) != 0,
         ragged,
         declared == spec.alignment.end() ? 16 : declared->second);
 }
@@ -375,6 +406,10 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
     {
         oStrides[0] = *spec.outputBatchStride;
     }
+    if(spec.outputSequenceStride.has_value())
+    {
+        oStrides[2] = *spec.outputSequenceStride;
+    }
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -399,10 +434,20 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                  spec.keyDataType.value_or(spec.dataType),
                                  &kStrides,
                                  &kDims));
-    tensors.push_back(
-        sdpaTensor(spec, builder, FLYDSL_SDPA_RDNA_V_UID, "v", spec.dataType, &vStrides, &vDims));
-    tensors.push_back(
-        sdpaTensor(spec, builder, FLYDSL_SDPA_RDNA_O_UID, "o", spec.dataType, &oStrides, &oDims));
+    tensors.push_back(sdpaTensor(spec,
+                                 builder,
+                                 FLYDSL_SDPA_RDNA_V_UID,
+                                 "v",
+                                 spec.valueDataType.value_or(spec.dataType),
+                                 &vStrides,
+                                 &vDims));
+    tensors.push_back(sdpaTensor(spec,
+                                 builder,
+                                 FLYDSL_SDPA_RDNA_O_UID,
+                                 "o",
+                                 spec.outputDataType.value_or(spec.dataType),
+                                 &oStrides,
+                                 &oDims));
 
     const std::vector<int64_t> scalarDims{1};
     const auto scaleDims = spec.scaleDims.empty() ? scalarDims : spec.scaleDims;
@@ -456,10 +501,21 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                      &biasStrides,
                                      &biasDims));
     }
-    const std::vector<int64_t> sinkDims = spec.sinkRank4 ? std::vector<int64_t>{1, spec.heads, 1, 1}
-                                                         : std::vector<int64_t>{spec.heads};
-    const std::vector<int64_t> sinkStrides
-        = spec.sinkRank4 ? std::vector<int64_t>{spec.heads, 1, 1, 1} : std::vector<int64_t>{1};
+    std::vector<int64_t> sinkDims = spec.sinkRank4 ? std::vector<int64_t>{1, spec.heads, 1, 1}
+                                                   : std::vector<int64_t>{spec.heads};
+    const int64_t sinkHeadStride = spec.sinkHeadStride.value_or(1);
+    std::vector<int64_t> sinkStrides
+        = spec.sinkRank4 ? std::vector<int64_t>{spec.heads * sinkHeadStride, sinkHeadStride, 1, 1}
+                         : std::vector<int64_t>{sinkHeadStride};
+    if(!spec.sinkDims.empty())
+    {
+        sinkDims = spec.sinkDims;
+        sinkStrides.assign(sinkDims.size(), 1);
+        for(size_t axis = sinkDims.size() - 1; axis > 0; --axis)
+        {
+            sinkStrides[axis - 1] = sinkStrides[axis] * sinkDims[axis];
+        }
+    }
     if(spec.withSink)
     {
         tensors.push_back(sdpaTensor(spec,
@@ -771,6 +827,20 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             s.sinkDataType = data_objects::DataType::FLOAT;
         },
         withSink);
+    // The kernels compute a head's sink offset h * stride in 32 bits: with 64 heads, a
+    // stride of 2^26 puts heads 32 and up past it (shared servableSinkStride).
+    const auto sixtyFourHeadsWithASink = [withSink](SdpaGraphSpec& s) {
+        withSink(s);
+        s.heads = 64;
+        s.kvHeads = 8;
+    };
+    edit(
+        "SinkHeadOffsetsPastInt32",
+        [sixtyFourHeadsWithASink](SdpaGraphSpec& s) {
+            sixtyFourHeadsWithASink(s);
+            s.sinkHeadStride = int64_t{1} << 26;
+        },
+        sixtyFourHeadsWithASink);
 
     // Outputs whose elements share addresses: concurrent writes to one location race.
     const auto twoBatches = [](SdpaGraphSpec& s) { s.batch = 2; };
@@ -844,7 +914,9 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     for(const auto& [name, value] : {std::pair{"Negative", -0.125F},
                                      std::pair{"Zero", 0.0F},
                                      std::pair{"NaN", std::numeric_limits<float>::quiet_NaN()},
-                                     std::pair{"Infinite", std::numeric_limits<float>::infinity()}})
+                                     std::pair{"Infinite", std::numeric_limits<float>::infinity()},
+                                     // Past the shared bound every family serves (2^20).
+                                     std::pair{"AboveTheBound", 2097152.0F}})
     {
         const float scale = value;
         edit(std::string("ScaleValue") + name, [scale](SdpaGraphSpec& s) {
@@ -869,6 +941,10 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         s.mask = SdpaMask::TOP_LEFT_CAUSAL;
         s.diagonalAlignment = static_cast<data_objects::DiagonalAlignment>(7);
     });
+    edit("UnnamedDiagonalAlignmentUnderTheDeprecatedBoolean", [](SdpaGraphSpec& s) {
+        s.deprecatedCausalTopLeft = true;
+        s.diagonalAlignment = static_cast<data_objects::DiagonalAlignment>(7);
+    });
     edit("LeftBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.leftBound = -2; });
     edit("RightBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.rightBound = -2; });
 
@@ -876,6 +952,32 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     edit("Fp32", [](SdpaGraphSpec& s) { s.dataType = data_objects::DataType::FLOAT; });
     edit("Fp8", [](SdpaGraphSpec& s) { s.dataType = data_objects::DataType::FP8_E4M3; });
     edit("MixedDtypes", [](SdpaGraphSpec& s) { s.keyDataType = data_objects::DataType::HALF; });
+    // V read, or O written, as the query's dtype while the graph states the other 16-bit one.
+    edit("ValueInAnotherDtype",
+         [](SdpaGraphSpec& s) { s.valueDataType = data_objects::DataType::HALF; });
+    edit("OutputInAnotherDtype",
+         [](SdpaGraphSpec& s) { s.outputDataType = data_objects::DataType::HALF; });
+
+    // A rank-4 sink is [1, Hq, 1, 1]: an extent past 1 on any other axis is a sink the
+    // kernels would read once per head (shared servableSinkStride).
+    const auto rank4Sink = [withSink](SdpaGraphSpec& s) {
+        withSink(s);
+        s.sinkRank4 = true;
+    };
+    for(const auto& [name, axis] : {std::pair{"Batch", size_t{0}},
+                                    std::pair{"Sequence", size_t{2}},
+                                    std::pair{"HeadDim", size_t{3}}})
+    {
+        const size_t wide = axis;
+        edit(
+            std::string("Rank4SinkWithA") + name + "Extent",
+            [rank4Sink, wide](SdpaGraphSpec& s) {
+                rank4Sink(s);
+                s.sinkDims = {1, s.heads, 1, 1};
+                s.sinkDims[wide] = 2;
+            },
+            rank4Sink);
+    }
     return cases;
 }
 

@@ -99,6 +99,28 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    LSE where hipDNN expects -inf. `m_top` there is floored at the kernel's own finite
    m floor (-3.40282e38), so the term is exp2(-inf) = 0, `l` is exactly 0 and the LSE
    takes modification 2's -inf. A row that reaches keys, or a finite sink, is unchanged.
+   (Since modification 9 the floor there is -FLT_MAX, in the natural-log domain.)
+9. **Bias and sink in the natural-log domain** (`flash_attn_func_gfx1201_aiw.py`,
+   `generators/gen_sdpa_aiw.py`). Upstream keeps the scores base-2, `qk * scale * log2e`,
+   and adds `bias * log2e` to them before subtracting the max. For any |bias| above
+   2.3587e38 that product overflows f32: a bf16 or f32 `finfo.min` padding mask (the
+   HF/transformers convention) became -inf, so a row masked that way on every key gave
+   O = 0 and LSE = -inf where PyTorch gives mean(V) and an LSE near the bias, and a bias
+   above 2.3587e38 gave NaN. The sink had the same overflow (`sink * log2e`, LSE NaN for a
+   sink above 2.3587e38). A bias build now does what the RDNA kernel's modification 22
+   does: `s = qk * scale + bias` (one FMA), the row max taken on s, and every exponent
+   `exp2((s - m) * log2e)`, the difference formed first. Its m floor is -FLT_MAX rather
+   than -3.40282e38, so an f32 `finfo.min` score sits above it; no softmax op carries
+   `ninf`, and the ISA keeps the literal (`0xff7fffff`) as the loop's initial max. A
+   sink build takes the sink's max, its term and the LSE in the same domain (a build
+   without bias converts its base-2 m to m * ln2 there; the compiler fuses that into
+   the subtract, which leaves a rounding residual of ~1e-7 relative in the rescale of O).
+   The LSE is `m + log2(l) * ln2`. Builds with neither bias nor sink are byte-identical
+   to before; all 32 bias and sink objects changed. Registers: the bf16 head_dim 128
+   non-causal f32-mask object spills 4 VGPRs where it spilled 3 (its allowance rises
+   to 4); the head_dim 256 bias objects spill 1-5 fewer; head_dim 64 f32-mask objects
+   use 2-4 fewer VGPRs. The LSE of a row whose sum is NaN stays NaN (the zero test on l
+   is a bit test, `v_cmp_class` for +0 in the ISA), PyTorch's answer.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and

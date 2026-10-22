@@ -134,6 +134,7 @@ from flydsl.expr.typing import Vector as Vec
 KERNEL_NAME = "flash_attn_func_gfx1201_aiw_kernel"
 _LOG2E = host_math.log2(host_math.e)
 _LN2 = 0.6931471824645996  # matches AOTriton's literal exactly
+_FLT_MAX = 3.4028234663852886e38  # f32's largest finite value (modification 9)
 
 # `dtype_to_elem_type` and `_run_compiled` are inlined copies of
 # `kernels.common.kernels_common.dtype_to_elem_type` and
@@ -648,6 +649,19 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
     # removes. That is what this kernel computes once the refusal is gone -- in
     # every tile the order is scale, bias, mask, and the mask writes -inf
     # whatever the bias held -- so nothing else changes.
+    #
+    # Modification 9 (hipDNN vendoring): a bias build keeps its scores, m and
+    # the floor in the *natural-log* scaled domain, s = qk * scale + bias, and
+    # exponentiates exp2((s - m) * log2e), subtracting first (the RDNA kernel's
+    # modification 22). Upstream adds bias * log2e to base-2 scores, which
+    # overflows f32 for any |bias| above 2.3587e38: a bf16 or f32 finfo.min
+    # padding mask became -inf (O = 0 where PyTorch gives mean(V)) and a large
+    # positive one NaN. The floor there is -FLT_MAX, below every finite score
+    # (f32 finfo.min included); no softmax op carries `ninf`, so a max against
+    # it is not folded away. A sink build moves its epilogue (the sink's max
+    # and the LSE) to the same domain for the same reason: sink * log2e
+    # overflowed above 2.3587e38. Builds with neither stay as upstream.
+    M_NATURAL = bool(BIAS_TYPE)
 
     # Dropout, AOTriton's ENABLE_DROPOUT. A build axis, so a build without it
     # emits no PRNG at all -- the loop is latency-bound and a caller who does
@@ -1358,10 +1372,14 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         c_neg_inf = fx.Float32(float("-inf"))
         # m_i floor: finite, so an all-masked tile cannot produce -inf - -inf.
         # Finite floor, so an all-masked row cannot produce -inf - -inf.
-        c_m_init = fx.Float32(-3.40282e38)
+        # Modification 9: a bias build's m is natural-log scaled and its floor
+        # is -FLT_MAX, below a finfo.min bias; others keep upstream's base-2 m.
+        c_m_init = fx.Float32(-_FLT_MAX if M_NATURAL else -3.40282e38)
         c_zero_f = fx.Float32(0.0)
         c_one_f = fx.Float32(1.0)
         c_sm_scale_log2e = sm_log2e
+        if const_expr(M_NATURAL):
+            c_sm_scale = fx.Float32(sm_scale)
         c_zero_v8f32 = Vec.filled(8, 0.0, fx.Float32)
         width_i32 = fx.Int32(WARP_SIZE)
         shuf_16_i32 = fx.Int32(16)
@@ -1698,15 +1716,20 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
 
                 # Scale before the row max, so m_i lives in the scaled
                 # domain and the exponent is a plain subtract.
-                s_raw = [fastmath.mul(v, c_sm_scale_log2e) for v in s_raw]
+                # Modification 9: a bias build scales by sm_scale alone; its m
+                # is natural-log scaled and log2e joins after the subtract.
+                if const_expr(M_NATURAL):
+                    s_raw = [fastmath.mul(v, c_sm_scale) for v in s_raw]
+                else:
+                    s_raw = [fastmath.mul(v, c_sm_scale_log2e) for v in s_raw]
 
                 if const_expr(BIAS_TYPE):
                     # ---- Bias, after the scale and before the mask ----
                     #
-                    # After the scale because m_i and the exponent live in the
-                    # base-2 scaled domain, so a bias in natural units has to
-                    # be multiplied by log2(e) first -- which is what
-                    # AOTriton's `qk += bias * 1.44269504089` is doing.
+                    # After the scale, in natural units: s = qk * scale + bias,
+                    # as PyTorch and cuDNN add it (modification 9). Upstream's
+                    # `qk += bias * 1.44269504089` added it to base-2 scores,
+                    # and bias * log2e overflows f32 above 2.3587e38.
                     #
                     # Before the mask so a column past seqlen_k stays -inf
                     # rather than becoming -inf + bias. Those columns are not
@@ -1798,9 +1821,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                                 ).to(fx.Float32)
                             )
                             _bs = fx.Float32(_braw if _bin else fx.Float32(0.0))
-                            s_raw[_i] = fastmath.add(
-                                s_raw[_i], fastmath.mul(_bs, fx.Float32(_LOG2E))
-                            )
+                            s_raw[_i] = fastmath.add(s_raw[_i], _bs)
                     else:
                         for _st in range_constexpr(NUM_S_ACCS):
                             _c0 = (_st // 2) * 32 + (_st % 2) * 16
@@ -1823,8 +1844,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                             for _r in range_constexpr(8):
                                 _bs = fx.Float32(Vec(_bv)[_r].to(fx.Float32))
                                 s_raw[_st * 8 + _r] = fastmath.add(
-                                    s_raw[_st * 8 + _r],
-                                    fastmath.mul(_bs, fx.Float32(_LOG2E)),
+                                    s_raw[_st * 8 + _r], _bs
                                 )
 
                 if const_expr(_MASK_STEPS):
@@ -1879,15 +1899,30 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 m_new_raw = fastmath.max(m_running, row_max)
 
                 # m is already scaled, so no scale appears in either exponent.
-                corr = rocdl.exp2(
-                    ir.F32Type.get(), fx.as_ir_value(fastmath.sub(m_running, m_new_raw))
-                )
+                # Modification 9: a bias build's m is natural-log scaled, so
+                # each exponent is (x - m) * log2e -- the difference first, so
+                # a score near +-FLT_MAX never meets the log2e multiply alone.
+                if const_expr(M_NATURAL):
+                    c_log2e = fx.Float32(_LOG2E)
+                    corr = rocdl.exp2(
+                        ir.F32Type.get(),
+                        fx.as_ir_value(
+                            fastmath.mul(fastmath.sub(m_running, m_new_raw), c_log2e)
+                        ),
+                    )
+                else:
+                    corr = rocdl.exp2(
+                        ir.F32Type.get(),
+                        fx.as_ir_value(fastmath.sub(m_running, m_new_raw)),
+                    )
                 neg_m = fastmath.sub(c_zero_f, m_new_raw)
 
                 p_vals = []
                 local_sum = fx.as_ir_value(c_zero_f)
                 for r in range_constexpr(NUM_S_VALS):
                     diff = fastmath.add(s_raw[r], neg_m)
+                    if const_expr(M_NATURAL):
+                        diff = fastmath.mul(diff, c_log2e)
                     p = rocdl.exp2(ir.F32Type.get(), fx.as_ir_value(diff))
                     p_vals.append(p)
                     local_sum = fastmath.add(local_sum, p)
@@ -2154,6 +2189,12 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         # 2^(m - m_top) over that sum. A row no key reached (l == 0) keeps only
         # the sink: O = 0 and LSE = sink. The rewritten m and l feed the LSE and
         # the normalisation below unchanged; `_o_keep` carries the O rescale.
+        #
+        # Modification 9: all of that now happens in the natural-log scaled
+        # domain -- m_top = max(m, sink), the terms exp2((x - m_top) * log2e) --
+        # because sink * log2e overflowed f32 above 2.3587e38 (LSE NaN where
+        # PyTorch gives the sink). A build without bias brings its base-2 m
+        # over as m * ln2 first; m_top, and so the LSE below, is natural-log.
         _f32_ty_sink = ir.F32Type.get()
         _o_keep = [None] * ROW_SUBTILES
         if const_expr(HAS_SINK):
@@ -2169,24 +2210,30 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                     )
                 ).to(fx.Float32)
             )
-            _sink2 = fastmath.mul(_sink_raw, fx.Float32(_LOG2E))
+            _c_log2e_sink = fx.Float32(_LOG2E)
             loop_results = list(loop_results)
             for qt in range_constexpr(ROW_SUBTILES):
                 _m = fx.Float32(loop_results[2 * qt])
+                if const_expr(not M_NATURAL):
+                    _m = fx.Float32(fastmath.mul(_m, fx.Float32(_LN2)))
                 _l = fx.Float32(loop_results[2 * qt + 1])
                 _has = _l > fx.Float32(0.0)
                 # Modification 8: a row no key reaches with a sink of -inf would put
                 # -inf in m_top, and exp2(-inf - -inf) is NaN even without fast-math.
-                # The kernel's own finite floor for m (c_m_init) keeps the sink term
-                # exp2(-inf) = 0, so l is 0 and the LSE takes the -inf branch below.
+                # A finite floor (-FLT_MAX, below every finite sink, since
+                # modification 9) keeps the sink term exp2(-inf) = 0, so l is 0
+                # and the LSE takes the -inf branch below.
                 _m_top = _has.select(
-                    fastmath.max(_m, _sink2),
-                    fastmath.max(_sink2, fx.Float32(-3.40282e38)),
+                    fastmath.max(_m, _sink_raw),
+                    fastmath.max(_sink_raw, fx.Float32(-_FLT_MAX)),
                 )
                 _keep = _has.select(
                     fx.Float32(
                         rocdl.exp2(
-                            _f32_ty_sink, fx.as_ir_value(fastmath.sub(_m, _m_top))
+                            _f32_ty_sink,
+                            fx.as_ir_value(
+                                fastmath.mul(fastmath.sub(_m, _m_top), _c_log2e_sink)
+                            ),
                         )
                     ),
                     fx.Float32(0.0),
@@ -2195,7 +2242,12 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                     fastmath.mul(_l, _keep),
                     fx.Float32(
                         rocdl.exp2(
-                            _f32_ty_sink, fx.as_ir_value(fastmath.sub(_sink2, _m_top))
+                            _f32_ty_sink,
+                            fx.as_ir_value(
+                                fastmath.mul(
+                                    fastmath.sub(_sink_raw, _m_top), _c_log2e_sink
+                                )
+                            ),
                         )
                     ),
                 )
@@ -2236,10 +2288,20 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             if _do_store:
                 _m = loop_results[2 * qt]
                 _l = loop_results[2 * qt + 1]
-                _lse = fastmath.mul(
-                    fastmath.add(_m, rocdl.log(_f32_ty, fx.as_ir_value(_l))),
-                    fx.Float32(_LN2),
-                )
+                if const_expr(M_NATURAL or HAS_SINK):
+                    # Modification 9: m is natural-log scaled here, so only
+                    # log2(l) takes the ln2 -- m * ln2 is never formed.
+                    _lse = fastmath.add(
+                        _m,
+                        fastmath.mul(
+                            rocdl.log(_f32_ty, fx.as_ir_value(_l)), fx.Float32(_LN2)
+                        ),
+                    )
+                else:
+                    _lse = fastmath.mul(
+                        fastmath.add(_m, rocdl.log(_f32_ty, fx.as_ir_value(_l))),
+                        fx.Float32(_LN2),
+                    )
                 # A row with no live keys gets +inf, not -inf: the backward
                 # pass subtracts LSE from qk, so +inf makes exp(qk - inf)
                 # zero for exactly the rows that must contribute nothing.
@@ -2247,6 +2309,10 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 # compares lower predictably.
                 # Modification 2 (hipDNN vendoring): -inf for such a row, the
                 # hipDNN / cuDNN convention, where AOTriton's backward wants +inf.
+                # Only an l whose bits are exactly 0 takes it: a NaN l (NaN in
+                # Q, K or the bias) keeps the NaN LSE, as PyTorch's logsumexp
+                # gives -- the target the other families converge on (parity
+                # P6). Keep this a bit test, not `l > 0`, which is false for NaN.
                 _lse = (
                     fx.Float32(_lse)
                     if fmha.bitcast_i32(fx.Float32(_l)) != fx.Int32(0)

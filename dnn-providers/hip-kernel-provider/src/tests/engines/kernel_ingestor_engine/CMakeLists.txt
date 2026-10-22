@@ -40,15 +40,19 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
     )
     # The architectures each op ships objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
-    string(REPLACE ";" "," _flydsl_rmsnorm_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm}")
-    string(REPLACE ";" "," _flydsl_rmsnorm_bwd_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm_bwd}")
-    target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM="${_flydsl_rmsnorm_archs}"
-        HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM_BWD="${_flydsl_rmsnorm_bwd_archs}"
-    )
+    # Every op's list, so the SDPA suites and TestContainer can say which engines this
+    # build must serve on the device too.
+    foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
+                       sdpa_rdna sdpa_rdna_decode sdpa_aiw)
+        string(REPLACE ";" "," _flydsl_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op}}")
+        string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+    endforeach()
     target_sources(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormBwdPacks.cpp

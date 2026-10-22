@@ -43,6 +43,7 @@ from kernels.attention_cdna.flash_attn_utils import (
     GenericStoreHelper,
     _is_gfx942_class,
     _make_flash_attn_generic_traits,
+    _no_keys,
     _waitcnt_vm_n,
     daz_denormal_attr,
 )
@@ -457,8 +458,6 @@ def build_flash_attn_func_module_primary(
         q_b_packs = q_loader.load_all(ctx.q_rsrc, ctx.q_row)
 
         ctx.init_constants(sm_scale)
-        if const_expr(has_bias):
-            ctx.c_bias_inv_scale = fx.Float32(1.0) / ctx.c_sm_scale
         ctx.init_kv_bounds()
         kv_upper = ctx.kv_upper
 
@@ -740,6 +739,7 @@ def build_flash_attn_func_module_primary(
                         s_raw_hi,
                         neg_scaled_max,
                         v_base,
+                        m_new_raw,
                     )
                 else:
                     p_packs_lo = softmax_helper.build_p_packs(p_vals_lo)
@@ -787,7 +787,8 @@ def build_flash_attn_func_module_primary(
     ):
         """Combine the KV splits' partials of one (batch, head, query) row by their LSEs
         (modification 14): O = sum_i w_i O_i / sum_i w_i with w_i = exp(lse_i - max), and
-        LSE = max + ln(sum_i w_i); a row no split reached gets O = 0 and LSE = -inf."""
+        LSE = max + ln(sum_i w_i); a row no split reached gets O = 0 and LSE = -inf, and
+        a row a split left NaN gets NaN (modification 29)."""
         elem_dtype = dtype_to_elem_type(traits.DTYPE_STR)
         row = fx.Index(gpu.block_idx.x)  # (b * Hq + h) * Sq + s
         tid = fx.Index(gpu.thread_idx.x)
@@ -858,9 +859,18 @@ def build_flash_attn_func_module_primary(
                 )
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = fx.Float32(res[0])
-        has = l_all > c_zero
+        # "No keys" is l == +0, tested on the bits so that fast math cannot turn it
+        # into a compare that is false for NaN: a split whose sum was NaN stored a NaN
+        # LSE, which maximumf carries into m_all and every weight, so the row's O and
+        # LSE come out NaN (modification 29).
+        no_keys = _no_keys(l_all)
+        inv = no_keys.select(c_zero, fx.Float32(1.0) / l_all)
+        m_lse, l_lse = m_all, l_all
         # The attention sink's logit joins the denominator once, here rather than in
         # any split's partial (modification 19); a row no key reached gets LSE = sink.
+        # It joins against the max over the splits' LSEs and the sink, m_top, which
+        # scales O by keep = exp(m_all - m_top): exp(sink - m_all) alone overflows to
+        # +inf once the sink leads by more than ~88.7 (modification 29).
         sink_val = c_ninf
         if const_expr(has_sink):
             sink_rsrc = buffer_ops.create_buffer_resource(Sink, max_size=True)
@@ -873,8 +883,11 @@ def build_flash_attn_func_module_primary(
             sink_val = (fx.Int32(sink_on) != fx.Int32(0)).select(
                 fx.Float32(fx.Float32(sink_raw)), c_ninf
             )
-            l_all = has.select(l_all + fx.math.exp(sink_val - m_safe), c_zero)
-        inv = has.select(fx.Float32(1.0) / l_all, c_zero)
+            m_top = fx.Float32(m_all.maximumf(sink_val))
+            keep = fx.Float32(fx.math.exp(m_all - m_top))
+            l_top = l_all * keep + fx.math.exp(sink_val - m_top)
+            inv = no_keys.select(c_zero, keep / l_top)
+            m_lse, l_lse = m_top, l_top
         o_base = (
             b_idx * fx.Index(stride_o_b)
             + h_idx * fx.Index(stride_o_h)
@@ -894,7 +907,7 @@ def build_flash_attn_func_module_primary(
                 )
         if tid == fx.Index(0):
             if fx.Int32(lse_on) != fx.Int32(0):
-                lse = has.select(m_all + fx.math.log(l_all), sink_val)
+                lse = no_keys.select(sink_val, m_lse + fx.math.log(l_lse))
                 lse_rsrc = buffer_ops.create_buffer_resource(LSE, max_size=True)
                 # Through the LSE's own strides (modification 20).
                 lse_off = (

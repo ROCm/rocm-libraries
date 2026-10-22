@@ -109,7 +109,8 @@ def build_flash_attn_dualwave_swp_module(
     has_alibi adds a per-head ALiBi positional bias computed analytically from a
     slope table; see the HAS_ALIBI block below.
     has_sink adds a per-head attention sink logit to the softmax denominator; see
-    the HAS_SINK block below. The three are independent and may be combined."""
+    the HAS_SINK block below. The three are independent and may be combined, except
+    has_bias with has_sink or split-K (modification 28)."""
     gpu_arch = get_hip_arch()
 
     if not gpu_arch.startswith("gfx950"):
@@ -147,6 +148,11 @@ def build_flash_attn_dualwave_swp_module(
     HAS_BIAS = bool(has_bias)
     HAS_ALIBI = bool(has_alibi)
     HAS_SINK = bool(has_sink)
+    if HAS_BIAS and (HAS_SINK or SPLITK):
+        # A bias build keeps its max in natural units (modification 28); the sink
+        # fold and the split-K combine take it in log2 units, where a row the bias
+        # masks at the dtype's lowest value overflows.
+        raise ValueError("has_bias is not supported with has_sink or num_kv_splits > 1")
 
     traits = _make_dualwave_swp_traits(
         num_heads,
@@ -276,7 +282,7 @@ def build_flash_attn_dualwave_swp_module(
                 "kv_h": stride_kv_h,
             },
         )
-        ctx.init_types_and_constants()
+        ctx.init_types_and_constants(scaled_scores=HAS_BIAS)
         ctx.init_runtime_indices()
         ctx.init_lds(SharedStorage)
         ctx.init_thread_mapping()
@@ -339,11 +345,11 @@ def build_flash_attn_dualwave_swp_module(
             _BIAS_READ_BATCH = min(4, _BIAS_GROUPS)
             _bias_frag_ty = Vec.make_type(_BIAS_VEC, ctx.elem_dtype)
             _bias_frag_align = _BIAS_VEC * traits.BF16_BYTES
-            # Scores are raw here, so the bias joins them divided by the softmax
-            # scale (modification 21).
-            _bias_log2e = Vec.from_elements(
-                [fx.Float32(BIAS_LOG2E) / ctx.c_sm_scale_log2e], fx.Float32
-            ).broadcast_to(_BIAS_VEC)
+            # The scores are scaled before the bias joins them, as the reference does
+            # (modification 28; modification 21 keeps them raw otherwise).
+            _score_scale_v16 = Vec.from_elements(
+                [ctx.c_score_scale], fx.Float32
+            ).broadcast_to(16)
             _bias_lds_base_idx = fx.Index(fx.ptrtoint(ctx.lds.bias.ptr))
             _bias_gran_bytes = traits.DMA_BYTES
             _bias_gran_elems = traits.DMA_BYTES // traits.BF16_BYTES
@@ -383,7 +389,8 @@ def build_flash_attn_dualwave_swp_module(
                 _alibi_atom, fx.slice(_alibi_div, (None, _alibi_idx_i32)), _alibi_frag
             )
 
-            # Divided by the softmax scale: it joins raw scores (modification 21).
+            # Divided by the softmax scale: it joins raw scores (modification 21), or a
+            # bias build's scaled ones, where the ratio is 1 (modification 28).
             _alibi_neg_slope = Vec(_alibi_frag.load(), (1,), fx.Float32)[0] * (
                 fx.Float32(-BIAS_LOG2E) / ctx.c_sm_scale_log2e
             )
@@ -451,6 +458,8 @@ def build_flash_attn_dualwave_swp_module(
 
         def _score_bias_half(s_h, tile_idx, h, buf):
             src = Vec(s_h)
+            if const_expr(HAS_BIAS):
+                src = src * _score_scale_v16
             out = [src[r] for r in range_constexpr(16)]
 
             if const_expr(HAS_ALIBI):
@@ -477,7 +486,7 @@ def build_flash_attn_dualwave_swp_module(
                             [out[r0 + e] for e in range_constexpr(_BIAS_VEC)],
                             fx.Float32,
                         )
-                        fused = bv * _bias_log2e + acc
+                        fused = bv + acc
                         for e in range_constexpr(_BIAS_VEC):
                             out[r0 + e] = fused[e]
 
@@ -577,8 +586,9 @@ def build_flash_attn_dualwave_swp_module(
                 else:
                     v_s_0 = softmax_helper.seq_pad_mask_if_needed(v_s_0, fx.Index(0))
             m_row_pro = softmax_helper.reduce_max(v_s_0)
-            if const_expr(traits.CAUSAL):
-                # Floor fully-masked rows (-inf) to finite so exp2 yields 0, not NaN.
+            if const_expr(traits.CAUSAL or HAS_BIAS):
+                # Floor fully-masked rows (-inf) to finite so exp2 yields 0, not NaN; a
+                # bias can mask a whole row as causal masking does (modification 28).
                 m_row_pro = softmax_helper.floor_masked_max(m_row_pro)
             v_s_0 = softmax_helper.sub_m(v_s_0, m_row_pro)
             v_p_0 = softmax_helper.exp2(v_s_0, 0, 16)
@@ -1033,7 +1043,8 @@ def build_flash_attn_dualwave_swp_module(
             # Epilogue C13 (compute): final P*V -> v_o holds the unnormalized output.
             v_o = gemm_helper.pv(v_p_1, v_packs_e13, v_o)
 
-            # The sink, the stores and the split-K combine take the scaled max.
+            # The sink, the stores and the split-K combine take the scaled max (a bias
+            # build's is a scaled score already, in natural units: modification 28).
             m_row = softmax_helper.scaled_max(m_row)
 
             if const_expr(HAS_SINK and not traits.SPLITK):

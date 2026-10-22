@@ -136,7 +136,7 @@ Evaluated once per graph. Every one of these is a hard refusal.
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
 | rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
-| gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The same rule as `validateScaleNormalizedShape` in the frontend. |
+| gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The rule of `validateScaleNormalizedShape` in the frontend, but for rank: a gamma of lower rank than x, which the frontend rejects, is aligned at the innermost axis with its missing leading axes read as 1, so the matcher stays total. |
 | epsilon is one scalar: present, with dims, and extent 1 on every axis | The kernel takes one f32; a tensor of more elements would be read as its first. |
 | epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
 | The graph is not override-shape | Rows and width are bound from the graph's shapes at prepare, which an override-shape graph may replace at execute. |
@@ -154,8 +154,9 @@ engine's: the UED declares `sdk_version` 1.2.0, so a runtime pass-by-value
 epsilon reaches the matcher. A graph that declares a non-default tensor
 alignment needs 1.3.0 and is declined there.
 
-On success it binds `flydsl_rmsnorm.{x,scale,epsilon,y}.uid` plus `.rows` and
-`.columns`, so nothing downstream re-derives them from the graph.
+On success it binds `flydsl_rmsnorm.{x,scale,epsilon,y}.uid`, a training graph's
+`flydsl_rmsnorm.inv_rms.uid`, plus `.rows` and `.columns`, so nothing downstream
+re-derives them from the graph.
 
 ### Kernel-scoped — `flydslRmsNormKernelMatches`
 
@@ -245,7 +246,7 @@ do not compute, declined rather than approximated.
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
 | **Multi-node graphs, fused add+RMSNorm** | One node per kernel. Fusion would be its own pack. |
 | **Architectures outside gfx11-generic, gfx12-generic, gfx90a, gfx942 and gfx950** | Objects ship for the gfx11 generic family (gfx1100–gfx1103, gfx1150–gfx1153), the gfx12 one (gfx1200, gfx1201), and the CDNA targets gfx90a, gfx942 and gfx950. gfx1170/gfx1171 belong to `gfx11-7-generic`. With `GPU_TARGETS` naming no arch we ship kernels for, the integration reports dormant at configure time and stages nothing — it does not fail, and it does not silently produce an empty shard. Adding a family is a regeneration ([REGEN.md](REGEN.md) §3), not a code change. |
-| **Ops other than RMSNorm** | `OPS` in `_instances.py` has RMSNorm forward and backward only. |
+| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward and the SDPA forward families (§5, §7), each an engine of its own. |
 
 ---
 
@@ -303,10 +304,11 @@ and
 | | `right_bound`, `left_bound`, diagonal alignment |
 | | whether to write the LSE output, and its strides |
 
-So the instance key is `dtype × head_dim × causal × has_bias`, and every axis
+So the instance key is `dtype × head_dim × causal × has_bias × bias_q`, and every axis
 it enumerates is **model-determined**, never request-determined. That is what
-keeps the table at 32 rows — each cell below is one object without a bias and
-one with:
+keeps the specialized table at 48 rows — each cell below is one object without a bias,
+one with an f32 bias and one with a bias in the query's dtype (the MLA, sink and generic
+objects below are beside it):
 
 | | `head_dim` 64 | `head_dim` 96 | `head_dim` 128 | `head_dim` 256 |
 |---|---|---|---|---|
@@ -347,8 +349,9 @@ slower or mixed, so those keep 128); the tiers above 128 use head-dim pairs, as
 the 256 object does; the 256 tier also splits its columns across two
 workgroups (`dv_split` 2), because its masked loads on top of the pair schedule do
 not fit the register file in one. They rank below the specialized objects, each
-narrower tier above the wider (`priority` 40, 30, 20, 15, 12, 10), so 64/96/128/256
-always run their own object and the narrowest generic tier takes the rest. A bias
+narrower tier above the wider (`priority` 40, 30, 20, 15, 12, 10), so under the static
+order 64/96/128/256 run their own object and the narrowest generic tier takes the rest
+(autotune, timing every candidate, may find otherwise). A bias
 on a head no specialized object serves declines.
 
 The causal variant is the one that applies a right bound — top-left or
@@ -358,33 +361,40 @@ KV loop at the diagonal and skips fully masked tiles, and the non-causal one
 carries a V prefetch across iterations that the causal one drops for register
 pressure. Everything else about the mask is a runtime argument, served by both.
 
-**Decode** has its own fifty-six objects (`decode` 1; bf16 and f16 × causal × `head_dim`
+**Decode** has its own seventy-two objects (`hipkernel:flydsl_sdpa_rdna_decode`; bf16 and f16 × causal × `head_dim`
 64, 96, 128, 256 without a bias, with an f32 one and with one in the query's dtype, plus
-two generic tiers), from a kernel
+two generic tiers, the wide 576/512 and 512/512 objects and the sink objects at 64 and
+128), from a kernel
 written for it
 ([`flash_attn_decode_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_decode_rdna.py)).
 The prefill objects give a decode step 128 query rows of which one is used, and read
 each KV head once per query head. The decode kernel packs the query heads of one KV
 head (the GQA group) and the query positions into 16-row tiles, one workgroup per tile,
-so a graph reads each KV head once per tile rather than once per query head. It serves
-`(Hq / Hk) × Sq ≤ 128`; past that, the prefill objects, which share each K/V tile
-across 128 rows, are faster. The bias objects take one tile (16 rows): at `head_dim`
-128 and up they already fill the register file, and a tiled launch's row index spills. It splits the keys a row can see --
+so a graph reads each KV head once per tile rather than once per query head. Its objects
+without a bias take as many 16-row tiles as the grid's second dimension holds (65,535),
+so they also claim graphs with far more than a decode step's `(Hq / Hk) × Sq` rows, where
+the prefill objects, which share each K/V tile across 128 rows, are usually faster; which
+engine runs such a graph is autotune's (UHD's) to decide. The bias objects take one tile
+(16 rows): at `head_dim` 128 and up they already fill the register file, and a tiled
+launch's row index spills. It splits the keys a row can see --
 from the window's edge to the diagonal -- across workgroups, which the dispatcher
 sizes to the device: two workgroups per unit the device reports, because RDNA reports
 workgroup processors of two CUs each; and merges the splits by their LSEs with a
-second kernel compiled into the same object. They rank above the prefill objects
-(`priority` 150), so such a graph runs here. At `head_dim` 256 two workgroups share
+second kernel compiled into the same object. Their `priority` (150) ranks them only
+within the decode engine; it does not compare them with the prefill objects, which are
+another engine's. At `head_dim` 256 two workgroups share
 each split's rows, one per half of the output columns (`dv_split` 2), to fit the
 register file. The bias objects read the same broadcast bias
 as the prefill ones, each lane its own (head, position) row of the GQA group's slice.
 Every other head_dim that is a multiple of 8 runs on a generic decode object -- up to
 96, or above it up to 256 with the column split -- that reads it at runtime and never
 fetches the K and V columns past it, so a step moves only the bytes its head has (an
-up-to-128 tier does not fit the register file). They rank above every prefill object
-and below the exact ones, the narrower tier above the wider (`priority` 145, 140).
+up-to-128 tier does not fit the register file). Within the decode engine they rank
+below the exact objects, the narrower tier above the wider (`priority` 145, 140).
 K and V with different head counts stay on the prefill objects. A split launch takes
-workspace (a partial O and LSE per split); one split writes O directly.
+workspace (a partial O, the row max and the row sum per split, so the merge weighs each
+split by its key count even when a bias near the dtype's lowest value puts every max far
+below zero); one split writes O directly.
 
 ### 5.2 What a graph must be
 
@@ -392,15 +402,15 @@ One SDPA-forward node, and:
 
 | Condition | Why |
 |---|---|
-| Q, K, V, O present, rank 4, device operands, **not ragged** | The kernel reads each through a pointer as a dense batch; a ragged (THD) operand would be read as one. |
+| Q, K, V, O present, rank 4, device operands, **not ragged**, each declaring 16-byte alignment; no two elements of O at one address | The kernel reads each through a pointer as a dense batch; a ragged (THD) operand would be read as one. Rows move as 16-byte vectors from each base, and many workgroups write O at once. |
 | One dtype for all four, `BFLOAT16` or `HALF` | One element type throughout; no fp32 WMMA operand form exists. |
 | Head-dim stride 1 on all four; other strides positive | Each lane reads a row's head-dim values as one contiguous vector. Every other stride is a kernel argument, so BSHD, BHSD and packed-QKV views are all served. |
-| K and V share batch and sequence; K has Q's head dim; O is Q's shape with V's head dim; V's head dim equals Q/K's, or is 128 with Q/K 192 (MLA) | No broadcast. The MLA objects bake both head dims (kernel modification 20); every other object has one. |
+| K and V share batch and sequence; K has Q's head dim; O is Q's shape with V's head dim; V's head dim at most Q/K's, and one an object bakes: equal to Q/K's, 128 with Q/K 192 (MLA prefill), or 512 with Q/K 576 (absorbed-MLA decode) | No broadcast. The graph matcher admits any V no wider than Q/K; each object's kernel matcher then requires its baked `head_dim_v`. The MLA objects bake both head dims (kernel modification 20); every other object has one. |
 | `Hq % Hk == 0` and `Hq % Hv == 0`; K and V may differ in head count | The K head and the V head are each the query head divided by its own group size. |
-| Any `left_bound`/`right_bound` ≥ −1, either alignment, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. |
-| Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. The running max is over unscaled scores, which orders them correctly only for a positive scale. A pass-by-value scale is read from host memory at launch, and a non-positive or non-finite one is refused there. |
-| Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor | The kernel writes the natural-log LSE of the scaled scores there. |
-| Bias (`attn_mask`), if present: an f32 device tensor, or one in the query's dtype, of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
+| Any `left_bound`/`right_bound` ≥ −1 at either named `diagonal_alignment`, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. A boolean sets `right_bound` 0 unless the graph sets one: `causal_mask` at the stored `diagonal_alignment` (bottom-right when it says so), `causal_mask_bottom_right` always bottom-right. An alignment the schema does not name declines, boolean or not. |
+| Scale: `attn_scale_value` (> 0 and ≤ 2²⁰), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. Every FlyDSL SDPA family serves the same range (`FlydslSdpaShared.hpp` `MAX_SOFTMAX_SCALE`): positive, because the CDNA kernels take the running max over unscaled scores, and at most 2²⁰, beyond which each family overflows f32 at a different point, so all decline alike. A pass-by-value scale is read from host memory at launch, and one outside the range is refused there. |
+| Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, 4-byte aligned, positive strides on its axes longer than 1, no two elements at one address | The kernel writes the natural-log LSE of the scaled scores there, through its strides. |
+| Bias (`attn_mask`), if present: an f32 device tensor, or one in the query's dtype, declaring 16-byte alignment, of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
 | `Sq`, `Skv` < 2²⁹; one (batch, kv head) slice of K or V under 2 GiB; grid under 2³¹ | int32 mask arithmetic, and 32-bit bounds-checked buffer descriptors. |
 
 Any sequence length is correct: K and V reads past `seq_len_kv` return zero and
@@ -408,14 +418,14 @@ every such score is masked, so nothing is padded and nothing pads the softmax.
 A row no key reaches — a narrow window, or bottom-right causal with more
 queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
-### 5.3 Against hipDNN's attention Tier 0 / Tier 1
+### 5.3 Against common SDPA feature requirements
 
 | # | Requirement | Status |
 |---|---|---|
 | 1 | fp16, bf16; fp32 accumulate | **served** |
 | 2 | BSHD, BHSD, general B/S/H strides, packed QKV | **served**; packed QKV checked on the GPU as strided views into one buffer |
 | 3 | MHA, MQA, GQA (`Hq % Hk == 0 && Hq % Hv == 0`) | **served**, including K and V with different head counts |
-| 4 | attention scale | **served** (positive) |
+| 4 | attention scale | **served** (positive, at most 2²⁰) |
 | 5 | causal, top-left | **served** |
 | 6 | causal, bottom-right, `Sq ≠ Skv` | **served** |
 | 7 | softmax stats / LSE | **served** |
@@ -424,8 +434,8 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 | 10 | padding mask via `SEQ_LEN_Q`/`SEQ_LEN_KV` | missing |
 | 11 | sliding window (`left_bound`) | **served** (and right-side bands) |
 | 12 | varlen / THD | missing (declined) |
-| 13 | decode (`Sq == 1`) | **served by a decode path** (ATT-13): GQA-packed rows and split-KV, for `(Hq / Hk) × Sq ≤ 128` (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
-| — | `Dv ≠ Dqk` (MLA) | **served** for un-absorbed prefill (Q/K 192, V 128) and absorbed decode (Q/K 576, V 512, one KV head, `(Hq / Hk) × Sq ≤ 128`); every mask, LSE, no bias. Absorbed chunked prefill (more rows) declines |
+| 13 | decode (`Sq == 1`) | **served by a decode path**: GQA-packed rows in 16-row tiles (one tile, 16 rows, on the bias objects) and split-KV, K and V with one head count (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
+| — | `Dv ≠ Dqk` (MLA) | **served** for un-absorbed prefill (Q/K 192, V 128) and absorbed MLA (Q/K 576, V 512) on the decode objects, which tile any number of rows, so absorbed chunked prefill runs there too; every mask, LSE, no bias. The 576/512 objects are built for absorbed MLA's one KV head, but the matcher only requires K's and V's head counts to match |
 | 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
 | — | attention sink | **served** at `head_dim` 64 and 128 (gpt-oss), prefill and decode, with every mask and the LSE output, no bias: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a key with no value in each row's softmax (kernel modification 21). A row no key reaches gets O = 0 and LSE = the sink. hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference |
 
@@ -436,12 +446,12 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| **Padding mask** (Tier 1) | medium | Two per-batch length pointers read once per workgroup. The diagonal offset is already computed in-kernel from the lengths for exactly this. hipDNN's CPU reference does not implement padding yet, so its semantics must be defined there first. |
-| **Varlen / THD** (Tier 1) | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
-| Bias on a generic head_dim | small | A `has_bias` variant of the eight generic objects (+8). |
-| Absorbed MLA chunked prefill; other `Dv ≠ Dqk` pairs | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 one-KV-head decode objects ship. Chunked prefill at 576/512 (Hq × Sq past 128 rows) needs a prefill schedule at that width, or the decode kernel's row tiles lifted past 128 for single-KV-head graphs. Other pairs are a row each. |
-| fp32 I/O, FP8, dropout, paged KV, block masks, ALiBi, softcap | out of scope | As hipDNN's requirements state; ALiBi and softcap have no reference semantics. |
-| **Backward** | out of scope here | Inference-only, as for hipDNN's Tier 0/1. LSE is emitted so a backward can be added without an ABI break. |
+| **Padding mask** | medium | Two per-batch length pointers read once per workgroup. The diagonal offset is already computed in-kernel from the lengths for exactly this. hipDNN's CPU reference does not implement padding yet, so its semantics must be defined there first. |
+| **Varlen / THD** | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
+| Bias on a generic head_dim | small | A `has_bias` variant of the twenty-four generic prefill objects (+24). |
+| A prefill schedule for absorbed MLA; other `Dv ≠ Dqk` pairs | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 decode objects ship. Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. Other pairs are a row each. |
+| fp32 I/O, FP8, dropout, paged KV, block masks, ALiBi, softcap | out of scope | Not planned for these engines; ALiBi and softcap have no reference semantics. |
+| **Backward** | out of scope here | These engines are inference-only. LSE is emitted so a backward can be added without an ABI break. |
 | **Other architectures** | see below | The objects are `gfx11-generic` and `gfx12-generic` builds, so every RDNA3 / RDNA3.5 / RDNA4 part is served. |
 
 **Every gfx11 generic member** (gfx1100–gfx1103, gfx1150–gfx1153) is served by
@@ -465,7 +475,7 @@ objects.
 |---|---|
 | The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — every object byte-identical, per target |
 | Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna_decode.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaDecodePacks` |
-| Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
+| Each prefill object has the declared 38-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
 | Each engine's shard ships exactly one object per `dtype × head_dim × causal × has_bias × bias_q × head_dim_max × has_sink` class, each with its engine's one signature | `TestFlydslSdpaRdnaPacks` and `TestFlydslSdpaRdnaDecodePacks`, and the shard census that runs them |
 | The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch` |
@@ -489,12 +499,56 @@ which applies §5's graph matcher and declines only what this kernel cannot comp
   the kernel's shifted by `Skv - Sq`); an additive mask in Q's dtype or f32, broadcast
   over B, H and Sq, its key axis contiguous; attention sinks at 64 and 128; a V head
   count of its own; the LSE through its own strides; a scale baked or read at launch.
-- **Declined:** a mask whose key axis is strided; head dims that are not multiples of 8;
-  anything past 32-bit offsets. The kernel also takes packed (varlen) batches and
-  dropout, which this engine does not serve yet.
+- **Edge cases, as §5's prefill:** a mask at the lowest finite value (bf16 or f32
+  `finfo.min`, the HF padding convention) on every key of a row gives O = mean(V) and an
+  LSE near the mask, as PyTorch does; a mask or sink above 2.36e38 no longer overflows
+  (README modification 9: the scores, max and sink live in the natural-log domain, the
+  RDNA kernel's modification 22). The LSE of a row whose softmax sum is NaN is NaN.
+- **Declined:** a mask whose key axis is strided; Q, K, V or O, or a mask, with a batch,
+  head or sequence (query) stride that is not a multiple of 8 elements; an f32 mask whose
+  declared alignment is under 32 bytes; more than 65,535 query tiles or batches (the
+  grid's y and z); a mask or sink on a padded tier (those ship plain); head dims that are
+  not multiples of 8; anything past 32-bit offsets. The kernel also takes packed (varlen)
+  batches and dropout, which this engine does not serve yet.
 - **Which engine runs a graph** both this and §5's prefill engine serve is autotune's
   (UHD's) to decide: measured on gfx1201, this one is faster on MLA prefill and long
   sequences, §5's on decode and sinks.
+
+### 5.7 Edge cases: the same answer from every family
+
+Every FlyDSL SDPA engine -- RDNA prefill and decode, AOTriton's gfx1201 kernel, and the
+CDNA generic, dual-wave and decode kernels (§7) -- gives the same result for the same
+graph, matching PyTorch's `scaled_dot_product_attention` and hipDNN's CPU reference, so
+swapping one family for another changes nothing. The GPU suites check these cases against
+the reference on the families that serve them (a decode bias, for instance, exists only on
+RDNA).
+
+| Case | Result |
+|---|---|
+| A row whose every key a bias masks with −inf | O = 0, LSE = −inf |
+| A row whose every key a bias masks with the dtype's lowest finite value (a padding mask) | Uniform over the keys the causal or window mask leaves: O = their mean of V |
+| Some keys masked with either value | Softmax over the rest |
+| A row no key reaches (causal with more queries than keys, a window) | O = 0, LSE = −inf; with a sink, LSE = the sink |
+| A sink far above every score | Folded into the running max: LSE = the sink, O ≈ 0 |
+| A split-KV decode | Splits weighed by their key counts, whatever the bias |
+| A NaN score in a row | O and LSE NaN for that row |
+| Scale | Positive and at most 2²⁰ in every family (§5.2) |
+
+What differs, and why:
+
+- **The LSE of a row no key reaches is −inf**, hipDNN's definition (its CPU reference and
+  every kernel). PyTorch's own backends disagree (its CPU flash path writes 0), and cuDNN
+  documents none, so there is no industry value to match.
+- **NaN propagation is the hardware's, not a guarantee.** The CDNA kernels and AOTriton's
+  softmax compile with no-NaN fast math; their "no key" tests are bit tests that keep a NaN
+  row NaN (CDNA modification 29), but a NaN in the inputs is outside the contract, as it
+  is for every engine. Which rows a NaN or infinite V element at a *masked* key reaches
+  depends on each kernel's tile size; PyTorch makes every row NaN. Matching that would cost
+  a select per P·V element, so it is not done.
+- **RMSNorm** (§1, §2a): y and inv_rms differ by about 1 ulp between wave32 (RDNA) and
+  wave64 (CDNA) parts, from the reduction tree's shape. dgamma is bitwise repeatable on a
+  device, but its summation grouping follows the device's compute-unit count, so its last
+  bits can differ between GPUs. Both are hardware differences.
 
 ## 6. The instance budget: what is baked, what is runtime, and why
 
@@ -518,7 +572,14 @@ wins by default. The rule this provider follows:
 3. **Axes are model-determined, never request-determined.** `dtype`,
    `head_dim`, `causal`, a future `has_bias` — properties of the model a graph
    comes from. Never a sequence length, head count or window width: those stay
-   runtime, so the count does not grow with the shapes a model is run at.
+   runtime, so the count does not grow with the shapes a model is run at. Nor a
+   feature's value -- epsilon, softmax scale, a bias, a sink, a mask bound or a
+   dropout probability: a feature's presence may be an axis (`has_bias`,
+   `has_sink`, `causal`), its value is always a runtime argument. The one
+   request-determined exception is a fast path beside a generic object that
+   serves every request, admitted by the kernel matcher only where it applies
+   (CDNA `kv_align` 64, `any_diagonal` 0, §7.1); removing it changes speed,
+   never coverage.
 4. **An axis splits only what needs it.** A bias variant adds bias objects; it
    does not double the table. Specialized fast objects are added beside a
    generic one only where they measurably win, ranked by `priority` (the RMSNorm
@@ -587,9 +648,12 @@ mode with a merge kernel (`hipkernel:flydsl_sdpa_cdna_decode`). They share the g
 matcher, the checks and the dispatch (`FlydslSdpaCdnaCommon.hpp`), each for its own
 family; an object's metadata carries only its family's knobs. Where this section speaks of
 a class's "default" and "companions", ranking applies within one engine: the generic
-kernel's tiles against each other, by their measured rules (the engine's interim native
-ranker, until a trained UHD ranker replaces it). Which engine runs a graph several serve
-is the engine-level heuristic's (UHD), or autotune's. The kernels are FlyDSL's own MFMA flash-attention forwards,
+kernel's tiles against each other, by descriptor `priority` plus a bonus where a tier's
+measured rule prefers it (the engine's interim native ranker). That static order is
+provisional: autotune times every object the engine admits for a graph and caches the
+measured order, and a trained UHD ranker replaces the static one. Which engine runs a
+graph several serve is the engine-level heuristic's (UHD), or autotune's; `priority`
+never compares objects of different engines. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
 [`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
 whose README lists the modifications (an import path, a runtime row guard in
@@ -630,11 +694,11 @@ and f16, the default tier first:
 | gfx950 bias | 64, 128 | `dualwave`; `generic` 64 for what it declines (a window, a strided LSE) | `dualwave` (+ offset-0 build at 128); `generic` 64 (128 at 128, one wave per SIMD) for what it declines |
 | gfx950 bias | 256 | `generic` 128, one wave per SIMD | the same |
 | gfx942, gfx90a bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
-| gfx950 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
-| gfx942, gfx90a MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
-| gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 8), V 512, one KV head | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
-| gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, one KV head | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
-| every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), ranked below every exact object, the narrower bucket above the wider | the same |
+| gfx950 MLA | Q/K up to 256 (multiples of 8), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
+| gfx942, gfx90a MLA | Q/K up to 256 (multiples of 8), V 128 | `generic` 128 with a Q/K mask | the same |
+| gfx950 absorbed MLA, decode | Q/K up to 1024 (576 in practice; multiples of 8), V 512; built for absorbed MLA's one KV head, but any GQA group is admitted | `generic` 64 with a Q/K mask, O split into four column slices, the keys split and the group packed | the same |
+| gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, as above | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
+| every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), `priority` below every exact tier (76, 74, 70), the narrower bucket above the wider | the same |
 | gfx90a, the widths that are not powers of two | up to 96, 160, 192, 224 (modification 26) | `generic` buckets at those widths, tiles from an MI210 sweep (96: 256 rows; 160: 256 rows; 192, 224: 128 rows, the 256-row tiles spilling 22-46 VGPRs); causal 96 and 160 with measured companions | the same |
 | every arch, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 and gfx90a gfx942's default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
 | every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), an engine of its own (`hipkernel:flydsl_sdpa_cdna_decode`) that serves any query length; which engine runs a graph is autotune's (UHD's) | the same |
@@ -646,6 +710,15 @@ padded K and transposed-V tiles need 67,072 bytes of LDS, past gfx942's 64 KiB, 
 objects are built with both unpadded -- exactly 64 KiB (vendored-kernel modification 9);
 K keeps its XOR swizzle against bank conflicts.
 
+The un-absorbed MLA objects (a 256 bucket with `head_dim_v` 128, `priority` 100) admit
+any Q/K up to 256 with V 128, a plain `head_dim` 128 graph included. Under the static
+order they tie the exact `head_dim` 128 default tiers (100, the tie falling to the kernel
+id) and outrank the companions (80), so on gfx950, whose generic d128 tiers are all
+companions, they come first in `hipkernel:flydsl_sdpa_cdna` for most d128 graphs without
+a bias or sink (those outside the 64-row companion's preferred range). They
+compute those graphs correctly, at the 256 bucket's cost (§7.5, item 10); the measured
+order autotune caches, and UHD after it, is what picks among the candidates.
+
 ### 7.1 What is baked, and what is not
 
 The set started as the kernels exactly as upstream builds them, and widens one
@@ -654,7 +727,7 @@ baked field at a time (§7.3).
 | Baked per object | Runtime kernel argument |
 |---|---|
 | dtype (`bf16`, `f16`) | batch |
-| `head_dim` (64, 128, 256), or a bucket (64, 128, 256; 1024 or 768 for absorbed MLA) whose Q/K width is runtime (`qk_mask`) | query and key lengths, independently; the Q/K head dim under `qk_mask` |
+| `head_dim` (64, 128, 256), or a bucket (64, 128, 256; on gfx90a also 96, 160, 192, 224; 1024 or 768 for absorbed MLA) whose Q/K width is runtime (`qk_mask`) | query and key lengths, independently; the Q/K head dim under `qk_mask` |
 | V's head dim (`head_dim_v`: `head_dim`'s, 128 or 512 on the MLA objects, or following Q/K's on a bucket object) | V's strides, apart from K's (read through them on the `qk_mask` and MLA objects) |
 | causal, or none | the causal diagonal: top-left, bottom-right, a band to its right; a sliding window's lower edge (generic kernel) |
 | | query and KV head counts (MHA, GQA, MQA) |
@@ -668,7 +741,7 @@ baked field at a time (§7.3).
 | whether an attention sink is added (`has_sink`) | the sink's head stride |
 | decode: keys split, the GQA group packed into rows (`split_kv`, `pack_gqa`); O's columns split (`dv_split`); K staged in column chunks (`k_chunk`) | how many splits |
 
-One hundred objects on gfx950, one hundred and two on gfx942. A class -- (dtype, `head_dim`, causal,
+One hundred objects on gfx950, one hundred and two on gfx942 and on gfx90a. A class -- (dtype, `head_dim`, causal,
 bias) -- ships a default tier that serves every shape of it, and measured companions
 for the shapes where another schedule wins (§7.6). Two variants specialise a tier
 further and rank above it where they apply. The generic kernel can skip masking the
@@ -694,16 +767,16 @@ One SDPA-forward node, and:
 
 | Condition | Why |
 |---|---|
-| Q, K, V, O rank 4, device operands, **not ragged**; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; each slice is one buffer view, whose record count is 32-bit. V with strides other than K's is served by the `qk_mask` and MLA objects, whose masked load path reads V through its own; the generic kernel's direct-to-LDS path and the dual-wave kernel read V through K's descriptor, so those objects decline it. |
+| Q, K, V, O rank 4, device operands, **not ragged**, each declaring 16-byte alignment; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; each slice is one buffer view, whose record count is 32-bit. V with strides other than K's is served by the `qk_mask` and MLA objects, whose masked load path reads V through its own; the generic kernel's direct-to-LDS path and the dual-wave kernel read V through K's descriptor, so those objects decline it. |
 | One dtype for all four, `bf16` or `f16` | One object per dtype. |
 | `Hq % Hk == 0`; V shaped as K but for a head dim at most K's, O as Q with V's head dim | The kernels do not broadcast; V's head dim is its own only on the MLA objects (modification 13). |
 | `head_dim` equal to an object's baked value, or, on a `qk_mask` object, a multiple of 8 up to its bucket; V's head dim equal to the object's `head_dim_v`, or Q/K's on a bucket object | Checked by the kernel matcher against each candidate's metadata. A masked K or V load zeroes whole 8-column halves. |
-| No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with a diagonal offset `align + right_bound` of at most `Skv − Sq`; a `left_bound` only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − left ≤ j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
-| Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. The running max is over unscaled scores, which orders them correctly only for a positive scale. A pass-by-value scale is read from host memory at launch, and a non-positive or non-finite one is refused there. |
+| No mask, or `right_bound` ≥ 0 at either named `diagonal_alignment` (or one of the deprecated causal booleans: right 0 unless the graph sets one, `causal_mask` at the stored alignment, `causal_mask_bottom_right` always bottom-right; an unnamed alignment declines either way), with a diagonal offset `align + right_bound` of at most `Skv − Sq`; a `left_bound` only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − left ≤ j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
+| Scale: `attn_scale_value` (> 0 and ≤ 2²⁰), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. The same range as the RDNA engines (`FlydslSdpaShared.hpp` `MAX_SOFTMAX_SCALE`): positive, because the running max is over unscaled scores, and at most 2²⁰, below where the causal objects' running-max floor overflows f32. A pass-by-value scale is read from host memory at launch, and one outside the range is refused there. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
-| Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, each axis longer than 1 at a positive stride, every element within 32-bit offsets | The kernels write the natural-log LSE of the scaled scores. The generic kernel and its merge take its strides (modification 20); the dual-wave kernel writes one packed `[B, H, Sq]`, so a strided LSE runs on gfx950's generic companions. |
-| Bias (`attn_mask`), if present: in the query's dtype, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Both kernels add it (the generic one by modification 12); rows move as 16-byte vectors; each slice is one buffer view. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias) declines. |
-| Attention sink, if present: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand, at `head_dim` 64 or 128 | Served by the generic kernel's `has_sink` objects (modification 19); the dual-wave kernel builds none. |
+| Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, each axis longer than 1 at a positive stride, every element within 32-bit offsets | The kernels write the natural-log LSE of the scaled scores. The generic kernel and its merge take its strides (modification 20); the dual-wave kernel writes one packed `[B, H, Sq]`, so a strided LSE runs on gfx950's generic companions. A row no key reaches gets −inf (or the sink); a row whose softmax sum is NaN (a NaN or +inf score) gets NaN, as PyTorch's does, and a decode split left NaN carries NaN into the merged O and LSE rather than being skipped (modification 29). |
+| Bias (`attn_mask`), if present: in the query's dtype, declaring 16-byte alignment, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); a key length that is a multiple of 4; one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Both kernels add it (the generic one by modification 12); rows move as 16-byte vectors; each slice is one buffer view, and the kernels read keys in runs of 4, so a run straddling the view's end could read as zero. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias, or not a multiple of 4 at all) declines. A bias build softmaxes over `q·k · scale + bias`, as PyTorch, hipDNN's CPU reference and the RDNA kernels do (modification 28): a bias that masks whole KV tiles with −inf is served, a row it masks with −inf on every key gets O = 0 and LSE −inf, and a row masked on every key with the dtype's lowest *finite* value averages V uniformly over the keys the causal mask leaves. |
+| Attention sink, if present: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand, its head stride positive (unless one head) with `(Hq − 1) × stride` within int32, at `head_dim` 64 or 128, without a bias | Served by the generic kernel's `has_sink` objects (modification 19), which are built without a bias, so a graph with both declines; the dual-wave kernel builds none. The sink joins against the max over the row's scores and itself, prefill and decode merge alike, so a sink far above the scores gives O ≈ 0 and LSE = the sink, as PyTorch and the RDNA kernels do (modification 29). |
 | Declined outright: padding / varlen, dropout, paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
@@ -725,9 +798,9 @@ against the coverage it buys. In order:
 | ~~Sliding windows~~ | Done on the generic kernel: a runtime lower edge in the mask and the KV loop's start (modification 11). The dual-wave kernel's pipeline starts at a fixed tile; gfx950 windows run on its generic tiers. |
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
-| ~~Additive bias~~ | Done: the dual-wave kernel's (modification 8), and the generic kernel's (modification 12) for gfx942 and gfx950's `head_dim` 256. f32 bias and misaligned rows need a conversion or unaligned path. |
-| ~~Attention sinks~~ | Done on the generic kernel at head dims 64 and 128 (modification 19), a baked axis like the bias: a per-query-head logit in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, in the softmax's denominator and the LSE. hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference. |
-| ~~Other head dims~~ | Done for every multiple of 8 up to 256, as on RDNA (modification 17): bucket objects at 64, 128 and 256 whose Q, K and V follow the graph's head dim, the K and V loads bounded in 8-column halves. |
+| ~~Additive bias~~ | Done: the dual-wave kernel's at `head_dim` 64 and 128 on gfx950 (modification 8), and the generic kernel's (modification 12) at 64, 128 and 256 on gfx90a, gfx942 and gfx950; a bias that masks whole tiles or rows gives what PyTorch gives (modification 28). f32 bias and misaligned rows need a conversion or unaligned path. |
+| ~~Attention sinks~~ | Done on the generic kernel at head dims 64 and 128 (modification 19), a baked axis like the bias: a per-query-head logit in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, in the softmax's denominator and the LSE, taken against the max over the scores and the sink (modification 29). hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference. |
+| ~~Other head dims~~ | Done for every multiple of 8 up to 256, as on RDNA (modification 17): bucket objects at 64, 128 and 256 (and on gfx90a also 96, 160, 192 and 224, modification 26) whose Q, K and V follow the graph's head dim, the K and V loads bounded in 8-column halves. |
 | ~~Decode: KV split and GQA packing~~ | Done on the generic kernel (modifications 14, 15): one workgroup per (batch, row tile, KV head) with the group's query heads as rows, the keys split over the grid's y by a count the engine picks from the shape and the device's compute units, and a merge kernel in the same object. Without a bias. |
 | ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. Absorbed MLA (576/512, one KV head) and 512/512 ship on gfx950 (modification 16: O split by columns, Q streamed). gfx942 takes them with K staged in 256-column chunks, three passes per KV tile (modification 18). |
 
@@ -766,6 +839,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | Sliding window on the generic kernel (`window_lo`, modification 11) | gfx942, against the objects without it, no window bound: a few more VGPRs on d64; the causal d128 object slower by about half a percent with a repeating sign (two compares on each diagonal tile's mask), d64 within noise. With a window, time scales with the window | runtime, for coverage -- **deferred** (gfx942 causal d128) |
 | Additive bias (`has_bias`, a compile-time axis) | the plain dual-wave objects carry two unused bias-stride arguments, neutral but for a fraction of a percent on two d64 shapes. A bias object costs what reading its bias costs -- a full `[B, H, S, S]` bias is as many bytes as the scores. At `head_dim` 128 the bias objects spill a few VGPRs (upstream's own bias addressing spills too), with no cost visible beyond the bias's own | two objects per class on gfx950; the d128 spill allowed and recorded |
 | LSE strides on the generic kernel and its merge (modification 20) | against the objects before it, LSE on and off: within noise on gfx942 and on gfx950 at `head_dim` 64 and 128, prefill and decode; the merge's strided LSE write costs the split decode objects a fraction of a percent with LSE on; the gfx950 `head_dim` 256 non-causal object is slower by about half a percent on every shape, LSE on or off, from how the changed prologue reschedules its loop | runtime, for coverage -- **deferred** (gfx950 d256 non-causal) |
+| Scaled-domain bias and NaN-safe row handling (modifications 28 and 29; the same edge-case results as the RDNA kernels, §5.7) | objects without a bias within about a percent. Bias objects: the causal ones on gfx950 and gfx942 slower by 2.5-5%, the gfx950 `head_dim` 128 non-causal one by about 2% (its exponent no longer fuses), the gfx90a `head_dim` 64 causal 128-row object by 9-13% on three of four shapes; on gfx950 the `head_dim` 64 bias objects by up to about 6% (generic causal at a decode shape, dual-wave causal), 3% (dual-wave non-causal); the gfx950 dual-wave `head_dim` 128 causal bias objects got faster (8-17%). The aiw `head_dim` 128 float-mask objects (aiw modification 9) slower by 3-4% | kept, for cross-family parity -- **deferred** |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -830,6 +904,18 @@ the harness's own bias. The measurements are kept outside the repository.
     objects are slower still on every one of those shapes, so the dual-wave ones stay.
     Getting every FMA packed, and the causal bias build back under the register file,
     would recover it.
+13. *The scaled-domain bias* (modifications 28 and 29). Adding the bias after the scale,
+    and masking with the lowest finite value so fast math cannot fold the mask away, costs
+    the generic bias objects an unfused exponent and a few register moves per tile: a few
+    percent on the causal objects, most on gfx90a `head_dim` 64 causal (9-13%). A form that
+    keeps the bias inside one FMA without changing the results, or a gfx90a tile retuned
+    for the bias build, are the candidates.
+14. *gfx950 `head_dim` 128 causal prefill objects at a single query row.* The plain and sink
+    64-row objects are about 12% slower at one query row against 2048 keys than before the
+    shared mask resolution and the round's host changes, with their own objects unchanged;
+    the cause is in the arguments or launch the host now gives them and is not yet found.
+    The split decode object serves that shape several times faster, so it is not the one
+    autotune picks there.
 
 ### 7.6 How the instance set was chosen
 
@@ -891,8 +977,8 @@ them when the ingestor gains one.
 ### 7.7 gfx90a (MI210, MI250)
 
 gfx90a runs the generic kernel on gfx942's code path (vendored-kernel modification 24)
-and ships what gfx942 ships but the dual-wave engine: `hipkernel:flydsl_sdpa_cdna` (56
-objects) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
+and ships what gfx942 ships but the dual-wave engine: `hipkernel:flydsl_sdpa_cdna` (78
+objects, with the 96/160/192/224 buckets below) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
 
 - **The plain prefill classes** (bf16 and f16; `head_dim` 64, 128, 256; causal or not)
   were chosen by a sweep on an MI210 (104 CUs): `block_m` 64/128/256 × waves per SIMD

@@ -81,6 +81,11 @@ struct RmsNormBwdGraphSpec
     std::map<int64_t, std::vector<int64_t>> strides;
     std::map<int64_t, int64_t> alignment;
     std::set<int64_t> virtualTensors;
+    /// Tensors with a ragged offset tensor, so they are not dense device operands.
+    std::set<int64_t> raggedTensors;
+    /// Tensors that carry a host value, so they are pass-by-value scalars rather than
+    /// device operands.
+    std::set<int64_t> passByValueTensors;
     bool withDbias = false;
     bool overrideShapeEnabled = false;
     /// A second RMS-norm backward node after the first, over the same tensors.
@@ -117,6 +122,14 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
         const auto strides
             = found == spec.strides.end() ? flydslPackedStrides(dims) : found->second;
         const auto declared = spec.alignment.find(uid);
+        auto valueType = data_objects::TensorValue::NONE;
+        flatbuffers::Offset<void> value = 0;
+        if(spec.passByValueTensors.count(uid) != 0)
+        {
+            const data_objects::Float32Value hostValue(1.0F);
+            valueType = data_objects::TensorValue::Float32Value;
+            value = builder.CreateStruct(hostValue).Union();
+        }
         tensors.push_back(data_objects::CreateTensorAttributesDirect(
             builder,
             uid,
@@ -125,10 +138,11 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
             &strides,
             &dims,
             spec.virtualTensors.count(uid) != 0,
-            data_objects::TensorValue::NONE,
-            0,
+            valueType,
+            value,
             false,
-            flatbuffers::nullopt,
+            spec.raggedTensors.count(uid) != 0 ? flatbuffers::Optional<int64_t>(99)
+                                               : flatbuffers::nullopt,
             declared == spec.alignment.end() ? 16 : declared->second));
     };
     add(FLYDSL_BWD_DY_UID,

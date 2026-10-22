@@ -7,7 +7,8 @@
 
 Writes ``<content>/rmsnorm_bwd/<arch>/<instance>.hsaco`` for every row of
 ``_instances.rmsnorm_bwd_instances()``, plus the ``manifest.json`` beside them and
-``<content>/rmsnorm_bwd/<arch>.SOURCE.md`` next to the folder, all committed.
+``<content>/rmsnorm_bwd/<arch>.SOURCE.md`` next to the folder. The folder is a DVC
+output (``<arch>.dvc``); SOURCE.md is committed.
 
 Each object is the vendored two-stage builder (``rmsnorm_bwd_kernel.py``) and holds
 two kernels: the partial kernel, which writes dx and one f32 dgamma row per program

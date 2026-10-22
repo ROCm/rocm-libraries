@@ -153,9 +153,10 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
 /**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * The descriptor `priority`, unchanged. Today exactly one candidate survives a match
- * (dtype x head_dim x causal is the instance key), so this decides nothing yet; it is
- * here so a second tile for one class is ranked by data, as RMS norm's tiers are.
+ * The descriptor `priority`, unchanged. Several candidates can survive a match: a generic
+ * object serves every multiple-of-8 head_dim up to its head_dim_max, so it matches beside
+ * the specialized object for that head_dim, and the generic tiers' lower priorities put the
+ * specialized one first. Autotune measures every survivor; this order is the fallback.
  */
 double flydslSdpaRdnaScore(const MatchContext& /*context*/,
                            const BoundTokens& /*bound*/,

@@ -12,10 +12,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -32,7 +34,9 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslRmsNormTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 
 /**
@@ -347,6 +351,55 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(sdpaFieldDeclines()),
                          [](const auto& info) { return info.param.name; });
 
+/// Each operand marked runtime pass-by-value: a host scalar where the kernel takes a device
+/// pointer. The scale is the only tensor these engines read that way.
+std::vector<SdpaFieldDecline> passByValueDeclines()
+{
+    std::vector<SdpaFieldDecline> cases;
+    const auto byValue
+        = [](int64_t uid) { return [uid](SdpaGraphSpec& s) { s.passByValueTensors.insert(uid); }; };
+    for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
+                                   std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},
+                                   std::pair{"V", FLYDSL_SDPA_RDNA_V_UID},
+                                   std::pair{"O", FLYDSL_SDPA_RDNA_O_UID}})
+    {
+        cases.push_back({std::string("PassByValue") + name, byValue(uid), {}});
+    }
+    const auto withFeature = [&cases, &byValue](std::string name,
+                                                int64_t uid,
+                                                const std::function<void(SdpaGraphSpec&)>& add) {
+        const auto mark = byValue(uid);
+        cases.push_back({std::move(name),
+                         [add, mark](SdpaGraphSpec& s) {
+                             add(s);
+                             mark(s);
+                         },
+                         add});
+    };
+    withFeature("PassByValueBias", FLYDSL_SDPA_RDNA_BIAS_UID, [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+    });
+    // A rank-1 bias of one element is the shape a host scalar has.
+    withFeature("PassByValueScalarBias", FLYDSL_SDPA_RDNA_BIAS_UID, [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+        s.biasDims = {1};
+        s.biasStrides = {1};
+    });
+    withFeature("PassByValueStats", FLYDSL_SDPA_RDNA_STATS_UID, [](SdpaGraphSpec& s) {
+        s.stats = SdpaStats::LSE;
+    });
+    withFeature(
+        "PassByValueSink", FLYDSL_SDPA_RDNA_SINK_UID, [](SdpaGraphSpec& s) { s.withSink = true; });
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(PassByValue,
+                         TestFlydslSdpaRdnaFieldDeclines,
+                         ::testing::ValuesIn(passByValueDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
 // ---------------------------------------------------------------------------
 // graph_match: what this pack declines, each for the reason the kernel cannot serve it
 // ---------------------------------------------------------------------------
@@ -501,6 +554,25 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedBottomRightBooleanIsCausalAtTheBott
     // With a left_bound too, the window is kept (cuDNN and #13065), not dropped.
     spec.leftBound = 32;
     EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 32);
+}
+
+TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedTopLeftBooleanIsCausalAtTheStoredAlignment)
+{
+    // causal_mask is right 0 at the alignment the graph stores: top-left by default, and
+    // bottom-right when diagonal_alignment says so, as the reference resolves it.
+    SdpaGraphSpec spec;
+    spec.deprecatedCausalTopLeft = true;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 300;
+    const auto topLeft = bindingsFor(spec);
+    EXPECT_EQ(boundInt(topLeft, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
+    EXPECT_EQ(boundInt(topLeft, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
+    EXPECT_EQ(boundInt(topLeft, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 0);
+    spec.diagonalAlignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    const auto bottomRight = bindingsFor(spec);
+    EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
+    EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
+    EXPECT_EQ(boundInt(bottomRight, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
 }
 
 TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)
@@ -994,17 +1066,19 @@ TEST(TestFlydslSdpaRdnaDecodeDispatch, RefusesToPrepareWithoutTheMatcherSBinding
 // dispatch on device: a real launch out of the staged archive
 // ---------------------------------------------------------------------------
 
-/// The device's architecture with feature suffixes removed, which is what the shard and
-/// its kpack entries are keyed on.
-DeviceProperties packedArchDeviceProperties()
+// packedArchDeviceProperties() and reportUnstaged() come from FlydslNormDeviceTestSupport.hpp:
+// a case on a device this build ships the engine's objects for fails when it finds none
+// staged, rather than skipping.
+
+/// The shipped-arch list (HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>) each engine's objects are
+/// built for, by the op name the build gives it.
+const char* shippedOpFor(const PackSymbols& engine)
 {
-    auto properties = currentDeviceProperties();
-    const auto colon = properties.gcnArchName.find(':');
-    if(colon != std::string::npos)
+    if(&engine == &FLYDSL_SDPA_AIW)
     {
-        properties.gcnArchName.resize(colon);
+        return "sdpa_aiw";
     }
-    return properties;
+    return &engine == &FLYDSL_SDPA_RDNA_DECODE ? "sdpa_rdna_decode" : "sdpa_rdna";
 }
 
 /// The staged candidate for (@p dtype, @p headDim, @p causal, @p hasBias), if this build
@@ -1190,11 +1264,6 @@ private:
     void* _device = nullptr;
 };
 
-/// Runs the staged kernel for @p spec through prepare() and launch(), and checks every
-/// output element against a double-precision reference computed from the same inputs.
-///
-/// Skips when the staged set holds no kernel for the spec's class: on an arch this build
-/// packed nothing for, there is no kernel to be wrong about.
 /// The staged object of AOTriton's gfx1201 kernel for a graph, if this build packed one: the
 /// object built for the head_dim, else the narrowest padded tier serving it. @p masked is
 /// whether any bound applies (the object that applies a window), @p biasF32 whether the
@@ -1280,10 +1349,20 @@ enum class RdnaFamily
     AIW,
 };
 
+/// Runs the staged kernel for @p spec through prepare() and launch(), and checks every
+/// output element against a double-precision reference computed from the same inputs.
+///
+/// When the staged set holds no kernel for the spec's class this fails on a device the build
+/// ships the engine's objects for, where the shard must hold one, and skips elsewhere: on an
+/// arch this build packed nothing for, there is no kernel to be wrong about.
+///
+/// @p forced, when given, is launched instead of the object the metadata search picks: the
+/// per-object suite (TestFlydslSdpaObjects.cpp) names each staged object itself.
 template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
-                                RdnaFamily family);
+                                RdnaFamily family,
+                                const KernelDefinition* forced = nullptr);
 
 template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
@@ -1297,7 +1376,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
-                                RdnaFamily family)
+                                RdnaFamily family,
+                                const KernelDefinition* forced)
 {
     const bool decode = family == RdnaFamily::DECODE;
     // The bounds the graph builder writes for this spec, in CpuFpReferenceSdpa's terms.
@@ -1323,7 +1403,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 
     const std::string dtype = spec.dataType == DataType::BFLOAT16 ? "bf16" : "f16";
     const bool causal = right >= 0;
-    const auto kernel
+    const auto searched
         = family == RdnaFamily::AIW
               ? findStagedAiwKernel(dtype,
                                     spec.headDim,
@@ -1340,13 +1420,19 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                  spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0,
                                  spec.valueHeadDim,
                                  spec.withSink ? 1 : 0);
+    const auto kernel = forced != nullptr ? std::optional<KernelDefinition>(*forced) : searched;
+    const auto& engine = family == RdnaFamily::AIW ? FLYDSL_SDPA_AIW : engineFor(decode);
     if(!kernel.has_value())
     {
-        GTEST_SKIP() << "nothing packed for dtype=" << dtype << " head_dim=" << spec.headDim
-                     << " causal=" << causal << " in this build's descriptor root";
+        reportUnstaged(
+            shippedOpFor(engine),
+            "nothing staged for dtype=" + dtype + " head_dim=" + std::to_string(spec.headDim)
+                + " causal=" + std::to_string(causal ? 1 : 0)
+                + " bias=" + std::to_string(spec.withBias ? 1 : 0) + " sink="
+                + std::to_string(spec.withSink ? 1 : 0) + " in this build's descriptor root");
+        return;
     }
 
-    const auto& engine = family == RdnaFamily::AIW ? FLYDSL_SDPA_AIW : engineFor(decode);
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
     const auto bound = matchesGraph(engine, fixture.context());
     ASSERT_TRUE(bound.has_value());
@@ -1398,6 +1484,39 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     const auto vAt = [&](int64_t b, int64_t h, int64_t s, int64_t e) {
         return spec.packedQkv ? qkv->at(b, 2 * spec.heads + h, s, e) : vTensor->at(b, h, s, e);
     };
+    // Device-value overrides: a step in V, and NaN in Q or K (separate tensors only).
+    if(spec.valueOnesBelowKey || spec.queryNanPosition || spec.keyNanPosition)
+    {
+        ASSERT_FALSE(spec.packedQkv);
+        const T nan(std::numeric_limits<float>::quiet_NaN());
+        for(int64_t b = 0; b < spec.batch; ++b)
+        {
+            if(spec.valueOnesBelowKey)
+            {
+                for(int64_t h = 0; h < valueHeads; ++h)
+                {
+                    for(int64_t j = 0; j < spec.seqLenKv; ++j)
+                    {
+                        for(int64_t e = 0; e < dv; ++e)
+                        {
+                            vTensor->set(b, h, j, e, T(j < *spec.valueOnesBelowKey ? 1.0F : 0.0F));
+                        }
+                    }
+                }
+            }
+            for(int64_t h = 0; spec.queryNanPosition && h < spec.heads; ++h)
+            {
+                qTensor->set(b, h, *spec.queryNanPosition, 0, nan);
+            }
+            for(int64_t h = 0; spec.keyNanPosition && h < spec.kvHeads; ++h)
+            {
+                kTensor->set(b, h, *spec.keyNanPosition, 0, nan);
+            }
+        }
+        qTensor->upload();
+        kTensor->upload();
+        vTensor->upload();
+    }
     const auto third = static_cast<size_t>(spec.heads * d) * sizeof(T);
     void* qPtr = spec.packedQkv ? qkv->device() : qTensor->device();
     void* kPtr = spec.packedQkv ? static_cast<void*>(static_cast<char*>(qkv->device()) + third)
@@ -1409,7 +1528,10 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                       4U,
                       false);
     // NaN until written: an output row the kernel skips fails rather than reading as a zero.
-    o.fillWith(T(std::numeric_limits<float>::quiet_NaN()));
+    // A case that expects NaN fills with 7 instead, a value no O or LSE here takes.
+    const bool expectsNan = spec.queryNanPosition.has_value() || spec.keyNanPosition.has_value();
+    const float unwritten = expectsNan ? 7.0F : std::numeric_limits<float>::quiet_NaN();
+    o.fillWith(T(unwritten));
 
     // f32 [B, H, Sq, 1], packed BHSD or laid out [B, Sq, H]: the layout the graph builder
     // declares.
@@ -1420,7 +1542,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
             : std::vector<int64_t>{spec.heads * spec.seqLenQ, spec.seqLenQ, 1, 1},
         5U,
         false);
-    stats.fillWith(std::numeric_limits<float>::quiet_NaN());
+    stats.fillWith(unwritten);
     const bool wantStats = spec.stats == SdpaStats::LSE;
 
     // The bias as the device holds it, indexed as [B, H, Sq, Skv]: the graph's right-aligned
@@ -1553,7 +1675,9 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     sum += scores[static_cast<size_t>(j)];
                 }
                 // A row no key reaches: O = 0 and LSE = -inf, as the reference defines it.
-                const bool hasKeys = sum > 0.0;
+                // Only a sum of exactly 0: a NaN sum (NaN in Q, or in a key the row sees)
+                // keeps O and the LSE NaN, as PyTorch's softmax and logsumexp do.
+                const bool hasKeys = !(sum == 0.0);
                 // The sink's logit joins the denominator of a row that reaches keys, as a key
                 // with no value; a row that reaches none has O = 0 and LSE = the sink.
                 const double sinkLogit = spec.withSink ? sink.at(0, h, 0, 0) : 0.0;
@@ -1582,6 +1706,11 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                         // A keyless row without a sink, or with a sink of -inf.
                         lseError = negativeInfinity ? 0.0 : lseError;
                     }
+                    else if(std::isnan(expectedLse))
+                    {
+                        // A NaN row: NaN, not the keyless -inf or a finite value.
+                        lseError = std::isnan(actualLse) ? 0.0 : lseError;
+                    }
                     else if(std::isfinite(actualLse))
                     {
                         lseError = std::abs(actualLse - expectedLse);
@@ -1604,8 +1733,13 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     expected = hasKeys ? expected / sum : 0.0;
                     // NaN or inf (an unwritten element reads as NaN) is a full miss.
                     const double actual = o.at(b, h, s, e);
-                    const double error = std::isfinite(actual) ? std::abs(actual - expected)
-                                                               : std::numeric_limits<double>::max();
+                    double error = std::isfinite(actual) ? std::abs(actual - expected)
+                                                         : std::numeric_limits<double>::max();
+                    if(std::isnan(expected))
+                    {
+                        // A NaN row must read NaN (the fill is 7 when NaN is expected).
+                        error = std::isnan(actual) ? 0.0 : std::numeric_limits<double>::max();
+                    }
                     if(error > worst)
                     {
                         worst = error;
@@ -1667,6 +1801,19 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesBottomRightCausalCrossAttention)
     spec.seqLenKv = 300;
     spec.kvHeads = 2;
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesTheDeprecatedCausalBooleanAtABottomRightAlignment)
+{
+    // causal_mask with diagonal_alignment BOTTOM_RIGHT is bottom-right causal, so with fewer
+    // queries than keys each row sees Skv - Sq more keys than top-left would give it.
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 300;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.deprecatedCausalTopLeft = true;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
 }
 
@@ -1886,6 +2033,67 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasThatMasksWholeRowsAtTheLowestFinite
     spec.seqLenKv = 300;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
     spec.biasDataType = DataType::FLOAT;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, WeighsDecodeSplitsByKeyCountUnderALowestFiniteBias)
+{
+    SKIP_IF_NO_DEVICES();
+    // Every key's score rounds to the bias, -FLT_MAX, so the softmax is uniform and O is the
+    // mean of V. 2049 keys are 65 tiles, two splits (decodeSplits: 65 / 32 by work): the
+    // first split holds 33 tiles, keys [0, 1056), the second 993 keys. With V = 1 on the
+    // first split's keys and 0 on the second's, O = 1056 / 2049 = 0.515. A merge weighing the
+    // splits by exp(m + ln l - M) loses ln l to rounding at m ~ -3.4e38 and gives 0.5.
+    SdpaGraphSpec spec;
+    spec.batch = 1;
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 2049;
+    spec.withBias = true;
+    spec.biasMasksRows = true; // row 0, the only one
+    spec.stats = SdpaStats::LSE;
+    spec.valueOnesBelowKey = 1056;
+    // V is 0 or 1 and P uniform, so only O's bf16 rounding (< 2e-3 at 0.5) is left; the
+    // equal-weight error is 0.0154.
+    constexpr double TOLERANCE = 5e-3;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, TOLERANCE, true);
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, TOLERANCE, true);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, GivesANanRowANanLse)
+{
+    SKIP_IF_NO_DEVICES();
+    // PyTorch: a row whose softmax sum is NaN has O = NaN and logsumexp NaN, not the -inf of
+    // a row no key reaches. Prefill, with and without a sink: NaN in one query row.
+    SdpaGraphSpec spec;
+    spec.stats = SdpaStats::LSE;
+    spec.queryNanPosition = 5;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.withSink = true;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    // Decode with one split: NaN in one of the GQA group's rows.
+    spec = SdpaGraphSpec{};
+    spec.stats = SdpaStats::LSE;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 300;
+    spec.queryNanPosition = 1;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    // Decode with two splits (2049 keys, as above): NaN in a key of the first split makes
+    // every row NaN; the merge must not report the other split's finite LSE.
+    spec = SdpaGraphSpec{};
+    spec.stats = SdpaStats::LSE;
+    spec.batch = 1;
+    spec.heads = 2;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 2049;
+    spec.keyNanPosition = 5;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+    spec.withSink = true;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
@@ -2160,6 +2368,9 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesSeveralPositionsInOneSplit)
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, true);
 }
 
+// The window spans several splits. The LSE is checked too: one key more or less at the
+// window's left edge moves O by less than bf16's budget over 128 keys, but moves the LSE
+// past its 1e-3 one, so an edge the split path gets wrong cannot pass.
 TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithinASlidingWindow)
 {
     SKIP_IF_NO_DEVICES();
@@ -2172,6 +2383,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithinASlidingWindow)
     spec.kvHeads = 1;
     spec.seqLenQ = 1;
     spec.seqLenKv = 3000;
+    spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
@@ -2351,7 +2563,10 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsVAndWritesTheLseThroughTheirOwnLayouts)
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
 
-// The runtime scale is read from host memory at launch; a non-positive one is refused there.
+// The runtime scale is read from host memory at launch; one the kernels cannot take (not
+// positive, not finite, or past the shared 2^20 bound) is refused there. Every operand is
+// bound to real device memory, so the scale is the only thing a launch can refuse, and a
+// servable scale with the same buffers launches.
 TEST(TestGpuFlydslSdpaRdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
 {
     SKIP_IF_NO_DEVICES();
@@ -2360,7 +2575,8 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
     const auto kernel = findStagedKernel("bf16", spec.headDim, 0, 0);
     if(!kernel.has_value())
     {
-        GTEST_SKIP() << "nothing packed for this device";
+        reportUnstaged(shippedOpFor(FLYDSL_SDPA_RDNA), "nothing staged for bf16 non-causal");
+        return;
     }
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
     const auto bound = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
@@ -2369,16 +2585,45 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
     const auto& handler = dispatchHandler(FLYDSL_SDPA_RDNA);
     const auto prepared = handler.prepare(fixture.context(), *bound, *kernel);
     ASSERT_NE(prepared, nullptr);
+
+    using Bf16 = hipdnn_data_sdk::types::bfloat16;
+    const std::vector<int64_t> qDims{spec.batch, spec.heads, spec.seqLenQ, spec.headDim};
+    const std::vector<int64_t> kvDims{spec.batch, spec.kvHeads, spec.seqLenKv, spec.headDim};
+    const auto qStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, spec.headDim);
+    const auto kvStrides = sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, spec.headDim);
+    const DeviceTensor<Bf16> q(qDims, qStrides, 1U, true);
+    const DeviceTensor<Bf16> k(kvDims, kvStrides, 2U, true);
+    const DeviceTensor<Bf16> v(kvDims, kvStrides, 3U, true);
+    const DeviceTensor<Bf16> o(qDims, qStrides, 0U, false);
+    const auto buffersWith = [&](float& scale) {
+        return std::vector<hipdnnPluginDeviceBuffer_t>{{FLYDSL_SDPA_RDNA_SCALE_UID, &scale},
+                                                       {FLYDSL_SDPA_RDNA_Q_UID, q.device()},
+                                                       {FLYDSL_SDPA_RDNA_K_UID, k.device()},
+                                                       {FLYDSL_SDPA_RDNA_V_UID, v.device()},
+                                                       {FLYDSL_SDPA_RDNA_O_UID, o.device()}};
+    };
+
     const Handle handle;
-    for(float scale : {0.0F, -0.125F, std::numeric_limits<float>::quiet_NaN()})
+    for(float scale : {0.0F,
+                       -0.125F,
+                       std::numeric_limits<float>::quiet_NaN(),
+                       std::numeric_limits<float>::infinity(),
+                       2097152.0F /* 2^21, past the 2^20 bound */})
     {
-        const std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_SCALE_UID, &scale}};
+        const auto buffers = buffersWith(scale);
         EXPECT_THROW(
             handler.launch(
                 handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr),
             hipdnn_plugin_sdk::HipdnnPluginException)
             << scale;
     }
+
+    // The control: with the same buffers, a servable scale launches.
+    float servable = 0.125F;
+    const auto buffers = buffersWith(servable);
+    EXPECT_NO_THROW(handler.launch(
+        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr));
+    EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesTheDefaultScaleWhenTheGraphGivesNone)
@@ -2597,10 +2842,56 @@ TEST(TestGpuFlydslSdpaAiwDispatch, AddsAMaskWithACausalMaskOrAWindow)
     spec.mask = SdpaMask::SLIDING_WINDOW;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::AIW);
-    // Broadcast over batch and heads: their strides are 0.
-    spec.biasDims = {1, 1, spec.seqLenQ, spec.seqLenKv};
+    // The two cases above broadcast over batch and heads (the default {1, 1, Sq, Skv}, both
+    // strides 0). A mask per (batch, head), then one per head shared across the batch: the
+    // kernel must step by the batch and head strides the graph gives.
+    ASSERT_GT(spec.batch, 1);
+    ASSERT_GT(spec.heads, 1);
+    spec.biasDims = {spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv};
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.biasDims = {1, spec.heads, spec.seqLenQ, spec.seqLenKv};
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsAMaskThatMasksWholeRowsAtTheLowestFiniteValue)
+{
+    SKIP_IF_NO_DEVICES();
+    // A padding mask's fully masked rows (HF's convention): every third row's mask is the
+    // mask dtype's lowest finite value on every key, so its scores are all about -FLT_MAX
+    // and its softmax is uniform, O = mean(V), with an LSE at the mask value, as PyTorch
+    // and the §5 kernels give. Upstream added mask * log2e to base-2 scores, which overflows
+    // to -inf below -2.36e38 (O = 0, LSE = -inf); README modification 9. The f32 mask's
+    // lowest is -FLT_MAX itself, which the kernel's m floor must not sit above.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasMasksRows = true;
+    spec.seqLenQ = 77;
+    // A multiple of 8: the mask's rows must stay aligned for the object's vector loads.
+    spec.seqLenKv = 104;
+    spec.stats = SdpaStats::LSE;
+    spec.biasDataType = DataType::FLOAT;
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.alignment.clear();
+    spec.biasDataType = DataType::BFLOAT16;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    // Partly masked rows: the causal bound removes some of a masked row's keys (-inf) and
+    // the mask's lowest value covers the rest, so O is the mean of V over the keys the
+    // bound keeps. Top-left row 0 keeps one key; bottom-right rows keep Skv - Sq more.
+    spec.headDim = 128;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    spec.dataType = DataType::HALF;
+    spec.headDim = 64;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasDataType = DataType::FLOAT;
+    spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
 }
 
 TEST(TestGpuFlydslSdpaAiwDispatch, AppliesBottomRightWindowsAndBands)
@@ -2742,6 +3033,33 @@ TEST(TestGpuFlydslSdpaAiwDispatch, WritesTheLseThroughItsOwnLayoutAndReadsARunti
 }
 
 } // namespace
+
+// The harness above, reached with a named object (FlydslSdpaObjectTestSupport.hpp).
+void testing::expectRdnaObjectMatchesReference(const SdpaGraphSpec& spec,
+                                               RdnaObjectEngine engine,
+                                               const KernelDefinition& kernel)
+{
+    auto family = RdnaFamily::PREFILL;
+    if(engine == RdnaObjectEngine::AIW)
+    {
+        family = RdnaFamily::AIW;
+    }
+    else if(engine == RdnaObjectEngine::DECODE)
+    {
+        family = RdnaFamily::DECODE;
+    }
+    if(spec.dataType == DataType::HALF)
+    {
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+            spec, F16_TOLERANCE, family, &kernel);
+    }
+    else
+    {
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, family, &kernel);
+    }
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_FLYDSL

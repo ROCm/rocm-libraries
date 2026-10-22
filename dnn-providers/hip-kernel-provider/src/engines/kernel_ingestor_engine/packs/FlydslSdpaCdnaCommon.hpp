@@ -43,6 +43,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
  * @file FlydslSdpaCdnaCommon.hpp
@@ -76,6 +77,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_cdna
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
+using namespace flydsl_sdpa;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 // Kernel metadata fields, declared by the KMD this pack's KDP points at.
@@ -125,7 +127,6 @@ inline constexpr std::string_view DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_off
 inline constexpr std::string_view WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
 /// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
 inline constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
-inline constexpr int64_t NO_STATS = -1;
 /// 1 when the LSE output is the packed [B, H, Sq] the dual-wave kernel writes (or there is
 /// none); 0 when it has strides of its own, which only the generic kernel takes
 /// (vendored-kernel modification 20).
@@ -140,16 +141,8 @@ inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 /// (vendored-kernel modification 19).
 inline constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_cdna.sink.uid";
 inline constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
-inline constexpr int64_t NO_SINK = -1;
 /// 1 for an object built to add an attention sink's logit to its softmax (modification 19).
 inline constexpr std::string_view HAS_SINK_FIELD = "has_sink";
-inline constexpr int64_t NO_BIAS = -1;
-
-inline constexpr uint32_t SDPA_RANK = 4;
-inline constexpr uint32_t BATCH_AXIS = 0;
-inline constexpr uint32_t HEAD_AXIS = 1;
-inline constexpr uint32_t SEQ_AXIS = 2;
-inline constexpr uint32_t HEAD_DIM_AXIS = 3;
 
 /// The dual-wave kernel's workgroup is fixed (two waves of 64 per 32 query rows of its
 /// 256-row tile); the generic kernel runs two threads per query row of its tile.
@@ -177,10 +170,6 @@ inline constexpr int64_t SPLIT_FALLBACK_COMPUTE_UNITS = 256;
 /// Threads per merge workgroup, one (batch, head, query) row each.
 inline constexpr int64_t MERGE_THREADS = 64;
 
-inline constexpr int64_t INT32_LIMIT = 2147483647LL;
-inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
-/// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
-inline constexpr int64_t UNBOUNDED = -1;
 /// The generic kernel's `window_lo` for "no window": below any row's reach (the kernels'
 /// _NO_WINDOW, vendored-kernel modification 11).
 inline constexpr int64_t NO_WINDOW = -(int64_t{1} << 30);
@@ -219,162 +208,6 @@ inline std::optional<int64_t>
 // ---------------------------------------------------------------------------
 // Matching
 // ---------------------------------------------------------------------------
-
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-/// The node this pack's matchers read, or nullptr if the graph isn't a single SDPA-forward
-/// node.
-inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
-{
-    if(context.graph.nodeCount() != 1)
-    {
-        return nullptr;
-    }
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return nullptr;
-    }
-    return &node.attributesAs<data_objects::SdpaAttributes>();
-}
-
-/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
-/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
-/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
-inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
-}
-
-/// Whether the kernels' arithmetic meets the node's compute type. They compute the softmax,
-/// accumulate and keep the statistics in f32: at least the precision FLOAT, HALF or BFLOAT16
-/// asks for, and UNSET leaves it to the engine. DOUBLE asks for more, and an integer or FP8
-/// compute type for a different computation, so those decline.
-inline bool computesInFloat(const MatchContext& context)
-{
-    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
-    return computeType == data_objects::DataType::UNSET
-           || computeType == data_objects::DataType::FLOAT
-           || computeType == data_objects::DataType::HALF
-           || computeType == data_objects::DataType::BFLOAT16;
-}
-
-/// Whether @p uid names a softmax scale the kernels can take: a host scalar (every dim 1, so
-/// a per-head or per-row scale is not read as one value) of a floating-point type, and, when
-/// its value is in the graph rather than supplied at execute, a positive finite one -- the
-/// kernels take the running max over unscaled scores, which orders them as the scaled ones
-/// only for a positive scale. A runtime value is checked at launch.
-inline bool isServableScaleTensor(const MatchContext& context, int64_t uid)
-{
-    const auto* tensor = findTensor(context, uid);
-    if(tensor == nullptr || tensor->dims() == nullptr
-       || !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
-       || tensor->ragged_offset_tensor_uid().has_value())
-    {
-        return false;
-    }
-    for(const auto extent : *tensor->dims())
-    {
-        if(extent != 1)
-        {
-            return false;
-        }
-    }
-    const auto dataType = tensor->data_type();
-    if(dataType != data_objects::DataType::FLOAT && dataType != data_objects::DataType::HALF
-       && dataType != data_objects::DataType::BFLOAT16
-       && dataType != data_objects::DataType::DOUBLE)
-    {
-        return false;
-    }
-    try
-    {
-        const auto operand
-            = hipdnn_plugin_sdk::makeScalarOperand(context.graph.getTensorMap(), uid, "scale");
-        if(operand.isRuntimeUserSupplied)
-        {
-            return true;
-        }
-        const double value = hipdnn_plugin_sdk::toDouble(operand.bakedDefault);
-        return value > 0.0 && std::isfinite(value)
-               && value <= static_cast<double>(std::numeric_limits<float>::max());
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
-    {
-        return false;
-    }
-}
-
-/// The product of @p factors, or nullopt when it does not fit in int64_t.
-inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
-
-/// Whether no two elements of @p tensor share an address, which an output needs: concurrent
-/// workgroups writing one location race. Its axes of more than one element, ordered by
-/// stride, must each step past everything the axes inside it span. Conservative: a layout
-/// interleaving two axes inside one another's gaps declines too.
-inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
-    {
-        return false;
-    }
-    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
-    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
-    {
-        if(dims->Get(axis) > 1)
-        {
-            axes.emplace_back(strides->Get(axis), dims->Get(axis));
-        }
-    }
-    std::sort(axes.begin(), axes.end());
-    int64_t span = 1; // elements the inner axes reach, from the first
-    for(const auto& [stride, extent] : axes)
-    {
-        if(stride < span)
-        {
-            return false;
-        }
-        const auto reach = checkedProduct({extent - 1, stride});
-        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
-        {
-            return false;
-        }
-        span += *reach;
-    }
-    return true;
-}
-
-/// The kernel metadata spelling of a graph dtype.
-inline std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)
-{
-    switch(dataType)
-    {
-    case data_objects::DataType::BFLOAT16:
-        return std::string("bf16");
-    case data_objects::DataType::HALF:
-        return std::string("f16");
-    default:
-        return std::nullopt;
-    }
-}
 
 /// The graph's shape, read from Q and K. Callers must have validated both operands.
 struct SdpaProblem
@@ -711,38 +544,15 @@ struct CdnaMask
 inline std::optional<CdnaMask>
     maskFor(const data_objects::SdpaAttributes& attributes, int64_t seqLenQ, int64_t seqLenKv)
 {
-    const bool topLeftDeprecated = attributes.causal_mask();
-    const bool bottomRightDeprecated = attributes.causal_mask_bottom_right();
-    if(topLeftDeprecated && bottomRightDeprecated)
+    // The deprecated booleans resolved as the reference does (resolveMaskBounds).
+    const auto bounds = resolveMaskBounds(attributes);
+    if(!bounds.has_value())
     {
         return std::nullopt;
     }
-    const int64_t left
-        = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
-    int64_t right
-        = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    if(left < UNBOUNDED || right < UNBOUNDED)
-    {
-        return std::nullopt;
-    }
-    bool alignBottomRight = false;
-    if(topLeftDeprecated || bottomRightDeprecated)
-    {
-        // The booleans mean right 0 at their corner; a right_bound the graph also sets wins,
-        // and a left_bound is kept (cuDNN and #13065; hipDNN's CPU reference drops both).
-        right = right == UNBOUNDED ? 0 : right;
-        alignBottomRight = bottomRightDeprecated;
-    }
-    else
-    {
-        const auto alignment = attributes.diagonal_alignment();
-        if(alignment != data_objects::DiagonalAlignment::TOP_LEFT
-           && alignment != data_objects::DiagonalAlignment::BOTTOM_RIGHT)
-        {
-            return std::nullopt;
-        }
-        alignBottomRight = alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    }
+    const int64_t left = bounds->left;
+    const int64_t right = bounds->right;
+    const bool alignBottomRight = bounds->alignBottomRight;
     if(right == UNBOUNDED)
     {
         if(left != UNBOUNDED)
@@ -776,51 +586,6 @@ inline std::optional<CdnaMask>
  * Refuses rather than approximates: every feature the kernels do not implement is
  * declined, so a graph asking for one falls through to an engine that can honour it.
  */
-/**
- * @brief The attention sink's element stride across query heads, or nullopt for a sink the
- *        generic kernel cannot read.
- *
- * One logit per query head in the query's dtype, as a rank-1 [Hq] tensor or a rank-4
- * [1, Hq, 1, 1] one; a device operand, its head stride positive unless there is one head.
- */
-inline std::optional<int64_t>
-    servableSinkStride(const MatchContext& context, int64_t uid, const SdpaProblem& problem)
-{
-    const auto* sink = findTensor(context, uid);
-    if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
-       || sink->data_type() != problem.dataType || sink->virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
-       || sink->ragged_offset_tensor_uid().has_value()
-       || !declaresAlignment(*sink, BYTES_PER_ELEMENT))
-    {
-        return std::nullopt;
-    }
-    const auto* dims = sink->dims();
-    uint32_t headAxis = 0;
-    if(dims->size() == SDPA_RANK)
-    {
-        if(dims->Get(BATCH_AXIS) != 1 || dims->Get(SEQ_AXIS) != 1 || dims->Get(HEAD_DIM_AXIS) != 1)
-        {
-            return std::nullopt;
-        }
-        headAxis = HEAD_AXIS;
-    }
-    else if(dims->size() != 1)
-    {
-        return std::nullopt;
-    }
-    if(dims->Get(headAxis) != problem.numHeads || sink->strides()->size() != dims->size())
-    {
-        return std::nullopt;
-    }
-    const int64_t stride = problem.numHeads == 1 ? 0 : sink->strides()->Get(headAxis);
-    if(stride < 0 || stride > INT32_LIMIT || (problem.numHeads > 1 && stride == 0))
-    {
-        return std::nullopt;
-    }
-    return stride;
-}
-
 inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& context)
 {
     const auto* attributesPtr = sdpaNode(context);
@@ -998,9 +763,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         // An absent attn_scale_value is 1.0, cuDNN's default: its SDPA node multiplies by
         // attn_scale only when one is set. hipDNN's references read it the same way.
         const float scale = attributes.attn_scale_value().value_or(1.0F);
-        // The kernels take the running max over unscaled scores, which orders them the
-        // same way as the scaled ones only for a positive scale.
-        if(!(scale > 0.0F) || !std::isfinite(scale))
+        if(!isServableScale(static_cast<double>(scale)))
         {
             return std::nullopt;
         }
@@ -1016,8 +779,8 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     int64_t sinkStride = 0;
     if(attributes.sink_token_tensor_uid().has_value())
     {
-        const auto stride
-            = servableSinkStride(context, *attributes.sink_token_tensor_uid(), problem);
+        const auto stride = servableSinkStride(
+            context, *attributes.sink_token_tensor_uid(), problem.numHeads, problem.dataType);
         if(!stride.has_value())
         {
             return std::nullopt;
@@ -1092,32 +855,6 @@ inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     return binding;
-}
-
-/// A candidate's integer metadata field, or nullopt when absent or of another type.
-inline std::optional<int64_t> integerMetadata(const KernelDefinition& kernel,
-                                              std::string_view field)
-{
-    const auto value = kernel.tryGetMetadata(std::string(field));
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    const auto* integer = std::get_if<int64_t>(&*value);
-    return integer == nullptr ? std::nullopt : std::optional<int64_t>(*integer);
-}
-
-/// The string counterpart of integerMetadata.
-inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
-                                                 std::string_view field)
-{
-    const auto value = kernel.tryGetMetadata(std::string(field));
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    const auto* text = std::get_if<std::string>(&*value);
-    return text == nullptr ? std::nullopt : std::optional<std::string>(*text);
 }
 
 inline std::optional<int64_t>
@@ -1292,18 +1029,15 @@ inline std::optional<int64_t> wholeTensorBytes(const OperandStrides& strides,
     return checkedProduct({last, elementBytes});
 }
 
-/// Whether a split or packed-GQA object's whole-tensor addressing reaches every element of
-/// Q and O within 32 bits: the merge kernel stores O at one offset over the whole tensor,
-/// and a packed object views a KV head's group of Q (and O) heads as one buffer.
+/// Whether a candidate's addressing reaches every element of Q and O within 32 bits: a
+/// row-tiled object's padding rows up to its last tile's end, the merge kernel's store of O
+/// at one offset over the whole tensor, and a packed object's view of a KV head's group of
+/// Q (and O) heads as one buffer.
 inline bool reachesWithin32Bits(const MatchContext& context,
                                 const data_objects::SdpaAttributes& attributes,
                                 const SdpaProblem& problem,
                                 const CdnaTile& tile)
 {
-    if(!tile.splitKv && !tile.packGqa)
-    {
-        return true;
-    }
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || o == nullptr)
@@ -1320,6 +1054,28 @@ inline bool reachesWithin32Bits(const MatchContext& context,
     }
     const auto fits
         = [](std::optional<int64_t> bytes) { return bytes.has_value() && *bytes <= INT32_LIMIT; };
+    if(!tile.packGqa)
+    {
+        // A query tile's padding rows, up to the last tile's end, are addressed at row *
+        // sequence stride like the real ones, with 32-bit byte offsets: past 32 bits a padding
+        // row's offset wraps back into the slice and its store lands on a real row. So the
+        // reach of every row the tiles cover must fit, not only the sequence's.
+        const auto paddedRows
+            = checkedProduct({(problem.seqLenQ + tile.blockM - 1) / tile.blockM, tile.blockM});
+        if(!paddedRows.has_value())
+        {
+            return false;
+        }
+        const auto rowsReach = [&](const OperandStrides& strides, int64_t width) {
+            const auto span = checkedProduct({*paddedRows - 1, strides.sequence});
+            return span.has_value() && *span <= INT32_LIMIT - width
+                   && fits(checkedProduct({*span + width, BYTES_PER_ELEMENT}));
+        };
+        if(!rowsReach(*qStrides, problem.headDim) || !rowsReach(*oStrides, problem.headDimV))
+        {
+            return false;
+        }
+    }
     if(tile.splitKv
        && !fits(wholeTensorBytes(*oStrides,
                                  problem.batch,
@@ -1610,14 +1366,7 @@ inline const std::vector<KernelArgument>& mergeSignature()
 
 inline const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
 {
-    const auto* tensor = findTensor(context, uid);
-    if(tensor == nullptr)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "matched flydsl_sdpa_cdna graph has no tensor for uid " + std::to_string(uid));
-    }
-    return *tensor;
+    return requireSdpaTensor(context, uid, "flydsl_sdpa_cdna");
 }
 
 /// The compiled kernel plus everything launch() needs.
@@ -1880,14 +1629,14 @@ public:
             scale = static_cast<float>(
                 hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                     *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
-            // A pass-by-value scalar, read from host memory: the kernels take the running max
-            // over unscaled scores, which orders them like the scaled ones only for a positive
-            // scale. A constant scale was checked at match time; this one arrives now.
-            if(!(scale > 0.0F) || !std::isfinite(scale))
+            // A pass-by-value scalar, read from host memory. A constant scale was checked at
+            // match time; this one arrives now.
+            if(!isServableScale(static_cast<double>(scale)))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "flydsl_sdpa_cdna: the runtime softmax scale must be positive and finite");
+                    "flydsl_sdpa_cdna: the runtime softmax scale must be positive and at most "
+                    "2^20");
             }
         }
         else

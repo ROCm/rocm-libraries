@@ -23,61 +23,80 @@ manifest on every run rather than patching it.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
 
 from . import _arch_families as families
+from ._ops import OP_KERNEL_DIRS
 
 MANIFEST_NAME = "manifest.json"
 MANIFEST_VERSION = 1
 
 FLYDSL_DIR = Path(__file__).resolve().parent.parent
 
-# What one op's objects are generated from. Each op names its kernel directories
-# under kernels_src/kernels/; a new op must add itself, and an op missing here is
-# an error rather than an empty digest. Ops that share a directory, as rmsnorm and
-# rmsnorm_bwd share norm/, and every op through the shared generator modules
-# below, go stale together: an edit to any of their files, comments included,
-# needs a regeneration of each.
-OP_KERNEL_DIRS = {
-    "rmsnorm": ("norm",),
-    "rmsnorm_bwd": ("norm",),
-    "sdpa_rdna": ("attention_rdna",),
-    "sdpa_rdna_decode": ("attention_rdna",),
-    "sdpa_cdna": ("attention_cdna",),
-    "sdpa_cdna_dualwave": ("attention_cdna",),
-    "sdpa_cdna_decode": ("attention_cdna",),
-    "sdpa_aiw": ("attention_rdna4",),
-}
-# Shared by every op: the package root, the kernel helpers every op imports, and
-# the generator machinery -- every module under generators/ but the per-op
-# generators (gen_<op>.py, counted for their own op only), the instance table,
-# which holds every op's rows and is counted as the op's own rows instead, and
-# the family table, counted as the target's own row, so adding a family leaves
-# every other target's objects current.
+# Shared by every op: the package root and the kernel helpers every op imports.
+# On the generator side an op digests only the modules its gen_<op>.py reaches
+# through imports (generator_modules), so a module one op's build uses -- the
+# CDNA build module, say -- leaves the other ops current. Three tables are
+# digested as the op's or target's own row instead of as files, so a row added
+# for one op or family leaves every other op's objects current: the op registry,
+# the instance table, and the family table.
 # gen_descriptors.py is not an input to the objects, and its own --check
 # re-derives every descriptor.
 _SHARED_KERNEL_PATHS = ("kernels_src/kernels/__init__.py", "kernels_src/kernels/common")
-_INSTANCE_TABLE = "generators/_instances.py"
-_FAMILY_TABLE = "generators/arch_families.json"
+_ROW_TABLES = ("_ops.py", "_instances.py")
 _INPUT_SUFFIXES = (".py", ".json")
+
+
+def _imports(path: Path) -> list[tuple[int, str, list[str]]]:
+    """Every import in @p path, at any depth: (level, module, names)."""
+    found = []
+    for node in ast.walk(ast.parse(path.read_bytes(), filename=str(path))):
+        if isinstance(node, ast.Import):
+            found += [(0, alias.name, []) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [alias.name for alias in node.names]
+            found.append((node.level, node.module or "", names))
+    return found
+
+
+def generator_modules(flydsl_dir: Path, op: str) -> list[Path]:
+    """The generators/ modules ``gen_<op>.py`` reaches through its imports.
+
+    Function-local imports count; ``generators/__init__.py`` counts, since every
+    import of the package runs it. A module only reachable by a dynamic import
+    would be missed, which tests/test_inputs_digest.py refuses.
+    """
+    generators = flydsl_dir / "generators"
+    seen: set[Path] = set()
+    pending = [generators / f"gen_{op}.py", generators / "__init__.py"]
+    while pending:
+        path = pending.pop()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        for level, module, names in _imports(path):
+            if level == 0 and module.startswith("generators."):
+                module = module.removeprefix("generators.")
+            elif level != 1:
+                continue
+            if module:
+                pending.append(generators / f"{module.split('.')[0]}.py")
+            else:
+                pending += [generators / f"{name}.py" for name in names]
+    return sorted(seen)
 
 
 def _input_files(flydsl_dir: Path, op: str) -> list[Path]:
     roots = [flydsl_dir / path for path in _SHARED_KERNEL_PATHS]
     roots += [flydsl_dir / "kernels_src" / "kernels" / d for d in OP_KERNEL_DIRS[op]]
-    generators = flydsl_dir / "generators"
     files = [
         path
-        for path in generators.iterdir()
-        if path.is_file()
-        and path.suffix in _INPUT_SUFFIXES
-        and not path.name.startswith("gen_")
-        and path.relative_to(flydsl_dir).as_posix()
-        not in (_INSTANCE_TABLE, _FAMILY_TABLE)
+        for path in generator_modules(flydsl_dir, op)
+        if path.name not in _ROW_TABLES
     ]
-    files.append(generators / f"gen_{op}.py")
     for root in roots:
         if root.is_file():
             files.append(root)
@@ -95,15 +114,15 @@ def _input_files(flydsl_dir: Path, op: str) -> list[Path]:
 def inputs_digest(op: str, arch: str, flydsl_dir: Path = FLYDSL_DIR) -> str:
     """SHA256 over one op's generator inputs for one target.
 
-    The op's files, then its instance rows, then the target's family row (a
-    concrete arch has none). Recorded in the target's manifest; ``gen_descriptors.py`` compares it with the
+    The op's files, then its registry row, then its instance rows, then the
+    target's family row (a concrete arch has none). Recorded in the target's manifest; ``gen_descriptors.py`` compares it with the
     tree, so a source edit without a regeneration fails the build instead of
     shipping objects built from other sources. Line endings are normalized, so a
     checkout with CRLF text does not read as a change.
     """
     if op not in OP_KERNEL_DIRS:
         raise KeyError(
-            f"op {op!r} names no kernel directories in _manifest.OP_KERNEL_DIRS; "
+            f"op {op!r} names no kernel directories in _ops.OP_KERNEL_DIRS; "
             "add its row so its objects are tied to their sources"
         )
     from ._instances import instances_for  # noqa: PLC0415
@@ -113,6 +132,7 @@ def inputs_digest(op: str, arch: str, flydsl_dir: Path = FLYDSL_DIR) -> str:
         relative = path.relative_to(flydsl_dir).as_posix()
         digest.update(relative.encode("utf-8") + b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    digest.update(json.dumps(list(OP_KERNEL_DIRS[op])).encode("utf-8") + b"\0")
     rows = [instance.to_record() for instance in instances_for(op, arch)]
     digest.update(json.dumps(rows, sort_keys=True).encode("utf-8") + b"\0")
     family = families.table().get(arch) if families.is_generic(arch) else None
@@ -185,7 +205,8 @@ def refresh_source_md(op_dir: Path) -> Path:
         "<!-- Generated by flydsl/generators/. Do not edit by hand: every generator",
         f"     run rebuilds this file from {arch}/manifest.json. -->",
         "",
-        f"{len(manifest['instances'])} code object(s), committed under `{arch}/`, "
+        f"{len(manifest['instances'])} code object(s) under `{arch}/` (stored with DVC, "
+        f"pointer `{arch}.dvc`), "
         "compiled from the vendored sources under",
         "`flydsl/kernels_src/` in the hip-kernel-provider tree. Regenerate with:",
         "",

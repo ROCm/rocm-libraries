@@ -7,7 +7,8 @@
 
 Writes ``<content>/rmsnorm/<arch>/<instance>.hsaco`` for every row of
 ``_instances.rmsnorm_instances()``, plus the ``manifest.json`` beside them and
-``<content>/rmsnorm/<arch>.SOURCE.md`` next to the folder, all committed.
+``<content>/rmsnorm/<arch>.SOURCE.md`` next to the folder. The folder is a DVC
+output (``<arch>.dvc``); SOURCE.md is committed.
 ``<content>`` is FlyDSL's bundle folder under the
 provider's production descriptor root (``_flydsl_env.CONTENT_DIR``).
 
