@@ -33,7 +33,10 @@ if( NOT ROCmCMakeBuildTools_FOUND )
 endif( )
 include(ROCMInstallTargets)
 
-set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
+set( hipfft_bench_source bench.cpp
+  ../../shared/array_validator.cpp
+  ../../shared/data_gen_device.cpp
+)
 set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
 
 add_executable( hipfft-bench ${hipfft_bench_source} ${hipfft_bench_includes} )
@@ -42,10 +45,6 @@ target_compile_options( hipfft-bench PRIVATE ${WARNING_FLAGS} )
 
 set_target_properties( hipfft-bench PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON )
 
-target_include_directories( hipfft-bench
-  PRIVATE
-  $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-  )
   
 if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )

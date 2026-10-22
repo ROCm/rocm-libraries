@@ -175,13 +175,6 @@ rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 
-# hipcc automatically provides HIP include dirs and HIP platform,
-# but plain clang needs to be told
-if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-  include_directories( ${HIP_INCLUDE_DIRS} )
-  add_compile_definitions( __HIP_PLATFORM_AMD__ )
-endif()
-
 # Enable MPI support in rocFFT:
 option(ROCFFT_MPI_ENABLE "Enable MPI" OFF)
 option(ROCFFT_CRAY_MPI_ENABLE "Cray MPI" OFF)
