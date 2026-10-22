@@ -23,7 +23,8 @@ namespace ck_tile {
 // Experimental, gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] K/V
 // pools, D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
 // bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
-// optional LSE output, no sink, dropout or bias. Build each instance in its own translation unit
+// optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional LSE output, no
+// dropout or bias. Build each instance in its own translation unit
 // with the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
 // -fgpu-flush-denormals-to-zero): the launch contract below rests on measurements of that generated
 // code, and the generated code was observed to change when several instances share a translation
@@ -51,8 +52,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     using Base::GridSize;
     using Base::MakeKargs;
 
-    static constexpr bool kIsGroupMode   = Base::kIsGroupMode;
-    static constexpr bool kStoreLSE      = Base::kStoreLSE;
+    static constexpr bool kIsGroupMode = Base::kIsGroupMode;
+    static constexpr bool kStoreLSE    = Base::kStoreLSE;
+    // Sink tokens (sink_size, StreamingLLM) and the per-head sink logit (sink_ptr) share one
+    // instance, as in the existing batch prefill kernel; sink tokens need a mask.
+    static constexpr bool kHasSink = FmhaPipeline::kHasSink;
+    static_assert(!kHasSink || FmhaMask::IsMasking, "sink tokens need a masked instance");
     static constexpr auto kKVLookupTable = Base::kKVLookupTable;
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
     static constexpr index_t kBlockSize  = Base::kBlockSize;
@@ -202,7 +207,13 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             // mask_type as in the existing batch prefill kernel (top-left, else bottom-right).
             require(kargs.mask_type != GenericAttentionMaskEnum::NO_MASK,
                     "a masked instance needs a mask type");
+            if constexpr(kHasSink)
+                require(kargs.sink_size >= 0, "sink_size must not be negative");
+            else
+                require(kargs.sink_size == 0, "sink tokens need a sink instance");
         }
+        if constexpr(!kHasSink)
+            require(kargs.sink_ptr == nullptr, "sink logits need a sink instance");
     }
 
     // Checked launch path: owns the dynamic LDS request, so a launcher cannot issue a value
@@ -370,12 +381,21 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         const FmhaMask mask = [&]() {
             if constexpr(FmhaMask::IsMasking)
             {
-                return make_generic_attention_mask_from_lr_window<FmhaMask>(
-                    kargs.window_size_left,
-                    kargs.window_size_right,
-                    kargs.seqlen_q,
-                    kargs.seqlen_k,
-                    kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+                if constexpr(kHasSink)
+                    return make_generic_attention_mask_from_lr_window<FmhaMask>(
+                        kargs.window_size_left,
+                        kargs.window_size_right,
+                        kargs.sink_size,
+                        kargs.seqlen_q,
+                        kargs.seqlen_k,
+                        kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+                else
+                    return make_generic_attention_mask_from_lr_window<FmhaMask>(
+                        kargs.window_size_left,
+                        kargs.window_size_right,
+                        kargs.seqlen_q,
+                        kargs.seqlen_k,
+                        kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
             }
             else
             {
@@ -383,6 +403,15 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             }
         }();
 
+        // Per-head sink logit in the score domain, as in the existing batch prefill kernel.
+        const float sink_value = [&]() {
+            if constexpr(kHasSink)
+                return kargs.sink_ptr != nullptr
+                           ? *(static_cast<const float*>(kargs.sink_ptr) + i_nhead) / kargs.scale_s
+                           : -numeric<float>::infinity();
+            else
+                return -numeric<float>::infinity();
+        }();
         auto o_acc_tile = FmhaPipeline{}(q_window,
                                          k_window,
                                          v_window,
@@ -391,7 +420,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                          mask,
                                          EmptyPositionEncoding<SaccDataType>{},
                                          kargs.scale_s,
-                                         -numeric<float>::infinity(),
+                                         sink_value,
                                          smem_ptr + Policy::GetLdsOffsetK0(),
                                          smem_ptr + Policy::GetLdsOffsetK1(),
                                          smem_ptr + Policy::GetLdsOffsetV0(),

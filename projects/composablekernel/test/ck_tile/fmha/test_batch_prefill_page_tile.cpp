@@ -52,6 +52,11 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_LSE
 #define CK_TILE_FMHA_PAGE_TILE_TEST_LSE 0
 #endif
+// 1: the sink instance (sink tokens via sink_size and per-head sink logits via sink_ptr); causal
+// models only.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SINK
+#define CK_TILE_FMHA_PAGE_TILE_TEST_SINK 0
+#endif
 
 namespace {
 
@@ -67,6 +72,7 @@ constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 64 || kPage == 128 || kPage == 256 || kPage == 1024);
 constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
 constexpr bool kLse    = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
+constexpr bool kSink   = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
@@ -97,7 +103,7 @@ struct Model
             ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
             1,
             false,
-            false,
+            kSink,
             static_cast<int>(kPage),
             ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
             kLookupTable,
@@ -145,7 +151,7 @@ struct ModelNames
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
                (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "") +
-               (kFp16 ? "Fp16" : "");
+               (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "");
     }
 };
 
@@ -162,6 +168,7 @@ struct Pointers
     const void* kv_indptr         = nullptr;
     const void* kv_last_page_lens = nullptr;
     void* lse                     = nullptr;
+    const void* sink              = nullptr; // per-head sink logits [Hq]
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
@@ -194,6 +201,10 @@ struct Window
     bool top_left = false;
     int left      = -1;
     int right     = 0;
+    // Sink instance only: the first `sink` keys stay visible (sink_size, StreamingLLM), and
+    // sink_logits passes the per-head sink logits (sink_ptr).
+    int sink         = 0;
+    bool sink_logits = false;
 };
 
 template <typename M>
@@ -243,6 +254,8 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.lse_ptr                  = d.lse;
     a.nhead_stride_lse         = l.seqstart_q.back(); // LSE is [Hq, total_q]
     a.batch_stride_lse         = 0;
+    a.sink_size                = M::kCausal ? w.sink : 0;
+    a.sink_ptr                 = w.sink_logits ? d.sink : nullptr;
     a.window_size_left         = M::kCausal ? w.left : -1;
     a.window_size_right        = M::kCausal ? w.right : -1;
     a.mask_type                = static_cast<int>(
@@ -400,7 +413,18 @@ TYPED_TEST(PageTileContract, CheckLaunch)
         expect_refused("a masked instance needs a mask type", need, [](Kargs& k) {
             k.mask_type = ck_tile::GenericAttentionMaskEnum::NO_MASK;
         });
+        if constexpr(kSink)
+            EXPECT_EQ(refusal(need, [](Kargs& k) { k.sink_size = 4; }), "");
+        else
+            expect_refused(
+                "sink tokens need a sink instance", need, [](Kargs& k) { k.sink_size = 4; });
     }
+    if constexpr(kSink)
+        EXPECT_EQ(refusal(need, [&](Kargs& k) { k.sink_ptr = fake(0xa0000); }), "");
+    else
+        expect_refused("sink logits need a sink instance", need, [&](Kargs& k) {
+            k.sink_ptr = fake(0xa0000);
+        });
 
     // The checked launch path builds the functor for valid arguments (nothing is launched)
     // and refuses invalid ones before a functor exists.
@@ -448,6 +472,7 @@ struct HostProblem
     int head_dim = 0;
     std::vector<Data> q, k, v;
     std::vector<float> q_float;
+    std::vector<float> sink_logits; // per query head, in the scaled score domain
 };
 
 // Values of V. Marker: V is zero except for the keys of one logical page (the middle page of
@@ -599,13 +624,17 @@ HostProblem MakeProblem(const Case& s,
         return out;
     };
     h.q_float = decode(h.q);
+    // Sink logits around the score range, with one head at -inf (that head has no sink).
+    for(int head = 0; head < h.layout.q_heads; ++head)
+        h.sink_logits.push_back(head % 4 == 3 ? -std::numeric_limits<float>::infinity()
+                                              : 0.75f * static_cast<float>(head % 5) - 1.0f);
     return h;
 }
 
 struct DeviceProblem
 {
     ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
-        lse;
+        lse, sink;
 
     // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
     static const std::vector<int32_t>& Pages(const Layout& l)
@@ -635,9 +664,12 @@ struct DeviceProblem
                             sizeof(int32_t)),
           lse(std::max<std::size_t>(
                   static_cast<std::size_t>(h.layout.q_heads) * h.layout.seqstart_q.back(), 1) *
-              sizeof(float))
+              sizeof(float)),
+          sink(std::max<std::size_t>(h.sink_logits.size(), 1) * sizeof(float))
     {
         q.ToDevice(h.q.data());
+        if(!h.sink_logits.empty())
+            sink.ToDevice(h.sink_logits.data());
         const std::size_t shift_bytes = PoolBytes(h, page_shift) - h.k.size() * sizeof(Data);
         for(auto [pool, host] : {std::pair{&k, &h.k}, std::pair{&v, &h.v}})
             EXPECT_EQ(hipMemcpy(static_cast<char*>(pool->GetDeviceBuffer()) + shift_bytes,
@@ -670,7 +702,8 @@ struct DeviceProblem
                 block_table.GetDeviceBuffer(),
                 kv_indptr.GetDeviceBuffer(),
                 kv_last_page_lens.GetDeviceBuffer(),
-                lse.GetDeviceBuffer()};
+                lse.GetDeviceBuffer(),
+                sink.GetDeviceBuffer()};
     }
 };
 
@@ -760,12 +793,24 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         {
             // Key k is visible to query q when q + offset - left <= k <= q + offset + right.
             const int64_t offset = window.top_left ? 0 : k_len - q_len;
-            s.is_masked          = [offset, window](std::size_t query, std::size_t key) {
+            // Sink keys (key < sink) stay visible below the right bound when the window has a
+            // left bound that does not already reach key 0, for query rows below k_len - the
+            // sink rule of the existing CK mask (SimplifiedGenericAttentionMask::IsOutOfSinkBound).
+            const int64_t q_rows = q_len;
+            const int64_t k_rows = k_len;
+            s.is_masked = [offset, window, q_rows, k_rows](std::size_t query, std::size_t key) {
                 const int64_t diagonal = static_cast<int64_t>(query) + offset;
                 const int64_t k        = static_cast<int64_t>(key);
-                return (window.left >= 0 && k < diagonal - window.left) ||
-                       (window.right >= 0 && k > diagonal + window.right);
+                const bool past_right  = window.right >= 0 && k > diagonal + window.right;
+                const bool in_window =
+                    !past_right && !(window.left >= 0 && k < diagonal - window.left);
+                const int64_t y    = 1 + window.left + (window.top_left ? 0 : q_rows - k_rows);
+                const bool in_sink = k < window.sink && !past_right && window.left >= 0 &&
+                                     y < q_rows && static_cast<int64_t>(query) < k_rows;
+                return !(in_window || in_sink);
             };
+            if(window.sink_logits)
+                s.sink_logits = h.sink_logits;
         }
         for(auto r : sampled_rows)
             if(r < static_cast<std::size_t>(q_len))
@@ -946,6 +991,57 @@ TYPED_TEST(PageTileForward, MatchesReferenceWindow)
                 const auto o       = Run<TypeParam>(h, d, window);
                 const auto metrics = CompareWithReference(h, o, true, {}, window);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " window "
+                          << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
+                          << " max_abs=" << metrics.max_abs_error
+                          << " min_cos=" << metrics.min_row_cosine
+                          << " nonfinite=" << metrics.nonfinite_output_count
+                          << " passed=" << metrics.passed << '\n';
+                EXPECT_EQ(metrics.checked_rows, LogicalRows(h.layout));
+                EXPECT_EQ(metrics.nonfinite_output_count, 0u);
+                EXPECT_TRUE(metrics.passed);
+            }
+        }
+    }
+}
+
+// Sink instance: sink tokens (sink_size) with sliding windows, so the key loop visits the sink
+// tiles first and then jumps to the window (the page lookup must follow the jump), sinks spanning
+// one and two key tiles, and per-head sink logits (one head at -inf) with and without sink tokens.
+TYPED_TEST(PageTileForward, MatchesReferenceSink)
+{
+    if constexpr(!kSink)
+        GTEST_SKIP() << "sink instance only";
+    else
+    {
+        const std::vector<Case> shapes = {
+            {"gqa2", 4, 2, {300, 13, 129, 64}, {2 * kPage + 37, kPage - 3, 129, 384}},
+            {"long", 4, 2, {300, 129}, {3000, 1500}},
+            {"tiny", 4, 2, {1, 130, 128, 200}, {1, 100, 128, 100}},
+        };
+        const std::vector<std::pair<const char*, Window>> windows = {
+            {"swa100 sink4", {false, 100, 0, 4, false}},
+            {"swa300 sink1", {false, 300, 0, 1, false}},
+            {"swa37 sink200", {false, 37, 0, 200, false}},
+            {"causal sink4", {false, -1, 0, 4, false}},
+            {"swa64 top-left sink16", {true, 64, 0, 16, false}},
+            {"local100+30 sink4", {false, 100, 30, 4, false}},
+            {"swa100 logits", {false, 100, 0, 0, true}},
+            {"causal logits", {false, -1, 0, 0, true}},
+            {"swa100 sink4 logits", {false, 100, 0, 4, true}},
+        };
+        std::uint32_t seed = 71;
+        for(const auto& shape : shapes)
+        {
+            const auto h =
+                MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, false, seed++);
+            DeviceProblem d(h);
+            for(const auto& [window_name, window] : windows)
+            {
+                const std::string name = std::string(shape.name) + " " + window_name;
+                SCOPED_TRACE(name);
+                const auto o       = Run<TypeParam>(h, d, window);
+                const auto metrics = CompareWithReference(h, o, true, {}, window);
+                std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " sink "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
                           << " min_cos=" << metrics.min_row_cosine
