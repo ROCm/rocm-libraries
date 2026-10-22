@@ -129,8 +129,16 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.buffer_load_vN_f16`        | `buffer_load_vN_f16`             | `raw.ptr.buffer.load.{i32,v2i32,v4i32}` + `vec_bitcast`      |
 | `tile.buffer_store_f16`          | `buffer_store_f16`               | `raw.ptr.buffer.store.i16`                                   |
 | `tile.buffer_store_vN_f16`       | `buffer_store_vN_f16`            | `raw.ptr.buffer.store.{i32,v2i32,v4i32}`                     |
+| `tile.buffer_load_vN`            | `buffer_load_vN`                 | `raw.ptr.buffer.load.{i8,i16,i32,v2i32,v4i32}` + `bitcast` to `<n x dtype>` |
+| `tile.buffer_store_vN`           | `buffer_store_vN`                | `bitcast` + `raw.ptr.buffer.store.{i8,i16,i32,v2i32,v4i32}`  |
 | `tile.async_buffer_load_lds`     | `async_buffer_load_lds`          | `llvm.amdgcn.raw.ptr.buffer.load.lds`                        |
 | `tile.async_buffer_load_lds_addr`| `async_buffer_load_lds_addr`     | same as above; explicit LDS i64 address                       |
+
+`buffer_load_vN` / `buffer_store_vN` take any scalar whose width is whole bytes (i8, u8, fp8, bf8,
+i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. The hardware checks an
+access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
+`num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
+i64 elements, so those two lower through LLVM only.
 
 ## MFMA
 

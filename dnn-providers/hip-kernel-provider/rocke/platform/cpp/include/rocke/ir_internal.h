@@ -191,6 +191,28 @@ const rocke_type_t* rocke_require_ir_type(const char* dtype);
  * scalar with no format. */
 int rocke_i_type_bits(const rocke_type_t* t);
 
+/* The bytes one buffer access of `count` `elem` elements moves (Python
+ * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole
+ * bytes and the access is 1, 2, 4, 8 or 16 bytes. Otherwise returns 0 and
+ * writes the Python engine's refusal, prefixed with `op_name`, into `err`. */
+int rocke_i_buffer_access_bytes(
+    const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap);
+
+/* The bytes a buffer access whose `role` ("result" of a load, "value" of a
+ * store) has type `t` moves (Python core/ir.py::_buffer_vector_bytes): `t` is a
+ * vector, checked as rocke_i_buffer_access_bytes. Otherwise returns 0 and
+ * writes the Python engine's refusal into `err`. */
+int rocke_i_buffer_vector_bytes(
+    const char* op_name, const char* role, const rocke_type_t* t, char* err, size_t err_cap);
+
+/* rocke_i_buffer_vector_bytes for a built tile.buffer_load_vN (three operands,
+ * one result: the loaded vector) or tile.buffer_store_vN (four operands, the
+ * last the stored vector, no result), after its operand and result counts:
+ * serialized IR reaches the verifier and the lowerings without passing the
+ * builder (Python core/ir.py::_buffer_op_bytes). Otherwise returns 0 and writes
+ * the Python engine's refusal into `err`. */
+int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap);
+
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
  * the builder ("bitcast", "vec_bitcast") and `hint` says what to do instead of

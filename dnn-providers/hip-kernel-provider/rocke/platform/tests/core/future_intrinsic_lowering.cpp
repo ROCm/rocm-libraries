@@ -2958,7 +2958,36 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
-/* ---- dtype-generic buffer_load_vN (Python IRBuilder.buffer_load_vN) ---- */
+/* ---- dtype-generic buffer_load_vN / buffer_store_vN (Python IRBuilder) ---- */
+
+/* Run `build` on a fresh builder; return the refusal text, or "" when the
+ * builder accepted. The builder reports a refusal either as an error status or
+ * by throwing. */
+template <typename BuildFn>
+std::string buffer_refusal(BuildFn build)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "buf_vn_bad");
+    std::string err;
+    try
+    {
+        rocke_value_t* X = global_ptr_param(&b, "X", rocke_i8());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+        build(&b, rsrc, rocke_b_const_i32(&b, 0));
+        if(rocke_ir_builder_status(&b) != ROCKE_OK)
+        {
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "(no message)";
+        }
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return err;
+}
+
 void case_buffer_load_vN_generic()
 {
     const std::string ir = lower_one("buf_vn", [](rocke_ir_builder_t* b) {
@@ -2968,27 +2997,33 @@ void case_buffer_load_vN_generic()
         rocke_value_t* i32x4 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i32(), 4);
         rocke_value_t* bf16x8 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_bf16(), 8);
         rocke_value_t* f32x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 1);
-        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr)
+        rocke_value_t* i8x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i8(), 1);
+        rocke_value_t* f16x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f16(), 1);
+        rocke_value_t* f64x1 = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f64(), 1);
+        if(i32x4 == nullptr || bf16x8 == nullptr || f32x1 == nullptr || i8x1 == nullptr
+           || f16x1 == nullptr || f64x1 == nullptr)
         {
             fail("buffer_load_vN returned NULL", __LINE__);
             return;
         }
-        /* Result type <n x dtype>, hint bl{n}, attrs dwords + elem_type. */
-        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1};
-        const int lanes[] = {4, 8, 1};
-        const int64_t dwords[] = {4, 4, 1};
-        const char* elems[] = {"i32", "bf16", "f32"};
-        for(int i = 0; i < 3; ++i)
+        /* Result type <n x dtype>, hint bl{n}, attr elem_type, and attr dwords
+         * only for an access of whole dwords (-1 = absent). */
+        const rocke_value_t* want[] = {i32x4, bf16x8, f32x1, i8x1, f16x1, f64x1};
+        const int lanes[] = {4, 8, 1, 1, 1, 1};
+        const int64_t dwords[] = {4, 4, 1, -1, -1, 2};
+        const char* elems[] = {"i32", "bf16", "f32", "i8", "f16", "f64"};
+        for(int i = 0; i < 6; ++i)
         {
             const rocke_value_t* v = want[i];
             const rocke_attr_value_t* dw = rocke_attr_get(&v->op->attrs, "dwords");
             const rocke_attr_value_t* et = rocke_attr_get(&v->op->attrs, "elem_type");
+            const bool dwords_ok
+                = dwords[i] < 0 ? dw == nullptr : (dw != nullptr && dw->u.i == dwords[i]);
             char hint[16];
             snprintf(hint, sizeof(hint), "%%bl%d", lanes[i]);
             if(v->type->kind != ROCKE_TYPE_VECTOR || v->type->count != lanes[i]
-               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || dw == nullptr
-               || dw->u.i != dwords[i] || et == nullptr || strcmp(et->u.s, elems[i]) != 0
-               || strncmp(v->name, hint, strlen(hint)) != 0)
+               || v->op->opcode != ROCKE_OP_TILE_BUFFER_LOAD_VN || !dwords_ok || et == nullptr
+               || strcmp(et->u.s, elems[i]) != 0 || strncmp(v->name, hint, strlen(hint)) != 0)
                 fail(elems[i], __LINE__);
         }
     });
@@ -2997,6 +3032,12 @@ void case_buffer_load_vN_generic()
     EXPECT_IR(ir, " to <8 x bfloat>");
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32(");
     EXPECT_IR(ir, "bitcast i32 ");
+    EXPECT_IR(ir, "call i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(");
+    EXPECT_IR(ir, " to <1 x i8>");
+    EXPECT_IR(ir, "call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16(");
+    EXPECT_IR(ir, " to <1 x half>");
+    EXPECT_IR(ir, "call <2 x i32> @llvm.amdgcn.raw.ptr.buffer.load.v2i32(");
+    EXPECT_IR(ir, " to <1 x double>");
 
     struct Reject
     {
@@ -3004,43 +3045,198 @@ void case_buffer_load_vN_generic()
         const rocke_type_t* (*dtype)(void);
         int n;
     };
+    /* The Python builder's texts (tests/core/test_buffer_access_widths.py). */
     static const Reject rejects[] = {
-        {"buffer_load_vN: unsupported dtype 'f64'", rocke_f64, 2},
-        {"buffer_load_vN: n=16 dtype=f16 -> dwords=8 must be 1, 2, or 4", rocke_f16, 16},
-        {"buffer_load_vN: n=3 dtype=f32 -> dwords=3 must be 1, 2, or 4", rocke_f32, 3},
-        {"buffer_load_vN: n=3 dtype=bf16 is not a whole number of dwords", rocke_bf16, 3},
-        {"buffer_load_vN: n=5 dtype=f16 is not a whole number of dwords", rocke_f16, 5},
-        {"buffer_load_vN: n=0 dtype=f32 is not a whole number of dwords", rocke_f32, 0},
+        {"buffer_load_vN: 16 x f16 is 32 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f16,
+         16},
+        {"buffer_load_vN: 3 x f32 is 12 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f32,
+         3},
+        {"buffer_load_vN: 3 x bf16 is 6 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_bf16,
+         3},
+        {"buffer_load_vN: 3 x f64 is 24 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+         rocke_f64,
+         3},
+        {"buffer_load_vN: n must be at least 1, got 0", rocke_f32, 0},
+        /* count * bits overflows a 32-bit int here: the width is computed in
+         * 64 bits, as Python's ints are. */
+        {"buffer_load_vN: 536870913 x i8 is 536870913 bytes; a buffer access moves 1, 2, 4, 8 "
+         "or 16 bytes",
+         rocke_i8,
+         536870913},
+        {"buffer_load_vN: i1 elements are 1 bits, not whole bytes; a buffer access moves whole "
+         "bytes",
+         rocke_i1,
+         8},
     };
     for(const Reject& r : rejects)
     {
-        rocke_ir_builder_t b;
-        rocke_ir_builder_init(&b, "buf_vn_bad");
-        bool rejected = false;
-        std::string err;
-        try
-        {
-            rocke_value_t* X = global_ptr_param(&b, "X", rocke_f16());
-            rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
-            rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-            rocke_value_t* v = rocke_b_buffer_load_vN(&b, rsrc, zero, zero, r.dtype(), r.n);
-            rejected = v == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE;
-            const char* msg = rocke_ir_builder_error(&b);
-            err = msg ? msg : "";
-        }
-        catch(const std::exception& e)
-        {
-            rejected = true;
-            err = e.what();
-        }
-        if(!rejected || err.find(r.want) == std::string::npos)
+        const std::string err
+            = buffer_refusal([&](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+                  rocke_b_buffer_load_vN(b, rsrc, zero, zero, r.dtype(), r.n);
+              });
+        if(err.find(r.want) == std::string::npos)
         {
             char msg[ROCKE_ERR_MSG_CAP + 128];
             snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", r.want, err.c_str());
             fail(msg, __LINE__);
         }
-        rocke_ir_builder_free(&b);
     }
+}
+
+void case_buffer_store_vN_generic()
+{
+    const std::string ir = lower_one("buf_store_vn", [](rocke_ir_builder_t* b) {
+        rocke_value_t* X = global_ptr_param(b, "X", rocke_i8());
+        rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        const struct
+        {
+            const rocke_type_t* (*dtype)(void);
+            int n;
+        } widths[] = {{rocke_i8, 1}, {rocke_i8, 2}, {rocke_f16, 2}, {rocke_f64, 1}, {rocke_i8, 16}};
+        for(const auto& w : widths)
+        {
+            rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, w.dtype(), w.n);
+            const int before = b->kernel->body->num_ops;
+            rocke_b_buffer_store_vN(b, rsrc, zero, zero, v);
+            if(!rocke_ir_builder_ok(b) || b->kernel->body->num_ops != before + 1
+               || b->kernel->body->ops[before]->opcode != ROCKE_OP_TILE_BUFFER_STORE_VN
+               || b->kernel->body->ops[before]->attrs.count != 0)
+                fail("buffer_store_vN op", __LINE__);
+        }
+    });
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8 ");
+    EXPECT_IR(ir, "bitcast <1 x i8> ");
+    EXPECT_IR(ir, "bitcast <2 x i8> ");
+    EXPECT_IR(ir, "bitcast <2 x half> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i16(i16 ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32 ");
+    EXPECT_IR(ir, "bitcast <1 x double> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.v2i32(<2 x i32> ");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.raw.ptr.buffer.store.v4i32(<4 x i32> ");
+    EXPECT_IR(ir, "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ");
+
+    const std::string hip = lower_one_hip(
+        "buf_store_vn_hip",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* X = global_ptr_param(b, "X", rocke_i8());
+            rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, rocke_b_const_i32(b, 256));
+            rocke_value_t* zero = rocke_b_const_i32(b, 0);
+            rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_i8(), 1);
+            rocke_b_buffer_store_vN(b, rsrc, zero, zero, v);
+        },
+        "gfx942");
+    EXPECT_IR(hip, "= __builtin_amdgcn_raw_buffer_load_b8(");
+    EXPECT_IR(hip, "{ unsigned char _bs; __builtin_memcpy(&_bs, &");
+    EXPECT_IR(hip, "__builtin_amdgcn_raw_buffer_store_b8(_bs, ");
+
+    /* The Python builder's texts (tests/core/test_buffer_access_widths.py). */
+    std::string err
+        = buffer_refusal([](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+              rocke_b_buffer_store_vN(b, rsrc, zero, zero, rocke_b_const_i32(b, 1));
+          });
+    const char* want_scalar = "buffer_store_vN: the value must be a vector, got i32; a "
+                              "one-element vector is vector_splat(x, 1)";
+    if(err.find(want_scalar) == std::string::npos)
+        fail(("scalar value: " + err).c_str(), __LINE__);
+    err = buffer_refusal([](rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* zero) {
+        rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, zero, zero, rocke_f32(), 4);
+        rocke_value_t* wide = rocke_b_vector_splat(b, rocke_b_vec_extract(b, v, 0), 8);
+        rocke_b_buffer_store_vN(b, rsrc, zero, zero, wide);
+    });
+    const char* want_wide
+        = "buffer_store_vN: 8 x f32 is 32 bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes";
+    if(err.find(want_wide) == std::string::npos)
+        fail(("wide value: " + err).c_str(), __LINE__);
+}
+
+/* The verifier's messages for the kernel `b` has built so far. */
+std::vector<std::string> verify_messages(rocke_ir_builder_t* b)
+{
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(b), &diags, &n);
+    std::vector<std::string> out;
+    for(size_t i = 0; i < n; ++i)
+        out.emplace_back(diags[i].message ? diags[i].message : "");
+    rocke_diags_free(diags, n);
+    return out;
+}
+
+bool has_message(const std::vector<std::string>& messages, const char* want)
+{
+    for(const std::string& m : messages)
+    {
+        if(m == want)
+            return true;
+    }
+    return false;
+}
+
+/* Buffer loads and stores written as raw ops, past the builder's checks, as
+ * serialized IR reaches the verifier: the verifier refuses a wrong width and a
+ * wrong operand count with the Python engine's texts
+ * (tests/core/test_buffer_access_widths.py). */
+void case_buffer_vN_verify()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "buf_vn_verify");
+    rocke_value_t* X = global_ptr_param(&b, "X", rocke_i8());
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 256));
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    rocke_value_t* load_operands[] = {rsrc, zero, zero};
+    const rocke_type_t* f32x3[] = {rocke_vector_type(&b, rocke_f32(), 3)};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_LOAD_VN,
+               load_operands,
+               3,
+               f32x3,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "bl3",
+               nullptr);
+    rocke_value_t* f32x8 = rocke_b_vector_splat(&b, rocke_b_const_f32(&b, 1.0), 8);
+    rocke_value_t* wide_operands[] = {rsrc, zero, zero, f32x8};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_STORE_VN,
+               wide_operands,
+               4,
+               nullptr,
+               0,
+               nullptr,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_BUFFER_STORE_VN,
+               load_operands,
+               3,
+               nullptr,
+               0,
+               nullptr,
+               nullptr,
+               0,
+               nullptr,
+               nullptr);
+    rocke_b_ret(&b);
+    const std::vector<std::string> messages = verify_messages(&b);
+    if(!has_message(messages,
+                    "tile.buffer_load_vN: 3 x f32 is 12 bytes; a buffer access moves 1, 2, 4, 8 "
+                    "or 16 bytes"))
+        fail("verifier must reject a 12-byte buffer_load_vN", __LINE__);
+    if(!has_message(messages,
+                    "tile.buffer_store_vN: 8 x f32 is 32 bytes; a buffer access moves 1, 2, 4, 8 "
+                    "or 16 bytes"))
+        fail("verifier must reject a 32-byte buffer_store_vN", __LINE__);
+    if(!has_message(messages, "tile.buffer_store_vN: expected 4 operands / 0 results, got 3 / 0"))
+        fail("verifier must reject a three-operand buffer_store_vN", __LINE__);
+    rocke_ir_builder_free(&b);
 }
 
 void case_global_load_async_to_lds_b8()
@@ -3435,6 +3631,8 @@ const TestCase k_cases[] = {
     {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"buffer_load_vN_generic", case_buffer_load_vN_generic},
+    {"buffer_store_vN_generic", case_buffer_store_vN_generic},
+    {"buffer_vN_verify", case_buffer_vN_verify},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},

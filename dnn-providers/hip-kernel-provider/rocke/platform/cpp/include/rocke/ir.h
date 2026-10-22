@@ -471,6 +471,9 @@ typedef enum rocke_opcode
 
     /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
     ROCKE_OP_ARITH_FDOT2,
+    /* Dtype-generic buffer store (Python IRBuilder.buffer_store_vN). Appended
+     * so no existing index shifts. */
+    ROCKE_OP_TILE_BUFFER_STORE_VN,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -1497,8 +1500,10 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* soffset,
                                           int dwords);
 /* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
- * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
- * <n x dtype>; out-of-range offsets read zero. */
+ * `dtype` is any scalar whose width is whole bytes, and the `n` elements move
+ * 1, 2, 4, 8 or 16 bytes together. Returns <n x dtype>; out-of-range bytes
+ * read zero. A refused dtype or width sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
 rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* voffset,
@@ -1558,6 +1563,16 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN),
+ * the store twin of rocke_b_buffer_load_vN: `value` is a vector of any scalar
+ * whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. Out-of-range
+ * bytes are not written. A refused value sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
+void rocke_b_buffer_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voffset,
+                             rocke_value_t* soffset,
+                             rocke_value_t* value);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,

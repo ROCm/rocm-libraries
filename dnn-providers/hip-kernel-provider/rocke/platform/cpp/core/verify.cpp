@@ -631,6 +631,14 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    op->num_operands);
         }
     }
+    else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)
+    {
+        char err[256];
+        if(rocke_i_buffer_op_bytes(op, err, sizeof err) == 0)
+        {
+            v_errf(v, op, "%s", err);
+        }
+    }
     else if(o == ROCKE_OP_CF_RETURN)
     {
         if(op->num_operands || op->num_results)

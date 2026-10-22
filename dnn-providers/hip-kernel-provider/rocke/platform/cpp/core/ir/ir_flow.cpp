@@ -1184,9 +1184,10 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, ops, 3, rty, &attrs, hint);
 }
 
-/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
- * f16/bf16 take n in {2, 4, 8}, f32/i32 take n in {1, 2, 4}; the
- * <dwords x i32> payload is typed <n x dtype>. */
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN): any
+ * scalar whose width is whole bytes, n elements moving 1, 2, 4, 8 or 16 bytes;
+ * the result is <n x dtype>. Attrs: dwords for a whole-dword access, then
+ * elem_type, in the Python builder's order. */
 rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* voffset,
@@ -1196,38 +1197,19 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
 {
     rocke_value_t* ops[3];
     rocke_attr_map_t attrs;
-    int elem_bytes;
-    int dwords;
+    int nbytes;
+    char err[ROCKE_ERR_MSG_CAP];
     char hint[16];
     if(!rocke_i_live(b))
         return NULL;
     if(!rsrc || !voffset || !soffset || !dtype)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load_vN: NULL operand");
-    if(dtype == rocke_f16() || dtype == rocke_bf16())
-        elem_bytes = 2;
-    else if(dtype == rocke_f32() || dtype == rocke_i32())
-        elem_bytes = 4;
-    else
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "buffer_load_vN: unsupported dtype '%s'", dtype->name);
-    if(n <= 0 || (n * elem_bytes) % 4 != 0)
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "buffer_load_vN: n=%d dtype=%s is not a whole number of dwords",
-            n,
-            dtype->name);
-    dwords = (n * elem_bytes) / 4;
-    if(!(dwords == 1 || dwords == 2 || dwords == 4))
-        return (rocke_value_t*)rocke_i_set_err(b,
-                                               ROCKE_ERR_VALUE,
-                                               "buffer_load_vN: n=%d dtype=%s -> dwords=%d "
-                                               "must be 1, 2, or 4",
-                                               n,
-                                               dtype->name,
-                                               dwords);
+    nbytes = rocke_i_buffer_access_bytes("buffer_load_vN", dtype, n, err, sizeof(err));
+    if(nbytes == 0)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err);
     attrs = rocke_i_attrs(b);
-    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    if(nbytes >= 4)
+        rocke_attr_set_int(b, &attrs, "dwords", (int64_t)(nbytes / 4));
     rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
     /* result_name_hint = f"bl{n}" */
     snprintf(hint, sizeof(hint), "bl%d", n);
@@ -1442,6 +1424,34 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
     ops[2] = soffset;
     ops[3] = value;
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN_F32, ops, 4, &attrs);
+}
+
+/* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN). */
+void rocke_b_buffer_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voffset,
+                             rocke_value_t* soffset,
+                             rocke_value_t* value)
+{
+    rocke_value_t* ops[4];
+    char err[ROCKE_ERR_MSG_CAP];
+    if(!rocke_i_live(b))
+        return;
+    if(!rsrc || !voffset || !soffset || !value)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_store_vN: NULL operand");
+        return;
+    }
+    if(rocke_i_buffer_vector_bytes("buffer_store_vN", "value", value->type, err, sizeof(err)) == 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", err);
+        return;
+    }
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN, ops, 4, NULL);
 }
 
 /* ============================ barriers / scheduling ===================== */

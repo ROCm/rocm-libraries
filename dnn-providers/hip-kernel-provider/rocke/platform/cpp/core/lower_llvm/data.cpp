@@ -329,6 +329,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.f16",
      "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    /* 1-byte buffer load and store (Python _INTRINSIC_DECLS, same position). */
+    {"raw.ptr.buffer.load.i8",
+     "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
+    {"raw.ptr.buffer.store.i8",
+     "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ptr addrspace(8) nocapture "
+     "writeonly, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
