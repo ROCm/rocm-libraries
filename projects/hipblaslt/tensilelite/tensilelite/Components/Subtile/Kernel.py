@@ -463,15 +463,11 @@ class TileInfo:
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
       if isinstance(geometry, MXScaleTilePair):
-        # The MX scale tile spans one scale epoch in K.  In the legacy
-        # (single-period) paths that epoch is the loop DepthU.  In the
-        # dual-period MXFP8 path the data loop is finer (DepthU=128) than the
-        # fixed 256-K scale swizzle epoch, so the scale tile tracks
-        # _ScalePeriodU* (256) rather than the data DepthU.
-        if kernel.get("_DualPeriodMXFP8"):
-          self.depthU = kernel["_ScalePeriodU%s" % ('A' if isA else 'B')]
-        else:
-          self.depthU = kernel["DepthU"]
+        # The MX scale tile spans one scale epoch in K, which the solution
+        # records as _ScalePeriodU*: the loop DepthU on the single-period paths,
+        # the fixed 256-K swizzle tile on dual-period MXFP8, where the data loop
+        # is finer (DepthU=128) than the scale epoch.
+        self.depthU = kernel["_ScalePeriodU%s" % _tc]
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]

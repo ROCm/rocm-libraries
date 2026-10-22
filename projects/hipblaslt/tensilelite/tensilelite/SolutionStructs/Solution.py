@@ -3906,6 +3906,21 @@ class Solution(collections.abc.Mapping):
                          and SCALE_SWIZZLE_K % depthU == 0
                          and SCALE_SWIZZLE_K // depthU >= 2)
       state["_DualPeriodMXFP8"] = dualPeriodMXFP8
+
+      # Scale epoch period, in K.  The dual-period path decouples the scale
+      # cadence from the data unroll: it loads the fixed 256-K swizzle tile,
+      # which then feeds (256/depthU) consecutive data iterations.  Every other
+      # path keeps scales in lockstep with the data, so the epoch is the data
+      # unroll and each fetch is consumed once.  Both cases are recorded here so
+      # downstream code reads the period directly instead of re-deriving it from
+      # the dual-period flag.
+      scalePeriod = SCALE_SWIZZLE_K if dualPeriodMXFP8 else depthU
+      state["_ScalePeriodUA"] = scalePeriod
+      state["_ScalePeriodUB"] = scalePeriod
+      scaleReuse = scalePeriod // depthU if depthU > 0 else 1
+      state["_ScaleReuseA"] = scaleReuse
+      state["_ScaleReuseB"] = scaleReuse
+
       if state["MXScaleFormat"] == "HostPreSwizzle":
         mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
@@ -3928,29 +3943,19 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason,
                      f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
                      f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
-        if mxBlock and dualPeriodMXFP8:
-          # Data loop: single-DU at depthU (depthUA/B == depthU keeps
-          # isSubtileMultiDU False → PGR2 legal).  Scale epoch: the fixed 256-K
-          # swizzle tile, reused by (256/depthU) consecutive data iterations.
-          scalePeriod = SCALE_SWIZZLE_K
-          state["_ScalePeriodUA"] = scalePeriod
-          state["_ScalePeriodUB"] = scalePeriod
-          state["_ScaleReuseA"] = scalePeriod // depthU
-          state["_ScaleReuseB"] = scalePeriod // depthU
 
       state["_DepthU"] = depthU
       state["DepthU"] = depthU
 
-      # Scales are sized by their epoch period: the dual-period path loads the
-      # fixed 256-K scale swizzle tile, so _DepthUMXS* counts the full epoch's
-      # scale rows (256/32 = 8) even though the data unroll is depthU (128).
-      scaleKForMXS = SCALE_SWIZZLE_K if dualPeriodMXFP8 else depthU
+      # Scales are sized by their epoch period, so _DepthUMXS* counts the scale
+      # rows in one epoch: 256/32 = 8 on the dual-period path, even though the
+      # data unroll there is only depthU (128).
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = scaleKForMXS // state["ProblemType"]["MXBlockA"]
+        state["_DepthUMXSA"] = state["_ScalePeriodUA"] // state["ProblemType"]["MXBlockA"]
       state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = scaleKForMXS // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = state["_ScalePeriodUB"] // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
