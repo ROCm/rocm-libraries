@@ -85,6 +85,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
+from .Validators.BlockDequant import validateBlockDequantCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -7163,8 +7164,16 @@ class Solution(collections.abc.Mapping):
       gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
       dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
       dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
+      # Block dequantization decouples the two widths outright -- A's global read
+      # feeds the dequantize, which writes LDS at its own width -- and with
+      # TLUA false the tile cannot be partial in A's vector direction anyway,
+      # so the path this guards is unreachable. B has no such conversion.
+      dequantDecouplesA = state["ProblemType"]["UseScaleAB"] == "Block" \
+          and bool(state["ProblemType"]["ScaleBlockSizesA"]) \
+          and state["GuaranteeNoPartialA"]
       if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \
-          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
+          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"] \
+          and not dequantDecouplesA:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
       if state["GlobalReadVectorWidthB"] > 1 and not dotNoShiftB \
@@ -7221,6 +7230,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
+    # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
+    if not validateBlockDequantCombination(state, printRejectionReason):
+      return
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
     state["AssignedDerivedParameters"] = True
