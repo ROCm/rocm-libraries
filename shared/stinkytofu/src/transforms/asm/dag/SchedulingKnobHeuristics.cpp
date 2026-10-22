@@ -82,9 +82,12 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
 
-    // TODO: choose one Rule 3 handshake per enclosing loop from kernel shape.
-    // Disabled until that heuristic is filled in.
-    out.reduceClusterBarrierPerLoop = false;
+    // One handshake cadence when the main-loop WMMA latency budget is long and
+    // each ds_load has at least 5 cycles of that budget.
+    const int sumWmmaLatency = features.stats.sumWmmaLatencyCycles;
+    const int dsLoads = features.stats.dsLoadCount;
+    out.reduceClusterBarrierPerLoop =
+        sumWmmaLatency > 2500 && dsLoads > 0 && sumWmmaLatency / dsLoads >= 5;
     out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
 
     return out;

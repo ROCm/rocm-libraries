@@ -38,7 +38,9 @@ inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 
-/// One Rule 3 handshake per enclosing loop. Off until propose() grows a heuristic.
+/// Static default when the main loop is missing or degenerate. The policy turns
+/// this on when sumWmmaLatencyCycles > 2500 and that sum covers at least 5
+/// cycles per ds_load.
 inline constexpr bool kStaticDefaultReduceClusterBarrierPerLoop = false;
 
 enum class SchedulingKnobSource : uint8_t {
