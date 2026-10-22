@@ -102,6 +102,7 @@ from .autotune import (
     spec_replace,
 )
 from .attention import (
+    BINARY_SEARCH_FALLBACK_ITERS,
     Attention2DConfig,
     Attention3DConfig,
     OnlineSoftmaxState,
@@ -109,6 +110,7 @@ from .attention import (
     apply_softcap_log2,
     apply_softcap_scalar,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     apply_attention_mask,
     causal_mask,
     mfma_16x16x16_for_dtype,
@@ -428,7 +430,9 @@ __all__ = [
     "PagedKvDescriptor",
     "apply_softcap_log2",
     "apply_softcap_scalar",
+    "BINARY_SEARCH_FALLBACK_ITERS",
     "binary_search_seq_idx",
+    "binary_search_seq_idx_iters",
     "apply_attention_mask",
     "causal_mask",
     # MFMA GEMM inner helper

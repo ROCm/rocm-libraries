@@ -344,6 +344,12 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
+    "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),
+    # The dW extent per output channel the fold sums partial slots over.
+    "kernels.common.conv_direct_dw_wgrad.DwWgradFoldSpec": ("taps",),
+    "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),

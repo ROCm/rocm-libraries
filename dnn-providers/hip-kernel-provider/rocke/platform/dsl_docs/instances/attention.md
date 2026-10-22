@@ -116,6 +116,17 @@ Current coverage (verified via `library/builders/gfx950/attention/prefill/parity
 - 2D scalar correctness kernel + 2D MFMA tiled kernel;
 - 3D split-KV (segment + reduce pipeline).
 
+Additive attention bias (`UnifiedAttentionProblem.use_additive_bias`): an fp32
+`[B, H, Sq, Sk]` bias added to the scores after softcap, like ALiBi/QQ bias
+(`softcap(QK * scale) + bias`), broadcastable over B and/or H via a
+zero stride, indexed by the query head under GQA. Forward only, **gfx950 only**
+(tiled 2D and 3D split-KV, Python engine); other arches report it unsupported
+through `supports_native_unified_attention_tiled` / `_3d_tiled`. Verified by the
+on-GPU numeric lane
+[test_attention_additive_bias_gfx950_numeric.py](../../../library/tests/test_attention_additive_bias_gfx950_numeric.py)
+rather than the parity scenario set above; knob semantics are in the
+[builders/common Knob reference](../../../library/builders/common/README.md#knob-reference).
+
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
 CK Tile ``01_fmha`` family parity:
@@ -347,7 +358,7 @@ High-level stages:
 1. Stage Q into LDS.
 2. Iterate over K/V tiles.
 3. Compute QK with MFMA.
-4. Apply masks/bias/softcap.
+4. Apply softcap, then masks and bias.
 5. Online softmax reduce per row.
 6. Compute P*V with MFMA.
 7. Store output with coalesced vector stores.
@@ -379,10 +390,13 @@ Detailed flow:
 
 5. Score processing:
  - apply scale;
- - apply ALiBi/QQ bias if configured;
- - apply causal and sliding-window masks;
  - apply softcap when configured;
- - set invalid positions to -inf.
+ - apply causal and sliding-window masks (invalid positions become -inf);
+ - add ALiBi/QQ bias if configured;
+ - add the additive bias if configured (gfx950).
+
+ The biases are added after the softcap, so the score is
+ `softcap(QK * scale) + bias`.
 
 6. Online softmax:
  - reduce row max across lanes/waves;
@@ -441,7 +455,7 @@ Step by step:
 3. Stage Q.
 4. Iterate only over KV tiles in this segment.
 5. Compute QK with MFMA.
-6. Apply masks/bias/softcap.
+6. Apply softcap, then masks and bias.
 7. Maintain online softmax state for this segment:
  - seg_max
  - seg_expsum
