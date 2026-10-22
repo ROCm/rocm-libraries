@@ -224,47 +224,6 @@ TEST(FmhaDispatcherTest, PlansSingleStageAppendKv)
     EXPECT_EQ(plan.stages[0].family, FmhaKernelFamily::FwdAppendKv);
 }
 
-TEST(FmhaDispatcherTest, SeqtunePrefersSmallerAlignedTile)
-{
-    FmhaRegistry registry;
-
-    auto key_big                      = make_key(FmhaKernelFamily::Fwd, "big", /*rank=*/0);
-    key_big.algorithm.tile_shape.m0   = 128;
-    key_big.algorithm.pad_s           = false;
-    auto key_small                    = make_key(FmhaKernelFamily::Fwd, "small", /*rank=*/0);
-    key_small.algorithm.tile_shape.m0 = 64;
-    key_small.algorithm.pad_s         = false;
-
-    registry.register_kernel(std::make_shared<MockFmhaKernel>(key_big, "big"));
-    registry.register_kernel(std::make_shared<MockFmhaKernel>(key_small, "small"));
-
-    FmhaDispatcher dispatcher(&registry);
-
-    fmha_fwd_traits traits{};
-    traits.hdim_q        = 128;
-    traits.hdim_v        = 128;
-    traits.data_type     = "fp16";
-    traits.is_v_rowmajor = true;
-    traits.mask_type     = mask_enum::no_mask;
-    traits.bias_type     = bias_enum::no_bias;
-
-    fmha_fwd_args args{};
-    args.batch        = 1;
-    args.seqlen_q     = 128;
-    args.seqlen_k     = 128;
-    args.max_seqlen_q = 128;
-    args.hdim_q       = 128;
-    args.hdim_v       = 128;
-    args.nhead_q      = 16;
-    args.nhead_k      = 16;
-
-    auto problem  = FmhaProblem::from_invocation(FmhaInvocation::make(traits, args), "gfx942");
-    auto selected = dispatcher.select_kernel(problem);
-    ASSERT_NE(selected, nullptr);
-    // Both tiles align to 128; seqtune prefers the smaller tile_m0
-    EXPECT_EQ(selected->get_name(), "small");
-}
-
 TEST(FmhaDispatcherTest, PlansBackwardAsThreeStagesWhenConvertExists)
 {
     FmhaRegistry registry;
@@ -471,7 +430,7 @@ TEST(FmhaDispatcherTest, SelectKernelReturnsNullptrOnEmptyRegistry)
 TEST(FmhaDispatcherTest, SelectKernelReturnsNullptrOnNoMatch)
 {
     FmhaRegistry registry;
-    auto key  = make_fwd_key(128, 128, "fp16", "gfx950");
+    auto key  = make_key(FmhaKernelFamily::Fwd, "fp16_h128");
     auto mock = std::make_shared<MockFmhaKernel>(key, "fp16_h128");
     registry.register_kernel(mock);
 
@@ -528,6 +487,9 @@ TEST(FmhaDispatcherTest, SplitKvAsymmetricHdimSelectsCombineAtHdimV)
     EXPECT_EQ(plan.stages[1].family, FmhaKernelFamily::FwdSplitKvCombine);
 }
 
+// select_first_fit() ranks a tile that holds seqlen_q in one aligned block
+// (category 0) ahead of the m0=64 fallback (category 1); selection_rank and then
+// tile size only order tiles within a category.
 TEST(FmhaDispatcherTest, SeqtunePrefersSingleBlockFitThenM64Fallback)
 {
     FmhaRegistry registry;
