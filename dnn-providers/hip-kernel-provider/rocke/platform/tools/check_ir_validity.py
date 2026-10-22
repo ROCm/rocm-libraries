@@ -87,6 +87,51 @@ def _bootstrap_sys_path() -> None:
 # STALE below) so a fix cannot silently leave dead weight behind.
 KNOWN_BAD: dict[str, str] = {}
 
+# Cases each flavor's toolchain is expected to leave UNVALIDATED, with the
+# reason. A host whose clang predates an arch or an instruction cannot measure
+# those cases, and that is the toolchain's age, not an emitter defect. Under
+# --strict an UNVALIDATED case passes only when it is listed here for the host
+# flavor. An UNVALIDATED case that is not listed fails. A listed case that now
+# validates is STALE and fails, so the list only ever SHRINKS. A flavor with no
+# entry expects no UNVALIDATED case.
+_NEEDS_LLVM23 = "lowering needs llvm23"
+_NO_GFX1250_TARGET = "this clang cannot target gfx1250"
+SKIP_UNVALIDATED: dict[str, dict[str, str]] = {
+    "llvm20": {
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4": _NO_GFX1250_TARGET,
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": _NO_GFX1250_TARGET,
+        "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": _NEEDS_LLVM23,
+        "gemm/gfx1250/t32x32x32": _NO_GFX1250_TARGET,
+        "gemm/gfx1250/t64x32x32": _NO_GFX1250_TARGET,
+    },
+    "llvm22": {
+        "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": _NEEDS_LLVM23,
+        "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": _NEEDS_LLVM23,
+    },
+    "llvm23": {},
+}
+
+
+def _skip_list_verdict(
+    flavor: str, results: dict[str, tuple[str, str]]
+) -> tuple[list[str], list[str]]:
+    """Compare the UNVALIDATED cases with the skip-list for `flavor`.
+
+    Returns (unexpected, stale). `unexpected` holds UNVALIDATED cases that the
+    list does not name. `stale` holds listed cases that now validate.
+    """
+    skipped = SKIP_UNVALIDATED.get(flavor, {})
+    unexpected = sorted(
+        c for c, v in results.items() if v[0] == "UNVALIDATED" and c not in skipped
+    )
+    stale = sorted(c for c in skipped if c in results and results[c][0] == "OK")
+    return unexpected, stale
+
 
 def _llvm_tool(name: str) -> str | None:
     """Locate an LLVM tool, preferring the ROCm install rocke itself loads.
@@ -543,14 +588,25 @@ def main() -> int:
             "fixed them."
         )
 
+    skip_unexpected, skip_stale = _skip_list_verdict(flavor, results)
     if unvalidated:
         print("\n== UNVALIDATED (nothing was measured here) ==")
         for cid in sorted(unvalidated):
             why = (
                 "needs a newer LLVM" if cid in not_lowerable else "arch not targetable"
             )
-            print(f"  {cid}  [{_arch_of(cid)}]  {why}")
+            listed = "" if cid in skip_unexpected else "  (skip-listed)"
+            print(f"  {cid}  [{_arch_of(cid)}]  {why}{listed}")
         print("\n  Re-run on a newer ROCm to cover these.")
+
+    if args.strict and skip_stale:
+        print(f"\n== STALE SKIP_UNVALIDATED entries ({flavor}; these now compile) ==")
+        for cid in skip_stale:
+            print(f"  {cid}\n    reason on file: {SKIP_UNVALIDATED[flavor][cid]}")
+        print(
+            "\n  SKIP_UNVALIDATED only shrinks. Delete these entries in the change "
+            "that fixed them."
+        )
 
     print()
     if new_bad:
@@ -564,12 +620,20 @@ def main() -> int:
         return 1
     # --strict already means "an unmeasured lane is a failure here" for the
     # no-toolchain and wrong-flavor exits above; an untargetable arch is the
-    # same gap at a finer grain, so it answers to the same flag. Without it the
-    # default gate stays green on a host that simply predates the arch.
-    if unvalidated and args.strict:
+    # same gap at a finer grain, so it answers to the same flag -- except for the
+    # cases SKIP_UNVALIDATED names for this flavor. Without --strict the default
+    # gate stays green on a host that simply predates the arch.
+    if args.strict and skip_unexpected:
         print(
-            f"RESULT: RED - {len(unvalidated)} case(s) unvalidated under "
-            "--strict; this clang cannot target their arch."
+            f"RESULT: RED - {len(skip_unexpected)} case(s) unvalidated under "
+            f"--strict and not in SKIP_UNVALIDATED for {flavor}: "
+            f"{', '.join(skip_unexpected)}."
+        )
+        return 1
+    if args.strict and skip_stale:
+        print(
+            "RESULT: RED - SKIP_UNVALIDATED is stale; remove the entries listed "
+            "above."
         )
         return 1
     tail = f" ({len(unvalidated)} unvalidated)" if unvalidated else ""
