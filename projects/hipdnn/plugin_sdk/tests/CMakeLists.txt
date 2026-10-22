@@ -35,6 +35,21 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCategoricalEncoding.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCustomLibraryAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestInlineExpressions.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestNativeAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestScoreTransform.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTableAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestSha256.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdAdapters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestEnginePredictor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdParser.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
@@ -50,9 +65,81 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:DigitGroupingLocale.cpp>
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
+# The standard library looks a locale facet up through its type information, so the one
+# source that defines a facet is built with RTTI; the code under test stays RTTI-free.
+set_source_files_properties(
+    DigitGroupingLocale.cpp
+    PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/GR,-frtti>"
+)
+
+# Test resources are found from the test binary (TestResourcePaths.hpp): the build and
+# install trees keep them at the same offset from it, and TheRock runs the installed
+# binary on a runner that has neither the build nor the source tree.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Loaded by the custom_library adapter tests.
+    add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
+    set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_test_scorer_lib)
+
+    set_target_properties(
+        hipdnn_test_scorer_lib
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+    )
+
+    install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+            RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+    )
+
+    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
+    # the training inputs beside it stay in the source tree.
+    set(_uhd_fixture_subdir "uhd_generated_fixtures")
+    set(_uhd_fixture_files
+        tile_selector.uhd.json
+        model.bin
+        dtype_selector/dtype_selector.uhd.json
+        dtype_selector/model.bin
+    )
+    set(_uhd_fixture_outputs "")
+    foreach(_file IN LISTS _uhd_fixture_files)
+        set(_source "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures/${_file}")
+        set(_staged "${HIPDNN_TEST_DATA_DIR}/${_uhd_fixture_subdir}/${_file}")
+        get_filename_component(_staged_dir "${_staged}" DIRECTORY)
+        add_custom_command(
+            OUTPUT "${_staged}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_staged_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_source}" "${_staged}"
+            DEPENDS "${_source}"
+            COMMENT "Staging UHD test fixture ${_file}"
+            VERBATIM
+        )
+        list(APPEND _uhd_fixture_outputs "${_staged}")
+
+        get_filename_component(_subdir "${_file}" DIRECTORY)
+        install(FILES "${_source}"
+                DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_uhd_fixture_subdir}/${_subdir}"
+        )
+    endforeach()
+    add_custom_target(
+        hipdnn_plugin_sdk_test_uhd_fixtures
+        DEPENDS ${_uhd_fixture_outputs}
+        COMMENT "Staging UHD test fixtures beside the test data"
+    )
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
+
+    target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
+        HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
+        HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
+        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
+endif()
 
 target_link_libraries(
     hipdnn_plugin_sdk_tests
@@ -69,6 +156,7 @@ target_link_libraries(
 # include path exposes cross-SDK test headers, so add it explicitly.
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
+
 
 # Fault the HIP boundary without adding hooks to the installed SDK.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

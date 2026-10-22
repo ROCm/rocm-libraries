@@ -14,6 +14,8 @@
 #include <variant>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -81,17 +83,30 @@ struct CatalogGraphFields
 /// and bound tokens can depend on anything a matcher reads, such as a graph match that
 /// declines override-shape graphs, so `graphFields` keys those fields exactly.
 /// Only build one from a usable `graph`: an unusable key never equals itself.
+///
+/// RFC 0019 §9.2's engine id is implicit in the cache's location, and @ref engineVersion
+/// replaces its inventory generation counter, since nothing re-scans the inventory.
 struct CatalogKey
 {
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     CatalogGraphFields graphFields;
     std::vector<int64_t> tensorUids;
     DeviceId deviceId;
+    /// `EngineDescriptor::revision` of the descriptor set that ranked this catalog. Constant
+    /// in-process; keyed so an entry can never be served to a newer engine version.
+    // Explicit init avoids -Wmissing-field-initializers on partial CatalogKey{graph, device}.
+    // NOLINTNEXTLINE(readability-redundant-member-init) - see above
+    hipdnn_data_sdk::utilities::Version engineVersion{};
+    /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
+    /// ranked order is keyed by metric, or a `time` request is served a `tflops` order.
+    /// Always a registered name, so it views the registry's static storage.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 
     bool operator==(const CatalogKey& other) const
     {
         return deviceId == other.deviceId && graphFields == other.graphFields
-               && tensorUids == other.tensorUids && graph == other.graph;
+               && tensorUids == other.tensorUids && graph == other.graph
+               && engineVersion == other.engineVersion && rankingMetric == other.rankingMetric;
     }
 };
 
@@ -127,6 +142,11 @@ struct CatalogKeyHash
             mix(fields.minRequiredEngineApiVersion->minor());
             mix(fields.minRequiredEngineApiVersion->patch());
         }
+        // Mixed per component: a packed major*1000+minor fold would collide 1.10.0 and 2.0.0.
+        mix(static_cast<size_t>(key.engineVersion.major));
+        mix(static_cast<size_t>(key.engineVersion.minor));
+        mix(static_cast<size_t>(key.engineVersion.patch));
+        mix(std::hash<std::string_view>{}(key.rankingMetric));
         return hash;
     }
 };
@@ -156,6 +176,10 @@ struct MatchContext
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
     const DeviceProperties& deviceProperties;
+    /// Registered ranking metric for the request (RFC 0019 §11.4); selects the
+    /// `sort_kernel_catalog` UHD and keys ranked-order caches. A view: must outlive the
+    /// context, and caches key on the registry's copy of the name, never on this view.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 };
 
 /// The graph schema version @p graph's own contents require; unstamped reads as

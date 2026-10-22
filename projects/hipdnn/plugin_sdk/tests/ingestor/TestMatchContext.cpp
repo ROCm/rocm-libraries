@@ -31,13 +31,18 @@ using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTest
 
 CatalogKey keyFor(const ContentCarryingTestGraph::Spec& spec,
                   std::vector<int64_t> tensorUids,
-                  DeviceId deviceId)
+                  DeviceId deviceId,
+                  hipdnn_data_sdk::utilities::Version engineVersion = {},
+                  std::string_view rankingMetric
+                  = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)
 {
     const ContentCarryingTestGraph graph{spec};
     return CatalogKey{GraphContentKey{graph},
                       CatalogGraphFields::of(graph.getGraph()),
                       std::move(tensorUids),
-                      deviceId};
+                      deviceId,
+                      engineVersion,
+                      rankingMetric};
 }
 
 /// Sets the optional graph-level fields so each can differ by presence and by value.
@@ -154,6 +159,32 @@ INSTANTIATE_TEST_SUITE_P(
                                      spec.minRequiredApiVersion
                                          = hipdnn_data_sdk::utilities::Version{1, 1, 0};
                                      return keyFor(spec);
+                                 }},
+        // RFC 0019 §9.2: the engine descriptor revision stands in for the inventory
+        // generation counter, so any bump, patch included, must miss.
+        CatalogKeyInequalityCase{"DifferentEngineMajorVersion",
+                                 [] {
+                                     return keyFor(referenceSpec(),
+                                                   {1, 2},
+                                                   0,
+                                                   hipdnn_data_sdk::utilities::Version{1, 0, 0});
+                                 }},
+        CatalogKeyInequalityCase{"DifferentEnginePatchVersion",
+                                 [] {
+                                     return keyFor(referenceSpec(),
+                                                   {1, 2},
+                                                   0,
+                                                   hipdnn_data_sdk::utilities::Version{0, 0, 1});
+                                 }},
+        // RFC 0019 §11.4: an order ranked for one metric is not an order for another, so
+        // a `time` request must never read the entry a `tflops` request cached.
+        CatalogKeyInequalityCase{"DifferentRankingMetric",
+                                 [] {
+                                     return keyFor(referenceSpec(),
+                                                   {1, 2},
+                                                   0,
+                                                   hipdnn_data_sdk::utilities::Version{},
+                                                   "time");
                                  }}),
     [](const ::testing::TestParamInfo<CatalogKeyInequalityCase>& info) { return info.param.name; });
 
@@ -171,6 +202,18 @@ TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesDifferentDeviceIds)
     const CatalogKey onDeviceOne = keyFor(ContentCarryingTestGraph::Spec{}, {1, 2}, 1);
 
     EXPECT_NE(hash(onDeviceZero), hash(onDeviceOne));
+}
+
+/// A cheap packing such as `major * 10 + minor` would collide 1.10.0 with 2.0.0.
+TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesEngineVersionsThatPackAlike)
+{
+    const CatalogKeyHash hash;
+    const CatalogKey onOneTen = keyFor(
+        ContentCarryingTestGraph::Spec{}, {1, 2}, 0, hipdnn_data_sdk::utilities::Version{1, 10, 0});
+    const CatalogKey onTwoZero = keyFor(
+        ContentCarryingTestGraph::Spec{}, {1, 2}, 0, hipdnn_data_sdk::utilities::Version{2, 0, 0});
+
+    EXPECT_NE(hash(onOneTen), hash(onTwoZero));
 }
 
 } // namespace

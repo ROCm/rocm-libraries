@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 
+from ...core.dtypes import dtype_info
 from .analysis.coalescing import analyze_coalescing, assert_asm_backed
 
 __all__ = [
@@ -77,19 +78,6 @@ _MNEMONIC_RE = re.compile(
 )
 
 
-def _dtype_bits(name: str) -> int:
-    n = name.lower()
-    if "16" in n:
-        return 16
-    if "32" in n:
-        return 32
-    if "64" in n:
-        return 64
-    if "8" in n:
-        return 8
-    raise ValueError(f"cannot infer dtype bits from {name!r}")
-
-
 def achieved_widths(objdump_text, *, direction, space, dtype_bits):
     """Per-lane vector widths (in ELEMENTS) the compiler ACTUALLY emitted for the ``direction``/``space`` access
     family, as a ``{width_elems: count}`` histogram read from ``llvm-objdump`` text. ``direction`` is
@@ -118,16 +106,18 @@ def achieved_widths(objdump_text, *, direction, space, dtype_bits):
     return hist
 
 
+# Axis names per GEMM operand, in the order of its tile descriptor (TileMma's a_desc / b_desc /
+# c_desc): A (M, K), B (N, K), C (M, N).
 _OPERAND_DIMS = {
     "a": ("M", "K"),
-    "b": ("K", "N"),
+    "b": ("N", "K"),
     "c": ("M", "N"),
-}  # natural axes per GEMM operand
+}
 
 
 def _dims_for_transaction(txn, pipeline):
     """Best-effort axis NAMES for a recorded transaction, matched by ENCODING IDENTITY against the MMA op's
-    a/b/c operand encodings (A=(M,K), B=(K,N), C=(M,N)). Returns ``None`` when it can't attribute the
+    a/b/c operand encodings (A=(M,K), B=(N,K), C=(M,N)). Returns ``None`` when it can't attribute the
     transaction to an operand -- the caller must then pass ``dims`` explicitly (never guessed here).
     """
     enc = txn.encoding
@@ -170,7 +160,7 @@ def report_for_transaction(txn, *, arch, dims=None, pipeline=None, n_lanes=64):
         fwd,
         dims,
         strides,
-        _dtype_bits(txn.dtype_name),
+        dtype_info(txn.dtype_name).encoded_bits,
         direction=txn.kind,
         line_bytes=line_bytes_for(arch),
     )

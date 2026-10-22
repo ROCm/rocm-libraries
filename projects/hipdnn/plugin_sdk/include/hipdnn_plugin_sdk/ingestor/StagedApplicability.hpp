@@ -26,9 +26,9 @@ class ApplicabilityScope
 {
 public:
     /// The device the first ingestor engine resolved, and the catalog key for it. The
-    /// key carries no engine identity, so every engine on that device shares it. Written
-    /// once per call, by the first engine, and never replaced: pending checks point into
-    /// `properties`.
+    /// key carries the engine version, so only engines of `keyVersion` share it; an engine
+    /// of another version builds its own. Written once per call, by the first engine, and
+    /// never replaced: pending checks point into `properties`.
     struct Device
     {
         /// The resolver that answered; an engine with another resolver resolves its own
@@ -40,6 +40,8 @@ public:
         /// nullopt when the graph yields no usable key; meaningful once keyBuilt.
         std::optional<CatalogKey> key;
         bool keyBuilt = false;
+        /// The engine version `key` was built for; meaningful once keyBuilt.
+        hipdnn_data_sdk::utilities::Version keyVersion{};
     };
 
     ApplicabilityScope() = default;
