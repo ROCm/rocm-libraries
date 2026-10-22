@@ -69,6 +69,13 @@ namespace TensileLite
 {
     namespace
     {
+        size_t checkedAdd(size_t a, size_t b)
+        {
+            if(b > std::numeric_limits<size_t>::max() - a)
+                throw std::overflow_error("Spatial cluster workspace exceeds size_t");
+            return a + b;
+        }
+
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
