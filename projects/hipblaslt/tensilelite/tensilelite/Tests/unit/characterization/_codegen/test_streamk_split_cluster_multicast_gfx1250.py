@@ -32,7 +32,8 @@ def _check_kernel(base, src):
     assert "partials tile offset (high word) for 64-bit SRD" in src
     assert "clamp M tile to the edge" in src
     assert "clamp N tile to the edge" in src
-    assert "s[sgprMulticastMaskB]" in src
+    multicast = config["ClusterDim"][1] > 1
+    assert ("s[sgprMulticastMaskB]" in src) is multicast
     assert "retire cooperative tensor_load_to_lds" not in src
     assert "PersistentMC_SkipPrefetchSignal" not in src
     assert "DP fold: rank" not in src
@@ -42,17 +43,23 @@ def _check_kernel(base, src):
     phantom = src.index("phantom tiles skip the store")
     reduction = src.index("flag offset based on physical partial slot")
     assert phantom < reduction
-    # Empty-worker validation precedes the sole prologue arrival.
-    initial_check = src.index("Make sure there's work to do")
-    initial_arrive = src.index("cluster B-multicast: elect wave 0")
-    assert initial_check < initial_arrive
-    # Alpha-zero nonowners leave before the first-load wait. Their dedicated
-    # wait lies immediately on that path before its persistent-loop exit.
-    alpha_wait = src.index("alpha-zero nonowner consumes cluster arrive")
-    assert "label_PersistentLoopClose" in src[alpha_wait:alpha_wait + 700]
-    close = src.index("label_PersistentLoopClose:")
-    close_text = src[close:close + 2000]
-    assert close_text.index("s_wait_dscnt 0") < close_text.index("s_barrier_signal -3")
+    if multicast:
+        # Empty-worker validation precedes the sole prologue arrival.
+        initial_check = src.index("Make sure there's work to do")
+        initial_arrive = src.index("cluster B-multicast: elect wave 0")
+        assert initial_check < initial_arrive
+        # Alpha-zero nonowners leave before the first-load wait. Their dedicated
+        # wait lies immediately on that path before its persistent-loop exit.
+        alpha_wait = src.index("alpha-zero nonowner consumes cluster arrive")
+        assert "label_PersistentLoopClose" in src[alpha_wait:alpha_wait + 700]
+        close = src.index("label_PersistentLoopClose:")
+        close_text = src[close:close + 2000]
+        assert close_text.index("s_wait_dscnt 0") < close_text.index("s_barrier_signal -3")
+    else:
+        assert "MulticastMask" not in src
+        assert "s_barrier_signal -3" not in src
+        assert "s_barrier_wait -3" not in src
+        assert "alpha-zero nonowner consumes cluster arrive" not in src
 
 
 def test_static_streamk_cluster_shapes_and_pgr_assemble():
@@ -63,9 +70,12 @@ def test_static_streamk_cluster_shapes_and_pgr_assemble():
         _check_kernel(base, src)
 
 
-def test_static_streamk_cluster_shadow_init_assembles(tmp_path):
+@pytest.mark.parametrize("cluster", [[2, 1], [2, 2]])
+def test_static_streamk_cluster_shadow_init_assembles(tmp_path, cluster):
     config = yaml.safe_load(_CONFIG.read_text())
     for fork in config["BenchmarkProblems"][0][1]["ForkParameters"]:
+        if "ClusterDim" in fork:
+            fork["ClusterDim"] = [cluster]
         if "ForceDisableShadowInit" in fork:
             fork["ForceDisableShadowInit"] = [False]
     path = tmp_path / "shadow.yaml"
@@ -75,7 +85,7 @@ def test_static_streamk_cluster_shadow_init_assembles(tmp_path):
     for base, src, _ in results:
         _check_kernel(base, src)
         skip = src.index("skip to ShadowInitStart iter b/c numIter==0")
-        assert "cluster_barrier wait" in src[skip - 500:skip]
+        assert ("cluster_barrier wait" in src[skip - 500:skip]) is (cluster[1] > 1)
         from Tensile.CustomKernels import getCustomKernelConfig
         (tmp_path / (base + ".s")).write_text(src)
         descriptor = getCustomKernelConfig(base, {}, str(tmp_path))
