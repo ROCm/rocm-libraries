@@ -11,6 +11,9 @@
 # are cleared before each config, as in run_cold_warm.sh / the split phases, unless KEEP_CACHE=1:
 # then they are cleared once before the first config and kept between configs (a normal run, where
 # e.g. the helper-kernel cache is shared by all configs).
+# When every config is DONE, scripts/aggregate_timing.py sums the logs of ALL configs (failed ones
+# included) into $OUT/AGGREGATE_analysis.txt. Re-running the script after a finished pass skips the
+# runs and only regenerates the aggregate.
 # Usage: bash run_per_config.sh [configs.txt]   (one tensilelite/Tests/... yaml path per line)
 TL=/home/alvasile/rocm-libraries/projects/hipblaslt/tensilelite
 OUT=${OUT:-$TL/timing_runs/full_runs_gfx950/per_config}
@@ -49,4 +52,6 @@ while read -r cfg; do
   echo DONE >> $D/times.txt
   echo "$(date -u +%T) $n/$total $cfg rc=$rc" >> $OUT/progress.txt
 done < $LIST
+python scripts/aggregate_timing.py $OUT/*/*.log.gz > $OUT/AGGREGATE_analysis.txt 2>&1
+echo "aggregate rc=$? logs=$(ls $OUT/*/*.log.gz | wc -l)" >> $OUT/progress.txt
 echo ALLDONE > $OUT/done.txt
