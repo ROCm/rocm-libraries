@@ -33,6 +33,11 @@
       "name": "block_m_per_warp",
       "type": "int",
       "default_value": 16
+    },
+    {
+      "name": "use_sinks",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }
