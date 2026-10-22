@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 #include "testing_spic0.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
@@ -70,7 +71,9 @@ namespace rocsparse_clients
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_error* p_error = nullptr;
-            std::ignore = rocsparse_spic0_descr_destroy(this->m_handle, this->m_descr, p_error);
+            rocsparse_clients_log_rocsparse_error(
+                "rocsparse_spic0_descr_destroy",
+                rocsparse_spic0_descr_destroy(this->m_handle, this->m_descr, p_error));
         }
 
         inline operator rocsparse_spic0_descr&()
@@ -1158,7 +1161,7 @@ void testing_spic0(const Arguments& arg)
         const int32_t n_calls      = arg.iters;
 
         hipStream_t stream;
-        rocsparse_get_stream(handle, &stream);
+        CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
