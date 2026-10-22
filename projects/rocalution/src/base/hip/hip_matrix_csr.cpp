@@ -1321,6 +1321,7 @@ namespace rocalution
                 this->mat_.col,
                 this->mat_info_,
                 &buffer_size);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Buffer is shared with ILU0 and other solve functions
             if(this->mat_buffer_ == NULL)
@@ -2625,6 +2626,7 @@ namespace rocalution
                                           this->mat_.col,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with ILU0 and other solve functions
         if(this->mat_buffer_ == NULL)
@@ -2932,6 +2934,7 @@ namespace rocalution
             this->mat_.col,
             this->mat_info_itsv_,
             &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Check buffer size
         if(this->mat_buffer_ != NULL && buffer_size > this->mat_buffer_size_)

@@ -756,6 +756,7 @@ namespace rocalution
                 this->mat_.blockdim,
                 this->mat_info_,
                 &buffer_size);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Buffer is shared with ILU0 and other solve functions
             if(this->mat_buffer_ == NULL)
@@ -868,6 +869,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with ILU0 and other solve functions
         if(this->mat_buffer_ == NULL)
@@ -1338,6 +1340,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with ILU0 and other solve functions
         if(this->mat_buffer_ == NULL)
@@ -1414,6 +1417,7 @@ namespace rocalution
                                           this->mat_.blockdim,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with ILU0 and other solve functions
         if(this->mat_buffer_ == NULL)
