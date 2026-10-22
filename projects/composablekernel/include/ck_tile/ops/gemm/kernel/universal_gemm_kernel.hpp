@@ -19,6 +19,7 @@
 #include "ck_tile/core/arch/workgroup_barrier.hpp"
 #include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
 #include "ck_tile/ops/gemm/kernel/wavelet_utils.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 
 namespace ck_tile {
 
@@ -499,8 +500,10 @@ struct UniversalGemmKernel
         }();
     };
 
-    /// True for the gfx125 TDM pipelines (CompTDM V1, and V2 through inheritance): they expose
-    /// skipCheckValidLaunchParams, consume tuples of A/B windows and need a TDM epilogue.
+    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 through inheritance, and the
+    /// producer/consumer pipeline): they expose skipCheckValidLaunchParams and consume tuples of
+    /// A/B windows. UniversalGemmKernel also pairs them with a non-TDM epilogue (e.g.
+    /// CShuffleEpilogue for split-K), subject to the whole-tile checks in IsSupportedArgument.
     /// Kernels that host them take a dedicated TDM path.
     static constexpr bool kIsTdmPipeline = has_skip_check_valid_launch_params::value;
 
@@ -584,7 +587,8 @@ struct UniversalGemmKernel
     ///          elements of T. That is the element size for 1-, 2-, 4- and 8-byte scalars; a
     ///          12-byte 6-bit pack has a 1-byte unit, so its 4 comes from alignof(T) alone.
     ///          IsSupportedArgument ends with this check for TDM pipelines, after its k_batch
-    ///          guards, but checks the device only for named-barrier pipelines. The MultiD GEMM,
+    ///          guards and, for a non-TDM epilogue, its tile-multiple checks, but checks the
+    ///          device only for named-barrier pipelines. The MultiD GEMM,
     ///          grouped GEMM, batched contraction and MX GEMM kernels therefore call this and
     ///          IsTdmDeviceSupported themselves.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
@@ -803,16 +807,61 @@ struct UniversalGemmKernel
             return false;
         }
 
+        // A TDM pipeline clips its A/B loads to the real extents, which is why the
+        // skipCheckValidLaunchParams short-circuit below drops the divisibility checks. Paired
+        // with a non-TDM epilogue, C is stored through MakeCBlockWindows instead, and the TDM
+        // pipelines run with kPadM = kPadN = false. That view masks the non-contiguous dimension
+        // itself (it pads it for bf16 atomic_add and the 64-bit global path); otherwise a tile
+        // past the last row (row-major) or column (column-major) lies beyond the buffer range and
+        // the hardware drops it. A ragged tile along the contiguous dimension is covered by
+        // neither: its excess lanes address the start of the next row of C, inside the buffer, so
+        // a buffer store or atomic writes them, and a bf16 global atomic is not masked at all.
+        //
+        // Split-K is also held to whole K tiles per split. SplitKBatchOffset cuts K at WarpTile K
+        // granularity. The TDM loads clip each split to its own splitted_k, so a ragged split
+        // would be zero-filled rather than read the next split's data, but only whole-tile splits
+        // have been validated on hardware.
+        if constexpr(kIsTdmPipeline && !is_tdm_epilogue_v<EpiloguePipeline>)
+        {
+            constexpr bool kCRowMajor = std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
+            if(kCRowMajor ? kargs.N % TilePartitioner::NPerBlock != 0
+                          : kargs.M % TilePartitioner::MPerBlock != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline with a non-TDM epilogue needs the contiguous "
+                                  "dimension of C (N if row-major, M if column-major) to be a "
+                                  "multiple of its block tile!");
+                }
+                return false;
+            }
+            // K % (KPerBlock * k_batch) == 0, written without the int32 product, which can
+            // overflow for a large K and k_batch.
+            if(kargs.k_batch > 1 && (kargs.K % kargs.k_batch != 0 ||
+                                     (kargs.K / kargs.k_batch) % TilePartitioner::KPerBlock != 0))
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline needs K to be a multiple of k_batch * KPerBlock "
+                                  "for split-K!");
+                }
+                return false;
+            }
+        }
+
         if constexpr(has_skip_check_valid_launch_params::value)
         {
             // Apply the same TDM checks as the kernels that host a TDM pipeline, including their
-            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 is tested with
-            // split-K. A pipeline that declares kSupportsTdmSplitK (comp_tdm_v3) with a
+            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 and the
+            // producer/consumer pipeline are tested with split-K. A pipeline that declares
+            // kSupportsTdmSplitK (comp_tdm_v3), or the producer/consumer pipeline, with a
             // split-K-capable epilogue (CShuffle) adds each split into C atomically, its TDM loads
-            // clipped to the split's K range, so k_batch > 1 is not rejected here for it.
+            // clipped to the split's K range, so k_batch > 1 is not rejected here for it. The
+            // whole-tile split checks above already ran.
+            constexpr bool kSplitKValidated =
+                kPipelineSupportsTdmSplitK || is_wavelet_pipeline<GemmPipeline>;
             const index_t tdm_k_batch =
-                (is_tdm_epilogue_v<EpiloguePipeline> || !kPipelineSupportsTdmSplitK) ? kargs.k_batch
-                                                                                     : 1;
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kSplitKValidated) ? kargs.k_batch : 1;
             if(!IsTdmArgumentSupported(
                    "GEMM", tdm_k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
             {
