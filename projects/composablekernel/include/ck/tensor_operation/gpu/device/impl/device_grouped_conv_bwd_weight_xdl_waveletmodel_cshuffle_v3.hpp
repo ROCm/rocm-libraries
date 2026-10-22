@@ -176,15 +176,15 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
 
         // Dispatch SplitKOffsetHack as a template parameter
         const auto a_grid_desc_transform =
-            GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
-                                                 GridwiseGemm::AK0Number,
-                                                 GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
-                                                                          get_device_arch());
+            GridwiseGemm::template TransformGridA<decltype(a_grid_desc_ak0_m_ak1),
+                                                  GridwiseGemm::AK0Number,
+                                                  GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
+                                                                           get_device_arch());
         const auto b_grid_desc_transform =
-            GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
-                                                 GridwiseGemm::BK0Number,
-                                                 GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
-                                                                          get_device_arch());
+            GridwiseGemm::template TransformGridB<decltype(b_grid_desc_bk0_n_bk1),
+                                                  GridwiseGemm::BK0Number,
+                                                  GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
+                                                                           get_device_arch());
         if(split_k_offset_hack)
         {
             GridwiseGemm::template Run<HasMainKBlockLoop,
