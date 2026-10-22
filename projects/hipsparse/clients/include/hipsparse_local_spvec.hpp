@@ -50,6 +50,7 @@ public:
                 hipsparseDestroySpVec(descr);
                 descr = nullptr;
             }
+            std::cerr << "hipsparseCreateSpVec failed: " << hipsparseGetErrorName(status) << std::endl;
             throw(status);
         }
     }
@@ -70,5 +71,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseSpVecDescr_t. A leftover hipsparseDestroySpVec(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalSpVec&) = delete;
 
 #endif // HIPSPARSE_LOCAL_SPVEC_HPP
