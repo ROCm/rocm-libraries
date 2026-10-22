@@ -950,10 +950,12 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
         << "no threshold decided this failure; reporting one would name a check that did not run";
 }
 
-// The device validators index every padded position, which for a ragged tensor reads other
-// batches' rows, so a device-site ragged comparison is refused with a pointer to the host.
-TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
+// The device allclose validator understands ragged layouts, so a device-site ragged
+// comparison is graded there rather than refused.
+TEST(TestOutputComparison, RaggedAllCloseOutputComparesOnDevice)
 {
+    SKIP_IF_NO_DEVICES();
+
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
                                                                              buffer.size()};
@@ -963,13 +965,38 @@ TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
     auto actual = raggedFloatTensor(3.5f);
 
     EXPECT_FALSE(
-        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
-            .has_value())
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
+            .has_value());
+
+    overwriteOnDevice(*actual, 4.0f);
+    const auto mismatch
+        = compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b");
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->uid, K_UID_A);
+    EXPECT_EQ(mismatch->report.find("NOT COMPARABLE"), std::string::npos);
+}
+
+// The device RMS validator indexes every padded position, which for a ragged tensor reads
+// other batches' rows, so a device-site ragged RMS comparison is refused with a pointer to
+// the host.
+TEST(TestOutputComparison, RaggedRmsOutputOnDeviceIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+    const auto rms = ComparisonTolerance::rms(K_RMS_THRESHOLD);
+
+    auto expected = raggedFloatTensor(3.5f);
+    auto actual = raggedFloatTensor(3.5f);
+
+    EXPECT_FALSE(compareTensor(K_UID_A, attrs, *expected, *actual, rms, ValidationSite::HOST, "b")
+                     .has_value())
         << "on the host a ragged pair compares normally";
 
     std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
     ASSERT_NO_THROW(mismatch = compareTensor(
-                        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b"));
+                        K_UID_A, attrs, *expected, *actual, rms, ValidationSite::DEVICE, "b"));
 
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_EQ(mismatch->uid, K_UID_A);

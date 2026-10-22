@@ -5,6 +5,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 #include <cstdint>
@@ -32,8 +33,9 @@ std::vector<std::string> buildValidatorDefines(const char* dataType, const char*
 void launchValidatorKernel(hipFunction_t function, int64_t totalElements, ValidatorArgs& args);
 void launchValidatorKernel(hipFunction_t function, int64_t totalElements, RmsValidatorArgs& args);
 
-// The kernels index every logical position of the padded dims, which for a ragged
-// tensor aliases other batches' rows or runs past the end of its buffer.
+// For validators without ragged support (validateRms), which index every logical position
+// of the padded dims: for a ragged tensor that aliases other batches' rows or runs past the
+// end of its buffer.
 inline void throwIfRagged(const hipdnn_data_sdk::utilities::ITensor& reference,
                           const hipdnn_data_sdk::utilities::ITensor& implementation)
 {
@@ -47,14 +49,13 @@ inline void throwIfRagged(const hipdnn_data_sdk::utilities::ITensor& reference,
 // Fills the strided-layout fields of a validator's args. Leaves ndim at 0 — the linear
 // fast path — only when both tensors are packed in the same stride order. Packed alone
 // is not enough: an NCHW-packed and an NHWC-packed tensor are both packed, and indexing
-// them by the same linear offset pairs up different logical elements.
+// them by the same linear offset pairs up different logical elements. A ragged tensor is
+// never packed, so it always gets ndim > 0, which setRaggedLayout relies on.
 template <class Args>
 void setStridedLayout(Args& args,
                       const hipdnn_data_sdk::utilities::ITensor& reference,
                       const hipdnn_data_sdk::utilities::ITensor& implementation)
 {
-    throwIfRagged(reference, implementation);
-
     const auto& refStrides = reference.strides();
     const auto& implStrides = implementation.strides();
     if(reference.isPacked() && implementation.isPacked() && refStrides == implStrides)
@@ -77,6 +78,16 @@ void setStridedLayout(Args& args,
         args.dims[d] = static_cast<long long>(dims[d]);
     }
 }
+
+// Points args at the ragged layout both tensors share (RFC 0014); call after
+// setStridedLayout. The kernels then visit every padded logical position and skip those
+// past a batch's stored rows, so this widens args.totalElements from elementCount() (the
+// stored count) to the product of the padded dims. `rowOffsets` receives the device copy
+// of the B+1 offset table and must outlive the launch.
+void setRaggedLayout(ValidatorArgs& args,
+                     const hipdnn_data_sdk::utilities::RaggedIterationInfo& layout,
+                     const std::vector<int64_t>& dims,
+                     hipdnn_data_sdk::utilities::MigratableMemory<long long>& rowOffsets);
 
 } // namespace detail
 } // namespace hipdnn_gpu_ref
