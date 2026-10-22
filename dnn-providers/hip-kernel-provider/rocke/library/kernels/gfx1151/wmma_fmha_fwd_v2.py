@@ -40,6 +40,14 @@ and OCP E4M3FN K/V (``k_scale``, ``v_scale``). Packed layouts take Q / O as
 per-sequence lengths come from the offsets). Positions (causal diagonal,
 ALiBi, QQ-bias, the bias query row) are sequence-local.
 
+Two query-side options refine the packed layouts. ``dense_q`` (paged only)
+keeps Q / O / LSE batch-strided like the dense layout -- uniform decode reads a
+[B, Sq, Hq, D] query against a paged cache -- so there is no ``cu_seqlens_q``
+and every sequence spans ``seqlen_q`` rows. ``seqused_q`` (any packed layout)
+takes each sequence's live query count from ``seqused_q`` [batch] I32, at most
+its span (``cu_seqlens_q`` gap or ``seqlen_q``); rows past it are neither read
+nor written, and the causal diagonal aligns to it.
+
 Grid: flat 1-D, ``batch * ceil(Sq / block_m) * Hq`` CTAs of
 ``WmmaFmhaFwdV2Spec.threads`` threads (:func:`wmma_fmha_fwd_v2_grid`). Heads
 run fastest, then the query tile and batch in ``cta_order``; the causal class
@@ -89,7 +97,8 @@ class WmmaFmhaFwdV2Spec:
     ``scheduler_strategy``, ``lazy_rescale``, ``k_pad`` / ``v_pad``,
     ``wave_pair`` and ``cta_order``. Feature flags: ``use_softcap``,
     ``use_sinks``, ``use_alibi``, ``use_qq_bias``, ``layout`` (with
-    ``page_block_size`` for ``paged``) and ``kv_dtype``.
+    ``page_block_size`` for ``paged``), ``dense_q``, ``seqused_q`` and
+    ``kv_dtype``.
     """
 
     dtype: str = "bf16"  # "fp16" | "bf16"
@@ -103,6 +112,8 @@ class WmmaFmhaFwdV2Spec:
     use_qq_bias: bool = False  # query-section [rows, cols] f32 bias
     layout: str = "dense"  # "dense" | "ragged" | "paged"
     page_block_size: int = 0  # paged only: tokens per page (power of two)
+    dense_q: bool = False  # paged only: batch-strided Q / O / LSE, no cu_seqlens_q
+    seqused_q: bool = False  # packed only: live query rows from seqused_q[batch]
     kv_dtype: str = ""  # "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN K/V bytes
     # Query rows per CTA (16 per wave or wave pair). 0 -> the shipping
     # default: 128 (8 waves), or 64 (8 waves as 4 pairs) with the wave pair.
@@ -146,6 +157,12 @@ class WmmaFmhaFwdV2Spec:
                 raise ValueError("paged attention needs a power-of-two page size")
         elif ps:
             raise ValueError("page_block_size is only valid for the paged layout")
+        if self.dense_q and self.layout != "paged":
+            raise ValueError("dense_q is only valid for the paged layout")
+        if self.seqused_q and self.layout == "dense":
+            raise ValueError(
+                "seqused_q is only valid for a packed (ragged / paged) layout"
+            )
         if self.kv_dtype not in ("", "fp8e4m3"):
             raise ValueError(f"kv_dtype must be '' or 'fp8e4m3', got {self.kv_dtype!r}")
 
@@ -185,6 +202,8 @@ class WmmaFmhaFwdV2Spec:
                 ("_qqbias", self.use_qq_bias),
                 ("_ragged", self.layout == "ragged"),
                 (f"_paged{self.page_block_size}", self.layout == "paged"),
+                ("_denseq", self.dense_q),
+                ("_sequsedq", self.seqused_q),
                 ("_kvfp8", bool(self.kv_dtype)),
             )
             if on
@@ -246,6 +265,22 @@ class WmmaFmhaFwdV2Spec:
     def catalog_dv_split(self) -> int:
         """CTAs sharing one O row: always 1 for prefill."""
         return 1
+
+    def catalog_layout(self) -> str:
+        """Q / K / V layout: ``"dense"``, ``"ragged"`` or ``"paged"``."""
+        return self.layout
+
+    def catalog_page_block_size(self) -> int:
+        """Keys per K / V page (paged only, else 0)."""
+        return self.page_block_size
+
+    def catalog_dense_q(self) -> int:
+        """1: a paged object reads a batch-strided Q (no ``cu_seqlens_q``)."""
+        return int(self.dense_q)
+
+    def catalog_seqused_q(self) -> int:
+        """1: live query rows come from ``seqused_q``."""
+        return int(self.seqused_q)
 
 
 def is_gfx12_family(arch: str) -> bool:
@@ -364,7 +399,10 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdV2Spec):
         ptr("qq_bias_ptr", F32, 4)
         scalars(I32, "qq_bias_rows", "qq_bias_cols", "qq_bias_stride")
     if spec.layout != "dense":
-        ptr("cu_seqlens_q", I32, 4)
+        if not spec.dense_q:
+            ptr("cu_seqlens_q", I32, 4)
+        if spec.seqused_q:
+            ptr("seqused_q", I32, 4)
         if spec.layout == "ragged":
             ptr("cu_seqlens_k", I32, 4)
         else:
@@ -443,9 +481,12 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
     # ---- packed layouts: this sequence's rows and lengths ----
     q_row0 = k_row0 = None
     if spec.layout != "dense":
-        nxt = b.add(batch, c1)
-        q_row0 = b.global_load_i32(p["cu_seqlens_q"], batch)
-        sq = b.sub(b.global_load_i32(p["cu_seqlens_q"], nxt), q_row0)
+        nxt = None if spec.dense_q else b.add(batch, c1)
+        if not spec.dense_q:
+            q_row0 = b.global_load_i32(p["cu_seqlens_q"], batch)
+            sq = b.sub(b.global_load_i32(p["cu_seqlens_q"], nxt), q_row0)
+        if spec.seqused_q:
+            sq = b.smin(b.global_load_i32(p["seqused_q"], batch), sq)
         with b.scf_if(b.cmp_ge(q_start, sq)):
             b.ret()  # past this sequence's queries
         if spec.layout == "ragged":
@@ -459,13 +500,18 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
     ):
         """Resource over one (batch, head) slice: ``(rows - 1) * token stride
         + width`` elements, empty when there are no rows (or not enabled). A
-        packed sequence starts at token ``row0`` instead of at its batch."""
+        packed sequence starts at token ``row0`` instead of at its batch; its
+        base is 64-bit, as a packed buffer may pass 2 GiB while each slice
+        stays I32-addressable."""
         if row0 is None:
             first = b.mul(batch, p[f"stride_{tensor}_batch"])
+            base = b.add(first, b.mul(head_idx, p[f"stride_{tensor}_head"]))
+            off = b.mul(base, ci(elem_bytes))
         else:
-            first = b.mul(row0, p[f"stride_{tensor}_token"])
-        base = b.add(first, b.mul(head_idx, p[f"stride_{tensor}_head"]))
-        sliced = b.global_ptr_add(ptr, b.mul(base, ci(elem_bytes)))
+            first = b.mul(b.zext(row0, I64), b.zext(p[f"stride_{tensor}_token"], I64))
+            head_off = b.zext(b.mul(head_idx, p[f"stride_{tensor}_head"]), I64)
+            off = b.mul(b.add(first, head_off), b.const_i64(elem_bytes))
+        sliced = b.global_ptr_add(ptr, off)
         extent = b.add(b.mul(b.sub(rows, c1), p[f"stride_{tensor}_token"]), width)
         nbytes = b.mul(extent, ci(elem_bytes))
         live = b.cmp_gt(rows, c0)

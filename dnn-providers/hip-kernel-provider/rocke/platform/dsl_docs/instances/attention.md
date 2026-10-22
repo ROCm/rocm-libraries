@@ -30,7 +30,9 @@ RDNA / gfx1250 WMMA forward:
   (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
   head counts incl. a separate V head count, head widths, masks and bias strides;
   baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
-  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+  paged (power-of-two page) layouts, a batch-strided Q against a paged cache (`dense_q`)
+  and per-sequence live query counts (`seqused_q`); body in
+  `platform/python/rocke/helpers/rdna_attention.py`)
 - `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
   decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
   split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
