@@ -7,8 +7,8 @@
 #include <roc/hostnumerics/compat/expected.hpp>
 
 namespace {
-using namespace roc::hostnumerics;
-using namespace roc::hostnumerics::compat;
+using roc::hostnumerics::compat::expected;
+using roc::hostnumerics::compat::unexpected;
 
 enum class TestFailure { Missing };
 
