@@ -452,11 +452,11 @@ _CONFIGS = {
     #     routes the bf16/fp16 wide path here; this exercises the bf16 32x32x8
     #     MFMA atom (`.1k` intrinsic) across d64/d128/d256/GQA/sinks+SW plus
     #     kv_cache_policy and i64-KV on the wide path. (The deeper flash
-    #     sub-knobs -- cfvst V-store scheduling, K single-buffer drain, the
-    #     sliced-K ring, direct-Q-global, and the mask-limit/invariant-hoist
-    #     VALU stack -- are surfaced as known unported gfx942 C-twin paths; see
-    #     the task report. They are NOT sampled here because the C twin cannot
-    #     yet match them byte-for-byte.) ---
+    #     sub-knobs -- K single-buffer drain, the sliced-K ring,
+    #     direct-Q-global, and the mask-limit/invariant-hoist VALU stack -- are
+    #     surfaced as known unported gfx942 C-twin paths; see the task report.
+    #     They are NOT sampled here because the C twin cannot yet match them
+    #     byte-for-byte. cfvst is sampled by gfx942_attention_tiled_2d cfg7/8.) ---
     # idx40: bf16 transposed-x8 d64 (exercises the bf16 32x32x8 atom).
     40: dict(
         head_size=64,

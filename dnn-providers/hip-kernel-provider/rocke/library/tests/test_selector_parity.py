@@ -600,6 +600,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_k_sliced_ring",
             "use_global_load_lds_k",
             "use_fp8_mfma_qk",
+            "use_conflict_free_v_store",
         }
     )
     _NO_KV_ADDRESS_FLAGS = frozenset(
@@ -608,6 +609,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_sinks",
             "use_alibi",
             "use_qq_bias",
+            "use_additive_bias",
             "use_transposed_scalar_state",
             "use_transposed_invariant_hoist",
             "use_transposed_mask_once",
@@ -676,7 +678,6 @@ class TestKvAddrLimit(unittest.TestCase):
         # Flat i32 loads read below 2^31 bytes; buffer loads stop at 0x7FFF0000.
         expected = {
             "use_conflict_free_v": 2**31,
-            "use_conflict_free_v_store": 2**31,
             "use_v_hbm_direct": 2**31,
             "use_k_hbm_direct": 0x7FFF0000,
             "use_fp8_mfma_pv": 0x7FFF0000,
@@ -691,7 +692,7 @@ class TestKvAddrLimit(unittest.TestCase):
                 )
         # Several loaders: the tightest one bounds the kernel and names the cause.
         both = SimpleNamespace(
-            use_i64_kv_addr=True, use_conflict_free_v_store=True, use_k_hbm_direct=True
+            use_i64_kv_addr=True, use_conflict_free_v=True, use_k_hbm_direct=True
         )
         self.assertEqual(
             _au._spec_kv_addr_limit(p, both),
@@ -700,6 +701,9 @@ class TestKvAddrLimit(unittest.TestCase):
         self.assertIsNone(
             _au._spec_kv_addr_limit(p, SimpleNamespace(use_i64_kv_addr=True))
         )
+        # cfvst has an I64_KV_ADDR branch, so it no longer caps an i64 spec.
+        cfvst = SimpleNamespace(use_i64_kv_addr=True, use_conflict_free_v_store=True)
+        self.assertIsNone(_au._spec_kv_addr_limit(p, cfvst))
         # An i32 spec stays on the buffer range whatever its loaders.
         i32 = SimpleNamespace(use_i64_kv_addr=False, use_conflict_free_v_store=True)
         self.assertEqual(_au._spec_kv_addr_limit(p, i32), _I32_BUFFER)
@@ -712,9 +716,9 @@ class TestKvAddrLimit(unittest.TestCase):
             _no_i64_path(2 * 2**31),
         )
 
-    def test_gfx942_cfvst_meta_caps_at_2gib(self):
+    def test_gfx942_cfvst_meta_has_no_limit(self):
         # Shipped gfx942 bf16 D64 causal prefill rides cfvst, whose V loader has
-        # no i64 branch: an i64 problem still gets its flat i32 limit.
+        # an i64 branch: an i64 problem gets no cache limit.
         p = _cfvst_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx942"), _clear_launch_memos():
             spec = _asb._tiled_spec_from_problem(p, "gfx942")
@@ -723,9 +727,7 @@ class TestKvAddrLimit(unittest.TestCase):
             meta = _au._get_2d_launch_meta(
                 p, _au._tiled_cache_key(p, "gfx942"), arch="gfx942"
             )
-        self.assertEqual(
-            meta.kv_addr_limit, _au._KvAddrLimit(2**31, "use_conflict_free_v_store")
-        )
+        self.assertIsNone(meta.kv_addr_limit)
 
     def test_meta_reads_the_built_spec(self):
         # A builder branch that leaves use_i64_kv_addr unset compiles i32 while
@@ -749,10 +751,9 @@ class TestKvAddrLimit(unittest.TestCase):
         # block over the i32 buffer range shares its geometry and differs only in
         # the i64 decision, so a key without that decision would serve the i32
         # limit to the i64 cfvst kernel.
-        cfvst = _au._KvAddrLimit(2**31, "use_conflict_free_v_store")
         cases = (
             ("gfx942", _AT_I32_LIMIT, _I32_BUFFER),
-            ("gfx942", _OVER_I32_LIMIT, cfvst),
+            ("gfx942", _OVER_I32_LIMIT, None),
             ("gfx950", _OVER_I32_LIMIT, None),
         )
         with _clear_launch_memos():
@@ -904,9 +905,9 @@ class TestKvAddrWidthGuard(unittest.TestCase):
 
     def test_loader_cap_hint_names_the_loader(self):
         p = _bug_prob(num_kv_blocks=_BUG_BLOCKS)
-        limit = _au._KvAddrLimit(2**31, "use_conflict_free_v_store")
+        limit = _au._KvAddrLimit(2**31, "use_conflict_free_v")
         with self.assertRaisesRegex(
-            ValueError, "use_conflict_free_v_store K/V loader has no i64 path"
+            ValueError, "use_conflict_free_v K/V loader has no i64 path"
         ):
             _au._check_kv_addr_width(p, _kv_cache(_BUG_BLOCKS, p), limit)
 
@@ -1054,18 +1055,19 @@ class TestProductionRouteGuard(_RouteGuardCase):
 class TestGfx942RouteGuard(_RouteGuardCase):
     _ARCH = "gfx942"
 
-    def test_cfvst_route_caps_at_2gib(self):
-        # The refilled count makes the cfvst spec i64, but its V loader still
-        # indexes with a flat i32 byte offset: 2^31 bytes launches, one block
-        # more raises.
+    def test_cfvst_route_launches_past_2gib(self):
+        # The refilled count makes the cfvst spec i64 and its V loader has an
+        # i64 branch, so caches past 2^31 bytes launch: one block over, and
+        # 69632 blocks (2.125 GiB).
         p = _cfvst_prob()
-        self._run(p, _OVER_I32_LIMIT, backend="tiled")
-        self._run(p, 65536, backend="tiled")
-        with self.assertRaisesRegex(
-            ValueError, "use_conflict_free_v_store K/V loader has no i64 path"
-        ):
-            self._run(p, 65537, backend="tiled")
-        self.assertEqual(self.launcher.call_count, 2)
+        for n in (_OVER_I32_LIMIT, 65536, 65537, 69632):
+            self._run(p, n, backend="tiled")
+            problem = _au._get_2d_launcher.call_args.args[0]
+            self.assertEqual(problem.num_kv_blocks, n)
+            spec = _asb._tiled_spec_from_problem(problem, "gfx942")
+            self.assertTrue(spec.use_i64_kv_addr)
+            self.assertTrue(spec.use_conflict_free_v_store)
+        self.assertEqual(self.launcher.call_count, 4)
 
     def test_4warp_tuning_spec_launches_past_the_buffer_range(self):
         spec, problem = _four_warp_tuning()

@@ -31,11 +31,9 @@
  * cheap, idempotent SSA recomputations) -- the emitted IR is unchanged.
  *
  * Paths reachable only through symbols not yet ported to the C transforms
- * surface (the non-fast paged-KV descriptor's TensorDescriptor.indirect /
- * .offset_i64_split, and the fp8 dequant_fp8x8_to_dtype) are stubbed-to-link:
- * fp8 K/V is rejected on gfx942 (so K_FP8_MFMA / KV_FP8 / TRANSPOSED_V* are
- * always false on this arch's buildable space), and FAST_PAGED_KV_DESC is the
- * gfx942 production descriptor path.
+ * surface (the sliced-K ring loader's paged-KV offsets, and the fp8
+ * dequant_fp8x8_to_dtype) are stubbed-to-link: fp8 K/V is rejected on gfx942
+ * (so K_FP8_MFMA / KV_FP8 are always false on this arch's buildable space).
  *
  * Lifetime: every emitted node is arena-owned (rocke_ir_builder_t.arena). Nothing
  * is freed individually; the arena bulk-frees the whole graph.
@@ -219,10 +217,12 @@ rocke_value_t* rocke_gfx942_attn2d_v_t_slot(rocke_gfx942_attn2d_build_ctx_t* ctx
     rocke_value_t* k_inner = rocke_b_mod(b, tok, rocke_b_const_i32(b, ctx->V_T_KPACK));
     rocke_value_t* n_group = rocke_b_div(b, dim, rocke_b_const_i32(b, ctx->V_T_NPER_ROW));
     rocke_value_t* n_inner = rocke_b_mod(b, dim, rocke_b_const_i32(b, ctx->V_T_NPER_ROW));
-    rocke_value_t* hi = rocke_b_add(
-        b,
-        rocke_b_mul(b, k_group, rocke_b_const_i32(b, ctx->V_T_NGROUPS * ctx->V_T_GROUP_STRIDE)),
-        rocke_b_mul(b, n_group, rocke_b_const_i32(b, ctx->V_T_GROUP_STRIDE)));
+    /* Bind both products in Python's left-to-right order (C argument
+     * evaluation order is unspecified). */
+    rocke_value_t* k_term
+        = rocke_b_mul(b, k_group, rocke_b_const_i32(b, ctx->V_T_NGROUPS * ctx->V_T_GROUP_STRIDE));
+    rocke_value_t* n_term = rocke_b_mul(b, n_group, rocke_b_const_i32(b, ctx->V_T_GROUP_STRIDE));
+    rocke_value_t* hi = rocke_b_add(b, k_term, n_term);
     rocke_value_t* lo
         = rocke_b_add(b, rocke_b_mul(b, n_inner, rocke_b_const_i32(b, ctx->V_T_KPACK)), k_inner);
     return rocke_b_add(b, hi, lo);
@@ -598,15 +598,31 @@ void rocke_gfx942_attn2d_issue_k_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
             /* Non-fast paged-KV (N_BLOCKS_PER_TILE==1 / multi-block):
              *   linear_half = call*KV_HALVES_PER_CALL + lane_half_base
              *   voff, _ = paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=)
-             * (Python 2470-2489; I64_KV_ADDR is false in gfx942's buildable
-             * space, so the plain i32 voffset is used). */
+             * I64_KV_ADDR uses offset_i64_split, folding the physical_block term
+             * into a 64-bit per-block base. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
             rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset(
-                   b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+            if(ctx->I64_KV_ADDR)
+            {
+                rocke_value_t* base_i64 = NULL;
+                if(!rocke_transforms_descriptor_offset_i64_split(b,
+                                                                 ctx->kv_desc,
+                                                                 "physical_block",
+                                                                 in_names,
+                                                                 in_values,
+                                                                 3,
+                                                                 &base_i64,
+                                                                 &voff,
+                                                                 &valid))
+                    return;
+                k_ptr = rocke_b_global_ptr_add(b, ctx->key, base_i64);
+                k_rsrc = rocke_b_buffer_rsrc(b, k_ptr, kv_block_bytes_c);
+            }
+            else if(!rocke_transforms_descriptor_offset(
+                        b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                 return;
         }
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
@@ -720,15 +736,32 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
         else
         {
             /* Non-fast paged-KV: voff = paged_kv_desc.offset(tile_idx=,
-             * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=)
-             * (Python 2585-2605; I64_KV_ADDR false in gfx942 buildable space). */
+             * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=).
+             * I64_KV_ADDR uses offset_i64_split, folding the physical_block term
+             * into a 64-bit per-block base. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
             rocke_value_t* valid = NULL;
-            if(!rocke_transforms_descriptor_offset(
-                   b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+            if(ctx->I64_KV_ADDR)
+            {
+                rocke_value_t* base_i64 = NULL;
+                if(!rocke_transforms_descriptor_offset_i64_split(b,
+                                                                 ctx->kv_desc,
+                                                                 "physical_block",
+                                                                 in_names,
+                                                                 in_values,
+                                                                 3,
+                                                                 &base_i64,
+                                                                 &voff,
+                                                                 &valid))
+                    return;
+                v_rsrc = rocke_b_buffer_rsrc(
+                    b, rocke_b_global_ptr_add(b, ctx->value, base_i64), kv_block_bytes_c);
+            }
+            else if(!rocke_transforms_descriptor_offset(
+                        b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                 return;
         }
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(

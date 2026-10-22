@@ -26,7 +26,7 @@
  *
  * Out of scope (NOT ported here): Pad, Merge, UnmergeDivMod, XorT, Slice,
  * Freeze, Insert, Replicate, Modulo, Offset, RightPad, LeftPad, PadDynamic,
- * Indirect, the move() / offset_i64 / delta machinery, and the convenience
+ * Indirect, the move() / delta machinery, and the convenience
  * constructors for those.  Only the transform kinds reachable from the symbols
  * above are given a tag in rocke_xform_kind_t.
  *
@@ -505,6 +505,22 @@ bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
                                                   rocke_value_t** out_base_i64,
                                                   rocke_value_t** out_within,
                                                   rocke_value_t** out_valid);
+
+/* Faithful port of TensorDescriptor.offset_i64. Like
+ * rocke_transforms_descriptor_offset but returns the FULL offset as one i64:
+ * the `i64_coord` term is widened before its stride multiply (no 2 GiB
+ * overflow for paged caches) and every other term is zero-extended and summed
+ * in i64. Unlike the _split form nothing is scalarised, so it suits flat
+ * per-lane global loads whose block id varies per lane. *out_offset is
+ * const_i64(0) when there are no terms; *out_valid is NULL == Python None. */
+bool rocke_transforms_descriptor_offset_i64(rocke_ir_builder_t* b,
+                                            const rocke_tensor_descriptor_t* desc,
+                                            const char* i64_coord,
+                                            const char* const* in_names,
+                                            rocke_value_t* const* in_values,
+                                            int n_in,
+                                            rocke_value_t** out_offset,
+                                            rocke_value_t** out_valid);
 
 #ifdef __cplusplus
 } /* extern "C" */

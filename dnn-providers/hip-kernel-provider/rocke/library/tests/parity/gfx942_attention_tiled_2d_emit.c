@@ -112,6 +112,25 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_k_single_buffer = false;
         s->use_agpr_alloc_zero = true;
         break;
+    case 7: /* cfvst on the bf16 D64 GQA 32/8 prefill geometry, i32 K/V. */
+    case 8: /* cfg7 with i64 K/V addressing. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_conflict_free_v_store = true;
+        s->use_i64_kv_addr = (idx == 8);
+        break;
     default:
         return -1;
     }

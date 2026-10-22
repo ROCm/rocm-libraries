@@ -667,6 +667,10 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_m_raw = rocke_b_fmax(b, ctx->m_cur[0], st_tile_max);
         rocke_value_t* st_ok = rocke_b_fcmp(b, "ogt", st_m_raw, neg_inf);
         rocke_value_t* st_m_new = rocke_b_select(b, st_ok, st_m_raw, zero_f);
+        /* Split cfvst: issue the V loads now so they overlap the exp2 pass. */
+        void* cfvst_payload = (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+                                  ? rocke_gfx942_attn2d_cfvst_load_v_regs(ctx, ctx->kv_tile_iv)
+                                  : NULL;
 
         /* PT32_groups build + l_local (Python 2858-2873). */
         rocke_value_t* st_l_local = zero_f;
@@ -688,6 +692,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* l_sum = l_local + lane^32 (Python 2876-2877). */
         rocke_value_t* st_l_remote = rocke_b_warp_shuffle_xor(b, st_l_local, 32);
         rocke_value_t* st_l_sum = rocke_b_fadd(b, st_l_local, st_l_remote);
+        /* Split cfvst: publish the transposed V tile loaded above. */
+        if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+            rocke_gfx942_attn2d_cfvst_store_v_regs(ctx, cfvst_payload);
 
         /* m_new / l_local broadcast across SOFTMAX_STATE_SLOTS (Python 2885-2886);
          * stored to ctx scratch so the downstream alpha/L block reads them. */
@@ -701,16 +708,35 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
 
         /* ============================================================ *
          *  post-QK V/K issue (Python 2962-2974). For the transposed path this
-         *  happens AFTER the softmax above (matches Python ordering).
+         *  happens AFTER the softmax above (matches Python ordering). Same
+         *  schedule as the non-transposed 32x32 path below.
          * ============================================================ */
         rocke_value_t* cur_buf = ctx->cur_buf;
         rocke_value_t* nxt_buf = ctx->nxt_buf_v;
-        if(ctx->GROUPED_KV2)
+        if(ctx->K_SINGLE_BUF)
+        {
+            rocke_b_s_waitcnt(b, /*vmcnt=*/-1, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            rocke_b_sync(b);
+            if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+            {
+                /* split cfvst already issued V; only next-K remains. */
+            }
+            else if(!ctx->EARLY_V_SCHEDULE)
+            {
+                rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            }
+            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if(ctx->GROUPED_KV2)
         {
             rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
             rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
         }
         else if(ctx->EARLY_V_SCHEDULE)
+        {
+            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
         {
             rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
         }

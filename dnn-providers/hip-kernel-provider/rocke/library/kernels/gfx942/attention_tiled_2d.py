@@ -3029,9 +3029,33 @@ def build_unified_attention_2d_tiled(
     def _cfvst_load_v_regs(kv_tile_idx: Value):
         """Issue cfvst VMEM loads and keep each thread's V tile in VGPRs."""
         zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
-        zero_i32 = b.const_i32(0)
+        # V offsets are i64 under I64_KV_ADDR, so their constants are too.
+        _off_const = b.const_i64 if I64_KV_ADDR else b.const_i32
+        zero_off = _off_const(0)
         tile_tok_base = b.mul(kv_tile_idx, b.const_i32(T))
         _dp = b.const_i32(_v_t2_dim_pairs)
+
+        def _v_offset(linear: Value):
+            """Byte offset of ``V[linear]`` from the cache base, and its validity.
+
+            Under I64_KV_ADDR the physical_block term is widened to i64, so a
+            cache past 2^31 bytes does not wrap. The block varies per lane here,
+            so this is the full flat offset rather than a scalar block base.
+            """
+            if I64_KV_ADDR:
+                return paged_kv_desc.offset_i64(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear,
+                    kv_head=kv_head_idx,
+                )
+            return paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear,
+                kv_head=kv_head_idx,
+            )
 
         def _load_token_row_pair(t_row: Value, d0: Value) -> Value:
             """Load <2 x f16> = (V[t_row, d0], V[t_row, d0+1]) as i32, bounded.
@@ -3042,18 +3066,13 @@ def build_unified_attention_2d_tiled(
             never P(0)*V(inf)=nan.
             """
             linear = b.add(b.mul(t_row, b.const_i32(HD)), d0)
-            voff, valid = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear,
-                kv_head=kv_head_idx,
-            )
+            voff, valid = _v_offset(linear)
             in_range = b.cmp_lt(b.add(tile_tok_base, t_row), max_seq_prefix_len)
             if valid is not None:
                 in_range = b.land(in_range, valid)
-            safe_voff = b.select(in_range, voff, zero_i32)
+            safe_voff = b.select(in_range, voff, zero_off)
             safe_elem = (
-                b.div(safe_voff, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else safe_voff
+                b.div(safe_voff, _off_const(KV_BYTES)) if KV_BYTES != 1 else safe_voff
             )
             if _CFV_STORE_SEPOFF:
                 # ISOLATION: compute the (t_row, d0+1) offset via a SEPARATE
@@ -3063,12 +3082,10 @@ def build_unified_attention_2d_tiled(
                 linear1 = b.add(
                     b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1))
                 )
-                voff1, valid1 = paged_kv_desc.offset(
-                    b, tile_idx=kv_tile_idx, linear_half=linear1, kv_head=kv_head_idx
-                )
-                safe_voff1 = b.select(in_range, voff1, zero_i32)
+                voff1, valid1 = _v_offset(linear1)
+                safe_voff1 = b.select(in_range, voff1, zero_off)
                 safe_elem1 = (
-                    b.div(safe_voff1, b.const_i32(KV_BYTES))
+                    b.div(safe_voff1, _off_const(KV_BYTES))
                     if KV_BYTES != 1
                     else safe_voff1
                 )
@@ -3082,7 +3099,7 @@ def build_unified_attention_2d_tiled(
                 # (rules out the vectorized global_load_vN lowering). Same values.
                 e0 = b.global_load(value, safe_elem, dtype, align=2)
                 e1 = b.global_load(
-                    value, b.add(safe_elem, b.const_i32(1)), dtype, align=2
+                    value, b.add(safe_elem, _off_const(1)), dtype, align=2
                 )
                 e0 = b.select(in_range, e0, zero_h)
                 e1 = b.select(in_range, e1, zero_h)
