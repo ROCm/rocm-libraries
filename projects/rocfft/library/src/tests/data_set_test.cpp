@@ -21,6 +21,7 @@
 #include "../../../shared/precision_type.h"
 #include "client_data_layout_helpers.h"
 #include "data_set.h"
+#include "data_set_test_access.h"
 #include "enum_printer.h"
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -36,36 +37,6 @@
 // internal_test_main.cpp
 extern size_t random_seed;
 extern size_t num_random_cases;
-
-struct data_set_test_access
-{
-    static void reorder_length_axes(data_set_t& data_set, const std::vector<size_t>& order)
-    {
-        data_set.reorder_length_axes(order);
-    }
-    static void clear(data_set_t& data_set)
-    {
-        data_set.clear();
-    }
-    static void
-        full_range_reset(data_set_t& data_set, const std::vector<size_t>& lengths, size_t batch)
-    {
-        data_set.full_range_reset(lengths, {}, {batch}, {}, false);
-    }
-    // Copy of a data set (embedding included) given an array type and a precision
-    // (left unset if std::nullopt) the way friends set them, e.g., upon finalization.
-    static data_set_t with_type(data_set_t                      data_set,
-                                rocfft_array_type               array_type,
-                                std::optional<rocfft_precision> precision)
-    {
-        data_set.array_type = array_type;
-        if(precision)
-            data_set.set_precision(*precision);
-        else
-            data_set.precision = data_set_t::precision_unset;
-        return data_set;
-    }
-};
 
 namespace
 {
@@ -672,13 +643,14 @@ TEST_F(data_set_test, inplace_real_round_trip)
             const auto herm_full = full.get_other_inplace_data_set_for(herm_io, fft_type);
             ASSERT_TRUE(herm_full.has_value());
             const auto herm_full_view = herm_full->get_data_set_for_len_axes(kept);
-            EXPECT_TRUE(herm->has_same_axes_as(herm_full_view)) << herm->str();
+            EXPECT_TRUE(*herm == with_type(herm_full_view, herm_type, precision)) << herm->str();
             EXPECT_EQ(type_of(herm_full_view),
                       kept.size() == L.size() ? herm_type : complex_counterpart(herm_type));
             EXPECT_EQ(precision_of(herm_full_view), precision);
             // and so is the embedding of a view
             const auto herm_embedding = herm->get_embedding_data_set();
-            EXPECT_TRUE(herm_embedding.has_same_axes_as(*herm_full)) << herm_embedding.str();
+            EXPECT_TRUE(herm_embedding == with_type(*herm_full, type_of(herm_embedding), precision))
+                << herm_embedding.str();
             EXPECT_EQ(type_of(herm_embedding),
                       herm->is_embedded() ? complex_counterpart(herm_type) : herm_type);
             EXPECT_EQ(herm->corresponding_axes_in_embedding(),
@@ -1063,7 +1035,6 @@ TEST_F(data_set_test, array_type_pair_rules)
                 EXPECT_EQ(reinterpret, reinterpret_outcomes[ta][tb]);
 
                 const bool same = same_data_array_types[ta][tb] && prec_a == prec_b;
-                EXPECT_TRUE(a.has_same_axes_as(b));
                 EXPECT_EQ(a == b, same);
                 const auto intersection = outcome_of([&] {
                     const auto xsect = data_set_t::make_contiguous_intersection_of(a, b);
