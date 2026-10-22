@@ -163,7 +163,7 @@ foreach(i RANGE 0 ${len1})
         message(FATAL_ERROR "${archive} is corrupted")
       endif()
 
-      execute_process(COMMAND tar xf "${archive}"
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E tar xf "${archive}"
         RESULT_VARIABLE STATUS
         WORKING_DIRECTORY "${CMAKE_MATRICES_DIR}")
       if(STATUS AND NOT STATUS EQUAL 0)
