@@ -92,21 +92,28 @@ get_filename_component(CMAKE_MATRICES_DIR "${CMAKE_MATRICES_DIR}"
 # SuiteSparse archives tracked by DVC, present after dvc pull
 get_filename_component(ROCSPARSE_DVC_MATRICES_DIR "${CMAKE_CURRENT_LIST_DIR}/../clients/matrices" ABSOLUTE)
 
+set(unconverted_matrices)
 set(missing_matrices)
 foreach(m IN LISTS TEST_MATRICES)
   get_filename_component(mat "${m}" NAME)
-  if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr"
-     AND NOT ROCSPARSE_MTX_DIR
-     AND NOT EXISTS "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
-    list(APPEND missing_matrices "${mat}")
+  if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
+    list(APPEND unconverted_matrices "${mat}")
+    if(NOT ROCSPARSE_MTX_DIR AND NOT EXISTS "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
+      list(APPEND missing_matrices "${mat}")
+    endif()
   endif()
 endforeach()
+
+if(NOT unconverted_matrices)
+  return()
+endif()
 
 if(missing_matrices AND NOT ALLOW_FETCH_DEPS)
   list(JOIN missing_matrices ", " missing_matrices)
   message(FATAL_ERROR
     "Test matrices not found: ${missing_matrices}.  Pull them with "
-    "'dvc pull -R projects/rocsparse/clients/matrices' from the rocm-libraries root, point "
+    "'dvc pull -R projects/rocsparse/clients/matrices' from the rocm-libraries root (in a "
+    "sparse checkout, run 'git sparse-checkout add .dvc' first), point "
     "CMAKE_MATRICES_DIR at a directory with the converted .csr files, or configure with "
     "-DALLOW_FETCH_DEPS=ON to download them from SuiteSparse.")
 endif()
@@ -144,12 +151,15 @@ foreach(i RANGE 0 ${len1})
 
   # Extract or download test matrices if not already converted
   if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
+    # Only a downloaded archive is removed after conversion, never the DVC-tracked one
+    set(downloaded_archive)
     if(NOT ROCSPARSE_MTX_DIR)
       set(archive "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
       if(EXISTS "${archive}")
         message("-- Extracting test matrix ${m}.tar.gz from ${ROCSPARSE_DVC_MATRICES_DIR}")
       else()
         set(archive "${CMAKE_MATRICES_DIR}/${mat}.tar.gz")
+        set(downloaded_archive "${archive}")
         # First try user specified mirror, if available
         if(DEFINED ENV{ROCSPARSE_TEST_MIRROR} AND NOT $ENV{ROCSPARSE_TEST_MIRROR} STREQUAL "")
           message("-- Downloading and extracting test matrix ${m}.tar.gz from user specified test mirror: $ENV{ROCSPARSE_TEST_MIRROR}")
@@ -208,11 +218,17 @@ foreach(i RANGE 0 ${len1})
     # mtx2csr.exe is having relative RUNPATH with respect to package install directory
     # Set LD_LIBRARY_PATH for running the executable from build directory
     set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}")
-    execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.csr
-      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
-      COMMAND_ERROR_IS_FATAL ANY)
+    # Write to a temporary name so that an interrupted conversion leaves no .csr that a rerun would skip
+    execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.csr.part
+      RESULT_VARIABLE STATUS
+      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
+    if(NOT STATUS EQUAL 0)
+      file(REMOVE ${CMAKE_MATRICES_DIR}/${mat}.csr.part)
+      message(FATAL_ERROR "mtx2csr.exe failed for ${mat}, aborting.")
+    endif()
+    file(RENAME ${CMAKE_MATRICES_DIR}/${mat}.csr.part ${CMAKE_MATRICES_DIR}/${mat}.csr)
     message(STATUS "${mat} success.")
-    file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
+    file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx ${downloaded_archive})
 
   endif()
 endforeach()
