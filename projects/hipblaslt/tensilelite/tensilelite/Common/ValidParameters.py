@@ -1267,6 +1267,16 @@ validParameters = { # we need to make sure this matches develop
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],
+    # TDMBFirstSplitSync -- B-first loads with separate A/B LDS synchronization.
+    #   0  default. Hidden from the kernel name.
+    #   1  TDM descriptor sets {B,MXSB} + {A,MXSA}: even waves load B then A,
+    #      odd waves MXSB then MXSA, so each wave carries an equal share. Every
+    #      wave issues its B-side tensor_load_to_lds and ds_loads before the A
+    #      side, and the A/B LDS sides take separate memory tokens, so the
+    #      barrier before the B-side reads waits only for the B-side loads.
+    #      Requires gfx1250 MX A and B, TDMInst=3, NumWaves>1, TDMFuse=0,
+    #      ScheduleIterAlg=4 and scalar PrefetchGlobalRead=2.
+    "TDMBFirstSplitSync": [0, 1],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

@@ -451,8 +451,13 @@ def decoupledOneBlockBoth(ks):
 
 
 def tdmWaveIssueOrder(ks, itemA, itemB):
-    """Return A/B items in descending per-tensor LDS-block order."""
-    _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
+    """Return A/B items in descending per-tensor LDS-block order.
+
+    TDMBFirstSplitSync (never decoupled) issues and reads B before A.
+    """
+    decoupled, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
+    if not decoupled and ks.get("TDMBFirstSplitSync", 0):
+        return (itemB, itemA)
     return dcpThickThinIssueOrder(((numLdsBlkA, itemA), (numLdsBlkB, itemB)))
 
 

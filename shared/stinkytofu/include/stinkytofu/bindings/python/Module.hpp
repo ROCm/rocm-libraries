@@ -124,6 +124,7 @@
 // SchedulingKnobHeuristics.hpp.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
+    X(LockBarrierOrder, bool, false)      /* workgroup barriers keep program order across tokens */ \
     X(EvenSpreadFillers, bool, true)                                                               \
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \

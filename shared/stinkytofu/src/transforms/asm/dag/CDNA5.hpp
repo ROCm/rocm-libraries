@@ -3213,6 +3213,25 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         };
         for (const auto& group : exclusiveAfterGroups) clampPairHalf(group, /*waitHalf=*/true);
         for (const auto& group : exclusiveBeforeGroups) clampPairHalf(group, /*waitHalf=*/false);
+
+        // ModuleOptions::LockBarrierOrder. The barriers are chained in program
+        // order below, so a barrier cannot issue before the ones above it. Give
+        // each barrier the smallest threshold of itself and every barrier below
+        // it; otherwise a late-threshold first barrier would hold back the rest.
+        if (getPassContext().getPassFeatureConfig().dagFeatures.lockBarrierOrder) {
+            std::vector<StinkyInstruction*> barriers;
+            for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst != nullptr && barrierWmmaThresholds_.count(inst) != 0)
+                    barriers.push_back(inst);
+            }
+            int suffixMin = std::numeric_limits<int>::max();
+            for (auto rit = barriers.rbegin(); rit != barriers.rend(); ++rit) {
+                int& threshold = barrierWmmaThresholds_[*rit];
+                suffixMin = std::min(suffixMin, threshold);
+                threshold = suffixMin;
+            }
+        }
     }
 
     // ModuleOptions::LockDsReadOrder. Within one memory token, ds_loads issue in
@@ -3249,12 +3268,17 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
             return tokens;
         };
+        // With LockBarrierOrder the barriers already keep program order across
+        // tokens, so the loads between them are chained across tokens too.
+        const bool acrossTokens =
+            getPassContext().getPassFeatureConfig().dagFeatures.lockBarrierOrder;
         std::map<std::vector<uint32_t>, std::vector<StinkyInstruction*>> loadsByToken;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (instPtr == nullptr || !isDSRead(*instPtr)) continue;
             std::vector<uint32_t> tokens = tokenKeyOf(*instPtr);
             if (tokens.empty()) continue;
+            if (acrossTokens) tokens = {std::numeric_limits<uint32_t>::max()};
             loadsByToken[std::move(tokens)].push_back(instPtr);
         }
         for (auto& entry : loadsByToken) {
@@ -3273,6 +3297,21 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " pri=" << dsReadPriorityOf(loads[i - 1]) << " successor=" << loads[i]
                            << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
             }
+        }
+    }
+
+    // ModuleOptions::LockBarrierOrder. The Layer 2 overlap edges only order
+    // overlapping pairs, so two barriers on different memory tokens are free to
+    // swap. Chain every s_barrier_signal / s_barrier_wait in program order so a
+    // kernel that emits one side's barrier first (B before A) keeps that order.
+    // A chain edge that contradicts a real dependence is dropped as a cycle.
+    if (getPassContext().getPassFeatureConfig().dagFeatures.lockBarrierOrder) {
+        StinkyInstruction* previous = nullptr;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || !(isBarrierSignal(*inst) || isBarrierWait(*inst))) continue;
+            if (previous != nullptr) deps.requestedConstraints.emplace_back(previous, inst);
+            previous = inst;
         }
     }
 

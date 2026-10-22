@@ -29,6 +29,8 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 _NO_MX_ON_B = {"MacDataTypeB": "F8", "DataTypeMXSB": "E8", "MXBlockB": 0}
 _ONE_WAVE_MI = [16, 16, 128, 1, 1, 2, 16, 1, 1]
 _ONE_WAVE_WG = [32, 1, 1]
+# A _derive override that removes the key instead of setting it.
+_UNSET = object()
 
 
 def _ks(fuse=1, pgrA=1, pgrB=2, **overrides):
@@ -212,6 +214,7 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
         "WorkGroupMapping": 1,
     }
     params.update(overrides)
+    params = {k: v for k, v in params.items() if v is not _UNSET}
     params.update(matrixInstructionToMIParameters(
         mi, isa, params["WavefrontSize"], problemType, workGroup, gfx1250_iim))
     sol = Solution(params, False, True, False, assembler, gfx1250_iim)
@@ -328,7 +331,8 @@ def test_valid_parameters_and_the_mapping_name_the_same_integers():
 
 
 def test_every_shipped_row_is_reachable():
-    assert set(TF.TDM_GROUPS) == set(TF.TDM_FUSE_GROUPING.values())
+    reachable = set(TF.TDM_FUSE_GROUPING.values()) | {TF.TDM_B_FIRST_SPLIT_SYNC_GROUPING}
+    assert set(TF.TDM_GROUPS) == reachable
     assert set(TF.TDM_GROUPS) == set(TF._GROUPING_ACCEPTED)
 
 
@@ -424,7 +428,8 @@ class Stub:
         for name in ("isTdmWaveSeparated", "tdmFusePaired",
                      "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated",
                      "tdmDescriptorSetOwner", "tdmLastIterDisableSgprs", "defineTdmSgprs",
-                     "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens"):
+                     "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens",
+                     "_tdmParityMembers"):
             fn = getattr(KernelWriterAssembly, name, None)
             if fn is not None:
                 setattr(self, name, fn.__get__(self, Stub))
@@ -654,3 +659,123 @@ def _incrementText(state):
     mod = w.tdmSetupIncrementWaveSeparated(
         state, {"tensorChar": "A"}, {"tensorChar": "B"})
     return str(mod)
+
+
+# ---------------------------------------------------------------------------
+# TDMBFirstSplitSync: {B,MXSB} + {A,MXSA}, B first, per-side LDS tokens.
+# ---------------------------------------------------------------------------
+def _splitKernel(**over):
+    kernel = _kernel(tdmFuse=0)
+    kernel.update(TDMBFirstSplitSync=1, PrefetchGlobalRead=2)
+    kernel.update(over)
+    return kernel
+
+
+def test_valid_parameters_offer_b_first_split_sync():
+    assert validParameters["TDMBFirstSplitSync"] == [0, 1]
+
+
+def test_b_first_split_sync_selects_its_own_row():
+    assert tdmGrouping(_splitKernel()).name == TF.TDM_B_FIRST_SPLIT_SYNC_GROUPING
+    assert tdmGrouping(_splitKernel(TDMBFirstSplitSync=0)).name == "MX_AB"
+
+
+@pytest.mark.parametrize(
+    "tc, waves",
+    [("B", (0, 2)), ("A", (0, 2)), ("MXSB", (1, 3)), ("MXSA", (1, 3))],
+)
+def test_b_first_split_sync_puts_data_and_scales_on_opposite_parities(tc, waves):
+    kernel = _splitKernel()
+    assert tdmWavePartition(kernel, tc) == (2, waves)
+    assert tdmWaveComponents(kernel, tc) == (2, 1)
+
+
+def test_b_first_split_sync_sets_follow_their_data_tensor():
+    kernel = _splitKernel()
+    assert TF.tdmSetOwner(kernel, "MXSB") == "B"
+    assert TF.tdmSetOwner(kernel, "MXSA") == "A"
+    assert TF.tdmSeparateABDescriptors(kernel) is True
+    assert tdmFusePaired(kernel) is True
+    assert TF.tdmSharedScaleSetActive(kernel) is False
+
+
+def test_partition_dispatch_covers_rows_that_break_the_parity_pair():
+    assert TF.tdmPartitionDispatchActive(_splitKernel()) is True
+    assert TF.tdmPartitionDispatchActive(_splitKernel(NumWaves=1)) is False
+    assert TF.tdmPartitionDispatchActive(_kernel(tdmFuse=1)) is False
+    assert TF.tdmPartitionDispatchActive(_kernel(tdmFuse=0)) is False
+    assert TF.tdmPartitionDispatchActive(_kernel(tdmFuse=2)) is True
+
+
+def test_b_first_split_sync_issues_b_first():
+    assert DP.tdmWaveIssueOrder(_splitKernel(), "A", "B") == ("B", "A")
+    assert DP.tdmWaveIssueOrder(_splitKernel(TDMBFirstSplitSync=0), "A", "B") == ("A", "B")
+
+
+class _ParityWriter(_Writer):
+    def _tdmParityMembers(self, kernel, tc, partner):
+        return KernelWriterAssembly._tdmParityMembers(self, kernel, tc, partner)
+
+
+def _setMembers(kernel, tc1, tc2):
+    return KernelWriterAssembly._tdmSetMembersByParity(
+        _ParityWriter(kernel), kernel, _tp(tc1), _tp(tc2))
+
+
+@pytest.mark.parametrize("pair", [("A", "B"), ("B", "A")])
+def test_set_members_by_parity_for_the_data_call(pair):
+    assert _setMembers(_splitKernel(), *pair) == ("A", "MXSA")
+
+
+@pytest.mark.parametrize("pair", [("MXSA", "MXSB"), ("MXSB", "MXSA")])
+def test_set_members_by_parity_for_the_scale_call(pair):
+    # The scale call advances B's set, where B rides the even waves.
+    assert _setMembers(_splitKernel(), *pair) == ("B", "MXSB")
+
+
+@pytest.mark.parametrize("tdmFuse, scalePair", [(0, ("MXSA", "MXSB")), (1, ("MXSB", "B"))])
+def test_set_members_by_parity_keeps_the_shipped_rows(tdmFuse, scalePair):
+    kernel = _kernel(tdmFuse)
+    assert _setMembers(kernel, "MXSA", "MXSB") == scalePair
+
+
+def test_b_first_split_sync_increment_selects_each_sets_members():
+    text = _incrementText(_splitKernel())
+    assert "A's set inc = parity ? MXSA : A" in text, text
+    assert "B's set inc = parity ? MXSB : B" in text, text
+
+
+def test_paired_increment_keeps_its_parity():
+    text = _incrementText(_kernel(tdmFuse=1))
+    assert "A's set inc = parity ? MXSA : A" in text, text
+    assert "B's set inc = parity ? B : MXSB" in text, text
+
+
+_SPLIT_SYNC = dict(TDMFuse=0, TDMBFirstSplitSync=1, ScheduleIterAlg=4,
+                   PrefetchGlobalReadA=_UNSET, PrefetchGlobalReadB=_UNSET)
+
+
+def test_solution_accepts_b_first_split_sync(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **_SPLIT_SYNC)
+    assert sol.get("Valid") is True, out
+    assert tdmGrouping(sol._state).name == TF.TDM_B_FIRST_SPLIT_SYNC_GROUPING
+
+
+@pytest.mark.parametrize(
+    "overrides, clause",
+    [
+        ({"TDMFuse": 1}, "TDMBFirstSplitSync requires TDMFuse=0"),
+        ({"ScheduleIterAlg": 0}, "TDMBFirstSplitSync requires ScheduleIterAlg=4"),
+        ({"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
+         "TDMBFirstSplitSync requires scalar PrefetchGlobalRead"),
+        ({"PrefetchGlobalRead": 1}, "TDMBFirstSplitSync requires PrefetchGlobalRead=2"),
+        ({"ProblemType": _NO_MX_ON_B}, "TDMBFirstSplitSync requires MX scales on both tensors"),
+        ({"MatrixInstruction": _ONE_WAVE_MI, "WorkGroup": _ONE_WAVE_WG},
+         "TDMBFirstSplitSync requires NumWaves > 1"),
+    ],
+)
+def test_solution_rejects_b_first_split_sync_outside_its_scope(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides, clause):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **{**_SPLIT_SYNC, **overrides})
+    assert sol.get("Valid") is False
+    assert clause in out

@@ -657,6 +657,7 @@ defaultBenchmarkCommonParameters = [
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
     {"TDMLoadWaveSync": [False]},
+    {"TDMBFirstSplitSync": [0]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
     # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):

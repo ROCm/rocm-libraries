@@ -84,7 +84,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
-                                tdmMemberIsLive
+                                tdmMemberIsLive, tdmPartitionDispatchActive
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
@@ -529,6 +529,9 @@ class KernelWriterAssembly(KernelWriter):
     tcEven = tPEven["tensorChar"]
     if not self.isTdmWaveSeparated(kernel):
       return tcEven, tPOdd["tensorChar"]
+    group = tdmSetGroup(kernel, tcEven)
+    if group is not None and len(group) == 2:
+      return self._tdmParityMembers(kernel, group[0], group[1])
     return tcEven, tdmGroupPartner(kernel, tcEven, tPOdd["tensorChar"])
 
   def _tdmSecondMemberIsOdd(self, kernel, tP1, tP2):
@@ -20870,10 +20873,15 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(emitFor(tP))
         return
       skip = Label(self.labels.getNameInc(f"TDM{what}{tc}Skip"), "")
+      parity = waves[0] % 2
       if len(waves) == 1:
         mod.add(SCmpLgU32(src0=sgpr(waveIdxSgpr), src1=waves[0],
                 comment=f"only wave {waves[0]} moves {tc}"))
         mod.add(SCBranchSCC1(skip.getLabelName(), f"skip {tc} on every other wave"))
+      elif tuple(waves) == tuple(w for w in range(numWaves) if w % 2 == parity):
+        mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, f"{'odd' if parity else 'even'} waves move {tc}"))
+        branch = SCBranchSCC0 if parity else SCBranchSCC1
+        mod.add(branch(skip.getLabelName(), f"skip {tc} on {'even' if parity else 'odd'} waves"))
       else:
         # A contiguous low run of waves: waveIdx >= len(waves) skips.
         assert tuple(waves) == tuple(range(len(waves))), \
@@ -20893,8 +20901,8 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("TDM Init Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
-    # Shared-scale descriptors are initialized on their full assigned wave sets.
-    if tdmSharedScaleSetActive(kernel):
+    # Shared-scale and BA_split descriptors are initialized on their full assigned wave sets.
+    if tdmPartitionDispatchActive(kernel):
       mod.add(self._tdmSharedScaleDispatch(kernel, tPA, tPB, waveIdxSgpr,
                                        lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr),
                                        "Init"))
@@ -20930,8 +20938,8 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
 
-    # Shared-scale dispatch computes each live start address on its assigned waves.
-    if tdmSharedScaleSetActive(kernel):
+    # Partition dispatch computes each live start address on its assigned waves.
+    if tdmPartitionDispatchActive(kernel):
       def startAddr(tP):
         tc = tP["tensorChar"]
         return comp.calculateStartAddrWaveSeparated(self, kernel, tP, f"Address{tc}",
@@ -21711,10 +21719,12 @@ class KernelWriterAssembly(KernelWriter):
       if tcA != "A":
         return mod
       mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-      mod.add(SCSelectB32(sgpr("tdmABIncs"), sgpr("GlobalReadIncsMXSA"),
-                          sgpr("GlobalReadIncsA")))
-      mod.add(SCSelectB32(sgpr("tdmMXSAMXSBIncs"), sgpr("GlobalReadIncsB"),
-                          sgpr("GlobalReadIncsMXSB")))
+      for owner, setIncName in (("A", "tdmABIncs"), ("B", "tdmMXSAMXSBIncs")):
+        group = tdmSetGroup(kernel, owner)
+        tcEven, tcOdd = self._tdmParityMembers(kernel, group[0], group[1])
+        mod.add(SCSelectB32(sgpr(setIncName), sgpr(f"GlobalReadIncs{tcOdd}"),
+                            sgpr(f"GlobalReadIncs{tcEven}"),
+                            f"{owner}'s set inc = parity ? {tcOdd} : {tcEven}"))
       return mod
     #TODO: should not directly use GRIA and GRIB
     tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tpA, tpB)
@@ -21827,7 +21837,7 @@ class KernelWriterAssembly(KernelWriter):
     mxKSplittingB = numMxKGroups >= numCompB if isMXSB else False
     assert numWaves > 1
 
-    if tdmSharedScaleSetActive(kernel):
+    if tdmPartitionDispatchActive(kernel):
       # Rebuild each descriptor on the waves assigned by the partition.
       with self.allocTmpSgpr(2, tag="resetTDMDescriptorForTailSharedScale") as tmpRes:
         waveIdxTmp = tmpRes.idx

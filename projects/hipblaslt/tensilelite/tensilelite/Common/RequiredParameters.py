@@ -143,6 +143,7 @@ def getRequiredParametersMin() -> set:
         'TailloopInNll',
         'TransposeLDS',
         'TransposeLDSMetadata',
+        'TDMBFirstSplitSync',
         'TDMFuse',
         'TDMInst',
         "TDMSplit",

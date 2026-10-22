@@ -1504,6 +1504,7 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMBFirstSplitSync',
     'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
@@ -2500,7 +2501,7 @@
         1,
         2,
       ]),
-      'len': 3,
+      'len': 17,
       'type': 'list',
     }),
     'PrefetchGL2Inc64Bit': dict({
@@ -2764,6 +2765,14 @@
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMBFirstSplitSync': dict({
       'head': list([
         0,
         1,

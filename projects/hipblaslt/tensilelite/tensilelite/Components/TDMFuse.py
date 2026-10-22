@@ -8,6 +8,8 @@
   TDMFuse=3  {B,MXSA,MXSB} + {A}   the mirror of 2, same split and wave count
 
 TDM_FUSE_GROUPING maps stable, name-bearing integers to TDM_GROUPS rows.
+TDMBFirstSplitSync=1 selects the "BA_split" row instead of a TDMFuse row:
+{B,MXSB} + {A,MXSA}, even waves carry B then A, odd waves MXSB then MXSA.
 """
 
 
@@ -32,10 +34,21 @@ TDM_GROUPS = {
     "paired": TdmGrouping("paired", (("A", "MXSA"), ("MXSB", "B"))),
     "A_MX": TdmGrouping("A_MX", (("A", "MXSA", "MXSB"), ("B",)), layout="block"),
     "B_MX": TdmGrouping("B_MX", (("B", "MXSA", "MXSB"), ("A",)), layout="block"),
+    "BA_split": TdmGrouping("BA_split", (("B", "MXSB"), ("A", "MXSA"))),
 }
 
 # Baked into shipped solution names, so these integers cannot move.
 TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX", 3: "B_MX"}
+
+# Rows where each data tensor owns a descriptor set that also carries one scale.
+TDM_PAIRED_ROWS = ("paired", "BA_split")
+
+TDM_B_FIRST_SPLIT_SYNC_GROUPING = "BA_split"
+
+
+def tdmBFirstSplitSync(ks):
+    """True when TDMBFirstSplitSync asks for B-first loads and per-side LDS sync."""
+    return bool(ks.get("TDMBFirstSplitSync", 0))
 
 
 def tdmBothTensors(ks):
@@ -75,6 +88,7 @@ _GROUPING_ACCEPTED = {
     "paired": _acceptPairedSets,
     "A_MX": _acceptSharedScaleSet,
     "B_MX": _acceptSharedScaleSet,
+    "BA_split": _acceptPairedSets,
 }
 
 # The row a declined grouping falls back to, which is also TDMFuse=0's row.
@@ -83,6 +97,8 @@ TDM_GROUPING_DEFAULT = TDM_FUSE_GROUPING[0]
 
 def tdmGroupingName(ks):
     """Return the requested row name, failing closed on incomplete mappings."""
+    if tdmBFirstSplitSync(ks):
+        return TDM_B_FIRST_SPLIT_SYNC_GROUPING
     fuse = ks.get("TDMFuse", 0)
     name = TDM_FUSE_GROUPING.get(fuse)
     if name is None:
@@ -111,8 +127,8 @@ def tdmGrouping(ks):
 
 
 def tdmFusePaired(ks):
-    """TDMFuse=1: {A,MXSA} and {MXSB,B}, one scale per data tensor. NumWaves>1."""
-    return tdmGrouping(ks).name == "paired"
+    """One scale per data tensor's set: TDMFuse=1 or TDMBFirstSplitSync. NumWaves>1."""
+    return tdmGrouping(ks).name in TDM_PAIRED_ROWS
 
 
 def tdmWaveSeparated(ks):
@@ -211,6 +227,16 @@ def tdmSharedSetOrder(ks, tcA, tcB):
 def tdmSharedScaleSetActive(ks):
     """True when codegen emits a shared-scale-set dispatch."""
     return tdmWaveSeparated(ks) and tdmSharedScaleSet(ks) is not None
+
+
+def tdmPartitionDispatchActive(ks):
+    """True when descriptor setup must guard each tensor by its own wave share.
+
+    The default setup sends the A/B (or MXSA/MXSB) pair to opposite parities, which
+    the shared-scale rows and BA_split (A and B both on even waves) break.
+    """
+    return tdmSharedScaleSetActive(ks) or (
+        tdmWaveSeparated(ks) and tdmGrouping(ks).name == TDM_B_FIRST_SPLIT_SYNC_GROUPING)
 
 
 def tdmPapRejectReason(ks):

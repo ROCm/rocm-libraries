@@ -158,6 +158,12 @@ struct PassFeatureConfig {
         /// Loads on different tokens are not ordered against each other. Set
         /// false to leave a ready lower-priority ds_load free to issue first.
         bool lockDsReadOrder = true;
+        /// Mirrors ModuleOptions::LockBarrierOrder. Workgroup barriers in a
+        /// region keep their program order even across memory tokens, and an
+        /// earlier barrier's WMMA threshold is lowered to the smallest threshold
+        /// of any barrier after it. With lockDsReadOrder, ds_loads are then
+        /// chained across tokens as well.
+        bool lockBarrierOrder = false;
         /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
         /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
         bool enableESM2TrackValuVsrc = false;

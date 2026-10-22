@@ -3444,6 +3444,50 @@ class Solution(collections.abc.Mapping):
                "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
         return
 
+    # TDMBFirstSplitSync: {B,MXSB}+{A,MXSA}, B-first issue, per-side LDS tokens.
+    if state.get("TDMBFirstSplitSync", 0):
+      def rejectSplitSync(why):
+        reject(state, printRejectionReason, "TDMBFirstSplitSync requires %s" % why)
+      if not tdmBothTensors(state):
+        rejectSplitSync("the TDM on both tensors (TDMInst=3); got TDMInst=%d" % state["TDMInst"])
+        return
+      if state["NumWaves"] <= 1:
+        rejectSplitSync("NumWaves > 1 for parity grouping; got %d" % state["NumWaves"])
+        return
+      if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+        rejectSplitSync("MX scales on both tensors")
+        return
+      if tdmFuse:
+        rejectSplitSync("TDMFuse=0; it picks its own grouping (got TDMFuse=%d)" % tdmFuse)
+        return
+      if state.get("UseSubtileImpl"):
+        rejectSplitSync("UseSubtileImpl=0")
+        return
+      if state["enableTDMMetadata"] or state["ProblemType"]["Sparse"]:
+        rejectSplitSync("a dense problem (no sparse metadata)")
+        return
+      if state["ScheduleIterAlg"] != 4:
+        # The split sync comes from the token barrier planner and StinkyTofu wait insertion.
+        rejectSplitSync("ScheduleIterAlg=4; got %d" % state["ScheduleIterAlg"])
+        return
+      if decouplePGRBlocks(state)[0]:
+        rejectSplitSync("scalar PrefetchGlobalRead, not a PrefetchGlobalReadA/B pair")
+        return
+      if state["PrefetchGlobalRead"] != 2:
+        rejectSplitSync("PrefetchGlobalRead=2; got %d" % state["PrefetchGlobalRead"])
+        return
+      if state.get("ReuseAcrossPersistent", 0) or state.get("PrefetchAcrossPersistent", 0):
+        rejectSplitSync("ReuseAcrossPersistent=0 and PrefetchAcrossPersistent=0")
+        return
+      if state["TDMSplit"]:
+        rejectSplitSync("TDMSplit=0")
+        return
+      # Rotating TDMPlusLdsBuf tokens collide with the per-side A/B tokens.
+      state["TDMPlusLdsBuf"] = 0
+      if not tdmGroupingAccepted(state):
+        rejectSplitSync("an accepted %s grouping" % tdmGroupingName(state))
+        return
+
     # Check PAP after TDMFuse-specific errors.
     if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
       papGroupingReason = tdmPapRejectReason(state)

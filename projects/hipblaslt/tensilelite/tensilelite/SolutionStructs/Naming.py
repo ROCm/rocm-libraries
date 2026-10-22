@@ -249,6 +249,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.add("TDMFuse")
     else:
       requiredParametersTemp.discard("TDMFuse")
+    if state.get("TDMBFirstSplitSync", 0):
+      requiredParametersTemp.add("TDMBFirstSplitSync")
+    else:
+      requiredParametersTemp.discard("TDMBFirstSplitSync")
 
     # Same for the 32-bit GL2 prefetch increment and the vgpr-pair GL2 prefetch address.
     if not state.get("PrefetchGL2Inc64Bit", False):

@@ -1558,6 +1558,7 @@ ROW_SEPARATES_AB = {
     "paired": True,   # {A,MXSA} + {MXSB,B}
     "A_MX": True,     # {A,MXSA,MXSB} + {B}
     "B_MX": True,     # {B,MXSA,MXSB} + {A}
+    "BA_split": True, # {B,MXSB} + {A,MXSA}
 }
 
 def test_every_grouping_row_has_a_stated_expectation():

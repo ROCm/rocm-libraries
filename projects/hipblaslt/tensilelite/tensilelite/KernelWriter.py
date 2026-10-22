@@ -59,7 +59,7 @@ from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
-from .Components.TDMFuse import tdmWavePartition
+from .Components.TDMFuse import tdmWavePartition, tdmBFirstSplitSync
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -3407,7 +3407,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         tensorParameters2nd = tensorParametersB
         tdm1st, tdm2nd = kernel["enableTDMA"], kernel["enableTDMB"]
         tdmMetadata = kernel["enableTDMMetadata"]
-        if self._dcpDivergent(kernel):
+        if self._dcpDivergent(kernel) or tdmBFirstSplitSync(kernel):
           tensorParameters1st, tensorParameters2nd = \
             self._dcpThickThinIssueOrder(kernel, tensorParametersA, tensorParametersB)
           tdm1st, tdm2nd = kernel["enableTDM%s" % tensorParameters1st["tensorChar"]], \
@@ -7297,6 +7297,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
+      if tdmBFirstSplitSync(kernel):
+        # The A and B barriers ride different LDS tokens, so without the lock the
+        # scheduler may hoist A's barrier and reads above B's.
+        stinky_module_options["LockBarrierOrder"] = True
       # Tuning overrides from GlobalParameters win over the values above.
       stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 
@@ -7814,8 +7818,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.memTokenLdsSplit = \
         [[blk, half1Tokens[blk]] for blk in range(self.states.numLDSBlk)]
     # Separate A/B tokens let wait-count insertion relax the thick gate independently.
+    # TDMBFirstSplitSync reuses them so the barrier planner splits the A and B syncs.
     _dcpGate = decoupledThickGateRelaxation(kernel)
-    if _dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS:
+    if (_dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS) \
+       or tdmBFirstSplitSync(kernel):
       _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
       self.states.memTokenLdsDcp = {
         "A": [0, 1 if numLdsBlkA > 1 else 0],

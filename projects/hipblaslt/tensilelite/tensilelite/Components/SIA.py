@@ -533,6 +533,10 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["TDMPlusLdsBuf"]
     localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
+    if tdmDeferLoad and kernel.get("TDMBFirstSplitSync"):
+        # The LDS swap, increments and last-loop guard all precede the loads in
+        # iteration 0, so each refill can follow its own side's last local read.
+        tdmLoadIter = 0
 
     if kernel["PrefetchGlobalRead"] == 2:
         # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads

@@ -194,6 +194,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
+                passFeatureConfig.dagFeatures.lockBarrierOrder = moduleOptions.LockBarrierOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
                 passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
                 passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
