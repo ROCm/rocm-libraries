@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "revision": "1.0",
+  "id": "f1900000-0000-0000-0000-000000000002",
+  "name": "generated feature fixture metadata",
+  "fields": [
+    {"name": "tile_m", "type": "int"},
+    {"name": "dtype", "type": "string"}
+  ]
+}

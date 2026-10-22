@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.Utilities.merge
+# Characterization tests for tensilelite.Utilities.merge
 #
 # ADD-ONLY: pins the library-logic merge tooling. Logic files are list-indexed:
 #   data[4]  = header ProblemType (dict)
@@ -15,7 +15,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.Utilities.merge")
+M = importlib.import_module("tensilelite.Utilities.merge")
 
 
 def _sol(idx, name="s", mfma=True, **extra):
