@@ -331,17 +331,14 @@ void testing_preconditioner_all(Arguments argus)
     b.MoveToAccelerator();
     e.MoveToAccelerator();
 
-    if(precond != "IC")
-    {
-        e.Ones();
-        matrix.Apply(e, &b);
-        p->Solve(b, &x_acc);
+    e.Ones();
+    matrix.Apply(e, &b);
+    p->Solve(b, &x_acc);
 
-        // Compute error L2 norm
-        e.ScaleAdd(-1.0, x_acc);
-        T error_acc = e.Norm();
-        std::cout << "error_acc =" << error_acc << std::endl;
-    }
+    // Compute error L2 norm
+    e.ScaleAdd(-1.0, x_acc);
+    T error_acc = e.Norm();
+    std::cout << "error_acc =" << error_acc << std::endl;
 
     ls.MoveToHost();
     p->MoveToHost();
@@ -359,11 +356,16 @@ void testing_preconditioner_all(Arguments argus)
     T error_host = e.Norm();
     std::cout << "error_host = " << error_host << std::endl;
 
-    if(precond != "IC")
+    x_host.ScaleAdd(-1.0, x_acc);
+    T diff = x_host.Norm();
+    std::cout << "diff = " << diff << std::endl;
+
+    // VariablePreconditioner switches to its next preconditioner on every solve
+    if(precond != "VariablePreconditioner")
     {
-        x_host.ScaleAdd(-1.0, x_acc);
-        T diff = x_host.Norm();
-        std::cout << "diff = " << diff << std::endl;
+        T tol = std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+        EXPECT_LE(diff, tol * x_acc.Norm())
+            << precond << ": the host and accelerator solutions differ";
     }
 
     ls.Clear();
@@ -473,6 +475,10 @@ void testing_preconditioner_repeated_move(const std::string& name, TriSolverAlg 
     else if(name == "ILUT")
     {
         s = new ILUT<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "IC")
+    {
+        s = new IC<LocalMatrix<T>, LocalVector<T>, T>;
     }
     else if(name == "ItILU0")
     {
