@@ -109,6 +109,8 @@ plus structural counts (load, store, fmul, fadd, fmuladd, br, phi).
 How it works: just `lower_kernel_to_llvm(kdef, arch=arch)` (default `gfx950`)
 plus a small regex table. Faster than `probe_isa_inspect` because it doesn't
 shell out to `llvm-objdump` and doesn't pay the COMGR HSACO step.
+An `ArchDomainWarning` is a per-entry `LOWER-FAIL`: the unsupported kernel
+gets no histogram for that target, and later entries are still inspected.
 
 Useful for: pre-COMGR sanity checks — did the spec switch flip the
 right intrinsic call? — and for catching DSL-level miscompiles where
@@ -121,7 +123,7 @@ symptom: stores went from N to 0, see the optimization runbook §10).
 backends; optional VGPR / LDS deltas from `llvm-readelf` on both.
 
 How it works: production path is `compile_kernel(kdef, arch=arch)`; debug path is
-`lower_kernel_to_hip(kdef)` written to disk and compiled with
+`lower_kernel_to_hip(kdef, arch=arch)` written to disk and compiled with
 `hipcc --offload-arch=<arch> --genco`. The two backends should agree
 on a healthy kernel; large size or resource deltas usually mean one
 backend is missing an op lowering (the HIP-debug backend's op coverage
@@ -230,6 +232,13 @@ PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
   --probe occupancy|config_sweep|intrinsic_counts|isa_inspect|lowering_compare \
   [--arch <arch>]
 ```
+
+`--arch` is forwarded by all five demos and accepts rocKE's known targets.
+Only `occupancy` requires a target in its resource-cap table (`gfx950`,
+`gfx942`, `gfx90a`); other targets produce a clear CLI error for that probe.
+The demo kernels use gfx950 attention intrinsics, so selecting an RDNA/gfx12
+target can report per-entry failures rather than a normal result for the wrong
+chip. The generic probe entry points also accept kernels built for that target.
 
 Each script also exposes a Python entry point so you can wire it into
 a one-off exploration script — see the per-script docstring.

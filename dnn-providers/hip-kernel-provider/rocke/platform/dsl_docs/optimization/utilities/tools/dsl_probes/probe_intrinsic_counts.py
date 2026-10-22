@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import warnings
 from pathlib import Path
 from typing import Iterable
 
@@ -58,7 +59,7 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
-from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
+from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm  # noqa: E402
 
 
 # Patterns most often surface the difference between matrix-core-tiled
@@ -145,7 +146,11 @@ def probe_intrinsic_counts(
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            ir = lower_kernel_to_llvm(kdef, arch=arch)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # gets no histogram for that target; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                ir = lower_kernel_to_llvm(kdef, arch=arch)
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === LOWER-FAIL: {type(e).__name__}: {e}")
             continue
