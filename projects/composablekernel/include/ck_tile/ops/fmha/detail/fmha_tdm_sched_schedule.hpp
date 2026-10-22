@@ -104,8 +104,7 @@ struct FmhaTdmSchedEvenlyInterleavedReadSchedule
         static_assert(Wmma >= 0 && Wmma < kQkWmmasPerStage);
         constexpr auto row                 = MakeQkRows<Stage>().rows[Wmma];
         constexpr auto kind                = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
-        constexpr bool pair_d64_n128_reads = std::is_same_v<typename Geometry::QDataType, bf16_t> &&
-                                             Geometry::kM == 128 && Geometry::kN == 128 &&
+        constexpr bool pair_d64_n128_reads = Geometry::kM == 128 && Geometry::kN == 128 &&
                                              Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
         if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
         {
@@ -129,8 +128,7 @@ struct FmhaTdmSchedEvenlyInterleavedReadSchedule
         static_assert(Wmma >= 0 && Wmma < kPvWmmasPerStage);
         constexpr auto row                 = MakePvRows<Stage>().rows[Wmma];
         constexpr auto kind                = Stage == kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
-        constexpr bool pair_d64_n128_reads = std::is_same_v<typename Geometry::QDataType, bf16_t> &&
-                                             Geometry::kM == 128 && Geometry::kN == 128 &&
+        constexpr bool pair_d64_n128_reads = Geometry::kM == 128 && Geometry::kN == 128 &&
                                              Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
         if constexpr(pair_d64_n128_reads && SecondHalf && Wmma % 2 == 0)
         {
