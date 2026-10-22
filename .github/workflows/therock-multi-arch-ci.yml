@@ -14,7 +14,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit d28f23baeedcd7bb6a58020cb190ea4c32c09011.
+# TheRock ref: pinned to ROCm/TheRock commit b0958085a97cb03a2c38931b8e2ec86ac78d1563.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+          ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -149,7 +149,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -187,7 +187,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -217,7 +217,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -231,7 +231,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
       contents: read
       id-token: write
@@ -244,7 +244,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -256,7 +256,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
     permissions:
       contents: read
       id-token: write
@@ -303,7 +303,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: d28f23baeedcd7bb6a58020cb190ea4c32c09011 # 2026-10-19
+          ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
