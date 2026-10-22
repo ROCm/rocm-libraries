@@ -26,6 +26,7 @@ import pytest
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.layouts import make_tile_desc
 from rocke.helpers.tiling.mma.styles import AtomNumbers, InterleavedStyle
+from rocke.helpers.tiling.mma.warp_encoding import encoder_supports_layout
 from rocke.helpers.tiling.transforms import (
     as_forward_map,
     classify_transform,
@@ -62,7 +63,7 @@ def _operand_gate(t) -> bool:
     halves -- identical data, no cross-lane). Fails when EITHER operand OVER-subscribes the wave -- the
     non-square f4 row does so on A (32*2 = 64 > 32) while B is fine (16*2 = 32), so the row is out.
     """
-    k_lanes = t.k // t.k_ab_per_lane
+    k_lanes = t.k // t.layout_params.k_ab_per_lane
     return all(
         free_lanes * k_lanes <= t.wave_size
         and t.wave_size % (free_lanes * k_lanes) == 0
@@ -72,7 +73,7 @@ def _operand_gate(t) -> bool:
 
 def _accum_gate(t) -> bool:
     """§9 accumulator precondition: ``c_lane_rows * atom.n == wave``."""
-    return (t.m // t.c_m_per_lane) * t.n == t.wave_size
+    return (t.m // t.layout_params.c_m_per_lane) * t.n == t.wave_size
 
 
 def _operand_reorder_ok(t, a, free_atoms: int, k_sub: int) -> tuple[bool, str]:
@@ -105,8 +106,13 @@ def _operand_reorder_ok(t, a, free_atoms: int, k_sub: int) -> tuple[bool, str]:
     return tier == "reorder", tier
 
 
+# Every dense row the encoder can lay out (multi-block rows are a documented encoder boundary).
 _DENSE = sorted(
-    (t for t in load_mma_traits().by_op_id.values() if t.family == "dense"),
+    (
+        t
+        for t in load_mma_traits().by_op_id.values()
+        if t.family == "dense" and encoder_supports_layout(t)[0]
+    ),
     key=lambda t: t.op_id,
 )
 _IDS = [t.op_id for t in _DENSE]
@@ -170,8 +176,8 @@ def test_proof_population():
         else:
             cannot += 1
     assert (len(_DENSE), driven, cannot) == (
-        73,
-        72,
+        97,
+        96,
         1,
     ), f"population shifted: total={len(_DENSE)} driven={driven} cannot={cannot}"
     # Every cannot-interleave row is one we documented (and vice-versa).
