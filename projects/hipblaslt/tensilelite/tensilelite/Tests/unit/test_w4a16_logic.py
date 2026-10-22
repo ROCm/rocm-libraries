@@ -7,15 +7,10 @@ import pytest
 import yaml
 from Tensile.Common.Utilities import state
 from test_w4a16_block_dequant import toolchain, GFX1151_LOGIC, needs_logic
+from test_w4a16_decode import SCHEDULES
 
 pytestmark = pytest.mark.unit
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
-# Handwritten decode kernels selected for N=1, keyed by K.
-DECODE_KERNELS = {
-    5120: "RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151",
-    17408: "RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151",
-    6144: "RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151",
-}
 
 
 @needs_logic
@@ -45,7 +40,10 @@ def test_q27b_equality_dispatch_keys():
     for row in serialized["table"]:
         solution = logic["Solutions"][row["index"]]
         if row["key"][1] == 1:
-            assert solution["CustomKernelName"] == DECODE_KERNELS[row["key"][3]]
+            suffix = {17408: "_W4_U1_A4", 6144: "_W4_NativePerm"}.get(
+                row["key"][3], "_W4")
+            assert solution["W4A16Decode"] == SCHEDULES[suffix]
+            assert solution["CustomKernelName"] == ""
         else:
             assert solution["EnableMatrixInstruction"]
             assert solution["CustomKernelName"] == ""
@@ -156,6 +154,7 @@ def test_symmetric_prefill_rounded_query_selects_narrow_tile(m, k, tile_m, n, ti
     assert len(rows) == 1
     selected = solutions[rows[0]["index"]]
     assert (selected["MacroTile0"], selected["MacroTile1"]) == (tile_m, tile_n)
+    assert not selected.get("W4A16Decode")
     assert selected.get("CustomKernelName", "") == ""
 
 
@@ -218,9 +217,10 @@ def test_multi_group_custom_logic_requires_runtime_argument(monkeypatch, toolcha
             parse()
 
 
-def test_no_shipped_w4a16_prefill_assembly():
-    assert not list(DIRECTORY.glob("RuntimeGroup_Cijk_*.s"))
-    assert not list(DIRECTORY.glob("RuntimeGroup_Prefill_*.s"))
+def test_no_shipped_w4a16_custom_assembly_or_hip_source():
+    assert not list(DIRECTORY.glob("RuntimeGroup*.s"))
+    assert not (DIRECTORY / "Source/w4a16_decode.hip").exists()
+    assert not (DIRECTORY / "Source/generate_w4a16_decode.py").exists()
 
 
 @needs_logic
