@@ -93,7 +93,13 @@ TEST(CPU_ConvCkGroupedFwdTF32Reuse_NONE, ProblemKeyCarriesComputeType)
 // ---------------------------------------------------------------------------
 struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction::Forward>
 {
-    GPU_GroupConv2DFwd_TF32Reuse_FP32() { compute_type = "TF32"; }
+    // compute_type must be set before the base SetUp() consumes it; do it here rather than in a
+    // constructor so the fixture needs no user-declared constructor.
+    void SetUp() override
+    {
+        compute_type = "TF32";
+        GroupConvTestFix<2u, float, Direction::Forward>::SetUp();
+    }
 
     // This test runs the solver itself and does its own verification.
     void TearDown() override {}
