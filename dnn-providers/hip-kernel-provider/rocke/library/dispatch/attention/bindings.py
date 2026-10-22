@@ -661,7 +661,8 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
     The kernels form element offsets in I32 (``token * stride + head *
     stride``) and scale them to I32 byte offsets for buffer loads against a
     descriptor of at most 2 GiB, so the bound is on bytes, not elements.
-    Matches the native pack's ``addressFitsI32``.
+    Matches the native pack's ``addressFitsI32``. Paged prefill K / V use
+    :func:`_check_page_extent_i32` instead.
     """
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -676,6 +677,30 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
             f"{name} spans {extent} bytes, which does not fit the I32 "
             "offset arithmetic of the RDNA attention kernels; split the tensor "
             "(e.g. per batch or per page range) before launching"
+        )
+
+
+def _check_page_extent_i32(tensor, name: str, element_bytes: int) -> None:
+    """Reject a paged K / V cache ``[num_blocks, page, H, D]`` whose page of
+    one head exceeds I32 bytes.
+
+    The prefill kernel steps to a head and to a page in 64 bits and addresses
+    the rows of that page from its base in I32 bytes, so the cache itself may
+    pass 2 GiB. Matches the native pack's ``pageFitsI32`` (the page count is
+    an I32 argument, checked as ``num_blocks``).
+    """
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if any(int(extent) <= 0 for extent in shape):
+        return
+    highest = sum((int(shape[i]) - 1) * int(stride(i)) for i in (1, 3))
+    extent = (highest + 1) * int(element_bytes)
+    if extent > 0x7FFF_FFFF:
+        raise ValueError(
+            f"{name} spans {extent} bytes in one page of one head, which does "
+            "not fit the I32 offset arithmetic of the RDNA attention kernels"
         )
 
 
@@ -869,13 +894,20 @@ def _rdna_validate_and_collect(
             raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
     _check_rdna_device(tensors)
     kv_bytes = 1 if view.kv_fp8 else 2
-    for name, tensor, element_bytes in (
-        ("q", q, 2),
-        ("k", k, kv_bytes),
-        ("v", v, kv_bytes),
-        ("out", out, 2),
+    # The prefill kernel addresses paged K / V heads and pages in 64 bits; the
+    # decode kernel forms its head and per-row page offsets in I32, so its
+    # caches keep the whole-tensor cap.
+    paged_kv = layout == "paged" and not view.decode
+    for name, tensor, element_bytes, paged in (
+        ("q", q, 2, False),
+        ("k", k, kv_bytes, paged_kv),
+        ("v", v, kv_bytes, paged_kv),
+        ("out", out, 2, False),
     ):
-        _check_byte_extent_i32(tensor, name, element_bytes)
+        if paged:
+            _check_page_extent_i32(tensor, name, element_bytes)
+        else:
+            _check_byte_extent_i32(tensor, name, element_bytes)
         # 16-bit rows load as 16-byte vectors, FP8 K/V rows as 8-byte ones.
         _check_rows_aligned(
             tensor, name, element_bytes, 8 if element_bytes == 1 else 16
@@ -1133,6 +1165,11 @@ def _rdna_validate_and_collect(
                     f"k cache page length must be {view.page_block_size}, "
                     f"got {_shape(k, 'k')}"
                 )
+            # The prefill's dead key rows of a page smaller than a tile still
+            # load from page 0 (and discard the value), so its caches must hold
+            # at least one page.
+            if not view.decode and _shape(k, "k")[0] <= 0:
+                raise ValueError("paged k / v caches must hold at least one page")
             values.update(
                 {
                     "seqused_k": seqused_k,
@@ -1300,10 +1337,16 @@ def bind_rdna_prefill_torch(
     strides, packed ragged/paged layouts, FP16/BF16, and OCP fp8e4m3 KV
     storage. Tensor keys are ``q``/``k``/``v``/``out`` plus caller-owned
     ``lse`` when ``request.emit_lse`` is true, layout metadata
-    (``cu_seqlens_q``/``cu_seqlens_k``/``seqused_k``/``block_table``) and the
-    enabled score inputs (``sinks``, ``alibi_slopes``, ``qq_bias``,
-    ``attn_bias``). LSE accepts live-head ``[B,H,S]`` / ``[H,total_q]``
-    layouts and layout-shaped forms.
+    (``cu_seqlens_q``/``cu_seqlens_k``/``seqused_k``/``block_table``, and
+    ``seqused_q`` for a ``seqused_q`` spec) and the enabled score inputs
+    (``sinks``, ``alibi_slopes``, ``qq_bias``, ``attn_bias``). LSE accepts
+    live-head ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms.
+
+    A paged ``dense_q`` spec takes a batch-strided ``[B, Sq, Hq, D]`` Q / O
+    (LSE ``[B,H,Sq]`` or ``[B,Sq,H(,1)]``) and no ``cu_seqlens_q``. With
+    ``seqused_q``, INT32 ``seqused_q[b]`` live rows of sequence ``b`` are
+    computed and its rows past them are written as O = 0, LSE = -inf. Paged
+    K / V caches may pass 2 GiB; one page of one head must fit I32 bytes.
 
     Head widths are the request's ``hdim_q``/``hdim_v``: multiples of 8 inside
     the object's buckets. Rows load as 16-byte vectors (8-byte for FP8 K/V),
