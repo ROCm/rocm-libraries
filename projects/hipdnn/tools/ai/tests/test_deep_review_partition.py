@@ -471,3 +471,19 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     (rd / "drift.txt").write_text("Target tip: abc\nTrigger: yes\n")
     run(part, "packets", rd, "--lanes", "DRIFT")
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
+
+
+def test_impact_scope_is_the_ingestor_path_only(part):
+    inside = (
+        "dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/attention_dense.py",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp",
+        "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+        "projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_dense.engine.yaml",
+    )
+    outside = (
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/gen.py",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)

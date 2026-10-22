@@ -50,6 +50,15 @@ AREA_ROWS = [
     ("tooling", ("projects/hipdnn/tools/", "tools/")),
 ]
 
+# Changes under these trigger the IMPACT lane (lanes/runtime-impact.md): the kernel ingestor's
+# producers, packer, native packs, SDK ingestor headers and generator configs.
+IMPACT_PREFIXES = (
+    "dnn-providers/hip-kernel-provider/",
+    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/",
+    "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+    "projects/hipdnn/tools/IngestorGenerator/",
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
@@ -65,6 +74,7 @@ CONCERN_LANES = {
     "DOCS",
     "RUN",
     "DRIFT",
+    "IMPACT",
 }
 
 
@@ -335,6 +345,8 @@ def concern_scope(lane: str, rows):
             or re.fullmatch(r"requirements.*\.txt", name(r[0]))
             or re.search(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|hip|cu|cuh)$", name(r[0]))
         ]
+    if lane == "IMPACT":
+        return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
     return rows
 
 
@@ -392,9 +404,9 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD and DEPS scope to their trigger files, other concern lanes take every
-    changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The diff
-    is not read."""
+    scope). BUILD, DEPS and IMPACT scope to their trigger files, other concern lanes take
+    every changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The
+    diff is not read."""
     rd = Path(args.round_dir)
     rows = {r[0]: r for r in read_numstat(rd)}
     areas = read_areas(rd)
