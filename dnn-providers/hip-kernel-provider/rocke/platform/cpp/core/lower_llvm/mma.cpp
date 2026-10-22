@@ -593,7 +593,7 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Emit the gfx1250 scaled-WMMA intrinsic using the resolved operand contract.
+/* Emit the scaled-WMMA intrinsic using the resolved operand contract.
  * The contract supplies packed carrier types, matrix and scale format selectors,
  * and the declaration identity. This instruction family requires LLVM 23. */
 static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
@@ -617,13 +617,17 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     char concrete_name[160];
     snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
     op_name = concrete_name;
-    if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
+    /* Admitted on any target whose MMA catalog lists the atom (Python
+     * ISABackend.emit_scaled_wmma), never by the target's name. */
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, spec->op_id))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
-                      "%s is only available on gfx1250 (got %s)",
+                      "%s is not available on %s: its MMA catalog does not list it",
                       op_name,
-                      L->backend ? L->backend->gfx : "(unknown)");
+                      gfx ? gfx : "(unknown)");
     }
     if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
     {

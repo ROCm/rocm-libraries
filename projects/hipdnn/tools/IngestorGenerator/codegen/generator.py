@@ -106,12 +106,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD carrying `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -128,7 +131,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
@@ -346,10 +350,12 @@ def _candidate_identity(kernel: KernelSpec) -> str:
     """What a candidate is beyond its tuple: two entries sharing a completed
     tuple are the same candidate only if they name the same binary at the same
     priority. A knob absent from ``kernel_source.spec`` and one pinned to the
-    value the policy chose are different binaries under one tuple."""
+    value the policy chose are different binaries under one tuple. A kernel's
+    launches are part of what it names: two kernels differing only in a launch
+    are different candidates."""
     return json.dumps(
         {
-            "kernel_source": kernel.kernel_source.as_document(),
+            **kernel.kernel_source.descriptor_fields(),
             "priority": kernel.priority,
         },
         sort_keys=True,
@@ -519,12 +525,14 @@ def build_kdp(
             }
         )
         entry = {
-            "version": "1.0",
+            # 1.1 only on a UKD carrying `sources`; every other stays 1.0.
+            "version": kernel.kernel_source.ukd_version,
             "id": ids[("kernel", pack_index, index)],
             "name": kernel.name,
             # Per-kind keys, never the union: the runtime loader hard-fails an
-            # unknown key and hkp_pack validates a closed set per kind.
-            "kernel_source": kernel.kernel_source.as_document(),
+            # unknown key and hkp_pack validates a closed set per kind. A
+            # multi-launch kernel writes `sources` in place of `kernel_source`.
+            **kernel.kernel_source.descriptor_fields(),
             "metadata": metadata,
             "priority": kernel.priority,
         }

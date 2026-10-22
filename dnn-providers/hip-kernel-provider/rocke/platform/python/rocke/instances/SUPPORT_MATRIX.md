@@ -99,6 +99,8 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `default` epilogue, `split_k=1` |
 | `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
+| `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
+| `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA, wave64. Built from `library/kernels`; not yet wired into dispatch |
 
 ---
@@ -122,6 +124,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
+| `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---
 
