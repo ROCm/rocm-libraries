@@ -279,6 +279,39 @@ namespace
         return d;
     }
 
+    // Owns the bsrgemm descriptors and work buffer, and puts the handle back in host
+    // pointer mode, on every return path.
+    struct ScalResources
+    {
+        rocsparse_handle                     handle;
+        rocsparse_mat_descr                  descr = nullptr;
+        rocsparse_mat_info                   info  = nullptr;
+        std::unique_ptr<device_vector<char>> buffer;
+
+        explicit ScalResources(rocsparse_handle h)
+            : handle(h)
+        {
+        }
+        ScalResources(const ScalResources&) = delete;
+        ScalResources& operator=(const ScalResources&) = delete;
+        ~ScalResources()
+        {
+            rocsparse_clients_log_rocsparse_error(
+                "rocsparse_set_pointer_mode",
+                rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            if(info != nullptr)
+            {
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
+                                                      rocsparse_destroy_mat_info(info));
+            }
+            if(descr != nullptr)
+            {
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                      rocsparse_destroy_mat_descr(descr));
+            }
+        }
+    };
+
     // Runs C = beta * D with grid.x clamped to limit blocks (0: device limit).
     template <typename T>
     bool device_scal(rocsparse_handle       handle,
@@ -304,11 +337,12 @@ namespace
         device_vector<rocsparse_int> d_ptr_C(static_cast<size_t>(mb + 1));
         device_vector<T>             d_beta(std::vector<T>{h_beta});
 
-        rocsparse_mat_descr descr = nullptr;
-        rocsparse_mat_info  info  = nullptr;
-        EXPECT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+        ScalResources res(handle);
+        EXPECT_EQ(rocsparse_create_mat_descr(&res.descr), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_create_mat_info(&res.info), rocsparse_status_success);
         EXPECT_EQ(rocsparse_set_pointer_mode(handle, mode), rocsparse_status_success);
+        const rocsparse_mat_descr descr = res.descr;
+        const rocsparse_mat_info  info  = res.info;
         const T* beta = (mode == rocsparse_pointer_mode_host) ? &h_beta : d_beta.ptr;
 
         void*            buffer      = nullptr;
@@ -316,11 +350,10 @@ namespace
         rocsparse_int    nnzb_C      = 0;
         rocsparse_status status      = bsrgemm_buffer_size(
             handle, dir, block_dim, beta, descr, d_ptr_D, d_ind_D, info, &buffer_size);
-        if(status == rocsparse_status_success
-           && hipMalloc(&buffer, std::max<size_t>(buffer_size, 1)) != hipSuccess)
+        if(status == rocsparse_status_success)
         {
-            buffer = nullptr;
-            status = rocsparse_status_memory_error;
+            res.buffer.reset(new device_vector<char>(std::max<size_t>(buffer_size, 1)));
+            buffer = res.buffer->ptr;
         }
         if(status == rocsparse_status_success
            && hipMemset(d_ptr_C.ptr, 0xFF, d_ptr_C.n * sizeof(rocsparse_int)) != hipSuccess)
@@ -394,14 +427,6 @@ namespace
         {
             status = rocsparse_status_internal_error;
         }
-        if(buffer != nullptr)
-        {
-            rocsparse_clients_log_hip_error("hipFree", hipFree(buffer));
-        }
-        EXPECT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
-                  rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
         if(status != rocsparse_status_success)
         {
             ADD_FAILURE() << "rocsparse_bsrgemm failed with status " << status << " at limit "
