@@ -9,13 +9,18 @@ to a graph by capability, not by exact shape. It ships next to the exact-shape e
 ## What an instance is
 
 An instance is one rocKE `KernelIdentity`
-(`rocke/library/benchmarks/common/kernel_cache.py`): the compile-time tuple of a
+(`rocke/library/kernels/conv/kernel_identity.py`): the compile-time tuple of a
 rocKE sweep. It holds configuration and capability fields and no problem extents.
 Two families are packaged, both gfx950, forward, fp16 or bf16:
 
-- implicit GEMM, from the AOT sweep (`benchmarks/common/kernel_sweep.py`);
-- direct, from the direct sweep (`benchmarks/common/direct_kernel_sweep.py`), every
-  forward algorithm of it: see [Direct instances](#direct-instances).
+- implicit GEMM, from the AOT sweep (`kernels/conv/aot_jobs.py`);
+- direct, from the direct sweep (`kernels/conv/direct_aot_jobs.py`), every forward
+  algorithm of it the packaged launch runs: see [Direct instances](#direct-instances).
+
+The adapter builds each instance from the job rocKE's AOT build builds its identity
+from (`job_for_identity`, `direct_job_for_identity`), serves the problems rocKE's
+grouped-convolution dispatcher admits for the identity (`dispatch/grouped_convolution.py`),
+and launches it with the dispatcher's launch plan (`launch_plan_for`).
 
 An implicit-GEMM instance has:
 
@@ -30,7 +35,10 @@ An implicit-GEMM instance has:
 
 Every other `KernelIdentity` field must hold its default, because it selects code this
 launch does not model. Examples are split-K, `chiplet_swizzle`, 3-D and the LDS layout
-knobs. The tool names any such field and refuses the instance.
+knobs. `gfx950_conv_fwd_aot_spec_for_identity` in the adapter names any such field and
+refuses the identity. The forward sweep builds one such family: group-merged depthwise
+kernels (`group_merge` > 1), which launch groups/`group_merge` workgroups along z over a
+merged GEMM-N and record builder-derived widths as 0, so they are refused.
 
 Each instance is built the way its sweep builds it: `Gfx950ConvFwdAotSpec` in
 `rocke/library/builders/common/convolution_forward.py` uses the sweep's probe problem.
@@ -44,16 +52,21 @@ engine; all share `kernel_family` 1 and the same forward ABI:
 
 | Algorithm | `direct_variant` | Kernel spec | Identities per dtype |
 |---|---|---|---:|
-| `direct_depthwise` | `std` | `DirectDepthwiseSpec` | 54 |
-| `direct_depthwise_spatial` | `spatial` | `DirectDepthwiseSpatialSpec` | 30 |
+| `direct_depthwise` | `std` | `DirectDepthwiseSpec` | 57 |
+| `direct_depthwise_spatial` | `spatial` | `DirectDepthwiseSpatialSpec` | 36 |
 | `direct_depthwise_tiled` | `tiled` | `DirectDepthwiseTiledSpec` | 1,536 |
-| `direct_depthwise_col` | `col` | `DirectDepthwiseColSpec` | 540 |
+| `direct_depthwise_col` | `col` | `DirectDepthwiseColSpec` | 594 |
 | `direct_grouped` | `grouped` | `DirectConvSpec` | 80 |
 | `direct_nongrouped` | `nongrouped` | `DirectNongroupedConvSpec` | 3,058 |
 
-That is 5,298 identities per dtype. `make_conv_aot_config.py` accepts every one of them
+That is 5,361 identities per dtype. `make_conv_aot_config.py` accepts every one of them
 (`PACKAGED_DIRECT_ALGORITHMS`, checked by the direct sweep's own round trip
-`direct_job_for_identity`). The exact-shape engine's direct launch runs only `std` and
+`direct_job_for_identity`). The direct sweep's other forward kernels need a launch the
+pack does not have, and the adapter refuses them: `direct_grouped_halo` (grouped
+convolution through the non-grouped LDS-halo kernel, over groups/`group_merge` merged
+groups), the split-C `direct_nongrouped` kernels (knob `split_c`: fp32 partial sums in
+a workspace bound to D, then a second kernel, `direct_split_reduce`, that folds them)
+and that fold itself. The exact-shape engine's direct launch runs only `std` and
 `spatial`; the shipped catalog holds all six (see
 [The shipped catalog](#the-shipped-catalog)).
 
@@ -87,15 +100,14 @@ and `spatial` share `gfx950_conv_fwd_aot_dw_<dtype>_<instance_id>` and state onl
 fields they always had, so their descriptors did not change; `tiled`, `col`, `grouped`
 and `nongrouped` are `gfx950_conv_fwd_aot_{dwtiled,dwcol,grouped,nongrouped}_<dtype>_<instance_id>`
 and also state their own knobs (`DIRECT_VARIANT_FIELDS`). Kernel symbols are prefixed
-`hkp_conv_fwd_dw_aot_gfx950_`. The probe problem mirrors `direct_kernel_sweep.probe_problem`
+`hkp_conv_fwd_dw_aot_gfx950_`. The probe problem is `direct_aot_jobs.probe_problem`
 (64x64, one image; 256 groups for the depthwise variants, 8 for spatial, 64 for grouped,
-one group of 256 channels for non-grouped).
+one group of 1024 channels for non-grouped).
 
 `library/tests/test_convolution_forward_aot_packaging.py` checks the probe, the knobs'
 round trip and packageability of every forward direct identity of both dtypes, and the
 IR, byte for byte up to the symbol, for all std and spatial identities and an evenly
-spread sample of the others. The IR identity of all 10,596 identities was also checked
-once, out of tree.
+spread sample of the others.
 
 ### Which graphs a direct instance serves
 
@@ -105,9 +117,10 @@ strides and paddings, no dilation, an odd filter with "same" padding, the input 
 covering every output row and column, the compiled filter, stride and padding, spatial
 only below 64 groups, and every grid axis at most 65535.
 
-The other variants serve what rocKE's own direct benchmark offers them
-(`_aot_direct_serves`; `KernelCache.supports_problem`, then `direct_plans` and
-`plan_for`, which rebuild the kernel spec on the real problem and run its validator):
+The other variants serve what rocKE's grouped-convolution dispatcher admits for them,
+which is what its direct benchmark offers them (`_aot_direct_serves`;
+`identity_supports_problem`, then `direct_spec_for_problem`, which rebuilds the kernel
+spec on the real problem and runs its validator):
 the graph has one stride and one padding, the compiled filter, stride, padding and
 dilation are the graph's, and then:
 
@@ -122,8 +135,7 @@ On top of rocKE's rules the packaged launch bounds every axis of a 3-D direct gr
 65535, as for std and spatial, and the non-grouped kernel's flat grid by a 32-bit
 dispatch. The adapter's test compares the served verdict with rocKE's offer over
 problems around each sampled instance (tails, images smaller than a block or the filter,
-other paddings, strides, dilations and channel counts); out of tree, every one of the
-10,596 identities was compared the same way with no disagreement. The only differences
+other paddings, strides, dilations and channel counts). The only differences
 are where the packaged guard is knowingly stricter: spatial at exactly 64 groups (as
 before), and graphs whose two axes differ in stride or padding, which rocKE's direct
 problem cannot state.
@@ -245,39 +257,56 @@ together:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 366 | 366 |
-| Direct `nongrouped` | 103 | 103 |
-| Direct depthwise `tiled` | 81 | 81 |
-| Direct `grouped` | 10 | 10 |
-| Direct depthwise `std` | 4 | 4 |
-| Direct depthwise `spatial` | 3 | 3 |
-| Direct depthwise `col` | 1 | 1 |
-| **Total** | **568** | **568** |
+| Implicit GEMM | 239 | 239 |
+| Direct depthwise `tiled` | 78 | 78 |
+| Direct `nongrouped` | 70 | 70 |
+| Direct depthwise `col` | 22 | 22 |
+| Direct depthwise `std` | 16 | 16 |
+| Direct depthwise `spatial` | 13 | 13 |
+| Direct `grouped` | 5 | 5 |
+| **Total** | **443** | **443** |
 
-1,136 instances in all. Every entry must be an identity of rocKE's gfx950 forward
-sweeps (`kernel_sweep.py` for implicit GEMM, `direct_kernel_sweep.py` for direct) and
+886 instances in all. Every entry must be an identity of rocKE's gfx950 forward
+sweeps (`aot_jobs.py` for implicit GEMM, `direct_aot_jobs.py` for direct) and
 must convert, that is, the packaged launch runs it. The tool fails on any entry that
 is not, rather than dropping it.
+
+The list was chosen from measurements of rocKE's whole packageable forward sweep on
+2-D fp16 and bf16 forward convolutions of public model workloads, plain pointwise
+(1x1, stride 1, no padding) excluded:
+
+1. every packageable sweep kernel was timed on a stratified sample of the shapes, and
+   the kernels close to each sampled shape's best formed a candidate pool;
+2. the pool was timed on a larger stratified sample, each shape weighted by the shapes
+   it stands for;
+3. a weighted greedy selection added, one configuration at a time (in both dtypes),
+   the kernel that most lowered the weighted geometric-mean slowdown against the best
+   pool kernel per shape; the union of that selection with the selections made while
+   holding each model's shapes out was kept, so the list does not depend on one model;
+4. coverage was added on top: one kernel for every implicit-GEMM load/store width
+   combination the sweep builds, and one direct kernel for every packageable direct
+   geometry (filter, padding, stride, dilation, channels per group), measured or not,
+   so a graph outside the measured set with a baked direct geometry still finds one.
 
 The implicit-GEMM instances bake these load/store widths (A and B load widths are
 always equal):
 
 | Epilogue | Load/store widths, fp16 instances |
 |---|---|
-| `cshuffle` | 8/8/8 (200), 1/1/8 (88), 1/1/1 (15), 2/2/2 (14), 4/4/8 (12), 2/2/8 (4), 4/4/4 (4), 8/8/4 (4), 8/8/1 (2) |
-| `default` | 1/1/1 (21), 8/8/1 (2) |
+| `cshuffle` | 8/8/8 (157), 1/1/8 (33), 4/4/8 (13), 8/8/4 (6), 1/1/1 (4), 4/4/4 (1), 2/2/8 (1), 2/2/2 (1) |
+| `default` | 8/8/1 (13), 1/1/1 (10) |
 
 So a problem whose widest combination is 1/1/2, 1/1/4, 2/2/1, 2/2/4, 4/4/1, 4/4/2 or
 8/8/2 has no instance at it, and runs every instance that serves it
 ([Serves and selected](#serves-and-selected)). Every problem class still has an
-implicit-GEMM instance (`test_the_catalog_serves_every_problem_class`). Three
-instances per dtype use the async DMA K loop.
+implicit-GEMM instance (`test_the_catalog_serves_every_problem_class`). No instance
+uses the async DMA K loop.
 
 Which instances serve a given problem, and which of those run, is decided at runtime,
-not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 200
-implicit-GEMM candidates for a dense graph with C and K divisible by 8, 4 to 88 where a
-narrower combination is built, 36 to 50 where it is not and every serving instance
-runs, and 36 for depthwise (`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
+not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 157
+implicit-GEMM candidates for a dense graph with C and K divisible by 8, 1 to 33 where
+the widest combination is narrower, and 14 for depthwise
+(`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
 
 The lists are compact: one identity per line, holding only the fields that have no
 plain default or that differ from it. `KernelIdentity.from_dict` restores the rest, and
@@ -293,14 +322,13 @@ for the direct instances (`make_conv_aot_config.py --sharding k-loop`, the defau
 
 | KDP shard, per dtype | Instances |
 |---|---:|
-| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 137 |
-| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 26 |
-| `gfx950_conv_fwd_aot_<dtype>_mem_async` | 3 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 84 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 17 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 81 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 18 |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 202 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 82 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 19 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 53 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 10 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 60 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 15 |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 204 |
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
@@ -348,7 +376,7 @@ regenerates it from the lists on every run. The tests hold the pieces together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
   tool builds from the committed labels and the rocKE tree beside them, when a label is
-  not a sweep identity or does not convert, or when the catalog is not 568 kernels per
+  not a sweep identity or does not convert, or when the catalog is not 443 kernels per
   dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
@@ -364,7 +392,7 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, 1,136 variants for this engine.
+The product pack compiles every instance, 886 variants for this engine.
 
 The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
@@ -526,7 +554,7 @@ integration root packs it for gfx950, the product's where the product root offer
 ## Current limits
 
 - Forward only. The launch runs every forward kernel of rocKE's sweeps, but the shipped
-  catalog packages only the 568 per dtype its label list names; the seed exercises
+  catalog packages only the 443 per dtype its label list names; the seed exercises
   knob values the catalog does not ship.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
