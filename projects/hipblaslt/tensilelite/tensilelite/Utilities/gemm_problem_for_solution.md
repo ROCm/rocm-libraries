@@ -77,7 +77,7 @@ Subsequent `get_problem` calls reuse the retained records without I/O, generator
 imports or GPU calls. Selective loading limits retained records, while compressed
 shards still require full decompression.
 
-`Tests/common/test_gemm_problem_for_solution.py` builds eight small gfx942 libraries for FP32,
+`Tests/common/test_gemm_problem_for_solution_integration.py` builds eight small gfx942 libraries for FP32,
 FP64, FP16 and BF16 with split factors 1 and 4. It verifies dimensions, numerical
 results and solution/kernel identity through `hipblaslt-bench`. With rocJITsu's
 logging plugin, it also checks that the target kernel dispatched exactly once.

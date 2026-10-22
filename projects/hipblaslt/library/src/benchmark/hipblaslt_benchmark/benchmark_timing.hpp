@@ -300,9 +300,9 @@ namespace hipblaslt_bench
     // `i % block_count` rotation and per-iteration icache flush). Fixed-count mode times one
     // batch of cfg.iters; adaptive mode self-sizes the batch and collects samples until the
     // mean converges, the robust spread plateaus, or a ceiling is hit.
-    // Returns whether `out` now holds a measurement. It is left untouched for an invalid
-    // adaptive configuration, a failure the hooks report, or should_abort ending the run
-    // before its first sample.
+    // Returns true for a completed run, including an empty result for zero fixed iterations.
+    // Leaves `out` untouched for invalid adaptive settings, a failure reported by the
+    // hooks, or should_abort ending the run before its first sample.
     template <typename Hooks = DefaultHooks, typename Launch>
     [[nodiscard]] inline bool run_measurement(Launch&&                     launch,
                                               const TimingConfig&          cfg,
@@ -325,7 +325,7 @@ namespace hipblaslt_bench
             if(cfg.iters == 0)
             {
                 out = TimingResult{};
-                return;
+                return true;
             }
             const int32_t iters    = cfg.iters > 0 ? cfg.iters : 1;
             double        batch_us = 0.0;
