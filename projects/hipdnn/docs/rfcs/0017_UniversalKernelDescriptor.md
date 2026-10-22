@@ -103,7 +103,8 @@ here, JIT a future follow-on.
 **Scope.** This document frames the system and its direction. Each descriptor format
 (match, dispatch, engine, heuristic) and subsystem (graph matching, applicability, expression
 language, packaging, and drop-in loader) is designed in its own follow-up RFC. The first deliverable
-is the single-kernel path; multi-kernel launch and composition are separate follow-ups. A
+is the single-kernel path plus the kernel-descriptor half of multi-kernel launch
+([§15.1](#151-several-kernels-for-one-operation)); the dispatch-descriptor half and composition are separate follow-ups. A
 named escape hatch covers a step needing C++; anything needing a new runtime dependency
 stays a full provider, one per dependency. This complements build-time codegen.
 
@@ -118,7 +119,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
-| Multi-kernel launch program (e.g. SDPA backward) | None | composition |
+| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -331,12 +332,20 @@ loaded with its UDD bound. When the caller opts into measurement, the builder in
 prepares the sampled candidates, each loaded and dispatch-ready in the same plan, with a UDD
 per pack they came from, so the measured winner can be chosen and cached.
 
-No new engine or plugin-ABI interfaces are introduced; the generic engine satisfies hipDNN's existing
-contracts using descriptor data, and the new machinery (the matcher, the expression interpreter, the
-selector, and the predicate and custom-plan registries) lives inside the provider behind those
-contracts.
+The generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery
+(the matcher, the expression interpreter, the selector, and the predicate and custom-plan registries)
+lives inside the provider behind those contracts. Two engine-plugin ABI entry points are added beside
+those contracts rather than inside the provider: **`hipdnnEnginePluginEnumerateCandidates`**, which pages
+an engine's matched catalog as complete knob tuples with stable candidate ids, and
+**`hipdnnEnginePluginGetPrediction`**, which describes or evaluates an engine-level or
+configuration-level performance prediction without benchmarking, tuning, or executing GPU work. Both
+are **owned by the plugin SDK**, not by this RFC
+([RFC 0019 §11.3](0019_UniversalHeuristicDescriptor.md#113-cross-engine-comparison)), and both are
+**optional exports an engine may decline**: an absent symbol, or `NOT_APPLICABLE`, means the engine does
+not offer that surface — not an empty catalog and not a missing prediction that changes applicability —
+so an engine that ignores both is unaffected by either.
 
-Four things change outside the provider, none altering an interface an engine implements, and each
+Four things change outside the provider, none altering an interface an engine must implement, and each
 additive:
 
 | Addition | Why it is needed |
@@ -534,11 +543,8 @@ solvers to compute a workspace default.
   "version": "1.0",
   "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by a UED heuristic role
   "name":   "Example attention LightGBM selector",
-  "kind":   "model",          // "model" | "static_order" | "custom_library"
-  "model": {
-    "framework": "lightgbm",  // tagged so other frameworks are additive
-    "artifact":  "example_attn/model.bin"
-  },
+  "adapter": "tree_data",     // the ranking mechanism, and the key of the body below (RFC 0019 §4.2)
+  "tree_data": {"artifact": "example_attn/model.bin"},  // a GBDT tree table exported as data, inside this descriptor's directory
   "features_signature": [     // ordered model inputs, bound like a UDD args_signature; order and form must match training
     "$device.cu_count",                          // device property
     "$device.lds_size",                          // device property
@@ -548,6 +554,12 @@ solvers to compute a workspace default.
     "$q.dims[2]",                                // graph tensor dim (query sequence length)
     {"*": ["$q.dims[0]", "$q.dims[1]"]}          // a derived feature: batch times head count
   ],
+  "features_hash": "sha256:…",  // fingerprint of the feature contract (RFC 0019 §6.3)
+  "trained_against": {          // the descriptor content revisions the model was trained on (RFC 0019 §8.1)
+    "ued": {"id": "efc9eae4-fe33-4cb0-a593-95d771dc13b2", "revision": "1.0"},
+    "kmd": {"id": "9ae0b215-32a7-49d1-96df-e9b05e1927ea", "revision": "1.0"},
+    "umd": [{"id": "…", "revision": "1.0"}]     // one entry per matcher
+  },
   "objective": "max"          // higher predicted score wins
 }
 ```
@@ -648,7 +660,9 @@ fields ([Section 6](#6-dispatch-and-workspace) has the full list).
 }
 ```
 
-**UKD, one kernel:** its source details plus concrete metadata values for the fields the
+**UKD, one kernel:** its source details, either one `kernel_source` or, for a kernel
+launched as several stages, a `sources` map keyed by launch name (UKD 1.1, rules in
+[§15.1](#151-several-kernels-for-one-operation)), plus concrete metadata values for the fields the
 KMD declares. The source points at a compiled kernel or says how to build it AOT; the
 metadata gives the exact variant this kernel was built with (a field the UKD omits takes
 the KMD's default). The engine's heuristic ranks the catalog on these values, and criteria
@@ -1324,7 +1338,9 @@ rules for drop-in packages.
 
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
-source; a multi-launch UKD supplies one per Launch. The initial variants:
+source; a multi-launch UKD supplies one per Launch. The initial variants (at runtime a `sources`
+entry is a `kpack` source; authored entries are `rocke`, and `hip` and `hsaco` entries follow in a
+later change, [§15.1](#151-several-kernels-for-one-operation)):
 
 ```jsonc
 "kernel_source": {
@@ -1365,7 +1381,9 @@ sources arrive).
 
 This section covers the runtime order: what loads, when, why, and where the result is kept.
 Everything happens behind `IEngine` and `IPlan`, the contracts a hand-written engine already
-implements, so no new engine or plugin-ABI interface is introduced.
+implements, so this flow introduces no engine or plugin-ABI interface of its own. The two optional
+exports of [Section 3](#3-how-it-works) sit outside it: enumeration serves the generation tooling, and
+prediction serves selection, before the phases below begin.
 
 **hipDNN enforces this order.** Four host calls arrive, and each one can only arrive after the
 last:
@@ -1512,7 +1530,8 @@ set, filter the catalog to the kernels whose metadata values match every setting
 highest-ranked survivor. If a knob query never ran, the heuristic loads here.
 
 **12. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to
-be able to launch, loading each one's `kernel_source` and evaluating its pack's dispatch grid,
+be able to launch, loading each one's `kernel_source` (for a multi-launch kernel, each launch's
+`sources` entry, loaded by the pack's native handler) and evaluating its pack's dispatch grid,
 block, shared-memory, and argument formulas over the bound token state from matching. Ordinarily
 that is the single chosen kernel; under measurement it is the candidates being sampled, prepared
 the same way in the same plan. Candidates can come from different packs, so a plan may hold several
@@ -1536,7 +1555,10 @@ a later failure (a heuristic that ranks nothing, a source that fails to resolve,
 fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
 build. The catalog is settled during applicability and every later stage is a read, so the cost of
 being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
-accepting is a bug, not a legal outcome. The same invariant applies to a composite's mandatory
+accepting is a bug, not a legal outcome. For a multi-launch kernel
+([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
+launch names differ from those its pack's handler declares is dropped when the catalog is built,
+never accepted. The same invariant applies to a composite's mandatory
 stage.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.
@@ -1628,9 +1650,11 @@ from the descriptors instead of tracked beside them.
 
 ### 9.2 Heuristic Adapters
 
-Heuristic descriptors extend the same way: a heuristic names a `kind`, and an adapter interprets
-that content into a scorer. The first adapter is a **LightGBM model**; alongside it, a **custom
-heuristic library** adapter satisfies a small C-API, so a provider can supply a bespoke selector
+Heuristic descriptors extend the same way: a heuristic names an `adapter`, and that adapter interprets
+its content into a scorer ([RFC 0019 §4.2](0019_UniversalHeuristicDescriptor.md#42-adapter-summary)).
+The default adapter is a GBDT tree table shipped as data (`tree_data`), such as an exported LightGBM
+model; alongside it, a **custom heuristic library** adapter (`custom_library`) satisfies a small C-API,
+so a provider can supply a bespoke selector
 without a model file. Further adapters extend what a heuristic can reference (other model formats,
 or plain file types such as a static CSV lookup or a fixed static order) without changing the
 spec. A heuristic runs at selection time, so its adapter is always build-and-runtime, never
@@ -1716,7 +1740,7 @@ The provider surfaces:
   schema, every graph token resolves against the set the engine's pattern publishes, and every
   `$kernel.*` a matcher or dispatch formula reads exists in the engine's metadata schema);
   cross-descriptor references that resolve (a pack's `engine`, `matchers`, and `dispatch`; an
-  engine descriptor's `heuristic` and `metadata`); dispatch formulas that reference only fields the
+  engine descriptor's heuristic roles and `metadata`); dispatch formulas that reference only fields the
   engine's pattern binds; and launch slots that every referenced kernel source fills. Where
   a code object exposes its kernarg layout, the dispatch descriptor's argument signature is checked
   against it, catching an ABI mismatch here rather than at a corrupted launch. An unbound token, an
@@ -1978,7 +2002,7 @@ descriptor data. Migration then proceeds incrementally and without disruption: a
 engine and its descriptor-backed replacement coexist until the generic one reaches parity on the
 graphs that engine covers, at which point the hand-written code retires.
 
-Multi-kernel launch and composition are separate follow-ups, outside this plan.
+The dispatch-descriptor half of multi-kernel launch and composition are separate follow-ups, outside this plan.
 
 ### 14.1 Testing and Performance
 
@@ -2042,7 +2066,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 
 ## 15. Multiple Kernels and Composition
 
-So far a kernel descriptor is one kernel: it lives in a pack, matched by its engine's pattern and
+Without `sources`, a kernel descriptor is one kernel: it lives in a pack, matched by its engine's pattern and
 the pack's matchers, and launched by the pack's one shared dispatch descriptor. That one kernel may
 already cover a *fused* multi-op subgraph, where the pattern covers the whole subgraph (for example
 Conv-Bias-ReLU) and the single Launch runs the fused kernel. This section covers two further
@@ -2061,9 +2085,11 @@ capabilities that differ in kind:
   Each engine is chosen on its own merits; the pieces are not co-designed. Composition is the one
   new descriptor kind here, the **composite descriptor (UCD)**.
 
-Both are future work: not committed in this RFC or its first deliverable, each specified in its
-own follow-up RFC, presented so the single-kernel format does not foreclose them. The pack's
-dispatch descriptor resolves to a program: an ordered sequence of Launches over a shared symbol
+The dispatch-descriptor half of the multi-launch pack (`launches[]`, intermediates, cross-step
+checks) and composition are future work: not committed in this RFC or its first deliverable, each
+specified in its own follow-up RFC, presented so the single-kernel format does not foreclose them.
+The kernel-descriptor half of the multi-launch pack ships ([§15.1](#151-several-kernels-for-one-operation)).
+The pack's dispatch descriptor resolves to a program: an ordered sequence of Launches over a shared symbol
 table and a shared set of intermediate buffers. The single-Launch case is the one-step form, so
 nothing authored today changes.
 
@@ -2120,7 +2146,7 @@ they need off those tensors by position. The pack's matcher (id
 
 // --- UKD: fills each Launch slot with a source, plus metadata (one per family member) ---
 {
-  "version": "1.0",
+  "version": "1.1",
   "id":   "8e0f76d6-3522-4099-b5f1-7b1544bde29c",
   "name": "SDPA backward (d128, bf16, gfx942)",
   "sources": {              // replaces kernel_source: one source per Launch name in the pack's UDD
@@ -2143,6 +2169,32 @@ sibling family member (d64) is one more kernel descriptor supplying its own sour
 same dispatch descriptor; because the dispatch descriptor holds the launch structure, a variant
 needing a different Launch count or wiring shares nothing at that level and belongs in its own
 pack.
+
+**Implementation status.** The kernel-descriptor half ships; the dispatch-descriptor half (the
+`launches[]` program, its intermediates and the cross-step checks) is deferred. A UKD (version 1.1)
+may carry a `sources` map keyed by launch name in place of `kernel_source`:
+
+- **Shape.** At least two entries. A launch name is a lowercase identifier,
+  `^[a-z][a-z0-9_]*$`. Each entry is a complete `kpack` kernel source. One kernel may appear under
+  two launch names, for a stage that runs one kernel twice with different arguments.
+- **Authoring.** Authored entries are `rocke` sources; `hip` and `hsaco` entries are a later
+  change. `embedded_source` is never packed, so it cannot be a `sources` entry, and an
+  already-packed `kpack` entry is not pack input. The loader accepts any `kpack` entry.
+- **Consumer agreement.** The UKD has one consumer metadata declaration. Each declared field must be
+  reported by at least one launch, and every launch that reports it must match the metadata
+  value; a launch whose spec lacks the attribute does not report it. A single-launch UKD keeps the
+  strict rule: its one spec must report every declared field.
+- **Compile once.** Entries with the same source, builder, spec and target compile once and share a
+  library, toc key and digest.
+- **Launch set.** All kernels of one pack declare the same launch names, the set the pack's
+  handler declares.
+
+The pack's native dispatch handler launches the entries, in an order it owns, and owns workspace
+and the hand-off between them. Until `launches[]` exists the handler declares the launch names it
+launches (`launchNames()`, provisional), and the provider's kernel state manager drops a kernel
+whose launch names differ from that set when it builds its catalog, so an accepted kernel is always
+launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a single-launch
+handler that reads `kernel_source`.
 
 ### 15.2 One Graph Split Across Several Engines
 
@@ -2248,6 +2300,10 @@ fails the composite closed **at applicability**: the composite declines and engi
 on, the same free decline any engine gets at that stage. Comparing whole chains never arises,
 since those alternatives are separate engines the existing chain already ranks.
 
+Kernel slots (RFC 0021) are orthogonal to `sources`: a slot selects among kernel descriptors, and a
+kernel descriptor with `sources` is one selection that launches several kernels of one multi-stage
+kernel.
+
 Cross-step correctness is the new surface, validated at build and load: every read of an
 intermediate is preceded by a write with matching dtype and shape, every region is written before
 it is read, the stage graph is acyclic, and a composite is offered on a given architecture only if
@@ -2263,10 +2319,12 @@ every mandatory stage's engine can satisfy its child graph on that architecture.
 | Alternative selection | engine selection | each alternative is its own engine; the existing chain arbitrates |
 | Cross-step safety | validation | producer-before-consumer, acyclicity, and per-arch coverage gates |
 
-The only new descriptor kind is the composite descriptor (UCD). There are no new plugin
-interfaces and no hipDNN core changes: a multi-step program is a dispatch descriptor with several
-Launches, and a decomposition is one composite descriptor whose child graphs are answered by
-ordinary engines.
+The only new descriptor kind is the composite descriptor (UCD). The dispatch-descriptor half of the
+design adds no new plugin interfaces and no hipDNN core changes: a multi-step program is a dispatch
+descriptor with several Launches, and a decomposition is one composite descriptor whose child graphs
+are answered by ordinary engines. The kernel-descriptor half that ships adds two members to the
+plugin SDK's ingestor headers: a defaulted `launchNames()` on the dispatch handler interface
+(provisional until `launches[]` exists) and a `sources` field on the SDK's kernel definition.
 
 ---
 
@@ -2400,7 +2458,8 @@ follow-up RFCs.
   is pursued, concatenating and remapping programs must preserve each sub-program's buffer
   assumptions (dtype, shape, alignment, single-writer, no aliasing between concurrently-live regions),
   all steps must run on the plan stream, and a composite must have per-arch stage coverage. The
-  single-kernel first deliverable carries none of this.
+  first deliverable carries none of this: its multi-launch kernel descriptors leave intermediates and
+  the hand-off between launches to the pack's native handler.
 
 ---
 
@@ -2408,8 +2467,10 @@ follow-up RFCs.
 
 1. **Source trust for drop-in:** what is the minimum trust requirement for drop-in JIT source, from
    restricting drop-in to prebuilt code objects, to bounding compiler inputs, to a separate opt-in?
-2. **Composition:** if composition ([Section 15](#15-multiple-kernels-and-composition)) is pursued,
-   should multi-kernel launch land before composite graph decomposition?
+2. **Composition:** the kernel-descriptor half of multi-kernel launch landed first
+   ([§15.1](#151-several-kernels-for-one-operation)). If composition
+   ([Section 15](#15-multiple-kernels-and-composition)) is pursued, should the dispatch-descriptor
+   half (`launches[]`, intermediates) land before composite graph decomposition?
 3. **Expression coverage:** validate the expression language against several real kernels (for
    example a split-K GEMM with workspace, a normalization, and a ragged attention that forces the
    data-dependent-launch discussion) before freezing it.
@@ -2507,7 +2568,7 @@ choices; none is a dependency.
   each assigned to an engine that satisfies it with its own applicability check and heuristic.
 - **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
   collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
-  `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
+  `engine`, and `dispatch`, and a UED's heuristic roles and `metadata`) use the id.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation used throughout this

@@ -80,12 +80,14 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
+    DIRECT_MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
     make_direct_spec,
 )
 from kernels.common.conv_implicit_gemm import ConvProblem
+from kernels.common.conv_implicit_gemm_dgrad import fold_width
 from kernels.conv.kernel_identity import (
     KernelIdentity,
     dgrad_sub_gemms,
@@ -279,6 +281,22 @@ def _conv_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 
 
 @functools.lru_cache(maxsize=256)
+def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
+    """The problem the implicit-GEMM instances run for ``req``.
+
+    A dgrad whose width folds into its channels
+    (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`: a patch
+    embedding, say) runs folded -- the same bytes in all three tensors, in
+    fewer and wider tilde sub-GEMMs. Admission, grid and kernargs all read
+    this problem, so an instance is admitted for the shape it actually runs.
+    """
+    p = _conv_problem(req)
+    if p is None or req.direction.lower() != "dgrad":
+        return p
+    return fold_width(p)
+
+
+@functools.lru_cache(maxsize=256)
 def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, str]:
     """The direct-conv view of ``req``: ``(problem, "ok")`` or ``(None, why)``.
 
@@ -439,7 +457,7 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _conv_problem(req), req.llvm_flavor)
+        return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -486,7 +504,7 @@ def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
     with padding and stride zeroed: every instance sharing a filter shares
     them.
     """
-    if identity.algorithm != "direct_grouped_dgrad_mfma":
+    if identity.algorithm not in DIRECT_MFMA_DGRAD:
         return ()
     return tuple(
         dataclasses.replace(
@@ -500,7 +518,7 @@ def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
             knobs=json.dumps(helper_knobs, sort_keys=True),
         )
         for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
-            _instance_knobs(identity)
+            _instance_knobs(identity), identity.algorithm
         )
     )
 
@@ -529,7 +547,7 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
 
 @functools.lru_cache(maxsize=4096)
 def _sub_gemms(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple:
-    return tuple(dgrad_sub_gemms(identity, _conv_problem(req)))
+    return tuple(dgrad_sub_gemms(identity, _gemm_problem(req)))
 
 
 def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
@@ -556,7 +574,7 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
     from kernels.common.conv_args import ConvArgs
 
     return ConvArgs.from_problem(
-        _conv_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
+        _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
 
 
@@ -571,7 +589,9 @@ class ConvLaunchStep:
     ``identity`` is the binary to launch (its AOT cache key). ``buffers``
     names the buffers bound to its A, B and D kernarg slots; the weight
     transforms take no B and no extents (``args`` is ``None``), a convolution
-    kernel takes its extents from ``args``.
+    kernel takes its extents from ``args``. ``scalars`` are the trailing
+    ``(name, value)`` kernargs of a weight transform: the runtime-channel
+    (``_rtc``) ones take the per-group channel counts.
     """
 
     identity: KernelIdentity
@@ -580,6 +600,7 @@ class ConvLaunchStep:
     signature: tuple[dict, ...]
     buffers: tuple[str, str | None, str]
     args: object = None
+    scalars: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -610,6 +631,7 @@ class ConvLaunchPlan:
                 "D": ptrs[d],
                 "A_bytes": sizes[a],
                 "D_bytes": sizes[d],
+                **dict(step.scalars),
             }
         extras = {}
         if self.num_sub_gemms:
@@ -643,7 +665,7 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
     )
     if not ident.is_direct:
         args = ConvArgs.from_problem(
-            _conv_problem(req),
+            _gemm_problem(req),
             direction=spec.direction,
             tile_m=ident.tile_m,
             tile_n=ident.tile_n,
@@ -668,10 +690,21 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
     # MFMA dgrad: the weight transforms, then a forward pass over the
     # transposed problem reading the transformed weights.
     from kernels.common.conv_abi import conv_direct_transform_signature
-    from kernels.common.conv_direct_grouped import direct_launch_geometry
+    from kernels.common.conv_direct_grouped import (
+        DIRECT_WEIGHT_TRANSFORM_RTC_ARGS,
+        direct_launch_geometry,
+    )
 
     knobs = _instance_knobs(ident)
-    transforms = direct_dgrad_weight_transforms(knobs)
+    transforms = direct_dgrad_weight_transforms(knobs, ident.algorithm)
+    # The runtime-channel transforms take the per-group channel counts as
+    # kernargs (as benchmarks/common/direct_kernel_sweep.direct_plan does).
+    runtime_channels = ident.algorithm == "direct_dgrad_mfma_rtc"
+    scalars = (
+        tuple(zip(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS, (problem.cpg, problem.kpg)))
+        if runtime_channels
+        else ()
+    )
     steps = []
     for helper, (variant, helper_knobs, src, dst) in zip(spec.helpers, transforms):
         grid, block = direct_launch_geometry(
@@ -682,8 +715,9 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
                 helper,
                 grid,
                 block,
-                tuple(conv_direct_transform_signature(spec.dtype)),
+                tuple(conv_direct_transform_signature(spec.dtype, runtime_channels)),
                 (src, None, dst),
+                scalars=scalars,
             )
         )
     launch_spec, _ = _direct_launch_spec(ident, req)
