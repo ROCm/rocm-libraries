@@ -22,6 +22,7 @@ if(NOT GTest_FOUND)
                             "-DALLOW_FETCH_DEPS=ON to download it.")
     endif()
 
+    include(FetchContent)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
