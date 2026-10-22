@@ -8,15 +8,17 @@ import copy
 import dataclasses
 import hashlib
 import json
+import itertools
 import re
 
 import pytest
 
 from hkp_pack import agreement, desk_check, pipeline, provenance_sidecar, sources
+from hkp_pack.descriptor_context import Entry
 from hkp_pack.descriptors import _validate_ukd_fields, load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
-from pack_helpers import GENERIC_TARGETS, _kdp, _silent, _write_json
+from pack_helpers import GENERIC_TARGETS, _kdp, _restamp, _silent, _write_json
 from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from test_specialization_agreement import (
     ARCH,
@@ -63,14 +65,6 @@ def _code_object(module):
     requires_msgpack()
     names = [module["primary"], *module["companions"].values()]
     return _object([_kernel(name, ARGS[name]) for name in names])
-
-
-def _restamp(doc):
-    """Re-publish every launch's descriptor digest over an edited shipped document,
-    so only the check under test can refuse it."""
-    binding = agreement.descriptor_binding(doc)
-    for evidence in doc["provenance"]["effective_spec"].values():
-        evidence["descriptor_digest"] = binding
 
 
 def shipped(launches=ONE_MODULE, version="1.0"):
@@ -639,6 +633,20 @@ class TestSameKernelUnderTwoLaunches:
         assert sources_provenance["a"]["builder"] != sources_provenance["b"]["builder"]
         agreement.verify(doc, records, payload)
 
+    def test_equal_bytes_with_different_observations_are_still_two_compiles(
+        self, monkeypatch
+    ):
+        """Compiles group by (library, toc_key), not by their bytes: two builders
+        may emit identical objects and each keep its own evidence."""
+        monkeypatch.setitem(MODULES, "vk-x", {"primary": PRIMARY, "companions": {}})
+        monkeypatch.setitem(MODULES, "vk-y", {"primary": PRIMARY, "companions": {}})
+        doc, records, payload = shipped({"a": ("vk-x", None), "b": ("vk-y", None)})
+        assert payload["a"] == payload["b"]
+        evidence = doc["provenance"]["effective_spec"]
+        evidence["b"]["observations"]["producer"]["builder"]["sha256"] = "f" * 64
+        assert evidence["a"]["observations"] != evidence["b"]["observations"]
+        agreement.verify(doc, records, payload)
+
     def test_one_compile_claimed_by_two_launches_verifies(self):
         doc, records, payload = shipped(
             {
@@ -656,6 +664,104 @@ class TestSameKernelUnderTwoLaunches:
         )
         with pytest.raises(HkpPackError, match=r"claim the kernels \['merge'\]"):
             agreement.verify(doc, records, payload)
+
+
+class TestLaunchOrderCarriesNoMeaning:
+    """The order of `sources` keys selects nothing: the verdict and the shipped
+    bytes are the same for every order."""
+
+    LAUNCHES = {
+        "first": ("vk-a", None),
+        "second": ("vk-a", None),
+        "merge": ("vk-a", "merge"),
+        "seg": ("vk-seg", None),
+    }
+
+    @staticmethod
+    def _orders():
+        return list(itertools.permutations(TestLaunchOrderCarriesNoMeaning.LAUNCHES))
+
+    def _shipped(self, order):
+        return shipped({name: self.LAUNCHES[name] for name in order})
+
+    def test_every_order_ships_the_same_document_and_verifies(self):
+        reference = None
+        for order in self._orders():
+            doc, records, payload = self._shipped(order)
+            agreement.verify(doc, records, payload)
+            canonical = json.dumps(doc, sort_keys=True)
+            reference = reference or canonical
+            assert canonical == reference
+
+    def test_every_order_refuses_a_launch_whose_evidence_departs_from_its_siblings(
+        self,
+    ):
+        for order in self._orders():
+            doc, records, payload = self._shipped(order)
+            doc = json.loads(json.dumps(doc))
+            evidence = doc["provenance"]["effective_spec"]
+            evidence["merge"]["observations"]["producer"]["builder"]["sha256"] = (
+                "f" * 64
+            )
+            with pytest.raises(HkpPackError, match="share one code object but carry"):
+                agreement.verify(doc, records, payload)
+
+    def test_the_two_launch_refusal_names_the_pair_in_sorted_order(self):
+        for order in itertools.permutations(["decode", "merge"]):
+            doc, records, payload = shipped({n: ONE_MODULE[n] for n in order})
+            doc = json.loads(json.dumps(doc))
+            evidence = doc["provenance"]["effective_spec"]
+            evidence["merge"]["observations"]["producer"]["builder"]["sha256"] = (
+                "f" * 64
+            )
+            with pytest.raises(HkpPackError) as info:
+                agreement.verify(doc, records, payload)
+            assert "launches ['decode', 'merge'] share one code object" in str(
+                info.value
+            )
+
+    def test_the_packer_compiles_and_claims_the_same_in_every_order(self, monkeypatch):
+        compiled = []
+
+        def fake_compile(
+            source, builder, spec, arch, _dir, _req, _origins, target, **_
+        ):
+            compiled.append((source, builder, target))
+            observations = {
+                "arch": arch,
+                "compile_target": arch,
+                "symbol": PRIMARY,
+            }
+            if builder == "b1":
+                observations["companions"] = {"merge": MERGE}
+            return f"{builder}.co", PRIMARY, observations
+
+        monkeypatch.setattr(pipeline, "compile_rocke_variant", fake_compile)
+
+        def entry(builder, role=None):
+            ks = {"kind": "rocke", "source": "k/m.py", "builder": builder, "spec": {}}
+            return {**ks, "role": role} if role else ks
+
+        authored = {
+            "first": entry("b1"),
+            "second": entry("b1"),
+            "merge": entry("b1", "merge"),
+            "seg": entry("b2"),
+        }
+        results = []
+        for order in itertools.permutations(authored):
+            compiled.clear()
+            ukd = {"id": "ukd-demo", "sources": {n: dict(authored[n]) for n in order}}
+            _vk, _symbol, fields = pipeline._compile_sources_ukd(
+                ukd, "UKD 'ukd-demo'", ARCH, "dir", {}, {}, {}, {}, {}, None
+            )
+            launches = {
+                name: (launch.variant_key, launch.symbol, launch.role)
+                for name, launch in fields["launches"].items()
+            }
+            results.append((sorted(compiled), sorted(launches.items())))
+        assert all(result == results[0] for result in results)
+        assert [builder for _s, builder, _t in results[0][0]] == ["b1", "b2"]
 
 
 class TestClaimCheck:
@@ -1151,6 +1257,55 @@ class TestDeskCheckReaders:
         assert "and kernel_source.kind is 'hip'." in str(info.value)
 
 
+class TestDeskCheckReadsEachLaunchsObject:
+    class _Archive:
+        def __init__(self, kernels):
+            self._kernels = kernels
+
+        def get_kernel(self, toc_key, arch):
+            assert arch == ARCH
+            return self._kernels.get(toc_key)
+
+    def test_each_launch_is_read_from_its_own_toc_key_and_verifies(
+        self, monkeypatch, tmp_path
+    ):
+        doc, records, payload = shipped(TWO_BUILDERS)
+        assert payload["segment"] != payload["reduce"]
+        by_toc_key = {doc["sources"][n]["toc_key"]: payload[n] for n in payload}
+        library = tmp_path / doc["sources"]["segment"]["library"]
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"archive")
+        archive = self._Archive(by_toc_key)
+        kpack = type(
+            "FakeKpack",
+            (),
+            {"PackedKernelArchive": type("A", (), {"read": lambda _path: archive})},
+        )
+        monkeypatch.setattr(desk_check, "load_kpack", lambda _dir: (kpack, None))
+        read = desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
+        assert read == payload
+        agreement.verify(doc, records, read)
+
+    def test_a_toc_key_absent_from_the_archive_names_its_launch(
+        self, monkeypatch, tmp_path
+    ):
+        doc, _records, payload = shipped(TWO_BUILDERS)
+        library = tmp_path / doc["sources"]["segment"]["library"]
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"archive")
+        archive = self._Archive(
+            {doc["sources"]["segment"]["toc_key"]: payload["segment"]}
+        )
+        kpack = type(
+            "FakeKpack",
+            (),
+            {"PackedKernelArchive": type("A", (), {"read": lambda _path: archive})},
+        )
+        monkeypatch.setattr(desk_check, "load_kpack", lambda _dir: (kpack, None))
+        with pytest.raises(HkpPackError, match="launch 'reduce': toc_key 'vk-red'"):
+            desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
+
+
 class TestProvenanceSidecarGuard:
     def test_a_packed_sources_ukd_in_an_unmarked_directory_is_refused(self, tmp_path):
         """`_require_authored` refuses a directory that holds kpack UKDs but no
@@ -1182,3 +1337,99 @@ class TestProvenanceSidecarGuard:
         self, sources_value, expected
     ):
         assert provenance_sidecar._kind({"sources": sources_value}) == expected
+
+
+def _inline(ukd_id, names):
+    """An inline compiled UKD of a shard, naming `names` as its launches; no names
+    is a single-launch kernel."""
+    return pipeline.InlineUKD(
+        id=ukd_id,
+        name=ukd_id,
+        metadata={},
+        priority=0,
+        source=None,
+        entry=None,
+        build=None,
+        symbol=None,
+        variant_key=None,
+        launches={name: None for name in names},
+    )
+
+
+def _kdp_of(kdp_id, *entries):
+    return pipeline.ArchKDP(
+        id=kdp_id, filename=f"{kdp_id}.kdp.json", header={}, entries=list(entries)
+    )
+
+
+def _shard(*kdps, standalone=()):
+    return pipeline.IntermediateArch(
+        arch=ARCH,
+        directory=None,
+        kdps=list(kdps),
+        standalone_ukds={u.id: u for u in standalone},
+    )
+
+
+class TestOneLaunchSetPerKdp:
+    """One native dispatch handler declares one launch set and serves every kernel
+    of its KDP; the packer refuses a KDP whose kernels disagree."""
+
+    def test_kernels_naming_different_launch_sets_are_refused(self, tmp_path):
+        inter = _shard(
+            _kdp_of(
+                "kdp-mixed",
+                _inline("ukd-one", ["decode", "merge"]),
+                _inline("ukd-two", ["segment", "reduce"]),
+            )
+        )
+        with pytest.raises(HkpPackError) as info:
+            pipeline.pack_arch(None, inter, tmp_path, None, None)
+        message = str(info.value)
+        assert "KDP 'kdp-mixed'" in message
+        assert "['ukd-one'] name launches ['decode', 'merge']" in message
+        assert "['ukd-two'] name launches ['reduce', 'segment']" in message
+
+    def test_a_single_launch_kernel_beside_a_multi_launch_one_is_refused(self):
+        inter = _shard(
+            _kdp_of(
+                "kdp-mixed", _inline("ukd-plain", []), _inline("ukd-multi", ["a", "b"])
+            )
+        )
+        with pytest.raises(HkpPackError) as info:
+            pipeline._check_launch_sets(inter)
+        message = str(info.value)
+        assert "KDP 'kdp-mixed'" in message
+        assert "['ukd-plain'] name launches []" in message
+        assert "['ukd-multi'] name launches ['a', 'b']" in message
+
+    def test_a_standalone_reference_is_held_to_its_launch_set(self):
+        inter = _shard(
+            _kdp_of("kdp-mixed", _inline("ukd-multi", ["a", "b"]), "ukd-alone"),
+            standalone=[_inline("ukd-alone", [])],
+        )
+        with pytest.raises(HkpPackError, match=r"\['ukd-alone'\] name launches \[\]"):
+            pipeline._check_launch_sets(inter)
+
+    def test_the_same_launch_set_in_a_different_key_order_is_accepted(self):
+        pipeline._check_launch_sets(
+            _shard(
+                _kdp_of(
+                    "kdp-demo",
+                    _inline("ukd-one", ["decode", "merge"]),
+                    _inline("ukd-two", ["merge", "decode"]),
+                )
+            )
+        )
+
+    def test_each_kdp_may_name_its_own_launch_set(self):
+        shared = _inline("ukd-shared", ["a", "b"])
+        pipeline._check_launch_sets(
+            _shard(
+                _kdp_of("kdp-ab", _inline("ukd-x", ["a", "b"]), "ukd-shared"),
+                _kdp_of("kdp-cd", _inline("ukd-y", ["c", "d"])),
+                _kdp_of("kdp-plain", _inline("ukd-z", [])),
+                _kdp_of("kdp-ab-again", "ukd-shared"),
+                standalone=[shared],
+            )
+        )

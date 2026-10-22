@@ -371,9 +371,12 @@ between stages belong to the native dispatch handler of the pack. That handler d
 launch names it launches (`IKernelDispatchHandler::launchNames`, empty by default, which is
 a single-launch handler reading `kernel_source`). The state manager drops a kernel whose
 launch names differ from that set, before applicability, so an accepted kernel is always
-launchable. A variant with a different launch set therefore belongs in its own pack. The
-handler reaches one launch's definition with `launchKernelDefinition(kernel, "merge")` and
-hands it to `buildIngestorKernelCode`.
+launchable. A variant with a different launch set therefore belongs in its own pack, and
+the packer enforces it: kernels of one KDP that name different launch sets, or a
+single-launch kernel beside a multi-launch one, fail the pack, naming the KDP and each
+kernel's launch set. The order of the `sources` keys carries no meaning, so the same names
+in another order are one set. The handler reaches one launch's definition with
+`launchKernelDefinition(kernel, "merge")` and hands it to `buildIngestorKernelCode`.
 
 ## Emitted-bundle census
 

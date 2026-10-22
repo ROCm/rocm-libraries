@@ -347,8 +347,9 @@ def _compile_sources_ukd(
                 origins,
             )
         except HkpPackError as exc:
-            # One declaration speaks for every launch, so a field a launch's own
-            # builder cannot show fails here, and must say which launch.
+            # A compile failure must say which launch. A field this launch's
+            # builder cannot show is no failure here: `compare_launches` below
+            # requires each field from at least one launch.
             raise HkpPackError(f"{where}: {_launch_label(names)}: {exc}") from exc
         first = entries[names[0]]
         sources.check_claims(
@@ -761,9 +762,9 @@ def _agreement_inputs(flat, arch):
                 continue
             rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
             request = agreement.observation_request(declaration, kmd)
-            # Every launch's compile observes the same request: one declaration
-            # speaks for the whole UKD, so a field a launch's builder cannot show
-            # fails that compile loudly rather than being exempted.
+            # Every launch's compile observes the same request. A launch whose
+            # builder cannot show a field reports it unreported; the field fails
+            # only when no launch reports it (`agreement.compare_launches`).
             for vk, _name, _launch in _launch_variants(ukd, rel_dir):
                 requests.setdefault(vk, {})[agreement.digest(request)] = request
     return (
@@ -1586,6 +1587,48 @@ def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
     return toolchain.hip_provenance(hipcc)
 
 
+def _launch_set(inter, entry):
+    """The launch names an entry of a KDP ships, as a frozenset; empty for a
+    single-launch kernel."""
+    if isinstance(entry, str):
+        key = canonical_id(entry)
+        entry = inter.standalone_ukds.get(key) or inter.passthrough_standalone_ukds[key]
+    if isinstance(entry, PassthroughUKD):
+        return frozenset(n for n in sources.kernel_sources(entry.doc) if n is not None)
+    return frozenset(entry.launches)
+
+
+def _check_launch_sets(inter):
+    """Every kernel of one KDP names the same launch set, per shard.
+
+    One native dispatch handler declares one launch set and serves every kernel of
+    its KDP, so a kernel with a different set, or a single-launch kernel beside a
+    multi-launch one (whose set is empty), belongs in a KDP of its own. The check
+    sees the entries that ship in this shard and runs per KDP, since a standalone
+    UKD may be referenced by several.
+    """
+    for kdp in inter.kdps:
+        by_set = {}
+        for entry in kdp.entries:
+            if isinstance(entry, str):
+                ident = entry
+            elif isinstance(entry, PassthroughUKD):
+                ident = entry.doc.get("id")
+            else:
+                ident = entry.id
+            by_set.setdefault(_launch_set(inter, entry), []).append(ident)
+        if len(by_set) > 1:
+            detail = "; ".join(
+                f"UKD(s) {sorted(map(str, ids))} name launches {sorted(names)}"
+                for names, ids in sorted(by_set.items(), key=lambda kv: sorted(kv[0]))
+            )
+            raise HkpPackError(
+                f"KDP '{kdp.id}' ({kdp.filename}): its kernels name different "
+                f"launch sets ({detail}); one dispatch handler declares one launch "
+                "set, so put each launch set in its own KDP"
+            )
+
+
 def pack_arch(
     flat,
     inter,
@@ -1620,6 +1663,7 @@ def pack_arch(
     out_arch_dir = Path(out_arch_dir)
     out_arch_dir.mkdir(parents=True, exist_ok=True)
 
+    _check_launch_sets(inter)
     standalone = list(inter.standalone_ukds.values())
 
     def _all_ukds():
