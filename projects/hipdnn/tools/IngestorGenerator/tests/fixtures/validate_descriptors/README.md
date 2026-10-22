@@ -3,14 +3,27 @@
 Each directory is a complete, standalone generic-kernel-ingestor descriptor bundle
 (KMD + UHD + UED + UMD + UDD + KDP with two inline kernels), modeled on the shipped
 `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv_fwd/`
-example. `valid/` is the unmutated baseline; every other directory differs by exactly one
-deliberate defect and must make `hipdnn_validate_descriptors <dir>` exit non-zero.
+example. `valid/` is the unmutated baseline; every malformed directory below differs by
+exactly one deliberate defect and must make `hipdnn_validate_descriptors <dir>` exit
+non-zero. The role fixtures at the end instead pin which role-bound models the validator
+admits, and must agree with the runtime admission for that role.
 
 ## `valid/`
 
 The baseline bundle: one engine (`hipkernel:ValidateFixture`), one pack targeting
 `gfx942`, two inline kernels with distinct `(block_size, dtype)` metadata tuples.
 Expected: exit 0.
+
+## `multi_launch/`
+
+A standalone loader-valid bundle (engine `hipkernel:ValidateFixtureMultiLaunch`, one pack
+targeting `gfx942`) whose two kernels carry a UKD 1.1 `sources` map with the launches
+`decode` and `merge`: `fixture.two_kernels_block64` names two kernels, and
+`fixture.one_kernel_twice_block256` names one kernel under both launch names. Expected:
+exit 0 with the engine loaded. The validator's stub handler declares the launch names of
+its pack's kernels, so this proves load and keep for a multi-launch pack, not equality
+with a real handler. The `kpack` entries name an archive that is not shipped; the loader
+reads only the descriptors.
 
 ## `bad_arch/`
 
@@ -57,3 +70,33 @@ Note: a *declared-but-non-int* knob cannot be a fixture here — `GenericEngine.
 `findUndeclaredKnob()` checks name membership only. The non-int-knob drop happens later,
 in `GenericPlanBuilder::getCustomKnobs` at plan-build time against a real graph and
 device, which this standalone binary cannot reach.
+
+## Role fixtures
+
+`valid/` plus one change to a role-bound UHD. The engine loads in every case; the verdict
+is the bound model's `model_checks` entry and the exit status. A kernel-scoped role is
+admitted through `UhdKernelHeuristic::tryCreate`; `predict_engine` through the L1 guards
+GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `model`).
+
+- `l2_static_order/`: the `sort_kernel_catalog` UHD is `static_order`. Expected: exit 0
+  -- declared order is a legal kernel ranking. `model_checks`: `sort_kernel_catalog`
+  succeeds.
+- `l2_dynamic_features/`: the `sort_kernel_catalog` UHD is a `native` scorer whose
+  signature reads `$kernel.block_size` and `$graph.batch`, with the `features_hash` and
+  `trained_against` a feature-consuming model needs. Expected: exit 0 without
+  `--feature-samples` -- the model loads and is admitted, and extraction, which needs a
+  recorded `$graph.batch`, is skipped with a warning (`feature_rows_checked` 0,
+  `feature_extraction_skipped` set). `model_checks`: `sort_kernel_catalog` succeeds. With
+  a sample covering the engine, extraction runs for each candidate kernel, and a sample
+  leaving `$graph.batch` unbound fails the run.
+- `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
+  `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
+  or `custom_library` model, so the runtime refuses it. `model_checks`:
+  `sort_kernel_catalog` succeeds, `predict_engine` fails.
+- `l1_native/`: `predict_engine` binds a calibrated `time` UHD with a signature-less
+  `native` scorer. Expected: exit 0 -- the symbol resolves through the UHD scorer
+  registry the L1 path uses, not the kernel comparator registry. `model_checks`:
+  `sort_kernel_catalog` and `predict_engine` both succeed.
+
+`tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
+(`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`) assert these exit statuses and `model_checks` verdicts.
