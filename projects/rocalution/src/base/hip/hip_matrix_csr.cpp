@@ -1006,9 +1006,7 @@ namespace rocalution
                                 0,
                                 this->nrow_,
                                 rocprim::maximum<PtrType>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(size, &buffer);
 
@@ -1020,9 +1018,7 @@ namespace rocalution
                                 0,
                                 this->nrow_,
                                 rocprim::maximum<PtrType>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&buffer);
             buffer = NULL;
@@ -1039,9 +1035,7 @@ namespace rocalution
                                         d_nnzPerm + 1,
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(size, &buffer);
 
@@ -1052,9 +1046,7 @@ namespace rocalution
                                         d_nnzPerm + 1,
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&buffer);
             buffer = NULL;
@@ -3462,9 +3454,7 @@ namespace rocalution
                                     0,
                                     row_size + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -3476,9 +3466,7 @@ namespace rocalution
                                     0,
                                     row_size + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -3560,9 +3548,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -3574,9 +3560,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -3652,9 +3636,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -3666,9 +3648,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -3744,9 +3724,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -3758,9 +3736,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -3836,9 +3812,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -3850,9 +3824,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -4597,9 +4569,7 @@ namespace rocalution
                                                  0,
                                                  nrow + 1,
                                                  rocprim::plus<PtrType>(),
-                                                 stream),
-                         __FILE__,
-                         __LINE__);
+                                                 stream));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -4610,9 +4580,7 @@ namespace rocalution
                                                  0,
                                                  nrow + 1,
                                                  rocprim::plus<PtrType>(),
-                                                 stream),
-                         __FILE__,
-                         __LINE__);
+                                                 stream));
 
         free_hip(&rocprim_buffer);
         free_hip(&row_nnz);
@@ -4701,9 +4669,7 @@ namespace rocalution
                                         0,
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -4715,9 +4681,7 @@ namespace rocalution
                                         0,
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -4866,9 +4830,7 @@ namespace rocalution
                                         0,
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -4880,9 +4842,7 @@ namespace rocalution
                                         0,
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -5168,9 +5128,7 @@ namespace rocalution
                                  this->mat_.row_offset,
                                  this->mat_.row_offset,
                                  this->nrow_ + 1,
-                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(size, &buffer);
 
@@ -5180,9 +5138,7 @@ namespace rocalution
                                  this->mat_.row_offset,
                                  this->mat_.row_offset,
                                  this->nrow_ + 1,
-                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&buffer);
 
@@ -5531,9 +5487,7 @@ namespace rocalution
                                     0,
                                     this->nrow_,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -5545,9 +5499,7 @@ namespace rocalution
                                     0,
                                     this->nrow_,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -5618,9 +5570,7 @@ namespace rocalution
                                          -2,
                                          cast_agg->size_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -5631,9 +5581,7 @@ namespace rocalution
                                          -2,
                                          cast_agg->size_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -5659,9 +5607,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -5672,9 +5618,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -5989,9 +5933,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -6002,9 +5944,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -6020,9 +5960,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -6034,9 +5972,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -6409,9 +6345,7 @@ namespace rocalution
                                     prolong_row_offset,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         allocate_hip(rocprim_size, &rocprim_buffer);
         CHECK_HIP_STATUS(
             rocprim::inclusive_scan(rocprim_buffer,
@@ -6420,9 +6354,7 @@ namespace rocalution
                                     prolong_row_offset,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         free_hip(&rocprim_buffer);
         PtrType prolong_nnz = 0;
         copy_d2h(1, prolong_row_offset + this->nrow_, &prolong_nnz);
@@ -8046,9 +7978,7 @@ namespace rocalution
                                     prolong_row_offset,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -8059,9 +7989,7 @@ namespace rocalution
                                     prolong_row_offset,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -8186,9 +8114,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -8199,9 +8125,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         if(global == true)
         {
@@ -8221,9 +8145,7 @@ namespace rocalution
                                 0,
                                 this->nrow_,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         }
 
         free_hip(&rocprim_buffer);
@@ -8835,9 +8757,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -8848,9 +8768,7 @@ namespace rocalution
                                          0,
                                          this->nrow_,
                                          rocprim::maximum<int>(),
-                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                         __FILE__,
-                         __LINE__);
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         if(global)
         {
@@ -8862,9 +8780,7 @@ namespace rocalution
                                 0,
                                 this->nrow_,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         }
 
         free_hip(&rocprim_buffer);
@@ -8887,9 +8803,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -8901,9 +8815,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -8938,9 +8850,7 @@ namespace rocalution
                                         0,
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -8952,9 +8862,7 @@ namespace rocalution
                                         0,
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -9799,9 +9707,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -9813,9 +9719,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -9850,9 +9754,7 @@ namespace rocalution
                                         0,
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -9864,9 +9766,7 @@ namespace rocalution
                                         0,
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -10002,9 +9902,7 @@ namespace rocalution
                                     0,
                                     ext_nnz + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10016,9 +9914,7 @@ namespace rocalution
                                     0,
                                     ext_nnz + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -10070,9 +9966,7 @@ namespace rocalution
                                        cast_map->vec_,
                                        cast_cmb->vec_,
                                        d_nruns,
-                                       HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                       HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10084,9 +9978,7 @@ namespace rocalution
                                        cast_map->vec_,
                                        cast_cmb->vec_,
                                        d_nruns,
-                                       HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                       HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -10114,9 +10006,7 @@ namespace rocalution
                                         0,
                                         nruns + 1,
                                         rocprim::plus<int>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10128,9 +10018,7 @@ namespace rocalution
                                         0,
                                         nruns + 1,
                                         rocprim::plus<int>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
         }
@@ -10211,9 +10099,7 @@ namespace rocalution
                                  int_csr_row_ptr,
                                  int_csr_row_ptr,
                                  this->nrow_ + 1,
-                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(size, &buffer);
 
@@ -10223,9 +10109,7 @@ namespace rocalution
                                  int_csr_row_ptr,
                                  int_csr_row_ptr,
                                  this->nrow_ + 1,
-                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
@@ -10233,9 +10117,7 @@ namespace rocalution
                                  gst_csr_row_ptr,
                                  gst_csr_row_ptr,
                                  this->nrow_ + 1,
-                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&buffer);
 
@@ -10417,9 +10299,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10431,9 +10311,7 @@ namespace rocalution
                                     0,
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -10541,9 +10419,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10555,9 +10431,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
@@ -10567,9 +10441,7 @@ namespace rocalution
                                     0,
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
-                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-            __FILE__,
-            __LINE__);
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
 
@@ -10695,9 +10567,7 @@ namespace rocalution
                                 0,
                                 nrow,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -10709,9 +10579,7 @@ namespace rocalution
                                 0,
                                 nrow,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -11342,9 +11210,7 @@ namespace rocalution
                                 0,
                                 nrow,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -11356,9 +11222,7 @@ namespace rocalution
                                 0,
                                 nrow,
                                 rocprim::maximum<int>(),
-                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 
@@ -11374,9 +11238,7 @@ namespace rocalution
                                         0,
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
@@ -11388,9 +11250,7 @@ namespace rocalution
                                         0,
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)),
-                __FILE__,
-                __LINE__);
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
             free_hip(&rocprim_buffer);
 

@@ -465,9 +465,7 @@ namespace rocalution
                                          0,
                                          nrow + ncol,
                                          rocprim::plus<IndexType>(),
-                                         stream),
-                         __FILE__,
-                         __LINE__);
+                                         stream));
 
         // Allocate rocprim buffer
         allocate_hip(rocprim_size, &rocprim_buffer);
@@ -480,9 +478,7 @@ namespace rocalution
                                          0,
                                          nrow + ncol,
                                          rocprim::plus<IndexType>(),
-                                         stream),
-                         __FILE__,
-                         __LINE__);
+                                         stream));
 
         // Clear rocprim buffer
         free_hip(&rocprim_buffer);
@@ -525,9 +521,7 @@ namespace rocalution
                                                  0,
                                                  nrow + ncol,
                                                  rocprim::plus<IndexType>(),
-                                                 stream),
-                         __FILE__,
-                         __LINE__);
+                                                 stream));
 
         // Allocate rocprim buffer
         rocprim_buffer = NULL;
@@ -541,9 +535,7 @@ namespace rocalution
                                                  0,
                                                  nrow + ncol,
                                                  rocprim::plus<IndexType>(),
-                                                 stream),
-                         __FILE__,
-                         __LINE__);
+                                                 stream));
 
         // Clear rocprim buffer
         free_hip(&rocprim_buffer);
@@ -634,9 +626,7 @@ namespace rocalution
                                                      0,
                                                      nrow + 1,
                                                      rocprim::plus<PointerType>(),
-                                                     stream),
-                             __FILE__,
-                             __LINE__);
+                                                     stream));
 
             // Allocate rocprim buffer
             allocate_hip(rocprim_size, &rocprim_buffer);
@@ -649,9 +639,7 @@ namespace rocalution
                                                      0,
                                                      nrow + 1,
                                                      rocprim::plus<PointerType>(),
-                                                     stream),
-                             __FILE__,
-                             __LINE__);
+                                                     stream));
 
             // Clear rocprim buffer
             free_hip(&rocprim_buffer);
