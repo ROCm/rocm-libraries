@@ -508,9 +508,8 @@ struct DeviceGroupedGemmMultipleD_Wmma_CShuffle_TileLoop_V3
         for(index_t i = 0; i < arg.group_count_; ++i)
         {
 
-            if((ck::is_gfx12_supported() || ck::is_gfx117_supported()) &&
-               !GridwiseGemm::CheckValidityAWaveTransfer(arg.gemm_descs_[i].M_,
-                                                         arg.gemm_descs_[i].K_))
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityAWaveTransfer(
+                                               arg.gemm_descs_[i].M_, arg.gemm_descs_[i].K_))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -520,9 +519,8 @@ struct DeviceGroupedGemmMultipleD_Wmma_CShuffle_TileLoop_V3
                 return false;
             }
 
-            if((ck::is_gfx12_supported() || ck::is_gfx117_supported()) &&
-               !GridwiseGemm::CheckValidityBWaveTransfer(arg.gemm_descs_[i].N_,
-                                                         arg.gemm_descs_[i].K_))
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityBWaveTransfer(
+                                               arg.gemm_descs_[i].N_, arg.gemm_descs_[i].K_))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {

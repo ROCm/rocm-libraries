@@ -39,7 +39,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_b_preshuffle(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx117__)
+#if defined(__gfx9__) || defined(__gfx12__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char
@@ -79,7 +79,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_b_preshuffle_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx117__)
+#if defined(__gfx9__) || defined(__gfx12__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         // Pass two lds pointer is the key to tell compiler that ds_read/write

@@ -709,8 +709,7 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
         {
             const auto& a = arg.gemm_kernel_args_[i].karg_;
 
-            if((ck::is_gfx12_supported() || ck::is_gfx117_supported()) &&
-               !GridwiseGemm::CheckValidityAWaveTransfer(a.M, a.K))
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityAWaveTransfer(a.M, a.K))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -720,8 +719,7 @@ struct DeviceGroupedGemm_Wmma_CShuffleV3 : public DeviceGroupedGemmSplitK<ALayou
                 return false;
             }
 
-            if((ck::is_gfx12_supported() || ck::is_gfx117_supported()) &&
-               !GridwiseGemm::CheckValidityBWaveTransfer(a.N, a.K))
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityBWaveTransfer(a.N, a.K))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
