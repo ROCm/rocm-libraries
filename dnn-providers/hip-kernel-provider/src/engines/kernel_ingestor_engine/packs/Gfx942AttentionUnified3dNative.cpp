@@ -243,8 +243,8 @@ std::optional<std::string> stridedKvRefusal(const data_objects::TensorAttributes
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
-    int64_t extent[SDPA_RANK];
-    int64_t stride[SDPA_RANK];
+    std::array<int64_t, SDPA_RANK> extent{};
+    std::array<int64_t, SDPA_RANK> stride{};
     for(uint32_t axis = 0; axis < SDPA_RANK; ++axis)
     {
         extent[axis] = dims->Get(axis);
@@ -951,7 +951,15 @@ double scoreKernel(const MatchContext& context,
     constexpr int64_t SEGMENT_CAP = 255;
     const int64_t segments = std::min(traits->numSegments, SEGMENT_CAP);
     const int64_t distance = std::min<int64_t>(std::abs(segments - target), SEGMENT_CAP);
-    const int64_t blockRank = traits->blockSize == 32 ? 0 : traits->blockSize == 64 ? 1 : 2;
+    int64_t blockRank = 2;
+    if(traits->blockSize == 32)
+    {
+        blockRank = 0;
+    }
+    else if(traits->blockSize == 64)
+    {
+        blockRank = 1;
+    }
     // Lexicographic (distance, segments, blockRank); smaller is better.
     const int64_t key = (distance * 256 + segments) * 4 + blockRank;
     const double base = traits->blockSize == PREFERRED_BLOCK_SIZE ? BLOCK_16_FLOOR : 0.0;
@@ -1271,7 +1279,7 @@ public:
         const auto& binding = state.binding;
         const auto& problem = state.problem;
         const auto& ws = state.workspace;
-        const hipStream_t stream = handle.getStream();
+        const auto stream = handle.getStream();
 
         if(workspace == nullptr)
         {

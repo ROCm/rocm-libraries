@@ -3,10 +3,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -64,7 +66,7 @@ struct AdmissionRow
     bool admitted64;
 };
 
-constexpr AdmissionRow ADMISSION_TABLE[] = {
+const std::vector<AdmissionRow> ADMISSION_TABLE = {
 #include "Gfx942AttentionUnified3dAdmissionTable.inc"
 };
 
@@ -150,9 +152,9 @@ TEST(TestGfx942AttentionUnified3dAdmission, KernelMatchAgreesPerBlockSize)
         {
             continue;
         }
-        const bool admitted[] = {row.admitted16, row.admitted32, row.admitted64};
-        const int64_t blocks[] = {16, 32, 64};
-        for(std::size_t i = 0; i < std::size(blocks); ++i)
+        const std::array<bool, 3> admitted = {row.admitted16, row.admitted32, row.admitted64};
+        const std::array<int64_t, 3> blocks = {16, 32, 64};
+        for(std::size_t i = 0; i < blocks.size(); ++i)
         {
             KernelSpec kernel;
             kernel.dtype = row.dtype == "bf16" ? "BF16" : "FP16";

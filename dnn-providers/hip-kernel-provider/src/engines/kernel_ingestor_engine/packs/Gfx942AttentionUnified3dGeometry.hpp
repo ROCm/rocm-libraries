@@ -62,7 +62,7 @@ inline constexpr int64_t GFX942_PRE_BUMP_CUS = 120;
  */
 inline std::optional<int64_t> gfx942TileSizeOverride(int64_t headSize, int64_t blockSize)
 {
-    if(!(headSize >= 128 && blockSize >= 32))
+    if(headSize < 128 || blockSize < 32)
     {
         return std::nullopt;
     }

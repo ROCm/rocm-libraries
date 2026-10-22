@@ -275,8 +275,8 @@ void runCase(const DispatchCase& c)
     size_t mismatches = 0;
     for(size_t i = 0; i < actual.size(); ++i)
     {
-        const float got = static_cast<float>(actual[i]);
-        const float want = static_cast<float>(expected[i]);
+        const auto got = static_cast<float>(actual[i]);
+        const auto want = static_cast<float>(expected[i]);
         if(!(std::abs(got - want) <= tolerance))
         {
             if(mismatches < 8)

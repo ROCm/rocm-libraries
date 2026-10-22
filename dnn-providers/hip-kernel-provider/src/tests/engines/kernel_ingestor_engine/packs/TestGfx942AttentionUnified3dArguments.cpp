@@ -55,7 +55,7 @@ struct ArgumentsRow
     std::array<ExpectedArgument, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT> arguments;
 };
 
-const ArgumentsRow ARGUMENTS_TABLE[] = {
+const std::vector<ArgumentsRow> ARGUMENTS_TABLE = {
 #include "Gfx942AttentionUnified3dArgumentsTable.inc"
 };
 
@@ -158,7 +158,7 @@ TEST(TestGfx942AttentionUnified3dArguments, MatchesRockeOnEveryGeneratedRow)
 TEST(TestGfx942AttentionUnified3dArguments, BshdAnchor)
 {
     const auto args
-        = gfx942StridedKvArguments({4, 8, 4096, 128}, {4096 * 8 * 128, 128, 8 * 128, 1});
+        = gfx942StridedKvArguments({4, 8, 4096, 128}, {4096LL * 8 * 128, 128, 8LL * 128, 1});
     EXPECT_EQ(args.strideBatchBytes, 2 * 4096 * 8 * 128);
     EXPECT_EQ(args.strideHeadBytes, 256);
     EXPECT_EQ(args.strideTokenBytes, 2048);
@@ -176,7 +176,7 @@ TEST(TestGfx942AttentionUnified3dArguments, WordsResolvePointersAndKeepScalars)
     const auto arguments = argumentsFor(ARGUMENTS_TABLE[1]);
     std::array<std::byte, 8> storage{};
     Gfx942Unified3dBufferAddresses addresses;
-    addresses.segmOutput = &storage[0];
+    addresses.segmOutput = storage.data();
     addresses.segmMax = &storage[1];
     addresses.segmExpsum = &storage[2];
     addresses.query = &storage[3];

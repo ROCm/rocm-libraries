@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -40,7 +41,7 @@ struct SplitRuleRow
     int64_t numSegments;
 };
 
-constexpr SplitRuleRow SPLIT_RULE_TABLE[] = {
+const std::vector<SplitRuleRow> SPLIT_RULE_TABLE = {
 #include "Gfx942AttentionUnified3dSplitRuleTable.inc"
 };
 

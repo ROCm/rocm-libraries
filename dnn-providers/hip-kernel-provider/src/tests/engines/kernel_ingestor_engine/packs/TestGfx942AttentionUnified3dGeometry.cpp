@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -87,7 +88,7 @@ TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
         std::optional<int64_t> override;
         int64_t tile;
     };
-    const Row rows[] = {
+    const std::array<Row, 9> rows = {{
         {64, 16, std::nullopt, 16},
         {64, 32, std::nullopt, 32},
         {64, 64, std::nullopt, 64},
@@ -97,7 +98,7 @@ TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
         {256, 16, std::nullopt, 16},
         {256, 32, 16, 16},
         {256, 64, 32, 32},
-    };
+    }};
     for(const auto& r : rows)
     {
         SCOPED_TRACE(::testing::Message() << "D=" << r.d << " block=" << r.block);
