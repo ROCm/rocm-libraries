@@ -20,10 +20,12 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 
+#include <algorithm>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <memory>
 #include <optional>
 
 namespace asm_sdpa_engine
@@ -1184,6 +1186,51 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
         builderOk.GetBufferPointer(), builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the vendored kernels
+    // cannot add the sink logit to the softmax denominator.
+    auto base = createSdpaFwdGraph();
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+
+    constexpr int64_t K_NUM_HEADS = 8;
+    int64_t sinkUid = 0;
+    for(const auto& tensor : graph.tensors)
+    {
+        sinkUid = std::max(sinkUid, tensor->uid + 1);
+    }
+    auto sink = std::make_unique<TensorAttributesT>();
+    sink->uid = sinkUid;
+    sink->name = "sink_token";
+    sink->data_type = DataType::FLOAT;
+    sink->dims = {1, K_NUM_HEADS, 1, 1};
+    sink->strides = {K_NUM_HEADS, 1, 1, 1};
+    graph.tensors.push_back(std::move(sink));
+    graph.nodes.front()->attributes.AsSdpaAttributes()->sink_token_tensor_uid = sinkUid;
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, withSink));
 }
 
 // =============================================================================
