@@ -1504,7 +1504,8 @@ TEST(TestGpuReferenceGraphExecutor, ReductionIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));

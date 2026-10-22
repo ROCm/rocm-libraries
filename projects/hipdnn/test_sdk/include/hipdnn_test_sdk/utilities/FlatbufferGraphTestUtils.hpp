@@ -3302,52 +3302,130 @@ inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
+// One of the two tensors of a single-node reduction graph built by createReductionGraph().
+struct ReductionTensorSpec
 {
+    // A dense, non-virtual tensor that is part of the graph.
+    static ReductionTensorSpec
+        dense(int64_t uid, std::vector<int64_t> dims, std::vector<int64_t> strides)
+    {
+        ReductionTensorSpec tensor;
+        tensor.uid = uid;
+        tensor.dims = std::move(dims);
+        tensor.strides = std::move(strides);
+        return tensor;
+    }
+
+    int64_t uid = 0;
+    std::vector<int64_t> dims;
+    // nullopt leaves the strides field out of the flatbuffer.
+    std::optional<std::vector<int64_t>> strides;
+    bool isVirtual = false;
+    bool isRuntimePassByValue = false;
+    std::optional<int64_t> raggedOffsetTensorUid;
+    // false leaves the tensor out of the graph, so the node's reference to `uid` dangles.
+    bool inGraph = true;
+};
+
+// Configuration for a single-node ReductionAttributes graph. The defaults describe a valid graph:
+// an fp32 ADD over the H and W axes of a packed NCHW tensor.
+struct ReductionGraphSpec
+{
+    static constexpr int64_t X_UID = 1;
+    static constexpr int64_t Y_UID = 2;
+
+    // `mode` over the axes where `yDims` is 1, with packed strides on both tensors.
+    static ReductionGraphSpec packed(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
+                                     const std::vector<int64_t>& xDims,
+                                     const std::vector<int64_t>& yDims,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                                     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        ReductionGraphSpec spec;
+        spec.mode = mode;
+        spec.x.dims = xDims;
+        spec.x.strides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        spec.y.dims = yDims;
+        spec.y.strides = hipdnn_data_sdk::utilities::generateStrides(yDims);
+        spec.dataType = dataType;
+        return spec;
+    }
+
+    // The data type of y: yDataType when set, otherwise the same as x.
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType() const
+    {
+        return yDataType.value_or(dataType);
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode
+        = hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD;
+    ReductionTensorSpec x = ReductionTensorSpec::dense(X_UID, {2, 3, 4, 5}, {60, 20, 5, 1});
+    ReductionTensorSpec y = ReductionTensorSpec::dense(Y_UID, {2, 3, 1, 1}, {3, 1, 1, 1});
+    // The data type of x, and of y unless yDataType overrides it.
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> yDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    bool isDeterministic = false;
+    bool overrideShapeEnabled = false;
+};
+
+// Builds a single-node ReductionAttributes graph from `spec`. Graph tensor uids are unique, so an
+// in-place spec (y.uid == x.uid) emits the x tensor only, and the node references it twice.
+inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphSpec& spec)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
-    const std::vector<int64_t> inDims = {4, 8};
-    const std::vector<int64_t> inStrides = {8, 1};
-    const std::vector<int64_t> outDims = {1, 8};
-    const std::vector<int64_t> outStrides = {8, 1};
+    const auto addTensor
+        = [&](const ReductionTensorSpec& tensor, const char* name, data_objects::DataType type) {
+              if(!tensor.inGraph)
+              {
+                  return;
+              }
+              tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+                  builder,
+                  tensor.uid,
+                  name,
+                  type,
+                  tensor.strides.has_value() ? &tensor.strides.value() : nullptr,
+                  &tensor.dims,
+                  tensor.isVirtual,
+                  data_objects::TensorValue::NONE,
+                  0,
+                  tensor.isRuntimePassByValue,
+                  tensor.raggedOffsetTensorUid));
+          };
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        1,
-        "input",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &inStrides,
-        &inDims));
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        2,
-        "output",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &outStrides,
-        &outDims));
+    addTensor(spec.x, "x", spec.dataType);
+    if(spec.y.uid != spec.x.uid)
+    {
+        addTensor(spec.y, "y", spec.outputDataType());
+    }
 
-    auto reductionAttr = hipdnn_flatbuffers_sdk::data_objects::CreateReductionAttributes(
-        builder, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD, 1, 2);
+    const auto reductionAttributes = data_objects::CreateReductionAttributes(
+        builder, spec.mode, spec.x.uid, spec.y.uid, spec.isDeterministic);
 
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "reduction",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes,
-        reductionAttr.Union()));
+    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
+        data_objects::CreateNodeDirect(builder,
+                                       "reduction",
+                                       spec.computeDataType,
+                                       data_objects::NodeAttributes::ReductionAttributes,
+                                       reductionAttributes.Union())};
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
-        builder,
-        "test",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &tensorAttributes,
-        &nodes);
-    builder.Finish(graphOffset);
+    const auto graph = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes,
+                                                       flatbuffers::nullopt,
+                                                       spec.overrideShapeEnabled);
+    builder.Finish(graph);
     return builder;
 }
 

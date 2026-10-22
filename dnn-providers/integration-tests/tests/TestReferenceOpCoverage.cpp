@@ -120,7 +120,8 @@ TEST(TestReferenceOpCoverage, DeviceReferenceDoesNotCoverBatchnormInference)
 // golden data is registered for validation against it.
 TEST(TestReferenceOpCoverage, CpuCoversReduction)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     const auto* graph = builder.GetBufferPointer();
     const auto size = static_cast<size_t>(builder.GetSize());
 

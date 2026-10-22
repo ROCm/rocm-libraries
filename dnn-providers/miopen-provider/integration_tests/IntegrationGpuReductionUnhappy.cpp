@@ -36,7 +36,7 @@ namespace
 // end to end through the frontend with only the MIOpen plugin loaded. The gate under test is
 // engines/plans/MiopenReductionChecks.cpp; the execute-time guard is MiopenReductionPlan.cpp.
 
-struct ReductionGraphSpec
+struct ReductionCase
 {
     std::string name;
     ReductionMode mode = ReductionMode::ADD;
@@ -52,11 +52,11 @@ struct ReductionGraphSpec
 
 // fp32 ADD over the two spatial axes of a packed NCHW tensor: the default MIOpen engine
 // serves it, so each decline case below differs from a supported graph in one property only.
-ReductionGraphSpec plainAdd(const std::string& name)
+ReductionCase plainAdd(const std::string& name)
 {
-    ReductionGraphSpec spec;
-    spec.name = name;
-    return spec;
+    ReductionCase reductionCase;
+    reductionCase.name = name;
+    return reductionCase;
 }
 
 struct ReductionGraph
@@ -66,31 +66,32 @@ struct ReductionGraph
     std::shared_ptr<TensorAttributes> y;
 };
 
-ReductionGraph makeReductionGraph(const ReductionGraphSpec& spec)
+ReductionGraph makeReductionGraph(const ReductionCase& reductionCase)
 {
     ReductionGraph result;
     result.graph.set_name("IntegrationGpuReductionUnhappy");
-    result.graph.set_compute_data_type(spec.computeType)
+    result.graph.set_compute_data_type(reductionCase.computeType)
         .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(spec.xType);
+        .set_io_data_type(reductionCase.xType);
 
-    const auto xStrides = spec.xStrides.empty() ? generateStrides(spec.xDims) : spec.xStrides;
+    const auto xStrides = reductionCase.xStrides.empty() ? generateStrides(reductionCase.xDims)
+                                                         : reductionCase.xStrides;
     result.x = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("x", spec.xType, spec.xDims, xStrides));
-    auto y = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("y", spec.yType, spec.yDims, generateStrides(spec.yDims)));
+        makeTensorAttributes("x", reductionCase.xType, reductionCase.xDims, xStrides));
+    auto y = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        "y", reductionCase.yType, reductionCase.yDims, generateStrides(reductionCase.yDims)));
 
     ReductionAttributes attrs;
-    attrs.set_mode(spec.mode).set_is_deterministic(spec.isDeterministic);
+    attrs.set_mode(reductionCase.mode).set_is_deterministic(reductionCase.isDeterministic);
 
     result.y = result.graph.reduction(result.x, y, attrs);
     result.y->set_output(true);
     return result;
 }
 
-std::vector<ReductionGraphSpec> getDeclinedCases()
+std::vector<ReductionCase> getDeclinedCases()
 {
-    std::vector<ReductionGraphSpec> cases;
+    std::vector<ReductionCase> cases;
 
     // MIOPEN_REDUCE_TENSOR_MUL_NO_ZEROS is commented out of miopenReduceTensorOp_t.
     auto mulNoZeros = plainAdd("MulNoZeros");
@@ -184,7 +185,7 @@ protected:
 };
 
 class IntegrationGpuReductionUnhappy : public MiopenOnlyFixture,
-                                       public ::testing::WithParamInterface<ReductionGraphSpec>
+                                       public ::testing::WithParamInterface<ReductionCase>
 {
 };
 
@@ -220,7 +221,7 @@ TEST_P(IntegrationGpuReductionUnhappy, DeclinesGraph)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuReductionUnhappy,
                          ::testing::ValuesIn(getDeclinedCases()),
-                         [](const ::testing::TestParamInfo<ReductionGraphSpec>& info) {
+                         [](const ::testing::TestParamInfo<ReductionCase>& info) {
                              return info.param.name;
                          });
 
@@ -266,8 +267,8 @@ TEST_F(IntegrationGpuReductionUnhappyEngine, DeterministicEngineIsNotApplicable)
 // legacy kernels take A and C as __restrict__ pointers.
 TEST_F(IntegrationGpuReductionUnhappyEngine, OverlappingBuffersRejectedAtExecute)
 {
-    const auto spec = plainAdd("PlainAdd");
-    auto reduction = makeReductionGraph(spec);
+    const auto reductionCase = plainAdd("PlainAdd");
+    auto reduction = makeReductionGraph(reductionCase);
 
     auto result = reduction.graph.build(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -279,8 +280,8 @@ TEST_F(IntegrationGpuReductionUnhappyEngine, OverlappingBuffersRejectedAtExecute
 
     // x is all ones, so every output element sums xCount / yCount ones.
     constexpr float INPUT_VALUE = 1.0f;
-    const auto xCount = elementCount(spec.xDims);
-    const auto yCount = elementCount(spec.yDims);
+    const auto xCount = elementCount(reductionCase.xDims);
+    const auto yCount = elementCount(reductionCase.yDims);
     const auto reducedCount = xCount / yCount;
     const auto expectedSum = static_cast<float>(reducedCount) * INPUT_VALUE;
 
