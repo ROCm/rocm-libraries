@@ -254,6 +254,30 @@ int64_t query_device_property(int device_id, hipDeviceProp_t& props)
                  props.maxThreadsPerBlock,
                  props.warpSize);
         hipblaslt_cout << buf;
+
+        // Same gate as ContractionSolution.cpp: gfx1200/gfx1201 kernels built with expert
+        // scheduling mode enable it in their main loop only if the driver reports support.
+        auto amdgpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(hardware);
+        if(amdgpu
+           && (amdgpu->processor == TensileLite::AMDGPU::Processor::gfx1200
+               || amdgpu->processor == TensileLite::AMDGPU::Processor::gfx1201))
+        {
+#if HIP_VERSION >= 70353390
+            int esm = 0;
+            if(hipDeviceGetAttribute(&esm, hipDeviceAttributeExpertSchedMode, device_id)
+               == hipSuccess)
+                hipblaslt_cout << "expert scheduling mode: " << (esm ? "on" : "off")
+                               << " (hipDeviceAttributeExpertSchedMode = " << esm << ")"
+                               << std::endl;
+            else
+                hipblaslt_cout << "expert scheduling mode: unknown (attribute query failed)"
+                               << std::endl;
+#else
+            hipblaslt_cout << "expert scheduling mode: off (HIP predates "
+                              "hipDeviceAttributeExpertSchedMode)"
+                           << std::endl;
+#endif
+        }
     }
 
     return device_count;
