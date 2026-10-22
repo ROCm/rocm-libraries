@@ -4,6 +4,7 @@
 // Host-only unit tests for the --verify_strict exit-code rule in hipblaslt_bench_options.
 // See README.md in this directory for the HostUnit/smoke_ naming.
 
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_bench_options.hpp"
 
 #include <gtest/gtest.h>
@@ -58,5 +59,51 @@ namespace
         EXPECT_EQ(exit_code(true, 2, 1), 1);
         EXPECT_EQ(exit_code(true, 0, -1), -1);
         EXPECT_EQ(exit_code(false, 0, 1), 1);
+    }
+
+    TEST_F(HostUnitBenchVerify, smoke_StrictEnablesChecksForDatafileArguments)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.norm_check                           = 0;
+        arg.allclose_check                       = 0;
+        hipblaslt_bench_options::verify_strict() = true;
+
+        hipblaslt_bench_options::apply_strict_verification(arg);
+
+        EXPECT_EQ(arg.norm_check, 1);
+        EXPECT_EQ(arg.allclose_check, 1);
+        EXPECT_FALSE(arg.norm_check_assert);
+    }
+
+    TEST_F(HostUnitBenchVerify, smoke_StrictCollectsFailuresInsteadOfAsserting)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.norm_check                           = 1;
+        arg.norm_check_assert                    = true;
+        hipblaslt_bench_options::verify_strict() = true;
+
+        hipblaslt_bench_options::apply_strict_verification(arg);
+
+        EXPECT_EQ(arg.norm_check, 1);
+        EXPECT_EQ(arg.allclose_check, 1);
+        EXPECT_FALSE(arg.norm_check_assert);
+    }
+
+    TEST_F(HostUnitBenchVerify, smoke_DefaultPreservesDatafileVerificationOptions)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.norm_check                           = 1;
+        arg.allclose_check                       = 0;
+        arg.norm_check_assert                    = true;
+        hipblaslt_bench_options::verify_strict() = false;
+
+        hipblaslt_bench_options::apply_strict_verification(arg);
+
+        EXPECT_EQ(arg.norm_check, 1);
+        EXPECT_EQ(arg.allclose_check, 0);
+        EXPECT_TRUE(arg.norm_check_assert);
     }
 }

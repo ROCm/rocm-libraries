@@ -72,6 +72,8 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
+    hipblaslt_bench_options::apply_strict_verification(arg);
+
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
 
@@ -1315,7 +1317,7 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp || hipblaslt_bench_options::verify_strict())
+    if(verify || ulp)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;

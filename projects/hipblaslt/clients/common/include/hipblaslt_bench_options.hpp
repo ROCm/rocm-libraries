@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <string>
 
+struct Arguments;
+
 // Process-wide CLI knobs that hipblaslt-bench reads directly instead of through
 // the YAML-backed Arguments struct.
 //
@@ -44,4 +46,5 @@ namespace hipblaslt_bench_options
     bool&        verify_strict();
     int64_t&     verification_failures();
     int          verification_exit_code(int ret);
+    void         apply_strict_verification(Arguments& arg);
 }
