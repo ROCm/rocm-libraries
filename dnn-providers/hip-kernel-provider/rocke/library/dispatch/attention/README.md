@@ -525,9 +525,10 @@ in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
 64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
 `hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
 64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
-kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
-matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
-and the decode engine uses the split count of `decode_launch_plan`, with one
+kernel of the same code object (RFC 0017 §15.1 `sources`). On dense graphs
+both native matchers apply `rdna_attention_use_decode`, so exactly one serves
+a problem (paged graphs always go to the prefill engine), and the decode
+engine uses the split count of `decode_launch_plan`, with one
 difference: more than one split always merges in the `merge` launch, never in
 the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
 would need zeroed every launch), so the hipDNN workspace holds only the split
