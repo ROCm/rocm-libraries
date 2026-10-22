@@ -2,8 +2,9 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two bundles,
-`rocKE/gfx950_attention_dense/` and `rocKE/gfx950_attention_unified_2d/` (their KDPs are stored in
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three bundles,
+`rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/` and
+`rocKE/gfx950_attention_unified_3d/` (their KDPs are stored in
 DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below), whose KDPs declare gfx950 only, so production packaging
 runs for a build whose GPU targets include gfx950 and that has rocKE enabled
 (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
