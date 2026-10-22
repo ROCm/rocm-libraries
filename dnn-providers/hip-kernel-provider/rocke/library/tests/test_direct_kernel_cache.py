@@ -833,3 +833,76 @@ def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
     assert not _rtc(plans)
     reasons = [r for i, r in rejected if i.algorithm == "direct_dgrad_mfma_rtc"]
     assert reasons and any(why in r for r in reasons), reasons[:3]
+
+
+@pytest.mark.parametrize(
+    "variant,problem",
+    [
+        (
+            "direct_wgrad_dw",
+            _problem(groups=192, cpg=1, kpg=1, stride=2, H=30, W=40),
+        ),
+        (
+            "direct_wgrad_dw_cols",
+            _problem(groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2, H=40, W=64),
+        ),
+        # A PAD 0 row: built only since the probe picks a width the kernel takes.
+        ("direct_wgrad_dw_cols", _problem(groups=4, cpg=1, kpg=1, PAD=0, W=34)),
+        (
+            "direct_wgrad_gather",
+            _problem(groups=1, cpg=3, kpg=24, stride=2, H=32, W=64),
+        ),
+        (
+            "direct_wgrad_gather",
+            _problem(groups=1, cpg=24, kpg=96, stride=2, H=30, W=40),
+        ),
+    ],
+)
+def test_folded_wgrad_plans_run_the_pass_then_the_fold(cache, variant, problem):
+    """A partial-slot wgrad is a two-step plan: the pass writes one slot per
+    partition into the scratch ``ws`` and the fold sums them into dW. Both
+    steps, and the scratch size, must agree on the partition and channel
+    counts of the problem actually launched."""
+    plans, _ = dks.direct_plans(cache, problem, "wgrad", _ARCH)
+    plans = [p for p in plans if p.identity.algorithm == variant]
+    assert plans
+    names = ("dy", "x", "dw", "ws")
+    ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
+    sizes = {n: 1 << 20 for n in names}
+    for plan in plans:
+        main, fold = plan.steps
+        assert main.buffers == ("dy", "x", "ws")
+        assert fold.buffers == ("ws", None, "dw")
+        spec = dks.make_spec(variant, problem, json.loads(plan.identity.knobs))
+        assert (main.grid, main.block) == spec.launch_geometry()
+        if variant == "direct_wgrad_gather":
+            channels, taps = spec.fold_channels(), spec.fold_taps()
+        else:
+            channels, taps = problem.groups, problem.KH * problem.KW
+        assert dict(fold.scalars) == {
+            "parts": spec.n_partitions(),
+            "channels": channels,
+        }
+        assert (
+            plan.workspaces
+            == {"ws": spec.n_partitions() * taps * channels * 4}
+            == {"ws": spec.workspace_bytes()}
+        )
+        # The fold's 64-output blocks cover every element of dW.
+        assert fold.grid[0] * 64 >= channels * taps
+        for step in plan.steps:
+            compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
+
+
+def test_small_c_depthwise_wgrad_binary_bakes_its_channel_count(cache):
+    """The small-C kernel bakes C, so a problem is only offered the binaries
+    built for its own channel count."""
+    problem = _problem(groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2, W=64)
+    plans, rejected = dks.direct_plans(cache, problem, "wgrad", _ARCH)
+    cols = [p for p in plans if p.identity.algorithm == "direct_wgrad_dw_cols"]
+    assert cols
+    assert all(json.loads(p.identity.knobs)["channels"] == 3 for p in cols)
+    assert any(
+        i.algorithm == "direct_wgrad_dw_cols" and "bakes C=" in why
+        for i, why in rejected
+    )
