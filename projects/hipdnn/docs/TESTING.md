@@ -46,7 +46,7 @@ Build options and presets: [Building hipDNN](./Building.md). Superbuild presets 
 cmake --build build --target hipdnn-standard-check
 ```
 
-`hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` exist for `quick`, `standard`, `comprehensive`, and `full`. They build and run the hipDNN core tests only; `hipdnn-check` runs all core tests. Provider and integration-tests targets are listed in [Building hipDNN: Superbuild Targets](./Building.md#superbuild-targets).
+`hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` exist for each category in [`test_categories.yaml`](../test_categories.yaml): the tiers `quick`, `standard`, `comprehensive` and `full`, plus `ffm-quick`, `unit` and `integration`. They build and run the hipDNN core tests only; `hipdnn-check` runs all core tests. Provider and integration-tests targets are listed in [Building hipDNN: Superbuild Targets](./Building.md#superbuild-targets).
 
 **One provider.** Build the provider's preset (for example `miopen-provider`), then run the shared integration suite against it:
 

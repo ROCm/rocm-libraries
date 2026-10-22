@@ -4,7 +4,7 @@ Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-22
 
 [Back to Testing](../TESTING.md)
 
-Gaps in hipDNN testing that the hipDNN team owns. Planned work is in the Roadmap: [Q3 2026](../Roadmap.md#testing), [Q4 2026](../Roadmap.md#testing-1) and [Q1 2027](../Roadmap.md#testing-2).
+Gaps in hipDNN testing that the hipDNN team owns. Planned work is in the Roadmap: [carried over from Q3 2026](../Roadmap.md#testing) and [Q4 2026 and beyond](../Roadmap.md#testing-1).
 
 ## Hardware coverage
 

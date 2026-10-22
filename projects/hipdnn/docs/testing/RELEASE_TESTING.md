@@ -24,7 +24,7 @@ The hipDNN team owns release testing: it runs the `full` tier, runs the benchmar
 - **`full` tier.** TheRock's prerelease flow selects `full`; that flow runs outside this repository. The team also runs `full` manually ahead of release branching. Every test must verify. A test that cannot run is skipped through a tracked issue, not dropped ([Flaky tests and skips](./TESTING_STRATEGY.md#flaky-tests-and-skips)). Tier definitions: [Test tiers](../TESTING.md#test-tiers).
 - **Performance corpus.** [dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) holds the benchmark corpus. Before a release the team runs the full corpus, ordered by importance of the op and by risk, meaning the ops changed most since the last release go first. Each release's results are compared with the previous release's, which is the proposed process for tracking performance. Approach: [Performance](./TESTING_STRATEGY.md#performance). Automation direction: [Roadmap](../Roadmap.md#benchmarking--performance-testing-2).
 - **Sanitizers.** Release sanitizer runs follow [Testing Strategy: Sanitizers](./TESTING_STRATEGY.md#sanitizers).
-- **Exploratory fuzzy mode (planned).** An exploratory mode that searches for uncovered cases within an affordable pre-release budget. See [Roadmap: Testing](../Roadmap.md#testing-2).
+- **Exploratory fuzzy mode (planned).** An exploratory mode that searches for uncovered cases within an affordable pre-release budget. See [Roadmap: Testing](../Roadmap.md#testing-1).
 
 ## Procedure
 
