@@ -20,8 +20,16 @@ registry default (with a WARN unless ``ignored``). The default spec carries
 One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
 ``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
-space are inherited from ``enumerate``). Kernels are emitted primary section first, then
-each ``also`` section in order. ``also`` is ``space: slice`` only.
+space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
+are emitted primary section first, then each ``also`` section in order. A ``space: full``
+section projects its own varying performance knobs; the catalog's projected knobs are the
+union over sections, in ``reduction.fields.performance`` order.
+
+``launches`` (optional) maps launch name to a ``kernel_source`` launch override and is
+copied onto every kernel: a rocKE builder returning a ``KernelModule`` names its primary
+kernel by ``{}`` and each companion by ``{role: <role>}``. A registry candidate that pairs
+its kernel with a reduce kernel (a ``reduce_spec`` beside the ``kernel_spec``) needs one,
+or the catalog would ship the kernel without the reduce the dispatcher launches after it.
 
 Exit 0 on success; 2 on unusable input. ``--strict`` makes exit 1 mean a gate refusal:
 kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classification) or a
@@ -59,6 +67,9 @@ from codegen.config_loader import (  # noqa: E402
 
 #: A projected value's Python type -> its KMD field type.
 _KMD_TYPES = {bool: "int", int: "int", float: "float", str: "string"}
+
+#: A launch name, as the generator and the descriptor loader accept it.
+_LAUNCH_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 #: The last ``{field}`` slot of a name template; projected knobs render after it.
 _LAST_SLOT = re.compile(r"(?<!\{)\{[^{}]+\}(?!\})")
@@ -128,6 +139,19 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             f"specialization.{key}",
             "a mapping",
         )
+    launches = manifest.get("launches")
+    _require(
+        launches is None
+        or (
+            isinstance(launches, dict)
+            and len(launches) >= 2
+            and all(isinstance(n, str) and _LAUNCH_NAME.fullmatch(n) for n in launches)
+            and all(isinstance(v, dict) for v in launches.values())
+        ),
+        path,
+        "launches",
+        "a mapping of two or more launch names ([a-z][a-z0-9_]*) to override mappings",
+    )
     decl = manifest["enumerate"]
     _require(isinstance(decl, dict), path, "enumerate", "a mapping")
     also = decl.get("also")
@@ -446,23 +470,17 @@ class Registry:
 
         self._sweep_level = walk.sweep_level
 
+        #: Whether the registry paired a kernel with a reduce kernel (``reduce_spec``),
+        #: which the catalog must then launch too (``launches``).
+        self.pairs_reduce = False
         #: The ``enumerate.also`` sections, each a `Registry` of its own.
         self.also: list = []
         if primary and decl.get("also"):
-            if self.space_kind != "slice":
-                raise EnumerationError(
-                    "enumerate.also needs enumerate.space: slice; a full space's "
-                    "performance knobs are projected across one registry candidate."
-                )
             for index, extra in enumerate(decl["also"]):
                 merged = {
                     **{k: decl[k] for k in self._INHERITED if k in decl},
                     **extra,
                 }
-                if merged.get("space", "slice") != "slice":
-                    raise EnumerationError(
-                        f"enumerate.also[{index}].space must be slice."
-                    )
                 section = Registry(manifest, merged)
                 if section.cell_fields != self.cell_fields:
                     raise EnumerationError(
@@ -578,6 +596,11 @@ class Registry:
                 f"pinned candidate must resolve to a kernel."
             )
         key = self.cell_key(cell)
+        if any(
+            getattr(item, "reduce_spec", None) is not None
+            for item in (base_wrapped, *wrapped)
+        ):
+            self.pairs_reduce = True
         for item in (base_wrapped, *wrapped):
             tuning_id = getattr(item, "tuning_id", None)
             if tuning_id:
@@ -854,15 +877,19 @@ def _section_rows(registry: Registry, classification: Classification) -> tuple:
 def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumeration:
     registry = registry or Registry(manifest)
     classification = Classification.from_manifest(
-        manifest, required=registry.space_kind == "full"
+        manifest,
+        required=any(s.space_kind == "full" for s in registry.sections()),
     )
-    rows, projected, held = _section_rows(registry, classification)
-    sections = [registry] * len(rows)
-    for section in registry.also:
-        extra, _, _ = _section_rows(section, classification)
+    rows, sections, varied, held_notes = [], [], set(), OrderedDict()
+    for section in registry.sections():
+        extra, section_projected, section_held = _section_rows(section, classification)
         rows.extend(extra)
         sections.extend([section] * len(extra))
+        varied.update(section_projected)
+        held_notes.update((h, None) for h in section_held)
     performance = classification.performance
+    projected = [n for n in performance if n in varied]
+    held = list(held_notes)
     accessors = {n: performance[n] for n in projected if performance[n]}
     return Enumeration(rows, projected, accessors, held, classification, sections)
 
@@ -998,6 +1025,10 @@ def build_config(
             },
             "metadata": metadata,
         }
+        if manifest.get("launches"):
+            kernel["kernel_source"]["launches"] = json.loads(
+                json.dumps(manifest["launches"])
+            )
         if is_default:
             kernel["default"] = True
         provenance = section.provenance(cell, ks)
@@ -1005,7 +1036,19 @@ def build_config(
             kernel["provenance"] = provenance
         kernels.append(kernel)
 
-    if registry.space_kind == "full" or registry.also:
+    unlaunched = [
+        s.pin.get("spec_id", "enumerate")
+        for s in registry.sections()
+        if s.pairs_reduce and not manifest.get("launches")
+    ]
+    if unlaunched:
+        raise EnumerationError(
+            f"the registry pairs {unlaunched[:3]} with a reduce kernel, but the manifest "
+            f"declares no 'launches': the catalog would ship the kernel without the "
+            f"reduce the dispatcher launches after it. Build both from one module "
+            f"builder and declare its launches."
+        )
+    if any(s.space_kind == "full" for s in registry.sections()) or registry.also:
         repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
         if repeated and registry.also:
             raise EnumerationError(
@@ -1076,18 +1119,32 @@ def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) ->
 
 
 def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
-    """Print the full space's varying fields and exact instance counts. With
-    ``strict``, return 1 when the current classification is over budget."""
+    """Print the full space's varying fields and exact instance counts, over every
+    ``enumerate`` section. With ``strict``, return 1 when the current classification
+    is over budget."""
     out = out or sys.stdout
     registry = Registry(manifest)
     classification = Classification.from_manifest(manifest, required=True)
-    cells = registry.cells()
-    spaces = [registry.space(cell) for cell in cells]
+    sections = [
+        (section, section.cells(), [section.space(c) for c in section.cells()])
+        for section in registry.sections()
+    ]
+    spaces = [space for _, _, section_spaces in sections for space in section_spaces]
     budget = classification.budget
 
     def count(performance) -> int:
-        selected = select_full(spaces, classification.with_performance(performance))
-        return sum(len(kept) for kept in selected.kept)
+        total = 0
+        for section, _, section_spaces in sections:
+            if section.space_kind == "full":
+                selected = select_full(
+                    section_spaces, classification.with_performance(performance)
+                )
+                total += sum(len(kept) for kept in selected.kept)
+            else:
+                total += sum(
+                    len(section.slice_of(base, specs)) for base, specs in section_spaces
+                )
+        return total
 
     def against(n: int) -> str:
         verdict = "OVER" if n > budget else "within"
@@ -1124,9 +1181,16 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
 
     arch = manifest["arch"]
     print(f"plan space: {manifest['engine']['name']} @ {arch}", file=out)
-    for fields, rows in registry.groups:
-        print(f"  cell group {fields}: {len(rows)} values", file=out)
-    print(f"  cells: {len(cells)}", file=out)
+    for section, cells, _ in sections:
+        if len(sections) > 1:
+            print(
+                f"  section {section.pin.get('spec_id', 'enumerate')} "
+                f"(space: {section.space_kind}):",
+                file=out,
+            )
+        for fields, rows in section.groups:
+            print(f"  cell group {fields}: {len(rows)} values", file=out)
+        print(f"  cells: {len(cells)}", file=out)
     print("  varying spec fields (value set; registry default):", file=out)
     if not values:
         print("    none", file=out)
