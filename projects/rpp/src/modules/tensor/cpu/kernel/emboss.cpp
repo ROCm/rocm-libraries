@@ -102,7 +102,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                computed using raw c code */
             /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
                Subtract overshoot of 2 floats to prevent buffer overrun. */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
+            Rpp32u reservedLength = (2 * padLength) + 2;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 14) * 14;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -180,7 +183,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -260,7 +266,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -337,7 +346,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                computed using raw c code */
             /* Note: AVX loop processes 42 floats per iteration but stores 48 floats.
             Subtract overshoot of 6 floats to prevent buffer overrun. */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 6) / 14) * 14;
+            Rpp32u reservedLength = (2 * padLength) + 6;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -440,7 +452,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                computed using raw c code */
             /* Note: AVX loop stores 16 values but advances by 12, creating 4-value overrun.
                Subtract 4 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
+            Rpp32u reservedLength = (2 * padLength) + 4;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -520,7 +535,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength * 3)) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -593,7 +611,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
                computed using raw c code */
             /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte
                overrun). Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 8) * 8;
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 8) * 8;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -686,7 +707,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -764,7 +788,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -846,7 +873,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -920,7 +950,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -1016,7 +1049,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -1101,7 +1137,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1187,7 +1226,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -1268,7 +1310,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -1370,7 +1415,10 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 40) * 40;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 40) * 40;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;

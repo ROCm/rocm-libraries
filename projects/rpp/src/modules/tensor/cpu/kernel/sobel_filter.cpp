@@ -176,7 +176,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 computed using raw c code */
                 /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
                Subtract overshoot of 2 floats to prevent buffer overrun. */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
+                Rpp32u reservedLength = (2 * padLength) + 2;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -275,7 +278,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 computed using raw c code */
                 /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
                Subtract overshoot of 2 floats to prevent buffer overrun. */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
+                Rpp32u reservedLength = (2 * padLength) + 2;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -365,7 +371,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 computed using raw c code */
                 /* Note: AVX loop processes 12 floats per iteration but stores 16 floats.
                Subtract overshoot of 4 floats to prevent buffer overrun. */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
+                Rpp32u reservedLength = (2 * padLength) + 4;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 12) * 12;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -463,7 +472,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 computed using raw c code */
                 /* Note: AVX loop processes 12 floats per iteration but stores 16 floats.
                Subtract overshoot of 4 floats to prevent buffer overrun. */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
+                Rpp32u reservedLength = (2 * padLength) + 4;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 12) * 12;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -549,7 +561,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                Rpp32u reservedLength = 2 * padLength;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 16) * 16;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -635,7 +650,10 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                Rpp32u reservedLength = 2 * padLength;
+                Rpp32u alignedLength = 0;
+                if (bufferLength > reservedLength)
+                    alignedLength = ((bufferLength - reservedLength) / 16) * 16;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;

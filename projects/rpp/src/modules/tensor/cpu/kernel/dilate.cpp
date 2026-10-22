@@ -210,7 +210,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
                Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -288,7 +291,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -362,7 +368,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -448,7 +457,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -561,7 +573,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
                Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -637,7 +652,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 18) * 18;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 18) * 18;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -713,7 +731,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 18) * 18;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 18) * 18;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -800,7 +821,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength * 3 number of columns from the beginning and end of each row will
                be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -908,7 +932,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
                Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) + 8;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -984,7 +1011,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1084,7 +1114,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - 2 * padLength * 3) / 12) * 12;
+            Rpp32u reservedLength = 2 * padLength * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1151,7 +1184,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - 2 * padLength * 3) / 12) * 12;
+            Rpp32u reservedLength = 2 * padLength * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -1235,7 +1271,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 T* srcPtrChannelLocal = srcPtrChannel;
                 T* dstPtrChannelLocal = dstPtrChannel;
@@ -1307,7 +1346,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 64) * 64;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 64) * 64;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1397,7 +1439,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1486,7 +1531,10 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 64) * 64;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 64) * 64;
             T* dstPtrChannels[3];
             for (int c = 0; c < 3; c++)
                 dstPtrChannels[c] = dstPtrChannel + c * dstDescPtr->strides.cStride;
@@ -1612,9 +1660,7 @@ RppStatus dilate_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             xmm_pxMaskRotate0To7, xmm_pxMaskRotate0To13, xmm_pxMaskRotate0To3,
                             xmm_pxMaskRotate0To9};
 #endif
-
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
@@ -1677,7 +1723,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -1751,7 +1800,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
 
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -1811,7 +1863,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -1883,7 +1938,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
                computed using raw c code */
             /* Note: AVX loop stores 48 bytes but advances by 42, creating 6-byte overrun.
                Subtract 6 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 6) / 14) * 14;
+            Rpp32u reservedLength = (2 * padLength) + 6;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 14) * 14;
 
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -1971,7 +2029,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
                computed using raw c code */
             /* Note: AVX loop stores 16 values but advances by 12, creating 4-value overrun.
                Subtract 4 to prevent buffer overrun at row boundaries in multithreading */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
+            Rpp32u reservedLength = (2 * padLength) + 4;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 T* srcPtrChannelLocal = srcPtrChannel;
                 T* dstPtrChannelLocal = dstPtrChannel;
@@ -2034,7 +2095,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength * 3)) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2097,7 +2161,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2169,7 +2236,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -2247,7 +2317,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 8) * 8;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 8) * 8;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -2309,7 +2382,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2387,7 +2463,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2458,7 +2537,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -2544,7 +2626,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 T* srcPtrChannelLocal = srcPtrChannel;
                 T* dstPtrChannelLocal = dstPtrChannel;
@@ -2612,7 +2697,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2691,7 +2779,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u reservedLength = 2 * padLength;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -2761,7 +2852,10 @@ static inline RppStatus dilate_float_host_tensor_impl(T* srcPtrImage, RpptDescPt
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 40) * 40;
+            Rpp32u reservedLength = (2 * padLength) * 3;
+            Rpp32u alignedLength = 0;
+            if (bufferLength > reservedLength)
+                alignedLength = ((bufferLength - reservedLength) / 40) * 40;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
