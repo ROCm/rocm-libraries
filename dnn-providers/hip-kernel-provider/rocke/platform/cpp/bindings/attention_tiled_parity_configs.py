@@ -329,7 +329,7 @@ GFX942_ATTENTION_TILED_2D = [
     },
 ]
 
-# idx20-29: runtime_layout (catalog geometry).
+# idx20-38: runtime_layout (catalog geometry; idx30-38 carry sinks).
 GFX942_ATTENTION_TILED_2D += [
     _rtl(64, 16, 1, "fp16"),
     _rtl(64, 32, 4, "bf16"),
@@ -341,6 +341,15 @@ GFX942_ATTENTION_TILED_2D += [
     _rtl(256, 32, 8, "bf16", num_warps=2, tile_size=16),
     _rtl(256, 64, 1, "fp16", num_warps=2, tile_size=16),
     _rtl(128, 32, 16, "bf16", num_kv_heads=4),
+    _rtl(64, 16, 2, "bf16", use_sinks=True),
+    _rtl(64, 32, 5, "fp16", use_sinks=True),
+    _rtl(64, 64, 7, "bf16", use_sinks=True),
+    _rtl(128, 16, 16, "fp16", use_sinks=True),
+    _rtl(128, 32, 2, "bf16", use_sinks=True),
+    _rtl(128, 64, 5, "fp16", use_sinks=True, tile_size=32),
+    _rtl(256, 16, 7, "bf16", use_sinks=True, num_warps=2),
+    _rtl(256, 32, 16, "fp16", use_sinks=True, num_warps=2, tile_size=16),
+    _rtl(256, 64, 2, "bf16", use_sinks=True, num_warps=2, tile_size=16),
 ]
 
 GFX950_ATTENTION_TILED_2D = [
@@ -1425,7 +1434,7 @@ GFX950_ATTENTION_TILED_2D = [
     },
 ]
 
-# idx72-81 of the emitters: runtime_layout (catalog geometry).
+# idx72-90 of the emitters: runtime_layout (catalog geometry; idx82-90 carry sinks).
 GFX950_ATTENTION_TILED_2D += [
     _rtl(64, 16, 1, "fp16", num_warps=2),
     _rtl(64, 32, 4, "bf16"),
@@ -1437,6 +1446,15 @@ GFX950_ATTENTION_TILED_2D += [
     _rtl(256, 32, 8, "bf16"),
     _rtl(256, 64, 1, "fp16"),
     _rtl(128, 32, 16, "bf16", num_kv_heads=4),
+    _rtl(64, 16, 2, "bf16", use_sinks=True, num_warps=2),
+    _rtl(64, 32, 5, "fp16", use_sinks=True),
+    _rtl(64, 64, 7, "bf16", use_sinks=True),
+    _rtl(128, 16, 16, "fp16", use_sinks=True),
+    _rtl(128, 32, 2, "bf16", use_sinks=True),
+    _rtl(128, 64, 5, "fp16", use_sinks=True),
+    _rtl(256, 16, 7, "bf16", use_sinks=True),
+    _rtl(256, 32, 16, "fp16", use_sinks=True),
+    _rtl(256, 64, 2, "bf16", use_sinks=True),
 ]
 
 GFX942_ATTENTION_TILED_3D = [

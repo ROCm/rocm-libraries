@@ -1078,7 +1078,6 @@ def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Option
             "spec sliding_window must be 0"
         )
     features = {
-        "use_sinks": spec.use_sinks,
         "has_softcap": spec.has_softcap,
         "use_alibi": spec.use_alibi,
         "use_qq_bias": spec.use_qq_bias,
@@ -1160,7 +1159,12 @@ def runtime_layout_num_warps(head_size: int, block_size: int) -> int:
 
 
 def runtime_layout_catalog_spec(
-    *, dtype: str, head_size: int, block_size: int, num_queries_per_kv: int
+    *,
+    dtype: str,
+    head_size: int,
+    block_size: int,
+    num_queries_per_kv: int,
+    use_sinks: bool = False,
 ) -> "UnifiedAttention2DTiledSpec":
     """The runtime-layout spec the hipDNN catalog compiles for one combination."""
     return UnifiedAttention2DTiledSpec(
@@ -1169,7 +1173,7 @@ def runtime_layout_catalog_spec(
         num_query_heads=num_queries_per_kv,
         num_kv_heads=1,
         dtype=dtype,
-        use_sinks=False,
+        use_sinks=use_sinks,
         sliding_window=0,
         has_softcap=False,
         num_warps=runtime_layout_num_warps(head_size, block_size),

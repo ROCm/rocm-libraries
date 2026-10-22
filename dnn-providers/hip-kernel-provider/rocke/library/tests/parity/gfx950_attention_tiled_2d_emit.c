@@ -1227,9 +1227,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
 
-    /* --- idx72-81: runtime_layout, every catalog (head_size, block_size) cell
-     *     with its catalog num_warps, GQA 1-16 and one num_kv_heads > 1 spec
-     *     (lockstep with the Python _rtl rows). */
+    /* --- idx72-90: runtime_layout, every catalog (head_size, block_size) cell
+     *     with its catalog num_warps, GQA 1-16, one num_kv_heads > 1 spec, then
+     *     the sink variants (lockstep with the Python _rtl rows). */
     case 72:
         rtl_spec(s, 64, 16, 1, 1, "fp16", false, 2);
         break;
@@ -1259,6 +1259,34 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         break;
     case 81:
         rtl_spec(s, 128, 32, 16, 4, "bf16", false, 4);
+        break;
+    /* idx82-90: the sink variants. */
+    case 82:
+        rtl_spec(s, 64, 16, 2, 1, "bf16", true, 2);
+        break;
+    case 83:
+        rtl_spec(s, 64, 32, 5, 1, "fp16", true, 4);
+        break;
+    case 84:
+        rtl_spec(s, 64, 64, 7, 1, "bf16", true, 4);
+        break;
+    case 85:
+        rtl_spec(s, 128, 16, 16, 1, "fp16", true, 4);
+        break;
+    case 86:
+        rtl_spec(s, 128, 32, 2, 1, "bf16", true, 4);
+        break;
+    case 87:
+        rtl_spec(s, 128, 64, 5, 1, "fp16", true, 4);
+        break;
+    case 88:
+        rtl_spec(s, 256, 16, 7, 1, "bf16", true, 4);
+        break;
+    case 89:
+        rtl_spec(s, 256, 32, 16, 1, "fp16", true, 4);
+        break;
+    case 90:
+        rtl_spec(s, 256, 64, 2, 1, "bf16", true, 4);
         break;
     default:
         return -1;

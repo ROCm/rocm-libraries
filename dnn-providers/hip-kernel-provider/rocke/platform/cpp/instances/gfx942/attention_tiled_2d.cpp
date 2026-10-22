@@ -165,7 +165,6 @@ bool rocke_gfx942_attention_tiled_2d_runtime_layout_reject_reason(
     if(s == NULL || !s->runtime_layout)
         return false;
     const rocke_attn2d_rtl_flag_t flags[] = {
-        {"use_sinks", s->use_sinks},
         {"has_softcap", s->has_softcap},
         {"use_alibi", s->use_alibi},
         {"use_qq_bias", s->use_qq_bias},
@@ -256,7 +255,6 @@ bool rocke_gfx950_attention_tiled_2d_runtime_layout_reject_reason(
         return true;
     }
     const rocke_attn2d_rtl_flag_t features[] = {
-        {"use_sinks", s->use_sinks},
         {"has_softcap", s->has_softcap},
         {"use_alibi", s->use_alibi},
         {"use_qq_bias", s->use_qq_bias},

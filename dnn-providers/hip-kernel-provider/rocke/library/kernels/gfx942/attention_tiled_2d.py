@@ -1116,7 +1116,6 @@ class UnifiedAttention2DTiledSpec:
 # Spec flags that bake a layout, need per-head side inputs, or select a
 # non-default pipeline; runtime_layout supports none of them.
 _RTL_INCOMPATIBLE_FLAGS = (
-    "use_sinks",
     "has_softcap",
     "use_alibi",
     "use_qq_bias",
@@ -1256,6 +1255,7 @@ def runtime_layout_catalog_spec(
     block_size: int,
     num_queries_per_kv: int,
     arch: str = "gfx942",
+    use_sinks: bool = False,
 ) -> UnifiedAttention2DTiledSpec:
     """The catalog spec for one (dtype, head_size, block_size, QPK) object."""
     geom = runtime_layout_geometry(head_size, block_size, arch=arch)
@@ -1271,7 +1271,7 @@ def runtime_layout_catalog_spec(
         num_query_heads=num_queries_per_kv,
         num_kv_heads=1,
         dtype=dtype,
-        use_sinks=False,
+        use_sinks=use_sinks,
         sliding_window=0,
         has_softcap=False,
         num_warps=num_warps,
