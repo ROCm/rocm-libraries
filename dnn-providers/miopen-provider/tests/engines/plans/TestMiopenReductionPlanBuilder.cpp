@@ -79,6 +79,8 @@ protected:
     }
 };
 
+// isApplicable() delegates to reduction_applicability::isSupported(), whose rules
+// TestMiopenReductionChecks pins one by one, so one accepted and one declined graph suffice here.
 TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsTrueForValidGraph)
 {
     const ReductionGraph graph{ReductionGraphSpec{}};
@@ -90,24 +92,6 @@ TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsFalseForMulNoZeros)
 {
     ReductionGraphSpec spec;
     spec.mode = ReductionMode::MUL_NO_ZEROS;
-    const ReductionGraph graph{spec};
-
-    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph.graph()));
-}
-
-TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsFalseForBfloat16)
-{
-    ReductionGraphSpec spec;
-    spec.dataType = DataType::BFLOAT16;
-    const ReductionGraph graph{spec};
-
-    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph.graph()));
-}
-
-TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled)
-{
-    ReductionGraphSpec spec;
-    spec.overrideShapeEnabled = true;
     const ReductionGraph graph{spec};
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph.graph()));

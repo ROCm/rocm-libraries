@@ -755,6 +755,13 @@ TEST_P(TestMiopenReductionChecksTensors, DeclinesZeroDim)
     EXPECT_TRUE(isDeclinedWith(_spec, reason("has a non-positive dim or stride at axis 1")));
 }
 
+TEST_P(TestMiopenReductionChecksTensors, DeclinesNegativeDim)
+{
+    tensorUnderTest().dims[1] = -1;
+
+    EXPECT_TRUE(isDeclinedWith(_spec, reason("has a non-positive dim or stride at axis 1")));
+}
+
 TEST_P(TestMiopenReductionChecksTensors, DeclinesZeroStride)
 {
     stridesUnderTest()[1] = 0;

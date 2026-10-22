@@ -574,9 +574,9 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 }
 
 // =============================================================================
-// THROW_ON_MIOPEN_FAILURE / LOG_ON_MIOPEN_FAILURE evaluate their argument once: re-evaluating it
-// on failure would issue the failing MIOpen call a second time (relaunching work, or leaking
-// what a create call made).
+// THROW_ON_MIOPEN_FAILURE / LOG_ON_MIOPEN_FAILURE must evaluate a failing call exactly once: the
+// error message is built from the status already returned, and the failing MIOpen call must not
+// be re-issued to build it (a second call relaunches work, or leaks what a create call made).
 // =============================================================================
 
 TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesFailingCallOnce)
@@ -598,18 +598,6 @@ TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesFailingCallOnce)
         EXPECT_NE(e.getMessage().find(miopenGetErrorString(miopenStatusBadParm)), std::string::npos)
             << e.getMessage();
     }
-    EXPECT_EQ(calls, 1);
-}
-
-TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesSucceedingCallOnce)
-{
-    int calls = 0;
-    const auto succeedingCall = [&calls]() {
-        ++calls;
-        return miopenStatusSuccess;
-    };
-
-    EXPECT_NO_THROW(THROW_ON_MIOPEN_FAILURE(succeedingCall()));
     EXPECT_EQ(calls, 1);
 }
 

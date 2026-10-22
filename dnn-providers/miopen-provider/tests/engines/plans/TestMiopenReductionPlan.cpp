@@ -66,8 +66,12 @@ private:
     MiopenReductionPlan _plan;
 };
 
+// Passes when fn throws a HipdnnPluginException with expectedStatus and, when given, a message
+// containing expectedMessagePart.
 template <typename Fn>
-::testing::AssertionResult throwsPluginException(const Fn& fn, hipdnnPluginStatus_t expectedStatus)
+::testing::AssertionResult throwsPluginException(const Fn& fn,
+                                                 hipdnnPluginStatus_t expectedStatus,
+                                                 const std::string& expectedMessagePart = "")
 {
     try
     {
@@ -75,12 +79,14 @@ template <typename Fn>
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        if(e.getStatus() == expectedStatus)
+        if(e.getStatus() == expectedStatus
+           && e.getMessage().find(expectedMessagePart) != std::string::npos)
         {
             return ::testing::AssertionSuccess();
         }
-        return ::testing::AssertionFailure() << "threw status " << e.getStatus() << " (expected "
-                                             << expectedStatus << "): " << e.getMessage();
+        return ::testing::AssertionFailure()
+               << "threw status " << e.getStatus() << " (expected " << expectedStatus
+               << ", message containing \"" << expectedMessagePart << "\"): " << e.getMessage();
     }
     return ::testing::AssertionFailure() << "did not throw";
 }
@@ -194,8 +200,9 @@ struct ExecutionCase
     const char* name;
     // The data type is set by the fixture.
     ReductionGraphSpec spec;
-    // Range of the uniformly distributed inputs. Modes that sum keep it positive, so the
-    // relative tolerance is not defeated by cancellation.
+    // Range of the uniformly distributed inputs. ADD and AVG keep it positive, so cancellation
+    // cannot defeat the relative tolerance, and MUL keeps it around 1, so the product stays a
+    // normal fp16 value.
     float low;
     float high;
 };
@@ -205,6 +212,15 @@ std::ostream& operator<<(std::ostream& os, const ExecutionCase& executionCase)
     return os << executionCase.name;
 }
 
+// MIOpen's legacy reduce picks its method from the output element count and the reduced length n
+// of each output (ReductionKernelConfigurator in projects/miopen/src/reducetensor.cpp, with the
+// BlockSize of 256 from reduce_tunables.hpp). Several outputs run DirectThreadWise up to
+// n = warpSize, DirectWarpWise up to 256, BlockWise up to 1024 and MultiBlock beyond, with one
+// block per 1024 inputs and at most 32 blocks per output. A single output runs BlockWise up to
+// n = 1024 and MultiBlock beyond, with one block per 256 inputs and no cap. MultiBlock reduces the
+// partials of each output in a second pass: DirectThreadWise up to warpSize / 4 of them,
+// DirectWarpWise up to 256, BlockWise beyond. The groups below run every method of both passes
+// that a wave64 device can reach.
 std::vector<ExecutionCase> getExecutionCases()
 {
     auto norm1OverChannelsNhwc
@@ -221,6 +237,7 @@ std::vector<ExecutionCase> getExecutionCases()
     addSelfOverlappingInput.x.strides = std::vector<int64_t>{1, 1};
 
     return {
+        // DirectThreadWise: several outputs, n <= 64.
         {"AddOverHwNchw",
          ReductionGraphSpec::packed(ReductionMode::ADD, {2, 3, 4, 5}, {2, 3, 1, 1}),
          0.5f,
@@ -241,20 +258,51 @@ std::vector<ExecutionCase> getExecutionCases()
          ReductionGraphSpec::packed(ReductionMode::AMAX, {4, 6}, {1, 6}),
          -2.0f,
          2.0f},
+        {"Norm1OverChannelsNhwc", norm1OverChannelsNhwc, -2.0f, 2.0f},
+        {"AddPaddedOutput", addPaddedOutput, 0.5f, 1.5f},
+        // Stride-1 axes side by side, so x reads most of its 11 stored elements several times.
+        {"AddSelfOverlappingInput", addSelfOverlappingInput, 0.5f, 1.5f},
+        // DirectWarpWise: several outputs, 64 < n <= 256.
+        {"Norm1OverHwWarpWise",
+         ReductionGraphSpec::packed(ReductionMode::NORM1, {2, 3, 12, 12}, {2, 3, 1, 1}),
+         -2.0f,
+         2.0f},
+        // BlockWise: a single output with n <= 1024, or several with 256 < n <= 1024.
         {"AvgFullReduction",
          ReductionGraphSpec::packed(ReductionMode::AVG, {2, 3, 4, 5}, {1, 1, 1, 1}),
          0.5f,
          1.5f},
-        {"Norm1OverChannelsNhwc", norm1OverChannelsNhwc, -2.0f, 2.0f},
         {"Norm2Rank1", ReductionGraphSpec::packed(ReductionMode::NORM2, {64}, {1}), -2.0f, 2.0f},
-        // Long enough for MIOpen's multi-block method, which keeps partials in the workspace.
+        {"Norm2OverHwBlockWise",
+         ReductionGraphSpec::packed(ReductionMode::NORM2, {2, 3, 24, 24}, {2, 3, 1, 1}),
+         -2.0f,
+         2.0f},
+        // MultiBlock over several outputs: n > 1024, with the partials kept in the workspace. 4
+        // blocks per output make the second pass DirectThreadWise. n = 33792 asks for 33, which
+        // are capped to 32, and makes it DirectWarpWise.
         {"AddMultiBlock",
          ReductionGraphSpec::packed(ReductionMode::ADD, {2, 4096}, {2, 1}),
          0.5f,
          1.5f},
-        {"AddPaddedOutput", addPaddedOutput, 0.5f, 1.5f},
-        // Stride-1 axes side by side, so x reads most of its 11 stored elements several times.
-        {"AddSelfOverlappingInput", addSelfOverlappingInput, 0.5f, 1.5f},
+        {"AddMultiBlockCapped",
+         ReductionGraphSpec::packed(ReductionMode::ADD, {2, 33792}, {2, 1}),
+         0.5f,
+         1.5f},
+        // MultiBlock to a single output, uncapped: 16, 32 and 384 blocks make the second pass
+        // DirectThreadWise, DirectWarpWise and BlockWise. AVG keeps the largest fp16 result in
+        // range.
+        {"Norm1MultiBlockSingleOutput",
+         ReductionGraphSpec::packed(ReductionMode::NORM1, {4096}, {1}),
+         -2.0f,
+         2.0f},
+        {"Norm2MultiBlockSingleOutput",
+         ReductionGraphSpec::packed(ReductionMode::NORM2, {8192}, {1}),
+         -2.0f,
+         2.0f},
+        {"AvgMultiBlockSingleOutput",
+         ReductionGraphSpec::packed(ReductionMode::AVG, {3, 256, 128}, {1, 1, 1}),
+         0.5f,
+         1.5f},
     };
 }
 
@@ -310,7 +358,7 @@ protected:
         forEachIndex(spec.y.dims, [&](const std::vector<int64_t>& index) {
             const auto actual = static_cast<double>(static_cast<float>(y.getHostValue(index)));
             const auto want = expected[yLinear];
-            EXPECT_NEAR(actual, want, TOLERANCE * std::max(1.0, std::abs(want)))
+            EXPECT_NEAR(actual, want, TOLERANCE * std::abs(want))
                 << "at output element " << yLinear;
             ++yLinear;
         });
@@ -318,9 +366,16 @@ protected:
 
     static constexpr DataType DATA_TYPE
         = std::is_same_v<T, half> ? DataType::HALF : DataType::FLOAT;
-    // Relative to max(1, |expected|). MIOpen accumulates in fp32 but rounds the output, and any
-    // multi-block partials, to T.
-    static constexpr double TOLERANCE = std::is_same_v<T, half> ? 4e-3 : 1e-4;
+    // Relative to |expected|. The reference is exact at this scale: it works in double on the
+    // values x holds after rounding to T. MIOpen computes in fp32, and on every path these cases
+    // take, each input passes through at most 64 fp32 roundings on its way to y (none for MIN_OP,
+    // MAX_OP and AMAX): DirectThreadWise chains up to warpSize = 64 inputs, the other methods
+    // chain a few per thread into trees of depth log2(256) = 8, and AVG's scaling or NORM2's
+    // square and square root add two. Summed terms all have one sign (see ExecutionCase::low),
+    // so the relative error stays below about 64 * 2^-24 = 3.8e-6, for which fp32 allows 1e-5.
+    // fp16 adds two roundings to T of at most 2^-11 each, of y and of the MultiBlock partials
+    // MIOpen keeps in the workspace as T: 2 * 2^-11 + 3.8e-6 = 9.8e-4 fits in 1e-3.
+    static constexpr double TOLERANCE = std::is_same_v<T, half> ? 1e-3 : 1e-5;
 
     std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
@@ -355,9 +410,9 @@ INSTANTIATE_TEST_SUITE_P(AllCases,
                          ::testing::ValuesIn(getExecutionCases()),
                          executionCaseName);
 
-// Workspace and device-buffer handling, for an fp32 ADD of x [2, 4, 4, 5] into y [2, 4, 1, 1]. Both
-// spans are multiples of 16 bytes, so placing one tensor directly after the other keeps the
-// default 16-byte tensor alignment.
+// Plan construction, workspace and device-buffer handling. SetUp builds the plan for an fp32 ADD
+// of x [2, 4, 4, 5] into y [2, 4, 1, 1]. Both spans are multiples of 16 bytes, so placing one
+// tensor directly after the other keeps the default 16-byte tensor alignment.
 class TestGpuMiopenReductionPlan : public ::testing::Test
 {
 protected:
@@ -401,6 +456,20 @@ protected:
     std::unique_ptr<Workspace<>> _workspace;
     std::unique_ptr<Workspace<>> _buffers;
 };
+
+// The gate declines modes with no miopenReduceTensorOp_t, so reaching the plan with one is a
+// provider bug, reported as an internal error rather than a bad parameter.
+TEST_F(TestGpuMiopenReductionPlan, ConstructorThrowsInternalErrorForModeWithoutMiopenOp)
+{
+    // Otherwise valid, so creating the tensors succeeds and the mode lookup is what throws.
+    auto spec = _spec;
+    spec.mode = ReductionMode::MUL_NO_ZEROS;
+
+    EXPECT_TRUE(
+        throwsPluginException([&] { const ReductionPlanUnderTest underTest(*_handle, spec); },
+                              HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                              "does not map to a miopenReduceTensorOp_t"));
+}
 
 TEST_F(TestGpuMiopenReductionPlan, GetWorkspaceSizeMatchesMiopenQuery)
 {
