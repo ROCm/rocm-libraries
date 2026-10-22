@@ -1297,7 +1297,11 @@ def test_paged_binding_preserves_window_and_launch_overrides(
     from kernels.common import attention_unified as au
 
     req, _, tensors = _retarget_binding_case(paged_binding_case, arch, page)
-    req = replace(req, sliding_window=17)
+    from dispatch.attention.common import AttentionMaskType
+
+    req = replace(
+        req, sliding_window=17, mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+    )
     result = dispatch_attention(req)
     tensors["problem"] = replace(tensors["problem"], sliding_window=17)
     calls = []
@@ -1752,6 +1756,7 @@ def test_paged_binding_rejects_raw_bias_stride(paged_binding_case, stage, value)
 def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeypatch):
     engine = pytest.importorskip("rocke_engine")
     from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import AttentionMaskType
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
@@ -1770,6 +1775,7 @@ def test_paged_feature_native_parity(arch, page, dtype, feature, flavor, monkeyp
         algorithm="paged_decode_t32",
         target_ctas=8,
         sliding_window=33,
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         softcap=1.5 if enabled("softcap") else 0.0,
         use_sinks=enabled("sinks"),
         use_alibi=enabled("alibi"),

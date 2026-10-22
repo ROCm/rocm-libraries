@@ -58,13 +58,14 @@ def validate_attention_request_types(request):
             "kv_block_size",
             "num_cus",
             "target_ctas",
+            "right_bound",
         ),
         require_attention_int,
         "request",
     )
     _fields(
         request,
-        ("window_left", "window_right"),
+        ("window_left", "window_right", "diagonal_alignment"),
         require_attention_int,
         "request",
         optional=True,
@@ -130,6 +131,7 @@ def validate_attention_problem_types(problem):
             "sliding_window",
             "num_cus",
             "target_ctas",
+            "right_bound",
             "num_kv_blocks",
         ),
         require_attention_int,
@@ -138,7 +140,15 @@ def validate_attention_problem_types(problem):
     _fields(problem, ("waves_per_eu",), require_attention_int, "problem", optional=True)
     _fields(
         problem,
-        ("use_sinks", "use_alibi", "use_qq_bias", "use_fp8", "fp8_fnuz"),
+        (
+            "use_sinks",
+            "use_alibi",
+            "use_qq_bias",
+            "use_fp8",
+            "fp8_fnuz",
+            "use_additive_bias",
+            "causal_top_left",
+        ),
         require_attention_bool,
         "problem",
     )
@@ -173,6 +183,33 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
     )
     if reducer:
         return
+    gfx950 = (
+        type(spec).__module__.endswith("gfx950.attention_tiled_3d")
+        or hasattr(spec, "use_additive_bias")
+        or hasattr(spec, "causal_top_left")
+        or hasattr(spec, "right_bound")
+    )
+    _fields(
+        spec,
+        ("use_additive_bias", "causal_top_left"),
+        require_attention_bool,
+        label,
+        allow_missing=not (complete and gfx950),
+    )
+    _fields(
+        spec,
+        ("right_bound",),
+        require_attention_int,
+        label,
+        allow_missing=not (complete and gfx950),
+    )
+    _fields(
+        spec,
+        ("kv_cache_policy",),
+        require_attention_string,
+        label,
+        allow_missing=not complete,
+    )
     _fields(
         spec,
         ("use_sinks", "has_softcap", "use_alibi", "use_qq_bias"),
@@ -181,7 +218,14 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
     )
     _fields(
         spec,
-        ("use_invariant_hoist", "use_wide_kv_load", "use_i64_kv_addr"),
+        (
+            "use_invariant_hoist",
+            "use_wide_kv_load",
+            "use_i64_kv_addr",
+            "use_decode_grid",
+            "use_kv_lds_swizzle",
+            "use_wave_page_id_load",
+        ),
         require_attention_bool,
         label,
         allow_missing=not complete,

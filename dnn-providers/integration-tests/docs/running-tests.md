@@ -151,7 +151,7 @@ Otherwise, you test the old tree.
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
-| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph. **C++ graph tests only**; bundles ignore it (their equivalent is `enforcement_level`). |
+| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph, without executing it or comparing outputs. A bundle is taken only to its applicability rung, whatever its `enforcement_level`, and **skips** when the engine declines. Needs `--test-engine` for bundles. Support claims are still enforced; a claim is left `accepted`, never `confirmed`, because nothing was verified. |
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
@@ -463,8 +463,11 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
   --output-on-failure`. This runs every registered lane and enforces claims. It
   does not run `dvc pull`, so golden comparisons there fall back to references and
   `hipdnn_golden_data_tests` registers nothing.
-- `.github/workflows/therock-ci-linux.yml` runs a bare `dvc pull` before
-  building, so golden data is present in those lanes.
+- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
+  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
+  default and was removed once it had gone unused; TheRock's multi-arch Linux
+  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
+  references in every CI lane today.
 
 ## Troubleshooting
 

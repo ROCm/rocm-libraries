@@ -38,12 +38,21 @@ def _shuffled_cache(torch, logical, page, *, poison_tail=True):
 @pytest.mark.parametrize("dim", [64, 128, 256])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_paged_tile_decode(
-    gpu, monkeypatch, page, dim, dtype, graph=False, default_stream=False
+    gpu,
+    monkeypatch,
+    page,
+    dim,
+    dtype,
+    graph=False,
+    default_stream=False,
+    tile=32,
+    transport="plain",
 ):
     torch, arch = gpu
     if arch not in ("gfx942", "gfx950"):
         pytest.skip("token-mapped loader targets gfx942/gfx950")
     from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import AttentionMaskType
     from kernels.common import attention_unified as au
 
     monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", str(int(graph)))
@@ -61,7 +70,11 @@ def test_paged_tile_decode(
     q = qh.cuda()
     # Legacy page-contained loaders require finite page padding: PV can read
     # masked V rows. New gather paths must safely handle NaN tails as well.
-    poison_tail = page < 32 or (arch == "gfx950" and page == 64)
+    poison_tail = (
+        tile == 32
+        and transport == "plain"
+        and (page < 32 or (arch == "gfx950" and page == 64))
+    )
     k, table = _shuffled_cache(torch, kh, page, poison_tail=poison_tail)
     v, _ = _shuffled_cache(torch, vh, page, poison_tail=poison_tail)
     cu = torch.arange(batch + 1, dtype=torch.int32).cuda()
@@ -80,6 +93,7 @@ def test_paged_tile_decode(
         dtype=dtype,
         kv_block_size=page,
         sliding_window=window,
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         target_ctas=8,
         algorithm="paged_decode_t32",
     )
@@ -87,7 +101,20 @@ def test_paged_tile_decode(
     from dispatch.attention.common import _problem
 
     problem = _problem(request)
-    assert result.spec.kernel_spec.tile_size == 32
+    runtime_spec = result.spec
+    if tile != 32 or transport != "plain":
+        from dataclasses import replace
+
+        runtime_spec = replace(
+            result.spec,
+            kernel_spec=replace(
+                result.spec.kernel_spec,
+                tile_size_override=tile,
+                use_kv_lds_swizzle=transport == "swizzle_page_ids",
+                use_wave_page_id_load=transport == "swizzle_page_ids",
+            ),
+        )
+    assert runtime_spec.kernel_spec.tile_size == tile
     stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
     torch.cuda.synchronize()
     before = set(au._3D_GRAPHS)
@@ -115,7 +142,7 @@ def test_paged_tile_decode(
                 softcap=0,
                 backend="3d",
                 stream=stream.cuda_stream,
-                tuning_spec=result.spec,
+                tuning_spec=runtime_spec,
             )
         stream.synchronize()
         expected = _reference(torch, qh, kh, vh, lengths, window)
@@ -147,7 +174,8 @@ def test_paged_tile_decode(
         )
         stream.synchronize()
         torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
-    # Exercise the dispatch binding as well as the direct explicit runtime.
+    # The candidate remains T32-only. Check its original spec after direct
+    # larger-tile launches so both runtime and public binding stay covered.
     binding = result.candidate.bind_torch(
         request,
         result.spec,
@@ -183,6 +211,7 @@ def test_paged_binding_metadata_replay(gpu, monkeypatch, page):
     if arch not in ("gfx942", "gfx950"):
         pytest.skip("token-mapped loader targets gfx942/gfx950")
     from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import AttentionMaskType
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
 
@@ -285,6 +314,7 @@ def _feature_reference(torch, q, k, v, lengths, window, features):
 )
 def test_paged_features_numeric(gpu, page, dtype, feature):
     from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention.common import AttentionMaskType
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
 
@@ -325,6 +355,7 @@ def test_paged_features_numeric(gpu, page, dtype, feature):
         algorithm="paged_decode_t32",
         target_ctas=8,
         sliding_window=window,
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         softcap=features["softcap"],
         use_sinks=enabled("sinks"),
         use_alibi=enabled("alibi"),
@@ -405,3 +436,18 @@ def test_paged_features_numeric(gpu, page, dtype, feature):
             del graph
         finally:
             execution.close()
+
+
+@pytest.mark.parametrize("page,tile", [(16, 64), (32, 64), (16, 128), (64, 128)])
+@pytest.mark.parametrize("transport", ["plain", "swizzle_page_ids"])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_gfx950_whole_page_tiles_numeric(
+    gpu, monkeypatch, page, tile, transport, dtype
+):
+    # Whole-page DMA requires finite physical page padding; token gather's
+    # NaN-tail contract is covered separately. Both use shuffled physical pages.
+    if gpu[1] != "gfx950":
+        pytest.skip("gfx950 whole-page loader")
+    test_paged_tile_decode(
+        gpu, monkeypatch, page, 64, dtype, tile=tile, transport=transport
+    )

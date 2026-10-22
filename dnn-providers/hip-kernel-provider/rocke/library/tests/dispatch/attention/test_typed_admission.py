@@ -331,7 +331,14 @@ def test_valid_shared_request_and_default_semantics(arch):
     result = dispatch_attention(req)
     assert result.spec is not None
     assert req.dims()["kv_block_size"] == 16
-    assert _tuning_problem(req).num_cus == 120
+    from rocke.helpers.split_k import _ARCH_NUM_CUS
+
+    if arch in _ARCH_NUM_CUS:
+        assert _tuning_problem(req).num_cus == _ARCH_NUM_CUS[arch]
+    else:
+        with pytest.raises(ValueError, match="pass num_cus"):
+            _tuning_problem(req)
+        assert _tuning_problem(replace(req, num_cus=120)).num_cus == 120
     p = _problem(req)
     assert p.waves_per_eu is None and p.num_kv_blocks == 0
     assert au.UnifiedAttentionProblem(**asdict(p)) == p

@@ -296,6 +296,7 @@ def test_valid_padded_bias_and_feature_dtypes(monkeypatch, arch, dtype, fp8):
             use_sinks=True,
             use_alibi=True,
             kv_storage_dtype="fp8e4m3" if fp8 else None,
+            kv_cache_policy="all" if fp8 else spec.kernel_spec.kv_cache_policy,
         ),
     )
     args.update(

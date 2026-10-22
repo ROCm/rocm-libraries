@@ -5,6 +5,7 @@
 
 from ._attention_kv_loader import AttentionKVLoaderKind, resolve_attention_kv_loader
 from ._attention_validation import (
+    require_attention_bool,
     require_attention_int,
     validate_attention_problem_types,
     validate_attention_3d_spec_types,
@@ -244,10 +245,11 @@ def validate_paged_loader_geometry(
             raise ValueError("3D kernel_spec.uses_paged_gather must be a bool")
     if values["kv_layout"] != "paged":
         raise ValueError("paged loader requires kernel_spec.kv_layout='paged'")
+    tiles = (16, 32, 64, 128) if tuning_spec.arch == "gfx950" else (16, 32, 64)
     for name, allowed in (
         ("block_size", (1, 16, 32, 64)),
-        ("tile_size", (16, 32, 64)),
-        ("tile_size_override", (16, 32, 64)),
+        ("tile_size", tiles),
+        ("tile_size_override", tiles),
     ):
         value = values[name]
         if name == "tile_size_override" and value is None:
@@ -265,8 +267,14 @@ def validate_paged_loader_geometry(
     expected_tile = override if override is not None else (32 if page == 1 else page)
     if tile != expected_tile:
         raise ValueError("3D kernel_spec.tile_size disagrees with tile_size_override")
+    if hasattr(spec, "use_i64_kv_addr"):
+        require_attention_bool(spec.use_i64_kv_addr, "kernel_spec.use_i64_kv_addr")
     loader_kind = resolve_attention_kv_loader(
-        tuning_spec.arch, values["kv_layout"], page, tile
+        tuning_spec.arch,
+        values["kv_layout"],
+        page,
+        tile,
+        use_i64_kv_addr=getattr(spec, "use_i64_kv_addr", False),
     )
     gather = loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
     if values["uses_paged_gather"] != gather:

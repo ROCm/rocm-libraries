@@ -386,70 +386,93 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
         self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
 
-    def _explicit_skip_case(self, arch, path):
+    def test_explicit_binding_rejects_additive_bias(self):
         candidate = next(
             c
             for c in attention_execution_candidates()
-            if c.name.startswith(f"attention_{arch}_u{path}_")
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
         )
-        req = _req(
-            arch,
-            algorithm=candidate.algorithm,
-            spec_id=candidate.spec_id,
-            seqlen_q=1 if path == "3d" else 1024,
-            kv_block_size=16,
-        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)
-        tensors = _paged_tensors()
-        tensors["problem"] = _problem(req)
-        if path == "3d":
-            tensors["q"] = _Tensor((1, 32, 128), "torch.bfloat16")
-            tensors["out"] = _Tensor((1, 32, 128), "torch.bfloat16")
-            tensors["cu_seqlens_q"] = _Tensor((2,), "torch.int32", [0, 1])
-        return candidate, req, spec, tensors
+        captured = {}
 
-    def test_explicit_binding_rejects_malformed_skip_before_validation(self):
-        for arch in ("gfx942", "gfx950"):
-            for path in ("2d", "3d"):
-                candidate, req, spec, tensors = self._explicit_skip_case(arch, path)
-                for value in (None, "False", "true", 0, 1, object()):
-                    with self.subTest(
-                        arch=arch, path=path, value=value
-                    ), mock.patch.object(
-                        attention_bindings, "validate_tuning_attention_tensors"
-                    ) as validate:
-                        with self.assertRaisesRegex(
-                            TypeError, "unsafe_skip_paged_value_validation"
-                        ):
-                            candidate.bound_torch(
-                                req,
-                                spec,
-                                tensors,
-                                unsafe_skip_paged_value_validation=value,
-                            )
-                        validate.assert_not_called()
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return "ok"
 
-    def test_explicit_binding_preserves_skip_defaults_and_structure(self):
-        for arch in ("gfx942", "gfx950"):
-            for path in ("2d", "3d"):
-                candidate, req, spec, tensors = self._explicit_skip_case(arch, path)
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=fake_run,
+        ):
+            tensors = _paged_tensors()
+            tensors["problem"] = replace(_problem(req), use_additive_bias=True)
+            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
                 candidate.bound_torch(req, spec, tensors)
-                tensors["seqused_k"] = _Tensor((1,), "torch.int32", [1025])
-                for option in ({}, {"unsafe_skip_paged_value_validation": False}):
-                    with self.subTest(
-                        arch=arch, path=path, option=option
-                    ), self.assertRaisesRegex(ValueError, "outside"):
-                        candidate.bound_torch(req, spec, tensors, **option)
-                candidate.bound_torch(
-                    req, spec, tensors, unsafe_skip_paged_value_validation=True
-                )
-                tensors["seqused_k"] = _Tensor((2,), "torch.int32", [1, 1])
-                with self.subTest(arch=arch, path=path), self.assertRaisesRegex(
-                    ValueError, "shape"
+
+            for name in (
+                "additive_bias",
+                "additive_bias_batch_stride",
+                "additive_bias_head_stride",
+                "additive_bias_sq_stride",
+            ):
+                with self.subTest(where="tensors", name=name):
+                    tensors = _paged_tensors()
+                    tensors[name] = 0
+                    with self.assertRaisesRegex(ValueError, f"{name} in tensors"):
+                        candidate.bound_torch(req, spec, tensors)
+
+            binding = candidate.bound_torch(req, spec, _paged_tensors())
+            with self.assertRaisesRegex(ValueError, "additive_bias in launch kwargs"):
+                binding.launch(additive_bias=object())
+            self.assertEqual(captured, {})
+
+            binding.launch()
+        self.assertFalse(any(k.startswith("additive_bias") for k in captured))
+
+    def test_runner_rejects_tuning_spec_bias_mismatch(self):
+        """``run_unified_attention_torch(tuning_spec=...)`` is a public entry too.
+        A spec and problem that disagree on ``use_additive_bias`` would misalign
+        the positional kernargs, so the runner refuses them before launch."""
+        from kernels.common import attention_unified as au
+
+        for prefix in (
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+            "attention_gfx950_u3d_splitkv_seg16_t1xb",
+        ):
+            candidate = next(
+                c for c in attention_execution_candidates() if c.name.startswith(prefix)
+            )
+            req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+            spec = candidate.select_spec(req)
+            bias_spec = replace(
+                spec, kernel_spec=replace(spec.kernel_spec, use_additive_bias=True)
+            )
+            problem = _problem(req)
+            for case, prob, tspec in (
+                (
+                    "bias_problem_plain_spec",
+                    replace(problem, use_additive_bias=True),
+                    spec,
+                ),
+                ("plain_problem_bias_spec", problem, bias_spec),
+            ):
+                with self.subTest(candidate=prefix, case=case), mock.patch.object(
+                    au, "_resolve_attention_arch", return_value="gfx950"
                 ):
-                    candidate.bound_torch(
-                        req, spec, tensors, unsafe_skip_paged_value_validation=True
-                    )
+                    with self.assertRaisesRegex(ValueError, "disagrees with problem"):
+                        au.run_unified_attention_torch(
+                            problem=prob,
+                            q=None,
+                            k=None,
+                            v=None,
+                            out=None,
+                            cu_seqlens_q=None,
+                            seqused_k=None,
+                            softmax_scale=1.0,
+                            block_table=None,
+                            softcap=0.0,
+                            tuning_spec=tspec,
+                        )
 
 
 if __name__ == "__main__":
