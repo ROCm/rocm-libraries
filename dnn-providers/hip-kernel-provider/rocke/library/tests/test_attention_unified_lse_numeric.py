@@ -459,7 +459,9 @@ def test_malformed_lse_buffer_is_refused_before_launch(case):
         bias = dict(additive_bias=storage, additive_bias_sq_stride=0)
     out = torch.full_like(q, float("nan"))
     aliased = ("cu_seqlens_q", "seqused_k", "block_table", "additive_bias")
-    with pytest.raises(ValueError, match=f"lse overlaps {case}" if case in aliased else "lse"):
+    with pytest.raises(
+        ValueError, match=f"lse overlaps {case}" if case in aliased else "lse"
+    ):
         run_unified_attention_torch(
             problem=problem,
             q=q,
