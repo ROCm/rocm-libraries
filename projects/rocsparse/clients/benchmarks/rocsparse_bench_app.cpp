@@ -26,6 +26,7 @@
 #include "rocsparse_bench.hpp"
 #include "rocsparse_random.hpp"
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
