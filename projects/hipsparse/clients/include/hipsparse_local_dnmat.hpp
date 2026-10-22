@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  Dense matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnMat
 {
@@ -44,11 +46,8 @@ public:
             = hipsparseCreateDnMat(&descr, rows, cols, ld, values, valueType, order);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroyDnMat(descr);
-                descr = nullptr;
-            }
+            std::cerr << "hipsparseCreateDnMat failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -57,7 +56,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroyDnMat(descr);
+            const hipsparseStatus_t status = hipsparseDestroyDnMat(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnMat destructor");
+            }
         }
     }
 
@@ -69,5 +72,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseDnMatDescr_t. A leftover hipsparseDestroyDnMat(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalDnMat&) = delete;
 
 #endif // HIPSPARSE_LOCAL_DNMAT_HPP
