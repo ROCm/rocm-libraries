@@ -1246,7 +1246,9 @@ class UnifiedAttentionReduceTiledSpec:
     waves_per_eu: Optional[int] = None
     # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
     #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
+    #   still differs from before LSE existed: the masked-segment merge fix below
+    #   applies with LSE on or off.)
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
