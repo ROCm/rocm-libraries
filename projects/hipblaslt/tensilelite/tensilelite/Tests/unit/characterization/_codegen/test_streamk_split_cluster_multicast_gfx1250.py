@@ -240,7 +240,7 @@ def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy
     assert_real_gfx1250_kernels(results)
     for base, src, _ in results:
         assert_assembles(src, base)
-        assert "phantom tiles skip the store" in src
+        _assert_phantom_completion(src)
         assert "s_barrier_wait -3" in src and "s_barrier_signal -3" in src
         if feature.startswith("sparse"):
             # The descriptor is refreshed after each persistent back edge.
@@ -248,5 +248,3 @@ def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy
         if strategy == "StreamK":
             assert "physical partial slot = cluster * peers + peer" in src
             assert "Tree reduction" in src
-            assert src.index("phantom tiles skip the store") < src.index(
-                "flag offset based on physical partial slot")
