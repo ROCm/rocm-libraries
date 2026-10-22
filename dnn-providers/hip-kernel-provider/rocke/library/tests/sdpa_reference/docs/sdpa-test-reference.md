@@ -6,11 +6,13 @@ SPDX-License-Identifier: MIT
 # SDPA correctness with a pinned rocKE reference
 
 The gfx942 lane runs current rocKE against a previously qualified rocKE kernel
-on the GPU. It covers the eight base parameterizations in
-[`test_attention_dense_gfx942_numeric.py`](../library/tests/test_attention_dense_gfx942_numeric.py):
+on the GPU. It covers the base parameterizations in
+[`test_attention_dense_gfx942_numeric.py`](../../test_attention_dense_gfx942_numeric.py):
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
-The gfx950 lane adds seven causal base configurations, described below.
-The gfx1151 and gfx1201 lanes each add eight standalone FP16 WMMA cases.
+The gfx950 lane adds causal base configurations, described below.
+The gfx1151 and gfx1201 lanes add standalone FP16 WMMA cases.
+From the rocKE root, `python library/tests/run_sdpa_reference.py cases --arch <arch>`
+lists an architecture's enrolled cases.
 A gfx1200 adapter is available for qualification; its archive and installation
 enrollment remain pending on-device qualification.
 For gfx942/gfx950, current execution uses the same dispatch factory and `run_attention_dense_torch`
@@ -27,9 +29,9 @@ passed through the kernel ABI. It preserves the original maximum absolute error
 tolerances (`0.02` for fp16, `0.04` for bf16); it does not claim identical Torch
 random inputs or bitwise equivalence between NumPy and Torch's reference outputs.
 
-See [GPU attention coverage](gpu-attention-test-coverage.md#the-eight-required-cases)
-for the exact eight configurations and broader gaps, and the
-[strategy and extension guide](gpu-ci-pinned-rocke-test-reference-plan.md) for adding
+See [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md#the-gfx942-required-cases)
+for the gfx942 configurations and broader gaps, and the
+[strategy and extension guide](../../reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md) for adding
 architectures and operations. This is not a drop-in replacement for the skipped
 Torch suites: it covers equivalent base configurations with different samples,
 not their full shape, structural, or interoperability coverage.
@@ -41,10 +43,30 @@ GPU random generator. Their intended distribution is similar, but their sample
 values and generation path differ. Multiple executions repeat this fixed corpus;
 they do not add random seeds. Generator incompatibility fails the digest check.
 
+## Dense replay compatibility
+
+The [shared compatibility and baseline policy](../../reference_common/docs/README.md#kernel-arguments-and-compatibility)
+explains why the current kernel and the frozen reference can have different
+signatures, and why a kernel update does not automatically replace its baseline.
+
+New gfx942/gfx950 qualifications record the `dense-v2` replay ABI and freeze the
+runtime shape and indexing scalars alongside the exported signature. gfx942
+uses the production runtime-argument helper, including head counts and the
+persistent grid's fast-division parameters. Older dense sources expose only
+batch and sequence-length scalars. Qualification rejects a signature with
+unbound arguments before writing a certificate. Replay binds fresh HIP pointers,
+uses the enrolled case's scale, and restores the frozen runtime scalars.
+
+Existing bundles without an ABI marker, or with `dense-v1`, retain their original
+shape-binding behavior. Their authenticated contents and numerical gates do not
+change. The gfx942 qualification adapter also supports the published baseline's
+older `dense_spec_for_request` API, selecting persistence explicitly through its
+request; current sources continue through the tuning API.
+
 ## gfx950 base dense cohort
 
-The gfx950 lane covers the seven base configurations from
-[`test_attention_dense_gfx950_numeric.py`](../library/tests/test_attention_dense_gfx950_numeric.py),
+The gfx950 lane covers the base configurations from
+[`test_attention_dense_gfx950_numeric.py`](../../test_attention_dense_gfx950_numeric.py),
 using an independent gfx950 bundle and lock. All cases are causal, B=1,
 Sq=Sk=512, Hq=16, with the default softmax scale:
 
@@ -62,7 +84,7 @@ The adapter uses named production tuning candidates, matching the original
 numeric tests. It selects wide DMA only for persistent, causal D128 cases.
 Grid kernels take runtime shape scalars; persistent kernels bake
 the shape. The existing replay worker supports both ABIs for this cohort.
-The input recipe, independent oracle, absolute tolerances, and margins below
+The input recipe, independent oracle, absolute tolerances, and budget policy below
 apply to both architectures. Error bounds and output identities are qualified
 separately on each architecture.
 
@@ -78,16 +100,17 @@ error bounds ranged from 0.000981060 to 0.001102120; BF16 bounds ranged from
 0.007636342 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
 and compiler identity are in the authenticated manifest. No tolerance was widened.
 
-Torch-free source verification passed all seven comparisons and three failure
-controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry also passed all ten
-checks with the source tree moved aside. The installed shared and SDPA host
-suites passed 82 and 26 tests respectively. This validates Python reference
-installation and execution, not native provider execution or final artifact splitting.
+Torch-free source verification of that bundle passed all seven comparisons
+and three failure controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry
+also passed all ten checks with the source tree moved aside. The installed shared
+and SDPA host suites passed 82 and 26 tests respectively. This validates Python
+reference installation and execution, not native provider execution or final
+artifact splitting.
 
 The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
 `45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. The archive was uploaded to DVC, downloaded into a new empty cache, and
 authenticated against the committed lock. Follow the
-[reference workflow](gpu-reference-workflow.md) for future updates.
+[reference workflow](../../reference_common/docs/gpu-reference-workflow.md) for future updates.
 
 ## Standalone WMMA coverage
 
@@ -95,9 +118,9 @@ The gfx1151 and gfx1201 bundles each cover the complete Cartesian product below,
 with B=2, Sq=Sk=64, Hq=4, contiguous `[B,S,H,D]` tensors, default SDPA scale,
 and a nonpersistent grid:
 
-| Dtype | Head dimension | KV heads | Mask | Cases per target |
-|---|---|---|---|---:|
-| FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal | 8 |
+| Dtype | Head dimension | KV heads | Mask |
+|---|---|---|---|
+| FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal |
 
 Both adapters use the production `WmmaFmhaFwdSpec` and builder from
 `kernels.gfx1151.wmma_fmha_fwd`, selecting the target's MMA implementation.
@@ -132,14 +155,14 @@ stay under concrete `gfx1200` or `gfx1201` installation directories so TheRock's
 artifact splitter and downloader select them correctly. A `gfx120X-all` job
 requests artifacts for both processors. A pinned suite executes only when that
 processor's archive is enrolled and its hardware is present.
-See the [reference workflow](gpu-reference-workflow.md#generic-code-objects-and-processor-qualification)
+See the [reference workflow](../../reference_common/docs/gpu-reference-workflow.md#generic-code-objects-and-processor-qualification)
 for qualification and publication.
 
 | Processor | Compiler target | Status |
 |---|---|---|
-| gfx1151 | gfx1151 | Existing eight-case archive published and enrolled |
+| gfx1151 | gfx1151 | Existing archive published and enrolled |
 | gfx1200 | gfx12-generic | Adapter and host tests ready; GPU qualification, archive, and installation enrollment pending |
-| gfx1201 | gfx12-generic | Replacement eight-case archive qualified, published, and enrolled |
+| gfx1201 | gfx12-generic | Replacement archive qualified, published, and enrolled |
 
 The gfx1201 replacement uses committed baseline
 `32bcaf47b7482ef815ce997808979e50cfa36323`, which contains generic WMMA support.
@@ -147,16 +170,17 @@ Qualification used Python 3.12.3, NumPy 2.5.4, and COMGR LLVM 23 on gfx1201,
 without Torch. Three baseline executions per case reproduced identical output
 digests. Independent maximum absolute error bounds ranged from 0.000332024 to
 0.001056340 (rounded upward); the FP16 tolerance remains `0.02`, with the
-existing `0.001` reserved margin. All eight archived code objects were inspected
+then-current `0.001` reserved margin (retained in that published bundle).
+All eight archived code objects were inspected
 and target `amdgcn-amd-amdhsa--gfx12-generic`.
 
 Source and installed verification each passed all eight comparisons and three
 failure controls, with zero selected GPU skips. The installed shared, SDPA, and
 convolution host suites passed 96, 84, and 63 tests respectively, with the source
 tree moved aside. All eight publication/install contract checks also passed.
-Installation used the lightweight Python CMake harness described in the testing
-guide. This qualification does not establish execution on gfx1200, automatic
-unified attention dispatch, or native provider execution.
+Installation used a CMake installation of the Python reference suites without
+native binaries. This qualification does not establish execution on gfx1200,
+automatic unified attention dispatch, or native provider execution.
 
 The published replacement archive has MD5 `8635f6cf21e20ef3bba89054f54ce952`
 and size 2,596,336 bytes. A fresh anonymous download matched the committed DVC
@@ -183,14 +207,14 @@ bundle. It preserves `gfx1200` instead of using its `gfx12-generic` catalog name
 TheRock owns the family expansion; the reference selector consumes its concrete
 target list without maintaining separate family aliases. If that list is absent,
 the suite selects by physical processor alone. See the shared
-[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+[processor-selection rules](../../reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 
 For a job with that target list:
 
 | Hardware and requested suite | Behavior |
 |---|---|
 | gfx1200 running `rocke_sdpa_gpu_gfx1201_pytest` | pytest exits with code 77; CTest reports **Skipped** |
-| gfx1201 running `rocke_sdpa_gpu_gfx1201_pytest` | Runs all eight comparisons and three failure controls; missing or invalid reference data fails |
+| gfx1201 running `rocke_sdpa_gpu_gfx1201_pytest` | Runs every enrolled comparison and the three failure controls; missing or invalid reference data fails |
 | No GPU, or a processor outside the requested target list, running the gfx1201 suite | Fails with a required-GPU error |
 | gfx1200 with an explicit `--rocke-reference-arch gfx1200` request | Requires its own qualified bundle and lock; missing data or a gfx1201 certificate fails |
 
@@ -204,7 +228,7 @@ execution requires newly compiled and qualified code objects, so the generic
 gfx1201 replacement has a new DVC object and matching lock. Its publication is
 required for CI to fetch this branch's new pointer even when the runner will
 later skip the gfx1201 suite. See the
-[publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
+[publication workflow](../../reference_common/docs/gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
 
 ## Accuracy contract
 
@@ -213,17 +237,18 @@ live, and `N` is the current result:
 
 ```text
 norm(N - R) <= norm(N - O) + norm(O - R) <= comparison_limit + baseline_bound
-comparison_limit + baseline_bound + margin <= original_tolerance
-margin > 0
+comparison_limit + baseline_bound < original_tolerance
 ```
 
 The norm is the maximum absolute error across every output element. Qualification
 measures a conservative bound on `norm(O - R)`. Both subtractions promote values
 to float64 first, and the maximum difference is rounded upward. Budget allocation
 uses exact rational arithmetic and rounds the comparison limit downward. The
-reserved margin is `0.001` for fp16 and `0.002` for bf16. A baseline without
-positive remaining headroom fails qualification; the original tolerance cannot
-be increased by its manifest.
+comparison limit is strictly below the exact remainder `T - B`; this preserves
+the original strict threshold without a fixed percentage reserve. A baseline
+with `B >= T` fails qualification; the original tolerance cannot be increased
+by its manifest. When Torch is enabled, B is the maximum baseline error bound
+against NumPy and both recorded Torch answers.
 
 Qualification records input and old-output digests. CI executes the old kernels
 and requires those same digests before using the offline bounds. An unknown old
@@ -240,10 +265,69 @@ lane. Every current repetition must pass. Baseline and current workers are reuse
 across cases but remain separate processes with isolated imports and caches.
 
 This is a sufficient accuracy gate within the existing Torch-derived limits,
-not a tight no-regression threshold. Accepted current-to-independent error is at
-most `0.019` for fp16 and `0.038` for bf16 after reserving the margins. A result
+not a tight no-regression threshold. Accepted current-to-independent error is
+strictly below `0.02` for fp16 and `0.04` for bf16. A result
 can change within that budget and still pass; an improvement can also fail the
 comparison to the baseline and require independent diagnosis.
+
+New qualifications record `budget_policy: "max-reference-bound-v1"` and a zero
+legacy `margin` field. Storage remains tensor-free schema 2. Existing bundles
+without this policy marker keep their authenticated 5% reserve and comparison
+limits; loading them does not silently widen their gate. Requalify and publish
+through the normal workflow to adopt the new policy. The reserve did not add
+input, shape, dtype, or architecture coverage.
+
+## Optional Torch reference agreement during qualification
+
+The original gfx942/gfx950 dense numeric tests use Torch FP32 SDPA. The default
+pinned qualification instead measures B against NumPy float64 on a portable,
+quantized input corpus. These references and input samples are not interchangeable.
+Existing published certificates do not acquire Torch evidence retroactively.
+
+To measure their agreement on exactly the qualified inputs, add
+`--torch-reference` (CPU) or `--torch-reference cuda` (ROCm GPU) to the offline
+`qualify` command. Both Torch float64 and float32 SDPA answers are checked, using
+explicit GQA expansion and the original tests' Python `1/sqrt(D)` scale. NumPy
+retains the float32 ABI scale. The measured gap therefore includes that scale
+representation difference. Torch outputs retain their computation dtype; they
+are not rounded to FP16/BF16 output storage. The default Torch SDPA backend
+selection is used, and its device, version, precision settings, checker digest,
+answer digests, and conservative disagreement bounds are recorded in the locked
+manifest. Requesting unavailable Torch or a missing/wrong ROCm GPU fails.
+
+For each enabled reference R_j, measure the pinned output directly:
+
+```text
+B = max_j upper_bound(norm(O - R_j))
+C < T - B
+D <= C implies norm(N - R_j) <= D + B < T for every enabled R_j
+```
+
+The measured NumPy–Torch gap is retained as diagnostic evidence, not compared
+against an arbitrary margin. A large baseline-to-reference error reduces the
+comparison budget; `B >= T` fails qualification. This preserves the same
+reference coverage without a fixed 5% reserve. Conservative arithmetic and
+authenticated replay are still required.
+
+CPU evidence applies only to the recorded CPU Torch answers. It does not qualify
+the original GPU Torch backend, a different Torch version, different inputs, or
+arbitrary future Torch outputs. Use `cuda` on the corresponding ROCm processor
+for GPU reference evidence. This comparison also does not prove exact-real
+arithmetic accuracy or accuracy no-regression. Existing Torch tests remain useful.
+
+A reference-only audit can run without compiling or executing rocKE:
+
+```bash
+PYTHONPATH=library/tests:platform/python python -m sdpa_reference.torch_reference \
+  --arch gfx942 --device cpu --output oracle-agreement.json
+python -m pytest library/tests/sdpa_reference/check_torch_reference.py -q
+```
+
+This audit is not baseline qualification and cannot replace a published bundle.
+To include the evidence in a certificate, rerun complete-cohort qualification
+with the option, then follow the shared candidate verification and publication
+workflow. Ordinary replay does not import Torch or run the independent references;
+the optional checker is not copied into the frozen replay payload.
 
 ## Developer verification
 
@@ -251,7 +335,7 @@ Use a Python environment outside the source tree with `numpy`, `pytest`, and
 `pytest-timeout`. A working HIP runtime and COMGR are required for current kernel
 compilation. Set `ROCM_PATH` or the runtime's library overrides when needed, and
 select `ROCKE_LLVM_FLAVOR` to match COMGR as described in
-[`platform/AGENTS.md`](../platform/AGENTS.md). Use an environment without Torch for reference verification. The shared worker
+[`platform/AGENTS.md`](../../../../platform/AGENTS.md). Use an environment without Torch for reference verification. The shared worker
 launcher blocks Torch imports in both baseline and current interpreters.
 
 From the rocm-libraries root, fetch the existing archive with DVC installed:
@@ -278,10 +362,10 @@ python library/tests/run_sdpa_reference.py verify --arch gfx942 \
   --current-root .
 ```
 
-This command requires gfx942 and runs all eight cases, with two old and two
-current executions per case. It exits unsuccessfully on a missing case, missing
-GPU, qualification failure, or comparison failure. It never generates independent
-answers or fetches a reference during verification.
+This command requires gfx942 and runs every case that `cases --arch gfx942`
+lists, with two old and two current executions per case. It exits unsuccessfully
+on a missing case, missing GPU, qualification failure, or comparison failure. It
+never generates independent answers or fetches a reference during verification.
 
 The same cases can be run through pytest:
 
@@ -312,7 +396,7 @@ GPU correctness results.
 
 ## Offline qualification and baseline promotion
 
-Follow [Adding or updating a pinned GPU reference](gpu-reference-workflow.md)
+Follow [Adding or updating a pinned GPU reference](../../reference_common/docs/gpu-reference-workflow.md)
 for the authoritative snapshot, qualification, candidate verification, DVC
 publication, and installation procedure. Select operation `sdpa`; qualification
 uses the independent NumPy SDPA oracle and this guide's numerical contract.
@@ -342,10 +426,11 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    prepares the Python/runtime dependencies. The existing provider runner selects
    CTest entries using the provider's category YAML. The
    `rocke_sdpa_gpu_<arch>_pytest` entries run the same pytest file used locally:
-   eight numerical cases for gfx942, gfx1151, and gfx1201, and seven for gfx950,
-   plus three negative checks on each architecture. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
-   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
-   Both host entries run independently of GPU bundles.
+   one numerical comparison for each case the architecture enrolls, plus three
+   negative checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks
+   and compares each installed bundle's cases with the enrolled cohort. Neither
+   host entry requires a GPU bundle.
 
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
@@ -365,7 +450,7 @@ ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
 The GPU entry is installed when a published bundle is configured. On matching
 hardware, a missing bundle or failed qualification check is an error. Other
 processors skip only when allowed by the
-[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs);
+[processor-selection rules](../../reference_common/docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs);
 a missing GPU or a processor outside the requested targets fails a requested suite.
 
 Further SDPA cohorts, runtime-shape reuse, sliding windows, and non-default
@@ -389,7 +474,7 @@ failure on a missing bundle. CTest supplies these options. Architecture-lane
 selection still uses the detected GPU and CI's concrete `AMDGPU_TARGETS`.
 Bundle and lock overrides require explicit operation and architecture options.
 A lock override also requires a bundle path. For candidate qualification and
-verification, follow the [reference workflow](gpu-reference-workflow.md).
+verification, follow the [reference workflow](../../reference_common/docs/gpu-reference-workflow.md).
 These options select what pytest reads; they do not change what CMake installs.
 CMake packages the standard archives for all operation/architecture pairs in
 `platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
@@ -401,13 +486,13 @@ those suites or verify an explicit candidate bundle and lock.
 ## Bundle contents and provenance
 
 The gfx942 DVC pointer is
-[`reference_bundles/sdpa/gfx942.tar.gz.dvc`](../library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc).
+[`reference_bundles/sdpa/gfx942.tar.gz.dvc`](../../reference_bundles/sdpa/gfx942.tar.gz.dvc).
 Its schema-2 bundle contains:
 
 ```text
 manifest.json
 qualification-lock.json
-payload/cases/<case-id>/kernel.hsaco
+payload/cases/<case-key>/kernel.hsaco
 payload/runtime/rocke/
 payload/runner/sdpa_reference/
 ```
@@ -417,6 +502,13 @@ independent-reference digests, bounds, launch metadata, source/compiler/target
 identity, Python/NumPy versions, and payload hashes. The source lock authenticates
 the manifest; the bundled lock alone is not the trust anchor. Temporary NPZ files
 can be used for worker transport, but tensor files are rejected from the archive.
+
+Each case's manifest key also names its payload directory. Loading matches
+entries to the enrolled cases by their full recorded case definition, not by
+key, and requires exactly one entry per enrolled case and no others. New
+qualifications key cases by id, such as `fp16-d128-h16-kv4-default-causal-b1-s512`.
+The published bundles keep their original keys, which omit batch (`-b`) and
+sequence length (`-s`); they load and replay unchanged.
 
 The gfx942 baseline source revision is
 `dd77374194a3ea1a7258cd54f87af6747b6362a5`; manifest SHA-256 is
@@ -472,4 +564,4 @@ Legacy Torch-dependent tests still skip in the supplied CI environment, as does
 an optional jsonschema check. Passing the selected CTests does not establish
 execution of those skipped numerical cohorts.
 
-Archive packaging uses the [packing and publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
+Archive packaging uses the [packing and publication workflow](../../reference_common/docs/gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
