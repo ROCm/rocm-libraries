@@ -1,13 +1,6 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
 ArchitectureName: gfx1151
 CUCount: null
 DefaultSolution:
-  ISA:
-  - 11
-  - 5
-  - 1
-  Valid: true
   1LDSBuffer: 0
   ActivationAlt: false
   ActivationFuncCall: true
@@ -22,9 +15,7 @@ DefaultSolution:
   AssertSummationElementMultiple: 1
   BufferLoad: true
   BufferStore: true
-  ClusterDim:
-  - 1
-  - 1
+  ClusterDim: [1, 1]
   ClusterLocalRead: 1
   CompactLoopStore: false
   ConvertAfterDS: false
@@ -114,10 +105,8 @@ DefaultSolution:
   PrefetchLocalRead: 1
   PreloadKernArgs: true
   SFCWGM:
-  - - 1
-    - 1
-  - - 1
-    - 1
+  - [1, 1]
+  - [1, 1]
   ScheduleGROverBarrier: -1
   ScheduleGlobalRead: 1
   ScheduleIterAlg: 3
@@ -156,9 +145,7 @@ DefaultSolution:
   TemporalHintMXSB: 0
   TemporalHintMetadata: 0
   TemporalHintWS: 0
-  ThreadTile:
-  - 4
-  - 4
+  ThreadTile: [4, 4]
   TransposeLDS: -1
   TransposeLDSMetadata: -1
   UnrollLoopSwapGlobalReadOrder: 0
@@ -178,19 +165,15 @@ DefaultSolution:
   WaveSeparateGlobalReadMetadata: 0
   WaveSplitK: false
   WavefrontSize: -1
-  WorkGroup:
-  - 16
-  - 16
-  - 1
+  WorkGroup: [16, 16, 1]
   WorkGroupMapping: 8
   WorkGroupMappingXCC: 1
   WorkGroupMappingXCCGroup: -1
   WorkGroupReduction: false
-DeviceNames:
-- Device 1536
+DeviceNames: [Device 1536]
 ExactLogic: null
 IndexOrder: null
-LibraryType: FreeSize
+LibraryType: Prediction
 MinimumRequiredVersion: 5.0.0
 PerfMetric: DeviceEfficiency
 ProblemType:
@@ -225,34 +208,17 @@ ProblemType:
   Index01A: 0
   Index01B: 1
   Index1: 1
-  IndexAssignmentsA:
-  - 3
-  - 0
-  - 2
-  IndexAssignmentsB:
-  - 3
-  - 1
-  - 2
-  IndexAssignmentsLD:
-  - 4
-  - 5
-  - 6
-  - 7
-  IndexAssignmentsMetadata:
-  - 3
-  - 0
-  - 2
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexAssignmentsLD: [4, 5, 6, 7]
+  IndexAssignmentsMetadata: [3, 0, 2]
   IndexUnroll: 3
   IndexUnrollA: 0
   IndexUnrollB: 0
   IndexUnrollM: 0
-  IndicesBatch:
-  - 2
-  IndicesFree:
-  - 0
-  - 1
-  IndicesSummation:
-  - 3
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
   Int4EncodingA: Signed
   MXBlockA: 0
   MXBlockB: 0
@@ -271,11 +237,8 @@ ProblemType:
   NumIndicesSummation: 1
   OperationType: GEMM
   OutputAmaxD: false
-  ScaleBlockSizesA:
-  - 32
-  - 64
-  - 128
-  ScaleZeroPointA: true
+  ScaleBlockSizesA: [32, 64, 128]
+  ScaleZeroPointA: false
   SetConstStrideA: []
   SetConstStrideB: []
   SetConstStrideBias: []
@@ -339,18 +302,9 @@ Solutions:
   GuaranteeNoPartialMetadata: true
   HalfPLRA: false
   HalfPLRB: false
-  ISA:
-  - 11
-  - 5
-  - 1
+  ISA: [11, 5, 1]
   InitCIterWmma: 0
-  InternalSupportParams:
-    SupportCustomStaggerU: true
-    SupportCustomWGM: true
-    SupportStreamKPerTileExtraIters: false
-    SupportUserGSU: true
-    UseSFC: false
-    UseUniversalArgs: true
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
   LSCA: 64
@@ -403,25 +357,15 @@ Solutions:
   LoopUnroll: 64
   MFMA_BF16_1K: 0
   MIArchVgpr: true
-  MIBlock:
-  - 16
-  - 16
-  - 16
-  - 1
-  - 1
-  - 1
+  MIBlock: [16, 16, 16, 1, 1, 1]
   MIInputPerThread: 16
   MIInputPerThreadA: 16
   MIInputPerThreadB: 16
   MIInputPerThreadMetadata: 16
   MIOutputVectorWidth: 1
   MIRegPerOut: 1
-  MIWaveGroup:
-  - 2
-  - 2
-  MIWaveTile:
-  - 2
-  - 5
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 5]
   MIWaveTileA: 2
   MIWaveTileB: 5
   MIWaveTileMetadata: 0
@@ -438,11 +382,7 @@ Solutions:
   MatrixInstK: 16
   MatrixInstM: 16
   MatrixInstN: 16
-  MatrixInstruction:
-  - 16
-  - 16
-  - 16
-  - 1
+  MatrixInstruction: [16, 16, 16, 1]
   MaxLDS: 65536
   MbskPrefetchMethod: 0
   MfmaInitCVgprs: false
@@ -466,21 +406,17 @@ Solutions:
   NumWaveSplitK: 1
   NumWaves: 4
   OptNoLoadLoop: 0
-  PackedC0IdxChars:
-  - I
-  PackedC0IndicesX:
-  - 0
-  PackedC1IdxChars:
-  - J
-  PackedC1IndicesX:
-  - 1
+  PackedC0IdxChars: [I]
+  PackedC0IndicesX: [0]
+  PackedC1IdxChars: [J]
+  PackedC1IndicesX: [1]
   PrefetchGlobalRead: 2
   PrefetchLocalRead: 0
   PreloadKernArgs: false
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 0
   SolutionIndex: 0
-  SolutionNameMin: Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM64_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA1151_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPMn1_LRVW16_LWPMn1_MIAV1_MIWT2_5_MXLIBL_MXSFNS_MO64_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR2_PLR0_PKA0_SGROB0_SIA0_SS1_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+  SolutionNameMin: Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM64_BL1_BS1_CD1_1_CLR0_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA1151_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPMn1_LRVW16_LWPMn1_MIAV1_MIWT2_5_MXLIBL_MXSFNS_MO64_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR2_PLR0_PKA0_SGROB0_SIA0_SS1_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
   SourceSwap: true
   StaggerU: 0
   StaggerUStride: 128
@@ -490,9 +426,7 @@ Solutions:
   SubGroup1: 32
   SubGroupA: 4
   SubGroupB: 32
-  ThreadTile:
-  - 1
-  - 1
+  ThreadTile: [1, 1]
   ThreadTile0: 16
   ThreadTile1: 5
   ThreadTileA: 16
@@ -516,14 +450,8 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 32
-  WorkGroup:
-  - 32
-  - 4
-  - 1
-  WorkspaceCheck:
-  - 4
-  - 0
-  - 1
+  WorkGroup: [32, 4, 1]
+  WorkspaceCheck: [4, 0, 1]
   _DepthU: 64
   _DepthUA: 64
   _DepthUB: 64
@@ -558,5 +486,4 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  WorkGroupMapping: 1
 TileSelectionIndices: null

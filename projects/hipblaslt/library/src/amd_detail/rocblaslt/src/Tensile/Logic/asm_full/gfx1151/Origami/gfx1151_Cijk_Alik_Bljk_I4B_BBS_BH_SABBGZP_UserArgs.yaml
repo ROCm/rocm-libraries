@@ -173,7 +173,7 @@ DefaultSolution:
 DeviceNames: [Device 1536]
 ExactLogic: null
 IndexOrder: null
-LibraryType: FreeSize
+LibraryType: Prediction
 MinimumRequiredVersion: 5.0.0
 PerfMetric: DeviceEfficiency
 ProblemType:
