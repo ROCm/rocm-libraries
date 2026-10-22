@@ -641,3 +641,90 @@ def test_subset(run, capsys, change, rc):
 def test_subset_excludes_strict_spec(run):
     kdp = _kdp([_entry("k0")])
     assert run(kdp, kdp, "--subset", "--strict-spec") == 2
+
+
+def _multi_entry(name: str = "k0") -> dict:
+    """A multi-launch entry: `sources` in place of `kernel_source`, at UKD 1.1."""
+    entry = _entry(name)
+    source = entry.pop("kernel_source")
+    entry["version"] = "1.1"
+    entry["sources"] = {
+        "segment": source,
+        "reduce": {
+            "kind": "rocke",
+            "source": "kernels/gfx950/attention_dense.py",
+            "builder": "build_reduce",
+            "spec": {"num_splits": 4},
+            "role": "reduce",
+        },
+    }
+    return entry
+
+
+class TestMultiLaunchEntries:
+    """An entry naming its kernels in `sources` is compared launch by launch: an
+    entry key that read only `kernel_source` would call two different
+    multi-launch catalogs the same."""
+
+    def test_equal_multi_launch_catalogs_are_the_same(self, run):
+        assert run(_kdp([_multi_entry()]), _kdp([_multi_entry()]), "--ignore-ids") == 0
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            lambda e: e["sources"]["reduce"].update(role="merge"),
+            lambda e: e["sources"]["reduce"].update(builder="build_other"),
+            lambda e: e["sources"]["reduce"]["spec"].update(num_splits=8),
+            lambda e: e["sources"]["segment"]["spec"].update(block_n=32),
+            lambda e: e["sources"].pop("reduce"),
+            lambda e: e["sources"].update(merge=e["sources"].pop("reduce")),
+            lambda e: e.update(
+                kernel_source=e.pop("sources")["segment"], version="1.0"
+            ),
+        ],
+        ids=[
+            "role",
+            "builder",
+            "second_launch_spec",
+            "first_launch_spec",
+            "dropped_launch",
+            "renamed_launch",
+            "collapsed_to_kernel_source",
+        ],
+    )
+    @pytest.mark.parametrize("flags", [(), ("--subset",), ("--strict-spec",)])
+    def test_a_change_to_any_launch_is_caught(self, run, edit, flags):
+        shipped = _kdp([_multi_entry()])
+        regenerated = json.loads(json.dumps(shipped))
+        edit(regenerated["kernelDescriptors"][0])
+        assert run(shipped, regenerated, "--ignore-ids", *flags) == 1
+
+    def test_a_spec_field_only_a_launch_carries_is_keyed_by_default(self, run):
+        """The shipped catalog's spec fields decide what is compared; a field only
+        its second launch carries must be among them."""
+        shipped = _kdp([_multi_entry()])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"][0]["sources"]["reduce"]["spec"] = {
+            "num_splits": 8
+        }
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+
+    def test_two_entries_with_one_set_of_launches_are_duplicates(self, capsys):
+        kdp = _kdp([_multi_entry("a"), _multi_entry("b")])
+        assert len(catalog_diff.find_duplicate_specs(kdp)) == 1
+
+    def test_an_entry_with_both_spellings_is_refused(self, run):
+        entry = _multi_entry()
+        entry["kernel_source"] = entry["sources"]["segment"]
+        assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2
+
+    @pytest.mark.parametrize(
+        "sources",
+        [[], "x", None, {"a": "x"}, {"a": {"spec": []}}],
+        ids=["list", "string", "null", "launch_not_object", "spec_not_object"],
+    )
+    def test_malformed_sources_exit_2(self, run, sources):
+        entry = _entry("k0")
+        entry.pop("kernel_source")
+        entry["sources"] = sources
+        assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2

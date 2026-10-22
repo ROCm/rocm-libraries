@@ -36,7 +36,7 @@ Existing checks run automatically on all PRs pre-merge and on the `develop` bran
 | CI Check | Description |
 |----------|-------------|
 | hipDNN Superbuild CI | Builds hipDNN and the providers via the superbuild on Linux and Windows (includes clang-tidy) |
-| TheRock multi-arch CI | Builds and tests across GPU families (e.g. gfx94X, gfx950, gfx1151), with per-component test shards for `hipdnn`, `hipdnn-integration-tests`, `hipdnn-samples`, `hipdnn_install`, and each provider |
+| TheRock multi-arch CI | Builds and tests across GPU families (e.g. gfx94X, gfx950, gfx1151), with per-component test shards for `hipdnn`, `hipdnn-integration-tests`, `hipdnn-samples`, `hipdnn-cudnn-samples`, `hipdnn_install`, and each provider |
 | pre-commit | Runs formatting and linting checks on changed files |
 | codecov | Checks code coverage requirements |
 
@@ -83,43 +83,41 @@ Sample output:
 ```
 Internal ctest changing into directory: /workspace/rocm-artifacts/bin/hipdnn
 Test project /workspace/rocm-artifacts/bin/hipdnn
-  Test #1: hipdnn_data_sdk_tests
-  Test #2: hipdnn_backend_tests
-  Test #3: hipdnn_frontend_tests
-  Test #4: hipdnn_test_sdk_tests
-  Test #5: hipdnn_plugin_sdk_tests
-  Test #6: hipdnn_public_backend_tests
-  Test #7: hipdnn_public_frontend_tests
+  Test  #1: hipdnn_data_sdk_tests
+  Test  #2: hipdnn_flatbuffers_sdk_tests
+  Test  #3: hipdnn_backend_tests
+  Test  #4: hipdnn_frontend_tests
+  Test  #5: hipdnn_frontend_dynamic_load_tests
+  Test  #6: hipdnn_test_sdk_tests
+  Test  #7: hipdnn_plugin_sdk_tests
+  Test  #8: hipdnn_public_backend_tests
+  Test  #9: hipdnn_backend_logging_shutdown_tests
+  Test #10: hipdnn_public_frontend_tests
+  Test #11: hipdnn_public_frontend_dynamic_load_tests
 
-Total Tests: 7
+Total Tests: 11
 ```
+
+The installed list depends on the build options. An ASAN build omits `hipdnn_backend_logging_shutdown_tests`. A build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` adds three `hipdnn_plugin_sdk_disk_cache_cross_process_*` entries. The build-tree-only tests in [`test_categories.yaml`](../../test_categories.yaml) (for example `hipdnn_test_name_validation`) are not installed.
 
 Run all hipDNN tests in parallel:
 ```
 ctest --test-dir rocm-artifacts/bin/hipdnn --output-on-failure --parallel 8 --timeout 30
 ```
-Sample output:
+Sample output (abbreviated; start order and times vary):
 ```
 Internal ctest changing into directory: /workspace/rocm-artifacts/bin/hipdnn
 Test project /workspace/rocm-artifacts/bin/hipdnn
-    Start 1: hipdnn_data_sdk_tests
-    Start 2: hipdnn_backend_tests
-    Start 6: hipdnn_public_backend_tests
-    Start 7: hipdnn_public_frontend_tests
-    Start 3: hipdnn_frontend_tests
-    Start 4: hipdnn_test_sdk_tests
-    Start 5: hipdnn_plugin_sdk_tests
-1/7 Test #4: hipdnn_test_sdk_tests ............   Passed    0.02 sec
-2/7 Test #5: hipdnn_plugin_sdk_tests ..........   Passed    0.02 sec
-3/7 Test #3: hipdnn_frontend_tests ............   Passed    0.02 sec
-4/7 Test #7: hipdnn_public_frontend_tests .....   Passed    0.27 sec
-5/7 Test #6: hipdnn_public_backend_tests ......   Passed    0.84 sec
-6/7 Test #2: hipdnn_backend_tests .............   Passed    1.33 sec
-7/7 Test #1: hipdnn_data_sdk_tests ............   Passed    2.64 sec
+    Start  1: hipdnn_data_sdk_tests
+    Start  2: hipdnn_flatbuffers_sdk_tests
+    ...
+ 1/11 Test  #6: hipdnn_test_sdk_tests ....................   Passed    <t> sec
+    ...
+11/11 Test  #1: hipdnn_data_sdk_tests ....................   Passed    <t> sec
 
-100% tests passed, 0 tests failed out of 7
+100% tests passed, 0 tests failed out of 11
 
-Total Test time (real) =   2.64 sec
+Total Test time (real) =   <t> sec
 ```
 
 Use the --verbose option for more detailed output:

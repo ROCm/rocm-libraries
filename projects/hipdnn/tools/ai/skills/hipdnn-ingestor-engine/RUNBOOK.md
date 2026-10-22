@@ -331,6 +331,9 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
   baseline "$EMITTED_ROOT"
 ```
 
+The gate checks every launch of a multi-launch (`sources`) descriptor; a failure names
+its launch.
+
 Exactly one assignment must be live. Both commented passes an empty root, which the
 descriptor index expands as the recursive glob `/**/*.json` — a walk of the whole
 filesystem.
@@ -347,8 +350,9 @@ Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tes
 Extensions copy only additions per [extend.md](extend.md). Generated with the installed
 ids, the scratch references and the consumer IDs in shared KDP or per-UKD specialization
 declarations already carry the retained UUIDs, which `catalog_diff.py --expect-ids` against
-the pre-splice KDP confirms. For descriptors, `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` applies the
-additions and refuses any change to a retained entry:
+the pre-splice KDP confirms. For descriptors,
+`projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` applies the additions
+and refuses any change to a retained entry:
 
 ```bash
 "$PY" "$GEN/tools/splice_additions.py" \
@@ -684,6 +688,9 @@ drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
 the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
 `--provenance-root DIR` mirroring its `--tree`.
+
+A multi-launch descriptor is checked per launch (spec, symbol and code object); a failure
+names the launch.
 
 Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes

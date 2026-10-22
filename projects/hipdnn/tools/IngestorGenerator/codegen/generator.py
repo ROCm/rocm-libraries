@@ -278,12 +278,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD carrying `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -300,7 +303,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
@@ -514,21 +518,29 @@ def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
     return json.dumps(_completed_metadata(metadata, config), sort_keys=True)
 
 
-def _candidate_identity_doc(kernel_source: dict, priority: int) -> str:
+def _entry_source_fields(entry: dict) -> dict:
+    """The source fields of a UKD read from disk: ``kernel_source`` or ``sources``."""
+    return {key: entry[key] for key in ("kernel_source", "sources") if key in entry}
+
+
+def _candidate_identity_doc(source_fields: dict, priority: int) -> str:
     """What a candidate is beyond its tuple: two entries sharing a completed
     tuple are the same candidate only if they name the same binary at the same
     priority. A knob absent from ``kernel_source.spec`` and one pinned to the
-    value the policy chose are different binaries under one tuple.
+    value the policy chose are different binaries under one tuple. A kernel's
+    launches are part of what it names: two kernels differing only in a launch
+    are different candidates.
 
-    Takes the emitted ``kernel_source`` document, so a prior descriptor read
-    from disk is identified the same way as a `KernelSpec`."""
-    return json.dumps(
-        {"kernel_source": kernel_source, "priority": priority}, sort_keys=True
-    )
+    Takes the emitted source fields (`KernelSource.descriptor_fields`: either
+    ``kernel_source`` or ``sources``), so a prior descriptor read from disk is
+    identified the same way as a `KernelSpec`."""
+    return json.dumps({**source_fields, "priority": priority}, sort_keys=True)
 
 
 def _candidate_identity(kernel: KernelSpec) -> str:
-    return _candidate_identity_doc(kernel.kernel_source.as_document(), kernel.priority)
+    return _candidate_identity_doc(
+        kernel.kernel_source.descriptor_fields(), kernel.priority
+    )
 
 
 def _arch_competes(left: list, right: list) -> bool:
@@ -695,12 +707,14 @@ def build_kdp(
             }
         )
         entry = {
-            "version": "1.0",
+            # 1.1 only on a UKD carrying `sources`; every other stays 1.0.
+            "version": kernel.kernel_source.ukd_version,
             "id": ids[("kernel", pack_index, index)],
             "name": kernel.name,
             # Per-kind keys, never the union: the runtime loader hard-fails an
-            # unknown key and hkp_pack validates a closed set per kind.
-            "kernel_source": kernel.kernel_source.as_document(),
+            # unknown key and hkp_pack validates a closed set per kind. A
+            # multi-launch kernel writes `sources` in place of `kernel_source`.
+            **kernel.kernel_source.descriptor_fields(),
             "metadata": metadata,
             "priority": kernel.priority,
         }
@@ -1126,7 +1140,7 @@ def resolve_ids(
                             "pack": kdp.name,
                             "arch": list(kdp.effective_arch(entry) or []),
                             "identity": _candidate_identity_doc(
-                                entry["kernel_source"], entry.get("priority", 0)
+                                _entry_source_fields(entry), entry.get("priority", 0)
                             ),
                         }
                     )
