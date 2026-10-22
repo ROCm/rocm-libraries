@@ -39,9 +39,11 @@ Optional:
 * [GoogleTest](https://github.com/google/googletest) (required only for tests)
   * Use `GTEST_ROOT` to specify a location
   * Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree
+* The SuiteSparse test matrices (required only for tests), stored with [DVC](https://dvc.org/):
+  run `dvc pull -R projects/rocsparse/clients/matrices` from the root of the rocm-libraries repository
 
 By default, CMake doesn't download any of these. Configure with `-DALLOW_FETCH_DEPS=ON` to download
-ROCm CMake and GoogleTest when they're missing.
+ROCm CMake, GoogleTest and the test matrices when they're missing.
 
 ## Build and install
 

@@ -238,6 +238,7 @@ def config_cmd():
             f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
             f'-DPROJECT_BINARY_DIR={matrices_dir}',
             f'-DCMAKE_MATRICES_DIR={matrices_dir}',
+            '-DALLOW_FETCH_DEPS=ON',
             f'-DROCM_PATH={rocm_path}',
             '-DCMAKE_INSTALL_LIBDIR=lib',
             '-P',

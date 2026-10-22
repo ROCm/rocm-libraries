@@ -23,7 +23,7 @@
 
 # Dependencies
 
-option(ALLOW_FETCH_DEPS "Download rocm-cmake and GoogleTest if they are not found in the build environment" OFF)
+option(ALLOW_FETCH_DEPS "Download rocm-cmake, GoogleTest and the test matrices if they are not found in the build environment" OFF)
 include(FetchContent)
 if(NOT ALLOW_FETCH_DEPS)
   set(FETCHCONTENT_FULLY_DISCONNECTED ON)

@@ -47,6 +47,13 @@ This requires network access during configuration.
 If GoogleTest isn't installed, you can instead build it from a local source tree without network access
 by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 
+The tests need 24 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+Before building the tests, run ``dvc pull -R projects/rocsparse/clients/matrices`` from the root of the rocm-libraries repository.
+With a sparse checkout, first add the DVC configuration using ``git sparse-checkout add .dvc``.
+Reading from the DVC storage doesn't require credentials.
+Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.csr`` files,
+or configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
+
 When building rocSPARSE from source, select supported versions of the math library
 dependencies (:doc:`rocPRIM <rocprim:index>` and optionally :doc:`rocBLAS <rocblas:index>`). Given a version of rocSPARSE,
 you must use a version of rocPRIM (and optionally rocBLAS) that is the same or later. For example, it's
