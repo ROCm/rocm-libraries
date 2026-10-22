@@ -132,8 +132,10 @@ def _kernel_cases():
 _LAUNCHERS: dict = {}
 
 
-def _launcher(dtype: str, head_size: int, block_size: int, qpk: int):
-    key = (dtype, head_size, block_size, qpk)
+def _launcher(
+    dtype: str, head_size: int, block_size: int, qpk: int, use_sinks: bool = False
+):
+    key = (dtype, head_size, block_size, qpk, use_sinks)
     if key not in _LAUNCHERS:
         from kernels.gfx950.attention_tiled_2d import (
             build_unified_attention_2d_tiled,
@@ -149,6 +151,7 @@ def _launcher(dtype: str, head_size: int, block_size: int, qpk: int):
             head_size=head_size,
             block_size=block_size,
             num_queries_per_kv=qpk,
+            use_sinks=use_sinks,
         )
         ok, why = supports_tiled_2d_spec(spec, arch="gfx950")
         assert ok, why
@@ -219,11 +222,13 @@ def _reference(
     qpk: int,
     window: int,
     scale: float,
+    sinks: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Bottom-right causal (+ window) attention of one sequence, fp32.
 
     ``q`` is ``[q_len, Hq, D]``; ``k``/``v`` are the gathered ``[seq_len, Hkv, D]``
-    live tokens. Rows with no visible key are zero.
+    live tokens. ``sinks`` ([Hq] logits, not scaled) join the softmax max and
+    denominator. Rows with no visible key are zero.
     """
     hq, d = q.shape[1], q.shape[2]
     out = np.zeros((q_len, hq, d), dtype=np.float32)
@@ -238,8 +243,12 @@ def _reference(
         s = np.where(visible, s, -np.inf)
         row_max = np.max(s, axis=1, initial=-np.inf, where=visible)
         has_key = np.isfinite(row_max)
+        if sinks is not None:
+            row_max = np.where(has_key, np.maximum(row_max, sinks[h]), row_max)
         p = np.where(visible, np.exp(s - np.where(has_key, row_max, 0.0)[:, None]), 0.0)
         denom = p.sum(axis=1)
+        if sinks is not None:
+            denom = denom + np.where(has_key, np.exp(sinks[h] - row_max), 0.0)
         o = p @ v[:, kvh, :]
         out[:, h, :] = np.where(
             has_key[:, None], o / np.where(has_key, denom, 1.0)[:, None], 0.0
@@ -247,14 +256,23 @@ def _reference(
     return out
 
 
-def _run(dtype: str, head_size: int, block_size: int, qpk: int, sc: Scenario):
+def _run(
+    dtype: str,
+    head_size: int,
+    block_size: int,
+    qpk: int,
+    sc: Scenario,
+    use_sinks: bool = False,
+):
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import DeviceMem, LaunchConfig
 
-    spec, launcher = _launcher(dtype, head_size, block_size, qpk)
+    spec, launcher = _launcher(dtype, head_size, block_size, qpk, use_sinks)
     rng = np.random.default_rng(
-        zlib.crc32(f"{dtype}/{head_size}/{block_size}/{qpk}/{sc.name}".encode())
+        zlib.crc32(
+            f"{dtype}/{head_size}/{block_size}/{qpk}/{sc.name}/{use_sinks}".encode()
+        )
     )
     D, BS = head_size, block_size
     hkv = NUM_KV_HEADS
@@ -360,12 +378,20 @@ def _run(dtype: str, head_size: int, block_size: int, qpk: int, sc: Scenario):
         k_ptr, v_ptr = cache_dev.ptr(), cache_dev.ptr() + D * 2
     else:
         k_ptr, v_ptr = upload(k_cache).ptr(), upload(v_cache).ptr()
+    # Sinks in the I/O dtype, spread from negligible to row-dominating so a head
+    # that loses (or reads another head's) sink fails the comparison.
+    sinks_view = None
+    sink_ptr = 0
+    if use_sinks:
+        sinks_host = _encode(rng.uniform(-4.0, 6.0, hq).astype(np.float32), dtype)
+        sinks_view = _decode(sinks_host, dtype)
+        sink_ptr = upload(sinks_host)
     values = {
         "output_ptr": o_dev.ptr() + GUARD * 2,
         "query_ptr": q_dev,
         "key_cache_ptr": k_ptr,
         "value_cache_ptr": v_ptr,
-        "sink_ptr": 0,
+        "sink_ptr": sink_ptr,
         "block_tables_ptr": bt_dev,
         "seq_lens_ptr": seq_lens_dev,
         "alibi_slopes_ptr": 0,
@@ -413,7 +439,15 @@ def _run(dtype: str, head_size: int, block_size: int, qpk: int, sc: Scenario):
         rows = int(starts[b]) + np.arange(ql)
         kf, vf = gathered[b]
         ref = _reference(
-            q_view[rows], kf, vf, int(seq_lens[b]), ql, qpk, sc.window, scale
+            q_view[rows],
+            kf,
+            vf,
+            int(seq_lens[b]),
+            ql,
+            qpk,
+            sc.window,
+            scale,
+            sinks_view,
         )
         idx = (
             GUARD
@@ -451,6 +485,47 @@ def _run(dtype: str, head_size: int, block_size: int, qpk: int, sc: Scenario):
 )
 def test_runtime_layout_matches_reference(dtype, head_size, block_size, qpk, sc):
     _run(dtype, head_size, block_size, qpk, sc)
+
+
+# Sink objects with NUM_KV_HEADS=2: heads of KV head 1 need the runtime query-head
+# bound and mapping to find their sink.
+_SINK_KERNEL_CASES = (
+    ("bf16", 64, 16, 1),
+    ("bf16", 128, 32, 4),
+    ("fp16", 128, 64, 5),
+    ("bf16", 256, 16, 8),
+    ("fp16", 64, 32, 8),
+)
+
+
+@pytest.mark.gpu
+@_NEEDS_GFX950
+@pytest.mark.parametrize("sc", SCENARIOS, ids=lambda s: s.name)
+@pytest.mark.parametrize(
+    "dtype,head_size,block_size,qpk", _SINK_KERNEL_CASES, ids=lambda v: str(v)
+)
+def test_runtime_layout_sinks_match_reference(dtype, head_size, block_size, qpk, sc):
+    _run(dtype, head_size, block_size, qpk, sc, use_sinks=True)
+
+
+def test_runtime_layout_sinks_accepted():
+    """runtime_layout composes with use_sinks; the object keeps ``sink_ptr``."""
+    from kernels.gfx950.attention_tiled_2d import (
+        build_unified_attention_2d_tiled,
+        runtime_layout_catalog_spec,
+        supports_tiled_2d_spec,
+    )
+
+    spec = runtime_layout_catalog_spec(
+        dtype="bf16", head_size=128, block_size=32, num_queries_per_kv=4, use_sinks=True
+    )
+    ok, why = supports_tiled_2d_spec(spec, arch="gfx950")
+    assert ok, why
+    assert spec.use_sinks
+    assert "sinks" in spec.kernel_name()
+    assert spec.kernel_name().endswith("_rtl")
+    kernel = build_unified_attention_2d_tiled(spec)
+    assert "sink_ptr" in [p.name.lstrip("%") for p in kernel.params]
 
 
 def test_runtime_layout_catalog_supported_and_named():

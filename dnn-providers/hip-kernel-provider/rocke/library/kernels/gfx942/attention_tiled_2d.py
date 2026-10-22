@@ -1084,7 +1084,6 @@ class UnifiedAttention2DTiledSpec:
 # Spec flags that bake a layout, need per-head side inputs, or select a
 # non-default pipeline; runtime_layout supports none of them.
 _RTL_INCOMPATIBLE_FLAGS = (
-    "use_sinks",
     "has_softcap",
     "use_alibi",
     "use_qq_bias",
@@ -1224,6 +1223,7 @@ def runtime_layout_catalog_spec(
     block_size: int,
     num_queries_per_kv: int,
     arch: str = "gfx942",
+    use_sinks: bool = False,
 ) -> UnifiedAttention2DTiledSpec:
     """The catalog spec for one (dtype, head_size, block_size, QPK) object."""
     geom = runtime_layout_geometry(head_size, block_size, arch=arch)
@@ -1239,7 +1239,7 @@ def runtime_layout_catalog_spec(
         num_query_heads=num_queries_per_kv,
         num_kv_heads=1,
         dtype=dtype,
-        use_sinks=False,
+        use_sinks=use_sinks,
         sliding_window=0,
         has_softcap=False,
         num_warps=num_warps,
@@ -2765,7 +2765,7 @@ def build_unified_attention_2d_tiled(
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
-            qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+            qh_in = b.cmp_lt(qh, _num_qh())
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -2775,7 +2775,7 @@ def build_unified_attention_2d_tiled(
                 qh = b.add(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
-                qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+                qh_in = b.cmp_lt(qh, _num_qh())
                 sink_h = b.global_load(sinks, qh, dtype, align=2)
                 sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
                 m_inits.append(b.select(qh_in, sink_f, neg_inf))

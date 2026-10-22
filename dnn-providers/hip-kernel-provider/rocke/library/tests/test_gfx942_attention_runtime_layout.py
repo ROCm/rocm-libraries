@@ -80,7 +80,6 @@ def _rtl_spec(**overrides):
 @pytest.mark.parametrize(
     "overrides,needle",
     [
-        (dict(use_sinks=True), "use_sinks"),
         (dict(has_softcap=True), "has_softcap"),
         (dict(use_alibi=True), "use_alibi"),
         (dict(use_qq_bias=True), "use_qq_bias"),
@@ -96,6 +95,22 @@ def _rtl_spec(**overrides):
 def test_incompatible_spec_rejected(overrides, needle):
     with pytest.raises(ValueError, match=needle):
         UnifiedAttention2DTiledSpec(**_rtl_spec(**overrides))
+
+
+def test_sinks_accepted_with_runtime_layout():
+    spec = UnifiedAttention2DTiledSpec(**_rtl_spec(use_sinks=True))
+    ok, why = supports_tiled_2d_spec(spec, arch="gfx942")
+    assert ok, why
+    catalog = runtime_layout_catalog_spec(
+        dtype="bf16", head_size=128, block_size=32, num_queries_per_kv=4, use_sinks=True
+    )
+    assert catalog.use_sinks
+    assert "sinks" in catalog.kernel_name()
+    assert catalog.kernel_name().endswith("_rtl")
+    kernel = build_unified_attention_2d_tiled(catalog, arch="gfx942")
+    names = [p.name.lstrip("%") for p in kernel.params]
+    assert "sink_ptr" in names
+    assert names[18:] == [n for n, _ in RUNTIME_LAYOUT_EXTRA_ARGS]
 
 
 def test_lds_budget_rejected_with_reason():
@@ -275,8 +290,14 @@ def _scenarios(bs):
     ]
 
 
-def _reference(q_rows, k_logical, v_logical, table, seq_lens, q_lens, qpk, bs, window):
-    """fp32 gather-then-dense attention. Returns {(seq, s): [Hq, D]}."""
+def _reference(
+    q_rows, k_logical, v_logical, table, seq_lens, q_lens, qpk, bs, window, sinks=None
+):
+    """fp32 gather-then-dense attention. Returns {(seq, s): [Hq, D]}.
+
+    ``sinks`` ([Hq] logits, not scaled) join the softmax max and denominator;
+    rows with no visible key stay zero.
+    """
     hq = q_rows[0].shape[1] if q_rows else 0
     out = {}
     for b, (sl, ql) in enumerate(zip(seq_lens, q_lens)):
@@ -305,8 +326,10 @@ def _reference(q_rows, k_logical, v_logical, table, seq_lens, q_lens, qpk, bs, w
                     sc = (k[vis, kv_h] @ q_rows[b][s, h]) / math.sqrt(
                         q_rows[b].shape[2]
                     )
-                    p = np.exp(sc - sc.max())
-                    res[h] = (p @ v[vis, kv_h]) / p.sum()
+                    m = sc.max() if sinks is None else max(sc.max(), sinks[h])
+                    p = np.exp(sc - m)
+                    denom = p.sum() + (0.0 if sinks is None else np.exp(sinks[h] - m))
+                    res[h] = (p @ v[vis, kv_h]) / denom
             out[(b, s)] = res
     return out
 
@@ -402,6 +425,18 @@ def _run_case(spec, sc, rng):
     kv_block_stride, kv_tok_stride, kv_head_stride = strides
     span_bytes = ((_HKV - 1) * kv_head_stride + (bs - 1) * kv_tok_stride + hd) * 2
 
+    # ---- sinks (I/O dtype, one per query head) ----
+    sinks_np = None
+    sink_ptr = 0
+    if spec.use_sinks:
+        # Spread from "negligible" to "dominates the row" so a head that loses
+        # (or reads another head's) sink fails the comparison.
+        sinks_host = rng.uniform(-4.0, 6.0, hq).astype(np.float32)
+        sinks_dev = torch.from_numpy(sinks_host).to(tdt).cuda()
+        sinks_np = sinks_dev.float().cpu().numpy()
+        sink_ptr = sinks_dev.data_ptr()
+        keep = keep + (sinks_dev,)
+
     # ---- output with sentinel guards ----
     o_tok = hq * hd + sc["o_pad"]
     o_elems = max(total_tok, 1) * o_tok
@@ -429,7 +464,7 @@ def _run_case(spec, sc, rng):
         query_ptr=q_dev.data_ptr(),
         key_cache_ptr=k_ptr,
         value_cache_ptr=v_ptr,
-        sink_ptr=0,
+        sink_ptr=sink_ptr,
         block_tables_ptr=table_dev.data_ptr(),
         seq_lens_ptr=seq_lens_dev.data_ptr(),
         alibi_slopes_ptr=0,
@@ -481,6 +516,7 @@ def _run_case(spec, sc, rng):
         qpk,
         bs,
         window if window is not None else _NO_WINDOW,
+        sinks_np,
     )
     written = np.zeros(got.shape, bool)
     for (b, s), res in ref.items():
@@ -521,6 +557,35 @@ def test_runtime_layout_numerics(dtype, head_size, block_size, qpk):
     )
     rng = np.random.default_rng(
         zlib.crc32(f"{dtype}:{head_size}:{block_size}:{qpk}".encode())
+    )
+    for sc in _scenarios(block_size):
+        _run_case(spec, sc, rng)
+
+
+# Sink objects: _HKV=2 KV heads, so query heads of KV head 1 (h >= qpk) need
+# the runtime query-head bound and mapping to find their sink.
+_GPU_SINK_KERNELS = [
+    ("bf16", 64, 16, 1),
+    ("bf16", 128, 32, 4),
+    ("fp16", 128, 64, 5),
+    ("bf16", 256, 16, 8),
+    ("fp16", 64, 32, 8),
+]
+
+
+@pytest.mark.gpu
+@requires_gfx942_gpu
+@pytest.mark.parametrize("dtype,head_size,block_size,qpk", _GPU_SINK_KERNELS)
+def test_runtime_layout_sinks_numerics(dtype, head_size, block_size, qpk):
+    spec = runtime_layout_catalog_spec(
+        dtype=dtype,
+        head_size=head_size,
+        block_size=block_size,
+        num_queries_per_kv=qpk,
+        use_sinks=True,
+    )
+    rng = np.random.default_rng(
+        zlib.crc32(f"sinks:{dtype}:{head_size}:{block_size}:{qpk}".encode())
     )
     for sc in _scenarios(block_size):
         _run_case(spec, sc, rng)
