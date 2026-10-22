@@ -996,42 +996,42 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 11, 4, 31, 200, 200},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 200, 200},
+        {"Smoke", {}, 11, 4, 16, 157, 157},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 157, 157},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 200, 200},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 4, 200, 200},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 0, 200, 200},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 200, 200},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 157, 157},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 5, 157, 157},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 9, 157, 157},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 157, 157},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 36, 36},
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 14, 14},
         // Eight channels per group: the grouped direct instances serve it too.
-        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 3, 4, 0, 200, 200},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1, 31, 36, 36},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 31, 36, 36},
+        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 3, 4, 1, 157, 157},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1, 23, 14, 14},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 23, 14, 14},
         // 64 groups and more: no spatial instance.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 1, 31, 36, 36},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 1, 31, 36, 36},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 4, 36, 36},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 4, 36, 36},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 1, 0, 36, 36},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 1, 0, 36, 36},
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 1, 21, 14, 14},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 1, 21, 14, 14},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 9, 14, 14},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 10, 14, 14},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 1, 4, 14, 14},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 1, 4, 14, 14},
         // "Valid" padding: of the direct instances, only col serves it.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 1, 0, 36, 36},
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 1, 1, 14, 14},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 200, 200},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 53, 200, 200},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 157, 157},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 36, 157, 157},
         // Each selects a seed width pair that no row above selects: 2/2/2, 4/4/2, 8/8/4,
         // 1/1/4, the default epilogue's 4/4/1 and cshuffle 2/2/1. The shipped catalog builds
         // no 4/4/2, 1/1/8, 4/4/1 or 2/2/1, so for C12K6, C3K8, C12K5 and C6K5 it runs every
         // instance that serves.
-        {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
-        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 50, 50},
-        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
-        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 88, 88},
-        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 36, 36},
-        {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 36, 36},
+        {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
+        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 15, 15},
+        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 6, 6},
+        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 33, 33},
+        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
+        {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
     };
     return s_graphs;
 }
@@ -1453,6 +1453,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
     const auto catalog = variant.directArms + variant.implicitArms;
     const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
     std::vector<std::string> pinned;
+    // A graph with fewer selected instances than TOP_BY_SCORE measures all of them.
+    const auto topCount = std::min(TOP_BY_SCORE, catalog);
 
     // Benchmarking under a limit of TOP_BY_SCORE measures exactly the best-ranked ones.
     _candidateLimit.setValue(std::to_string(TOP_BY_SCORE));
@@ -1461,8 +1463,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
         auto& recorder = capture.recorder();
         auto graph = buildConvGraph(variant.dtype, variant.problem);
         ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
-        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(TOP_BY_SCORE)
-                                              + " (" + std::to_string(catalog)
+        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(topCount) + " ("
+                                              + std::to_string(catalog)
                                               + " before knob filtering)"))
             << recorder.getRecordedLogsAsString();
         ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 59));
@@ -1470,7 +1472,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
     const auto measured = lastPersistedRecord();
     ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
     const auto& [key, top] = *measured;
-    ASSERT_EQ(top.size(), TOP_BY_SCORE);
+    ASSERT_EQ(top.size(), topCount);
     for(size_t arm = 0; arm < top.size(); ++arm)
     {
         auto record = top;
@@ -1480,7 +1482,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
         ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, record));
         const auto kernel = ingestor::toString(record.front().kernelId);
         ASSERT_NO_FATAL_FAILURE(serveFromRecord(
-            knobs, kernel, TOP_BY_SCORE, TOP_BY_SCORE, 61 + static_cast<unsigned int>(arm)));
+            knobs, kernel, topCount, topCount, 61 + static_cast<unsigned int>(arm)));
         pinned.push_back(kernel);
     }
 

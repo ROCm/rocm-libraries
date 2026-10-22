@@ -102,8 +102,8 @@ def catalog():
     return tool.read_labels(tool.CATALOG_LABELS)
 
 
-def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
-    """366 implicit-GEMM and 202 direct kernels per dtype, and the two dtypes list the
+def test_the_catalog_lists_443_kernels_per_dtype_the_same_in_both(catalog):
+    """239 implicit-GEMM and 204 direct kernels per dtype, and the two dtypes list the
     same kernels."""
     by_dtype = collections.defaultdict(list)
     for identity in catalog:
@@ -113,7 +113,7 @@ def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
         families = collections.Counter(
             i["algorithm"] == "implicit_gemm" for i in identities
         )
-        assert families == {True: 366, False: 202}
+        assert families == {True: 239, False: 204}
 
     def without_dtype(identity):
         return tuple(
