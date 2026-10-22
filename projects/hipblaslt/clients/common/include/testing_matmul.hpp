@@ -1489,8 +1489,7 @@ void check(hipStream_t                   stream,
                 hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
                                << worst_batch << " has norm_error " << worst_error
-                               << ", at or above the " << hip_datatype_to_string(To) << " limit of "
-                               << limit << std::endl;
+                               << ", at or above the GEMM limit of " << limit << std::endl;
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {

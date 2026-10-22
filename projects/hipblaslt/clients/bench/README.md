@@ -125,9 +125,9 @@ Run fp32 GEMM with validation
 - `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
 - `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
 
-The norm check of D fails when any one batch's norm_error reaches the limit for the output type, the same limit `hipblaslt-test` uses (1e-5 for f32, 0.01 for f16, 0.1 for bf16). The limit applies to each batch, not to the sum in the `norm_error` column. When a check fails, the bench prints one line per failing gemm to stderr:
+The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch, not to the sum in the `norm_error` column. When a check fails, the bench prints one line per failing gemm to stderr:
 ```
-norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the f32_r limit of 1e-05
+norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the GEMM limit of 1e-05
 allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 5, column 0: result 7, reference 2
 ```
 

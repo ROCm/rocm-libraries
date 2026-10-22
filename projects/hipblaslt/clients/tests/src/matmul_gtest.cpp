@@ -92,7 +92,7 @@ namespace
             return static_cast<float*>(buffers[0].buf())[batch * m * n + i];
         }
 
-        int64_t run()
+        int64_t run(hipDataType input_type = HIP_R_32F)
         {
             Arguments arg{};
             arg.init();
@@ -101,7 +101,7 @@ namespace
             arg.allclose_check    = 1;
             arg.norm_check_assert = false;
             arg.compute_type      = HIPBLAS_COMPUTE_32F;
-            arg.a_type = arg.b_type = HIP_R_32F;
+            arg.a_type = arg.b_type = input_type;
 
             const uint32_t               gemm_count = 1;
             std::vector<HipDeviceBuffer> no_device;
@@ -187,6 +187,22 @@ namespace
         d.run();
         EXPECT_GT(last, 0);
         EXPECT_DOUBLE_EQ(d.norm_error, last);
+    }
+
+    TEST(BenchVerify, smoke_MixedPrecisionNormUsesGemmTolerance)
+    {
+        BenchVerifyD d(8, 4, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t i = 0; i < 32; i++)
+            d.at(d.result, 0, i) *= 1.001f;
+        EXPECT_EQ(d.run(HIP_R_16F), 0);
+        EXPECT_GT(d.norm_error, norm_tolerance(HIP_R_32F));
+        EXPECT_DOUBLE_EQ(norm_tolerance(HIP_R_32F, HIPBLAS_COMPUTE_32F, HIP_R_16F, HIP_R_16F),
+                         0.01);
+        EXPECT_DOUBLE_EQ(norm_tolerance(HIP_R_16F, HIPBLAS_COMPUTE_32F, HIP_R_16BF, HIP_R_16BF),
+                         0.1);
+        EXPECT_DOUBLE_EQ(
+            norm_tolerance(HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_16BF, HIP_R_32F, HIP_R_32F),
+            0.5);
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
