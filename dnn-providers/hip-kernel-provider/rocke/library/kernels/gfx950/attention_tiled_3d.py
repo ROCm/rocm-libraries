@@ -1658,3 +1658,55 @@ def supports_tiled_reduce_spec(
             f"num_segments={spec.num_segments} exceeds {_REDUCE_MAX_SEGMENTS}",
         )
     return True, "supported"
+
+
+def reduce_spec_for(
+    spec: UnifiedAttention3DTiledSpec,
+) -> UnifiedAttentionReduceTiledSpec:
+    """The reduce kernel that pairs with segment kernel ``spec``.
+
+    Every reduce field is a segment field: the dispatcher builds the pair from one problem
+    and one config (``make_explicit_attention_3d_specs``), so deriving the reduce from the
+    segment spec reproduces what it launches.
+    """
+    return UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        dtype=spec.dtype,
+        num_segments=spec.num_segments,
+        waves_per_eu=spec.waves_per_eu,
+    )
+
+
+def build_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+):
+    """The split-KV segment kernel with its reduce kernel as one code object.
+
+    Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
+    <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack, so a host that loaded
+    the segment kernel finds the reduce in the same module by name. The reduce is
+    :func:`reduce_spec_for` ``(spec)``.
+    """
+    from rocke.helpers import KernelModule
+
+    return KernelModule(
+        primary=build_unified_attention_3d_tiled(spec, arch=arch),
+        companions={
+            "reduce": build_unified_attention_reduce_tiled(
+                reduce_spec_for(spec), arch=arch
+            )
+        },
+    )
+
+
+def supports_unified_attention_3d_tiled_module(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for :func:`build_unified_attention_3d_tiled_module`: the
+    segment kernel's and its derived reduce kernel's predicates must both accept."""
+    ok, why = supports_tiled_3d_spec(spec, arch=arch)
+    if not ok:
+        return ok, why
+    return supports_tiled_reduce_spec(reduce_spec_for(spec), arch=arch)

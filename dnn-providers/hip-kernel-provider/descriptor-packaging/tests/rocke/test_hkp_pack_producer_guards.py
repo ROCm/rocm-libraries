@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from hkp_pack.errors import HkpPackError
+from hkp_pack.sources import kernel_sources
 from hkp_pack.rocke_compile import (
     ROCKE_TARGET_NATIVE,
     _check_support_predicate,
@@ -303,6 +304,33 @@ def test_the_gfx950_reduce_builder_is_validated_by_its_own_predicate():
         _check_support_predicate(module, builder, bad, "gfx950")
 
 
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_the_gfx950_3d_module_builder_is_validated_by_both_halves():
+    """The segment+reduce module builder resolves its own predicate by derived name, and
+    that predicate refuses a spec only the reduce half cannot lower (a segment count
+    whose per-segment factors overflow the reduce's LDS cache)."""
+    module = import_module("kernels.gfx950.attention_tiled_3d")
+    builder = "build_unified_attention_3d_tiled_module"
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
+    good = spec_cls(
+        head_size=128,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+    )
+    _check_support_predicate(module, builder, good, "gfx950")
+    bad = dataclasses.replace(good, num_segments=4097)
+    with pytest.raises(
+        HkpPackError, match="supports_unified_attention_3d_tiled_module.*exceeds 4096"
+    ):
+        _check_support_predicate(module, builder, bad, "gfx950")
+
+
 _DESCRIPTOR_TREE = (
     Path(__file__).resolve().parents[3]
     / "src"
@@ -323,13 +351,14 @@ def _shipped_rocke_checks():
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
         pack = json.loads(path.read_text())
         for kernel in pack.get("kernelDescriptors", []):
-            source = kernel["kernel_source"]
-            if source.get("kind") != "rocke":
-                continue
-            target = source.get("target", ROCKE_TARGET_NATIVE)
-            for arch in kernel.get("arch") or pack.get("arch", []):
-                key = (source["source"], source["builder"], target, arch)
-                seen.setdefault(key, source["spec"])
+            # Every launch of a multi-launch kernel is its own compile.
+            for source in kernel_sources(kernel).values():
+                if source.get("kind") != "rocke":
+                    continue
+                target = source.get("target", ROCKE_TARGET_NATIVE)
+                for arch in kernel.get("arch") or pack.get("arch", []):
+                    key = (source["source"], source["builder"], target, arch)
+                    seen.setdefault(key, source["spec"])
     return [(*key, spec) for key, spec in seen.items()]
 
 
