@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  Sparse vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalSpVec
 {
@@ -50,7 +52,8 @@ public:
                 hipsparseDestroySpVec(descr);
                 descr = nullptr;
             }
-            std::cerr << "hipsparseCreateSpVec failed: " << hipsparseGetErrorName(status) << std::endl;
+            std::cerr << "hipsparseCreateSpVec failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -59,7 +62,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroySpVec(descr);
+            const hipsparseStatus_t status = hipsparseDestroySpVec(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalSpVec destructor");
+            }
         }
     }
 
