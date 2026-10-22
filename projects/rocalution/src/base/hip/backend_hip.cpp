@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -195,8 +195,7 @@ namespace rocalution
         }
 
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
 
         if(dev_prop.major < 3)
         {
@@ -298,8 +297,7 @@ namespace rocalution
 
         int num_dev;
 
-        DISCARD_HIP_ERROR(hipGetDeviceCount(&num_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceCount(&num_dev));
 
         if(_get_backend_descriptor()->HIP_dev >= 0)
         {
@@ -308,8 +306,7 @@ namespace rocalution
             LOG_INFO("Selected HIP device: " << backend_descriptor.HIP_dev);
 
             struct hipDeviceProp_t dev_prop;
-            DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
 
             // LOG_INFO("Device number: " << backend_descriptor.HIP_dev);
             LOG_INFO("Device name: " << dev_prop.name);                                        // char name[256];
@@ -379,8 +376,7 @@ namespace rocalution
     std::string rocalution_get_arch_hip(void)
     {
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
         return dev_prop.gcnArchName;
     }
 
@@ -488,32 +484,28 @@ namespace rocalution
 
     void rocalution_hip_sync(void)
     {
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
     }
 
     void rocalution_hip_sync_default(void)
     {
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_default))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
     }
 
     void rocalution_hip_sync_interior(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_interior))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 
     void rocalution_hip_sync_ghost(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_ghost))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 
