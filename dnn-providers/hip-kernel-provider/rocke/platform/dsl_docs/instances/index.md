@@ -43,6 +43,9 @@ implementation.
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
 | `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
+| `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
+| `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
+| `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `instances/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
@@ -190,6 +193,24 @@ allowed_block_sizes = (64, 128, 256, 512, 1024)
 allowed_vecs = (2, 4, 8)
 ```
 
+## Sparse Attention Family (DSA)
+
+The DeepSeek Sparse Attention scorer. A score-only kernel: it rates every allowed
+key against the query so a later top-k can keep the highest-scoring subset. No
+softmax and no value output, and the index-key is shared across heads (MQA-style,
+one D_I vector per token).
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `common/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
+
+Arch-neutral kernel on gfx942 and gfx950 (bf16), runtime seqlen_q/seqlen_k, with
+two bodies: a scalar reduction (sub-tile seqlen_q and single-query decode
+fallback, correctness oracle) and an MFMA matrix-core body (tail-masked for any
+seqlen_q/seqlen_k; index_head_dim 16-aligned). fp8 is a later phase. Dispatch is
+`library/dispatch/dsa/` (`dispatch_lightning_indexer`) in its own registry, so a
+DSA request never selects a standard-attention kernel and vice versa.
+
 ## Cross-Family Capability Matrix
 
 From `helpers/README.md`:
@@ -207,12 +228,14 @@ From `helpers/README.md`:
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
 | conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
 | conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
+| conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
+| lightning_indexer | - | - | - | - | yes (dot + head sum) | yes | - | scalar FMA reduction (bf16), `SignatureBuilder` |
 
 ## Building Any Instance
 

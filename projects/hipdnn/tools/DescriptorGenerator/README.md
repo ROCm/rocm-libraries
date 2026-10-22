@@ -45,7 +45,7 @@ Each run generates:
 | `tests/frontend/Integration<Op>DescriptorLifting.cpp` | Lifting round-trip, tensor sharing, no-finalization, and per-scalar tests |
 | `frontend/include/hipdnn_frontend/detail/<Op>Unpacker.hpp` | Frontend unpacker (inverse of packer) |
 | `backend/tests/descriptors/Test<Op>OperationFromNode.cpp` | fromNode() round-trip tests |
-| `fragments/*.txt` | Code snippets for manual insertion into existing files |
+| `fragments/*.txt` | Code snippets for manual insertion into existing files, including the work-model fragments: `fbs_tensor_fields.txt` (schema annotations), `node_flops_overload.txt`, `logical_flops_case.txt` and `work_model_test_case.txt` |
 
 See `CLAUDE.md` for post-generation integration steps.
 
@@ -62,15 +62,16 @@ The end-to-end workflow for adding a new operation type:
 7. **Update CMake** build files
 8. **Build and test** to verify everything compiles and passes
 9. **Review the generated integration tests** — both `Integration<Op>DescriptorLowering.cpp` and `Integration<Op>DescriptorLifting.cpp` now ship with full round-trip + per-scalar coverage; add operation-specific tests (multi-input variants, multi-op graphs) on top following the ConvFprop reference at `tests/frontend/IntegrationConvFpropDescriptorLowering.cpp`
+10. **Add the work model** — annotate the schema (`fbs_tensor_fields.txt`), regenerate `node_operands_generated.h`, and give the op a FLOP formula or a `NO_COUNTING_CONVENTION` entry (`node_flops_overload.txt`, `logical_flops_case.txt`, `work_model_test_case.txt`)
 
-See `CLAUDE.md` for detailed integration steps (especially steps 4-7).
+See `CLAUDE.md` for detailed integration steps (especially steps 4-7 and 12).
 
 ### Creating a YAML Config from an FBS Schema
 
 The YAML config maps FBS schema fields to hipDNN backend API concepts. To create a new config:
 
 1. Read the FBS schema in `flatbuffers_sdk/schemas/`
-2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`
+2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; a field annotated `work_data_dependent` sets `work_data_dependent: true`
 3. Identify data fields (vectors, enums, scalars) → `data_fields`
 4. Look at existing frontend node/attributes classes for naming conventions
 5. Use `convolution_fwd.yaml` as the reference config
@@ -112,6 +113,9 @@ operation:
       # accessor name (a trailing "()" is stripped) when the backend tensor
       # name does not map to any frontend tensor — e.g., SDPA's `attn_mask`
       # uses `frontend_getter: "get_bias"`. See "Recent Changes" for details.
+      work_data_dependent: false      # true when the tensor's contents, not its shape,
+                                      # decide the node's work (valid lengths, page tables,
+                                      # routing offsets); emits the schema annotation
 
   data_fields:
     - name: "alpha"
@@ -135,6 +139,7 @@ operation:
       required: false
       test_uids: [100, 101]           # UIDs for test tensor descriptors
       test_label: "PeerStats"          # Label used in generated test case names
+      work_data_dependent: false      # as for tensor_fields
 
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_MY_OP_COMP_TYPE"
