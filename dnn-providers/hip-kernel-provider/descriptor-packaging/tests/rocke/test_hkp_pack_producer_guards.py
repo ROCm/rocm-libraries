@@ -22,6 +22,7 @@ from hkp_pack.rocke_compile import (
     _module_from_source,
     _require_spec_arch_signature,
     _resolve_spec_class,
+    _resolve_support_predicate,
     build_spec,
     rocke_compile_arch,
 )
@@ -334,6 +335,18 @@ def test_every_shipped_rocke_builder_passes_the_pack_time_predicate_check():
             )
         except HkpPackError as exc:
             pytest.fail(f"{source}:{builder} @ {arch} ({target}): {exc}")
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_gfx942_reduce_tiled_builder_resolves_its_own_predicate():
+    """The real gfx942 reduce builder resolves its spec-first predicate by the
+    derived name, so the packer can validate (and therefore pack) it."""
+    module = import_module("kernels.gfx942.attention_tiled_3d")
+    name, fn = _resolve_support_predicate(
+        module, "build_unified_attention_reduce_tiled"
+    )
+    assert name == "supports_unified_attention_reduce_tiled"
+    assert fn is module.supports_unified_attention_reduce_tiled
 
 
 # --- C. Literal validation --------------------------------------------------
