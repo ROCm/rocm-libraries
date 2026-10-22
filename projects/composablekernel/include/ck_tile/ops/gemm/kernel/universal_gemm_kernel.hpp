@@ -220,7 +220,9 @@ struct UniversalGemmKernel
      * With k_batch > 1 every split atomically adds into the same C tile, which requires a vector
      * width the atomic store path can express. A half-precision epilogue with an odd
      * GetVectorSizeC() has no such path and emits no store at all, leaving C untouched rather than
-     * partial. Both the host rejection in IsSupportedArgument and the device-side epilogue dispatch
+     * partial. An epilogue whose store always overwrites (kCanAccumulateOutput == false, e.g.
+     * TdmEpilogue) has no such path at any width: each split would replace C with its own partial
+     * sum. Both the host rejection in IsSupportedArgument and the device-side epilogue dispatch
      * read this constant, so the two cannot drift apart.
      *
      * CK_TILE_FORCE_SINGLE_TAIL_HANDLER elides the atomic_add arm of that dispatch entirely, so in
@@ -231,7 +233,9 @@ struct UniversalGemmKernel
 #if defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
         false;
 #else
-        EpiloguePipeline::GetVectorSizeC() % 2 == 0 || !is_any_of<EDataType, fp16_t, bf16_t>::value;
+        epilogue_can_accumulate_v<EpiloguePipeline> &&
+        (EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
+         !is_any_of<EDataType, fp16_t, bf16_t>::value);
 #endif
 
     // Wavelet pipelines launch load waves beyond the math waves BlockGemm maps onto the C tile.
