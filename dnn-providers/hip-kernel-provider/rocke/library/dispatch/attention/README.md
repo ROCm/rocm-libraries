@@ -489,12 +489,20 @@ their prefix sums or paged metadata. Rows load as 16-byte vectors (8-byte for
 FP8 K/V), so data pointers and every outer stride must keep that alignment.
 Paged launches pass the caches' page count as `num_blocks`; the kernels treat a
 `block_table` entry outside `[0, num_blocks)` as a page of zeros (no read
-outside the caches, no host-side value check). The prefill kernel takes a K
+outside the caches, no host-side value check). The binding rejects a `seqlen_k`
+past the table's capacity (its width times the page size), since the kernels
+clamp each `seqused_k` to `seqlen_k`, and a prefill cache with no pages.
+The prefill kernel takes a K
 table (`block_table`) and a V table (`block_table_v`) that share one row
-stride; the binding passes its one `block_table` as both. A paged prefill
-spec's `dense_q` / `seqused_q` options come from the request's fields of the
-same names (the `dense_q` / `seqused_q` features; the decode refuses them, so
-such a request always runs the prefill).
+stride; the binding passes its one `block_table` as both. The prefill kernel
+steps to a K / V head and page in 64 bits, so a paged cache may pass 2 GiB as
+long as one page of one head is I32-addressable in bytes (the decode kernel
+still needs the whole cache I32-addressable). A paged prefill spec with
+`dense_q` takes a batch-strided `[B, Sq, Hq, D]` Q / O and no `cu_seqlens_q`;
+one with `seqused_q` takes an INT32 `[B]` `seqused_q` of live query rows and
+writes the rows past it as O = 0, LSE = `-inf`. The request's
+`dense_q` / `seqused_q` fields select these options (the `dense_q` / `seqused_q`
+features; the decode refuses them, so such a request always runs the prefill).
 Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
 explicit FP32 `k_scale`/`v_scale` for FP8 storage. The decode binding takes
 its split count from the shape, the visible key range and the CU count
