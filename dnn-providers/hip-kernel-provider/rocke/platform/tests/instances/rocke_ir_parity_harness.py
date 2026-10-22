@@ -1978,9 +1978,9 @@ def cases():
             group_merge=8,
         ),
     )
-    # gfx1250 WMMA (wave32, 16x16x32): the depthwise problem unmerged (the
-    # grid-per-group path dispatch takes) and merged on both epilogues, plus a
-    # dense-grouped problem (groups=4, cpg=kpg=16) unmerged.
+    # gfx1250 WMMA (wave32, 16x16x32): the depthwise problem unmerged
+    # (grid-per-group) and merged on both epilogues, plus a dense-grouped
+    # problem (groups=4, cpg=kpg=16) unmerged.
     conv_g4 = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)
     for tag, prob, gm, epi, vec_c in (
         ("n2h14c64k64r3g64/dw_unmerged", conv_dw, 1, "default", None),

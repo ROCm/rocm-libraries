@@ -315,8 +315,8 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
     case 34:
     case 35:
     {
-        /* Grid-per-group WMMA (unmerged), the path gfx1250 dispatch takes for
-         * a grouped problem. 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+        /* Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+         * 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
          * depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
          * Keep in lockstep with conv_implicit_gemm_emit.py. */
         spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);

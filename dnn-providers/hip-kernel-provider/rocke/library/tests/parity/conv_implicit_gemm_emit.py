@@ -528,8 +528,8 @@ def _spec_raw(idx: int):
             "gfx1151" if idx == 32 else "gfx1250",
         )
     if idx in (33, 34, 35):
-        # Grid-per-group WMMA (unmerged), the path gfx1250 dispatch takes for a
-        # grouped problem. 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+        # Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+        # 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
         # depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
         if idx == 34:
             p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)

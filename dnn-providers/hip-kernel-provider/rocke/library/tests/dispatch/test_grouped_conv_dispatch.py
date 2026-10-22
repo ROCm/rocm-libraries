@@ -228,8 +228,7 @@ def test_an_instance_builds_only_for_its_own_arch():
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx942"), "arch 'gfx942'"),
-        # gfx1250 registers forward instances only.
-        (dict(arch="gfx1250", direction="dgrad"), "arch 'gfx1250'"),
+        (dict(arch="gfx1250"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
@@ -719,29 +718,6 @@ def test_algorithm_pin_keeps_one_family():
     assert results
     assert {r.spec.algorithm for r in results} == {"direct_depthwise_tiled"}
     assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
-
-
-@pytest.mark.parametrize(
-    "shape, algorithm",
-    [
-        ("grouped_cpg16", "implicit_gemm"),
-        ("grouped_cpg4", "implicit_gemm"),
-        ("depthwise3x3", "direct_depthwise_tiled"),
-        ("depthwise7x7", "direct_depthwise_tiled"),
-    ],
-)
-def test_gfx1250_runs_grouped_forward_at_wave32(shape, algorithm):
-    """Grouped and depthwise forward requests reach gfx1250's own instances,
-    which launch wave32 blocks."""
-    result = gc.dispatch_conv_grouped(_req(arch="gfx1250", **_SHAPES[shape]))
-    assert result.spec.identity.arch == "gfx1250"
-    assert result.spec.algorithm == algorithm
-    assert result.spec.identity.wave_size == 32
-    assert result.block[0] % 32 == 0
-    assert all(
-        s.identity.wave_size == 32
-        for s in gc.registered_conv_grouped_instances("gfx1250", direction="fwd")
-    )
 
 
 # ---------------------------------------------------------------------------
