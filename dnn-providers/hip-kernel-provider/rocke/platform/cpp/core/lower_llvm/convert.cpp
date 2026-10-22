@@ -167,6 +167,7 @@ static void _op_arith_sitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_arith_uitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
+    rocke_i_refuse_non_u8_source(op);
     const rocke_value_t* v = op->operands[0];
     rocke_ll_emitf(L,
                    "  %s = uitofp %s %s to float",

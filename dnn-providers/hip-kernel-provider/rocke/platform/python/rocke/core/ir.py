@@ -482,6 +482,17 @@ def _refuse_unsigned_operands(op: "Op", instead: Optional[str] = None) -> None:
         _refuse_unsigned(op.name, operand.type, instead)
 
 
+def _refuse_non_u8_source(op: "Op") -> None:
+    """Refuse ``op``, a u8 -> float conversion, unless its source is a u8
+    scalar. IRBuilder.uitofp_f32 checks its input when the op is built; the
+    lowerings call this for IR that did not come through it (hand-assembled or
+    deserialized), because they would read any other source differently: LLVM's
+    uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0."""
+    (source,) = op.operands
+    if source.type.name != "u8":
+        raise TypeError(f"{op.name} expects a u8 source, got {source.type.name}")
+
+
 def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
     """Scope / ordering attr of a fence or flag op, checked for the lowerers.
 
