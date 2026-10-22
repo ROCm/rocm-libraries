@@ -416,13 +416,13 @@ def _validate_sources(ukd, where):
         if not isinstance(ks, dict) or "kind" not in ks:
             raise HkpPackError(f"{where} sources '{name}' missing 'kind'")
         kind = ks["kind"]
-        if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS:
+        if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS or kind not in (
+            "rocke",
+            "hip",
+            "hsaco",
+            "kpack",
+        ):
             raise sourcesmod.refuse_authored_kind(where, name, kind)
-        if kind not in ("rocke", "hip", "hsaco", "kpack"):
-            raise HkpPackError(
-                f"{where} sources '{name}' has unsupported kind '{kind}' "
-                "(expected 'rocke', 'hip' or 'hsaco', or 'kpack' once packed)"
-            )
         kinds.add(kind)
         if kind == "rocke":
             _require(ks, ["source", "builder", "spec"], f"{where} sources '{name}'")

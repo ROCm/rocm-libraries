@@ -224,8 +224,8 @@ class TestVerifyBindsEachEntryToItsOwnEvidence:
 
     def test_a_symbol_the_module_exports_under_the_wrong_launch_fails(self):
         doc, records, payload = shipped()
-        # Both launches now name the primary: the object exports it, so only the
-        # role recorded for `merge` can tell.
+        # `merge` is given the primary's symbol and signature, which the object
+        # exports; only the role recorded for `merge` can tell it apart.
         doc["sources"]["merge"]["symbol"] = PRIMARY
         doc["sources"]["merge"]["signature"] = doc["sources"]["decode"]["signature"]
         _restamp(doc)
@@ -444,6 +444,34 @@ class MalformedSpec:
     resolved_use_exp2_fast: bool = True
 
 
+class _RaisingPropertySpec:
+    """`block_n` exists, as a property whose body raises AttributeError."""
+
+    head_size = 64
+    dtype = "bf16"
+    causal = True
+
+    @property
+    def block_n(self):
+        return self.missing_helper
+
+    def resolved_use_exp2_fast(self):
+        return True
+
+
+class _RaisingMethodSpec:
+    """`resolved_use_exp2_fast` exists, as a method whose body raises
+    AttributeError."""
+
+    head_size = 64
+    dtype = "bf16"
+    causal = True
+    block_n = 64
+
+    def resolved_use_exp2_fast(self):
+        return self.missing_helper
+
+
 def _requests():
     request = agreement.observation_request(consumer(), FULL_KMD)
     return {agreement.digest(request): request}
@@ -486,6 +514,22 @@ class TestFieldsALaunchDoesNotReport:
         this stage lacks."""
         with pytest.raises(HkpPackError, match="not a bound effective accessor"):
             _observed(MalformedSpec())
+
+    @pytest.mark.parametrize(
+        "spec, attribute",
+        [
+            (_RaisingPropertySpec(), "block_n"),
+            (_RaisingMethodSpec(), "use_exp2_fast"),
+        ],
+        ids=["property", "method"],
+    )
+    def test_an_attribute_that_raises_while_observed_is_not_unreported(
+        self, spec, attribute
+    ):
+        """An AttributeError from an attribute the spec does have is a defect in
+        it; only an attribute the spec lacks is a field it does not report."""
+        with pytest.raises(HkpPackError, match=f"cannot observe {attribute} via"):
+            _observed(spec)
 
     def test_a_field_one_launch_reports_and_matches_passes(self):
         launches = {
@@ -945,7 +989,6 @@ class TestAuthoredValidation:
         [
             ("embedded_source", "not packed into a code object"),
             ("kpack", "not pack input"),
-            ("flydsl", "expected 'rocke', 'hip' or 'hsaco'"),
         ],
     )
     def test_each_refused_kind_says_why(self, kind, says):
@@ -1020,7 +1063,13 @@ class TestAuthoredValidation:
             _validate_ukd_fields(doc, "UKD 'k'")
 
     def test_an_unknown_kind_and_a_missing_kind_are_refused(self):
-        with pytest.raises(HkpPackError, match="unsupported kind 'flydsl'"):
+        with pytest.raises(
+            HkpPackError,
+            match=(
+                "'k1' has kind 'flydsl', which is not a sources entry kind "
+                r"\(expected 'rocke', 'hip' or 'hsaco', or 'kpack' once packed\)"
+            ),
+        ):
             _validate_ukd_fields(
                 _sources_ukd({"k0": _rocke_entry(), "k1": {"kind": "flydsl"}}),
                 "UKD 'k'",
@@ -1166,7 +1215,7 @@ class TestEveryReaderOfAUkdsKernel:
             assert "role" not in doc["kernel_source"]
         assert ukd["sources"]["k1"]["role"] == "merge"
 
-    def test_a_non_rocke_entry_reaching_the_compile_is_refused(self):
+    def test_a_kpack_entry_reaching_the_compile_is_refused(self):
         ukd = _sources_ukd({"k0": _rocke_entry(), "k1": _packed_entry(PRIMARY)})
         with pytest.raises(HkpPackError) as info:
             pipeline._compile_ukd_variant(
@@ -1256,6 +1305,15 @@ class TestDeskCheckReaders:
             {"kernel_source": {"toc_key": "y"}},
         ]
         assert desk_check.toc_key_uniqueness(plain) == (2, 2)
+
+    def test_a_toc_key_shared_through_one_launch_collides_across_kernels(self):
+        two_launch = _kernel_doc("k", {"a": {"toc_key": "t"}, "b": {"toc_key": "u"}})
+        reuse = {"name": "o", "kernel_source": {"toc_key": "u"}}
+        disjoint = {"name": "o", "kernel_source": {"toc_key": "v"}}
+        assert desk_check.toc_key_uniqueness([two_launch, reuse]) == (1, 2)
+        assert desk_check.toc_key_uniqueness([two_launch, disjoint]) == (2, 2)
+        shared = _kernel_doc("k", {"a": {"toc_key": "t"}, "b": {"toc_key": "t"}})
+        assert desk_check.toc_key_uniqueness([shared]) == (1, 1)
 
     def test_symbols_of_a_sources_kernel_are_counted_per_kernel(self):
         one = _kernel_doc("k", {"a": {"symbol": "s1"}, "b": {"symbol": "s2"}})

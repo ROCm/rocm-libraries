@@ -761,9 +761,9 @@ class _VariantJob:
     hipcc: str
     arch: str
     requests: dict = field(default_factory=dict)
-    # The launch of a `sources` UKD this variant was first needed by; None for a
-    # single-launch UKD.
-    launch: object = None
+    # The launches of `sources` UKDs that share this compile, in walk order; empty
+    # for a single-launch UKD.
+    launches: tuple = ()
 
 
 def shipped_engines(flat, arches):
@@ -930,19 +930,22 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
     if observation_requests is None:
         _, observation_requests = _agreement_inputs(flat, arch)
     jobs = []
-    seen = set()
+    launches = {}
     for kdp in flat.kdps():
         for sid, ukd, sdesc in _selected_entries(
             kdp.doc, arch, ukd_by_id, flat.generic_targets
         ):
             rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
             for vk, name, launch in _launch_variants(ukd, rel_dir):
-                if vk is None or vk in seen:
+                if vk is None:
                     continue
-                seen.add(vk)
+                if vk in launches:
+                    if name is not None and name not in launches[vk]:
+                        launches[vk].append(name)
+                    continue
+                launches[vk] = [] if name is None else [name]
                 jobs.append(
                     _VariantJob(
-                        launch=name,
                         vk=vk,
                         kind=launch["kernel_source"]["kind"],
                         ukd=launch,
@@ -954,7 +957,7 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
                         requests=observation_requests.get(vk, {}),
                     )
                 )
-    return jobs
+    return [replace(job, launches=tuple(launches[job.vk])) for job in jobs]
 
 
 def _compile_one_variant(job):
@@ -1284,8 +1287,8 @@ def _prewarm_variants(
         named = None if failed is None else failed.ukd.get("id")
         launch = (
             ""
-            if failed is None or failed.launch is None
-            else (f" launch '{failed.launch}'")
+            if failed is None or not failed.launches
+            else f" {_launch_label(failed.launches)}"
         )
         raise HkpPackError(
             f"variant '{named or failure[0]}'{launch} failed to compile for {arch}: "

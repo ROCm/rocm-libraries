@@ -52,7 +52,10 @@ def refuse_authored_kind(where, name, kind):
     elif kind == "kpack":
         tail = "and already-packed entries are not pack input"
     else:
-        tail = "which is not a sources entry kind (expected 'rocke', 'hip' or 'hsaco')"
+        tail = (
+            "which is not a sources entry kind "
+            "(expected 'rocke', 'hip' or 'hsaco', or 'kpack' once packed)"
+        )
     return HkpPackError(f"{head}, {tail}")
 
 

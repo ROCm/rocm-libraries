@@ -312,7 +312,7 @@ A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (seve
 packed `sources` is a JSON object keyed by launch name with at least two entries, each a
 complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
 Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
-single entry, a bad name, a `sources` under version 1.0 and an entry that is not `kpack`
+single entry, a bad name, a packed `sources` under version 1.0 and an entry that is not `kpack`
 are all refused, by the packer and by the loader. Two launch names may name one kernel (a
 stage that runs one kernel twice with different arguments): such entries carry equal
 `library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
@@ -351,7 +351,9 @@ still validates a packed `sources`, so a shipped tree can be checked.
   differ in `symbol`; at runtime they resolve out of one loaded module.
 - **Two builders (`rocke`).** Entries naming different builders (a split-KV segment kernel and its
   reduce kernel, say) are two entries with no `role`, and two code objects. No wrapper
-  builder is needed.
+  builder is needed. IngestorGenerator cannot vary a second builder's spec per variant: a
+  launch's `spec` override is static (see the `launches` paragraph in the
+  [IngestorGenerator README](../../../projects/hipdnn/tools/IngestorGenerator/README.md#the-engine-manifest-and-reduction)).
 - **Claim check (`rocke`).** For each compiled variant a UKD uses, the kernels its entries claim
   must equal the kernels the compile produced: the primary plus every companion role. Entries
   that name one kernel under different launch names make one claim. A compiled companion
