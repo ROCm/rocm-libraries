@@ -476,6 +476,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
@@ -622,7 +623,8 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 600)\n")
 
-    foreach(_operation sdpa conv)
+    # cmake/InstallGpuReferences.cmake discovers the operations from library/tests.
+    foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_${_operation}_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
@@ -687,6 +689,7 @@ if(ROCKE_INSTALL_TESTS)
     # RDNA WMMA suites skip on devices without a gfx11/gfx12 generic target.
     set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_correctness.py"
+        "tests/library/tests/test_conv_gradient_correctness.py"
         "tests/library/tests/test_conv_wgrad_correctness.py"
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
