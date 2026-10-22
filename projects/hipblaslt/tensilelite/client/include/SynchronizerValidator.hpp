@@ -128,7 +128,9 @@ namespace TensileLite
             }
 
         private:
-            // Preserve transfer failures for the final solution verdict.
+            /// Runs checkInputs on every device for each of `slots`, for `stage`.
+            /// Any exception, including a failed readback or clear, marks the
+            /// solution as failed before rethrowing.
             void validateInputs(std::vector<size_t> const& slots, char const* stage);
 
             /// Checks every Synchronizer buffer reachable from *inputs*.
