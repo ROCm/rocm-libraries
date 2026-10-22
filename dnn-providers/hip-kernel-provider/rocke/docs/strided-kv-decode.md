@@ -21,8 +21,8 @@ including padding, with these bounds:
 
 The selected segment and reducer must each fit the target's LDS capacity.
 Admission uses the resolved tile dimensions and LDS allocation dtypes. In
-particular, gfx942 D256/T32 uses one V buffer and requires 58,368 bytes,
-within its 65,536-byte capacity. D256/T64 requires 141,312 bytes and is
+particular, gfx942 D256/T32 uses one V buffer and requires 57,344 bytes,
+within its 65,536-byte capacity. D256/T64 requires 106,496 bytes and is
 rejected before compilation. An
 explicit smaller tile is checked using its actual footprint; selection does
 not silently resize it. gfx950 D256/block64 fits its target capacity.

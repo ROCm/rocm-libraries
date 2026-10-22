@@ -4,9 +4,11 @@
 #define ROCKE_INSTANCE_ATTENTION_PAGED_KV_INTERNAL_H
 #include "rocke/ir.h"
 
-/* Mirror of library/kernels/common/_attention_paged_kv.py. Pool bounds and
- * metadata contracts are validated before launch; speculative table accesses
- * and out-of-range data loads have separate guards. */
+/* Mirror of library/kernels/common/_attention_paged_kv.py. Host admission checks
+ * structural pool representability. Valid lengths, query offsets and referenced
+ * physical page IDs remain caller-owned, including after mutation/graph replay.
+ * Optional synchronized binding content validation must be repeated after
+ * mutation; table-index guards do not validate referenced physical page IDs. */
 static inline rocke_value_t* rocke_paged_kv_offset(rocke_ir_builder_t* b,
                                                    rocke_value_t* table,
                                                    rocke_value_t* seq_base,
