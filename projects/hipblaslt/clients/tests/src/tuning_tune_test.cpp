@@ -2296,10 +2296,10 @@ namespace
         EXPECT_GT(plan.total, capped.cap);
     }
 
-    // The block count is hipblaslt-bench's for the same problem. A zero beta
-    // leaves C unread, so with C and D apart, fp16 1024^3 and a 512 MiB budget
-    // the bench plans 86 blocks of A, B and D, and 64 once beta reads C.
-    TEST_F(TuningScratchPlan_pre_checkin, BlockCountFollowsTheBenchFootprint)
+    // With C and D apart, fp16 1024^3 occupies 6 MiB for A, B and D, and
+    // 8 MiB once beta reads C. These are actual tensor bytes; the benchmark's
+    // C estimate uses sizeof(hipDataType) instead of the element size.
+    TEST_F(TuningScratchPlan_pre_checkin, BlockCountUsesActualTensorBytes)
     {
         PlanCase c;
         c.m = c.n = c.k = 1024;
