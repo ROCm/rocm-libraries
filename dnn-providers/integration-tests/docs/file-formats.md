@@ -430,7 +430,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 version = 1
 
 [[tolerance_overrides]]
-filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
+filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
 atol = 1.19
 rtol = 0.2
 
@@ -441,10 +441,10 @@ validator     = "rms"
 rms_threshold = 1e-4
 
 [[test_skips]]
-archs     = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to match every arch
+archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
-filters   = ["*ConvFwdBiasActiv*"]
-reason    = "ROCm/rocm-libraries#6979 - no engine has an applicable solution"
+filters   = ["*_SdpaFwd_Default.*_128_bfp16_*"]
+reason    = "no applicable kernel for this shape on this arch"
 ```
 
 | Table | Rules |
@@ -502,7 +502,7 @@ Do not confuse them:
 |---|---|
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries (`hipdnn_integration_tests_unit_tests`, `hipdnn_gpu_ref_tests`, `hipdnn_golden_data_tests`) |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950AttentionDense_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.

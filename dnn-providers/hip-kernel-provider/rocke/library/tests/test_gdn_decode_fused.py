@@ -10,6 +10,7 @@ conditional kernel ABI. On-device numerics live in
 from __future__ import annotations
 
 import dataclasses as dc
+import itertools
 import unittest
 
 from kernels.gfx950.gdn_decode import (
@@ -212,6 +213,17 @@ def _scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
 
 _FLAGS = ((True, False), (False, True), (True, True))
 
+# Fused (NW, WTK) tiles at DK = DV = 128, 16/16 heads, BPV = 1 that compile
+# with 0 B scratch in every gate kind, state dtype and fusion mode under ROCm
+# 7.1, ROCm 7.13 and ROCm 10 (builders/gfx950/gdn/CASE_STUDY.md). Norm-only
+# also fits on every legal tile except _NORM_ONLY_SPILL_TILES. Every other
+# fused tile spills in some mode under at least one of those compilers, and
+# which modes is compiler-dependent, so the held set is per tile, not per
+# mode: a few individual modes on those tiles (8 of them) also stay at 0 B but
+# are only required to lower.
+_NO_SPILL_TILES = ((1, 16), (2, 8), (2, 16), (4, 8), (4, 16), (8, 16))
+_NORM_ONLY_SPILL_TILES = ((1, 1), (1, 2))
+
 
 class TestFusedEmission(unittest.TestCase):
     def test_params_match_signature(self):
@@ -229,30 +241,92 @@ class TestFusedEmission(unittest.TestCase):
                         )
 
     def test_lowers_and_compiles_without_scratch(self):
-        """Every fused variant lowers and compiles without spilling, including
-        one wave with fuse_conv, which owns all DV rows plus their taps and
-        weights (0 B on gfx950 with ROCm 7.1 and ROCm 7.13)."""
+        """Every legal fused tile lowers; the tiles every measured compiler
+        keeps at 0 B stay there, including one wave with fuse_conv at
+        (1,16,1), which owns all DV rows plus their taps and weights."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+        held = 0
         for gate in ("gdn", "kda"):
             for st in ("bf16", "f32"):
                 for conv, norm in _FLAGS:
-                    for nw in (1, 2, 4, 8):
+                    for nw in (1, 2, 4, 8, 16):
+                        for wtk in (1, 2, 4, 8, 16, 32):
+                            s = _fused(
+                                gate_kind=gate,
+                                state_dtype=st,
+                                num_warps=nw,
+                                warp_threads_k=wtk,
+                                fuse_conv=conv,
+                                fuse_out_norm=norm,
+                            )
+                            if not is_valid_spec(s, arch=ARCH)[0]:
+                                continue
+                            with self.subTest(name=s.kernel_name()):
+                                ll = _lower_kernel_to_llvm_python(
+                                    build_gdn_decode(s, arch=ARCH),
+                                    arch=ARCH,
+                                    llvm_flavor="llvm20",
+                                )
+                                self.assertIn("define amdgpu_kernel", ll)
+                                if (nw, wtk) in _NO_SPILL_TILES or (
+                                    not conv and (nw, wtk) not in _NORM_ONLY_SPILL_TILES
+                                ):
+                                    held += 1
+                                    self.assertEqual(_scratch_bytes(self, s), 0)
+        # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
+        self.assertEqual(held, 6 * 12 + 11 * 4)
+
+    def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
+        """Where late_row_inputs lets single-wave fuse_conv load its rows'
+        state and norm inputs first (conv_once, WTK 4 / 8), the hoisted
+        kernel spills no more than the late order it replaces. Each spec turns
+        on every other knob the tile accepts (dpp_reduce, stream_rows,
+        xcd_remap, both hints, interleave_cols with an f32 state), in three
+        modes: conv only; conv + norm with the per-lane norm inputs; conv +
+        norm with out_lds and norm_gate_once. waves_per_eu stays 0: a floor
+        keeps the late order."""
+        from unittest import mock
+
+        from kernels.gfx950 import gdn_decode
+
+        modes = (
+            dict(fuse_out_norm=False),
+            dict(fuse_out_norm=True),
+            dict(fuse_out_norm=True, out_lds=True, norm_gate_once=True),
+        )
+        for gate in ("gdn", "kda"):
+            for st, ics in (("bf16", (False,)), ("f32", (False, True))):
+                for wtk in (4, 8):
+                    for ic, mode in itertools.product(ics, modes):
                         s = _fused(
                             gate_kind=gate,
                             state_dtype=st,
-                            num_warps=nw,
-                            fuse_conv=conv,
-                            fuse_out_norm=norm,
+                            num_warps=1,
+                            warp_threads_k=wtk,
+                            fuse_conv=True,
+                            conv_once=True,
+                            dpp_reduce=True,
+                            stream_rows=True,
+                            interleave_cols=ic,
+                            xcd_remap=True,
+                            state_load_hint="streaming",
+                            state_store_hint="streaming",
+                            **mode,
                         )
                         with self.subTest(name=s.kernel_name()):
-                            ll = _lower_kernel_to_llvm_python(
-                                build_gdn_decode(s, arch=ARCH),
-                                arch=ARCH,
-                                llvm_flavor="llvm20",
-                            )
-                            self.assertIn("define amdgpu_kernel", ll)
-                            self.assertEqual(_scratch_bytes(self, s), 0)
+                            self.assertTrue(is_valid_spec(s, arch=ARCH)[0])
+                            self.assertFalse(gdn_decode.late_row_inputs(s))
+                            hoisted = _scratch_bytes(self, s)
+                            hoisted_ops = _op_names(s)
+                            with mock.patch.object(
+                                gdn_decode, "late_row_inputs", lambda _: True
+                            ):
+                                late = _scratch_bytes(self, s)
+                                late_ops = _op_names(s)
+                            # the patch reached the emitter: the order moved
+                            self.assertNotEqual(hoisted_ops, late_ops)
+                            self.assertLessEqual(hoisted, late)
 
     def test_unfused_kernel_has_no_lds_or_barrier(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -262,6 +336,11 @@ class TestFusedEmission(unittest.TestCase):
         )
         self.assertNotIn("addrspace(3)", ll)
         self.assertNotIn("s.barrier", ll)
+
+
+def _op_names(spec):
+    """Op names of ``spec``'s kernel in emission order (regions inline)."""
+    return [op.name for op in _flat_ops(build_gdn_decode(spec, arch=ARCH))]
 
 
 def _flat_ops(kernel):
@@ -296,23 +375,40 @@ def _root_param(value) -> str:
 
 
 def _specs_for_ir_checks():
-    """Both emitters, both gate kinds, every state width and fusion mode."""
+    """Both emitters, both gate kinds, every state width and fusion mode, and
+    the performance knobs that add or reshape global accesses."""
     for gate in ("gdn", "kda"):
         for st in ("bf16", "f32"):
             yield dc.replace(GdnDecodeSpec(), gate_kind=gate, state_dtype=st)
             yield dc.replace(
                 GdnDecodeSpec(), gate_kind=gate, state_dtype=st, simple=True
             )
+            yield dc.replace(
+                GdnDecodeSpec(),
+                gate_kind=gate,
+                state_dtype=st,
+                interleave_cols=True,
+                state_load_hint="streaming",
+                state_store_hint="streaming",
+            )
             for dtype in ("bf16", "f16"):
                 for conv, norm in _FLAGS:
                     for nw in (1, 4):
-                        yield _fused(
+                        spec = _fused(
                             gate_kind=gate,
                             dtype=dtype,
                             state_dtype=st,
                             num_warps=nw,
                             fuse_conv=conv,
                             fuse_out_norm=norm,
+                        )
+                        yield spec
+                        yield dc.replace(
+                            spec,
+                            interleave_cols=True,
+                            conv_once=conv,
+                            norm_gate_once=conv and norm,
+                            out_lds=norm,
                         )
 
 
