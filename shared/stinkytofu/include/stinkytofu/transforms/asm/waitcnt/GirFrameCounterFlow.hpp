@@ -5,6 +5,9 @@
 #pragma once
 
 #include <functional>
+#include <map>
+#include <set>
+#include <utility>
 
 #include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
@@ -15,6 +18,13 @@ class Function;
 
 namespace waitcnt {
 
+/// Which hazard kinds required each planned wait. Beside the plan, not inside the shared
+/// `WaitCountSpec`.
+struct GirWaitKinds {
+    std::map<std::pair<const StinkyInstruction*, CounterKind>, std::set<GirHazardKind>> anchors;
+    std::map<std::pair<const BasicBlock*, CounterKind>, std::set<GirHazardKind>> tails;
+};
+
 /// Compute a finite-frame wait plan directly on `(ST basic block, GIR frame)` states.
 /// `covers` must be the same predicate the caller emits with: a wait planned for a block that is
 /// never written is not merely wasted, it demands a barrier nothing was asked to place.
@@ -22,7 +32,8 @@ WaitInsertionPlan buildGirFrameWaitPlan(
     Function& function, const GirFrameAnalysis::Result& frames,
     const GirFrameHazardAnalysis::Result& hazards,
     const std::function<bool(const BasicBlock&)>& covers,
-    const std::function<bool(const StinkyInstruction&)>& alsoFences = {});
+    const std::function<bool(const StinkyInstruction&)>& alsoFences = {},
+    GirWaitKinds* kinds = nullptr);
 
 /// Remove existing dscnt-only waits that cannot tighten the counter once `plan` is applied. The
 /// plan is still virtual: this reconciles generic DS waits with GIR waits before the latter are

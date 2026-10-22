@@ -205,6 +205,31 @@ bool girOwnsOrdering(const StinkyInstruction& inst) {
     return contract != nullptr && contract->loaded;
 }
 
+/// A fence GirFencePlacementPass placed, found in the record it left. Placement names the WAIT
+/// half; a split signal is the same fence, so it answers for its pair.
+bool girPlacedFence(const StinkyInstruction& inst) {
+    const BasicBlock* block = inst.getParent();
+    const Function* function = block ? block->getParentFunc() : nullptr;
+    if (!function) return false;
+    const auto* placed = function->getStructMetaData<GirFenceCoverage>(kGirFenceCoverageKey);
+    if (placed == nullptr) return false;
+    if (placed->fences.count(&inst) != 0) return true;
+    if (!isBarrierSignal(inst) || !isSplitBarrierAllWave(inst)) return false;
+    bool after = false;
+    for (const IRBase& node : *block) {
+        const auto* other = dyn_cast<const StinkyInstruction>(&node);
+        if (!other) continue;
+        if (other == &inst) {
+            after = true;
+            continue;
+        }
+        if (!after) continue;
+        return isBarrierWait(*other) && isSplitBarrierAllWave(*other) &&
+               placed->fences.count(other) != 0;
+    }
+    return false;
+}
+
 bool takesNoWait(const StinkyInstruction& inst) {
     return girOwnsOrdering(inst);
 }
@@ -847,7 +872,8 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
     }
-    if (isBarrier(*inst) && !girNamesStorage(*inst)) {
+    // A GIR fence's tokens name hazards the frame counter flow already grades.
+    if (isBarrier(*inst) && !girPlacedFence(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
     }

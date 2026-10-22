@@ -92,6 +92,7 @@ struct Potential {
     IssueKey producer;
     size_t producerIndex = 0;
     int anchorGap = 0;
+    GirHazardKind kind = GirHazardKind::RAW;
 };
 
 struct RequirementSummary {
@@ -99,14 +100,16 @@ struct RequirementSummary {
     std::map<BasicBlock*, int, std::less<BasicBlock*>> byPred;
     std::set<IssueKey> producers;
     std::map<BasicBlock*, std::set<IssueKey>, std::less<BasicBlock*>> producersByPred;
+    std::set<GirHazardKind> kinds;
 
-    void record(BasicBlock* pred, int wait, const IssueKey& producer) {
+    void record(BasicBlock* pred, int wait, const IssueKey& producer, GirHazardKind kind) {
         if (wait < 0) return;
         if (strictest == WaitCountSpec::kUnused || wait < strictest) strictest = wait;
         auto [it, inserted] = byPred.emplace(pred, wait);
         if (!inserted) it->second = std::min(it->second, wait);
         producers.insert(producer);
         producersByPred[pred].insert(producer);
+        kinds.insert(kind);
     }
 };
 
@@ -168,7 +171,10 @@ PotentialMap buildPotentials(Function& function, const GirFrameAnalysis::Result&
                                  << " anchor=" << anchor->getParent()->getLabel() << "#"
                                  << indexInBlock(*anchor) << " anchorGap=" << anchorGap << "\n");
             result[{anchor, anchorFrame, counter}].push_back(
-                {{hazard.producer, hazard.producerFrame}, hazard.producerIndex, anchorGap});
+                {{hazard.producer, hazard.producerFrame},
+                 hazard.producerIndex,
+                 anchorGap,
+                 hazard.kind});
         };
 
         if (!hazard.crossAgent) {
@@ -593,7 +599,8 @@ RequirementMap simulate(Function& function, const GirFrameAnalysis::Result& fram
                     if (span.count <= 0) continue;
                     for (const auto& [pred, arrived] : perPred)
                         requirements[{site.anchor, site.counter}].record(
-                            pred, waitToDrain(site.counter, arrived), potential.producer);
+                            pred, waitToDrain(site.counter, arrived), potential.producer,
+                            potential.kind);
                 }
             }
         }
@@ -647,10 +654,13 @@ std::pair<int, bool> prefixIssuesBefore(StinkyInstruction* anchor, CounterKind c
     return {issues, false};
 }
 
+using TailKindMap = std::map<TailSite, std::set<GirHazardKind>>;
+
 struct PromotionPlan {
     DecisionMap anchors;
     TailDecisionMap tails;
     TailProducerMap tailProducers;
+    TailKindMap tailKinds;
 };
 
 PromotionPlan derivePromotions(const RequirementMap& requirements, const DecisionMap& decisions,
@@ -697,6 +707,7 @@ PromotionPlan derivePromotions(const RequirementMap& requirements, const Decisio
             if (producers != summary.producersByPred.end())
                 local.tailProducers[edge].insert(producers->second.begin(),
                                                  producers->second.end());
+            local.tailKinds[edge].insert(summary.kinds.begin(), summary.kinds.end());
         }
         if (!valid || local.tails.empty()) continue;
         result.anchors[site] = common;
@@ -706,6 +717,8 @@ PromotionPlan derivePromotions(const RequirementMap& requirements, const Decisio
         }
         for (const auto& [edge, producers] : local.tailProducers)
             result.tailProducers[edge].insert(producers.begin(), producers.end());
+        for (const auto& [edge, edgeKinds] : local.tailKinds)
+            result.tailKinds[edge].insert(edgeKinds.begin(), edgeKinds.end());
     }
     return result;
 }
@@ -751,7 +764,8 @@ RequirementMap closeDecisions(Function& function, const GirFrameAnalysis::Result
 WaitInsertionPlan materializePlan(const DecisionMap& decisions,
                                   const TailDecisionMap& tailDecisions,
                                   const TailProducerMap& tailProducers,
-                                  const RequirementMap& requirements) {
+                                  const RequirementMap& requirements, const TailKindMap& tailKinds,
+                                  GirWaitKinds* kinds) {
     WaitInsertionPlan plan;
     for (const auto& [site, wait] : decisions) {
         if (wait == WaitCountSpec::kUnused) continue;
@@ -760,6 +774,9 @@ WaitInsertionPlan materializePlan(const DecisionMap& decisions,
         auto summary = requirements.find(site);
         if (site.counter == CK_Tensor && summary != requirements.end())
             attachTensorTokens(spec, summary->second);
+        if (kinds && summary != requirements.end())
+            kinds->anchors[{site.anchor, site.counter}].insert(summary->second.kinds.begin(),
+                                                               summary->second.kinds.end());
     }
 
     std::map<BasicBlock*, WaitCountSpec, std::less<BasicBlock*>> tailSpecs;
@@ -769,6 +786,10 @@ WaitInsertionPlan materializePlan(const DecisionMap& decisions,
         auto producers = tailProducers.find(site);
         if (site.counter == CK_Tensor && producers != tailProducers.end())
             attachTensorTokens(spec, producers->second);
+        if (kinds)
+            if (auto edge = tailKinds.find(site); edge != tailKinds.end())
+                kinds->tails[{site.block, site.counter}].insert(edge->second.begin(),
+                                                                edge->second.end());
     }
     for (auto& [block, spec] : tailSpecs) plan.tailDrains.push_back({block, std::move(spec)});
     return plan;
@@ -972,7 +993,7 @@ WaitInsertionPlan buildGirFrameWaitPlan(
     Function& function, const GirFrameAnalysis::Result& frames,
     const GirFrameHazardAnalysis::Result& hazards,
     const std::function<bool(const BasicBlock&)>& covers,
-    const std::function<bool(const StinkyInstruction&)>& alsoFences) {
+    const std::function<bool(const StinkyInstruction&)>& alsoFences, GirWaitKinds* kinds) {
     const PotentialMap potentials = buildPotentials(function, frames, hazards, covers, alsoFences);
     if (potentials.empty()) return {};
 
@@ -982,6 +1003,7 @@ WaitInsertionPlan buildGirFrameWaitPlan(
 
     TailDecisionMap tailDecisions;
     TailProducerMap tailProducers;
+    TailKindMap tailKinds;
     RequirementMap requirements =
         closeDecisions(function, frames, potentials, decisions, tailDecisions);
 
@@ -1009,6 +1031,8 @@ WaitInsertionPlan buildGirFrameWaitPlan(
         }
         for (const auto& [site, producers] : promotions.tailProducers)
             tailProducers[site].insert(producers.begin(), producers.end());
+        for (const auto& [site, edgeKinds] : promotions.tailKinds)
+            tailKinds[site].insert(edgeKinds.begin(), edgeKinds.end());
         if (!changed) break;
         requirements = closeDecisions(function, frames, potentials, decisions, tailDecisions);
     }
@@ -1095,7 +1119,8 @@ WaitInsertionPlan buildGirFrameWaitPlan(
     if (girUnaccountedSpans && std::getenv("ST_GIR_SPAN_STATS"))
         std::cerr << "[gir-span] " << function.getName() << ": " << girUnaccountedSpans
                   << " unaccounted span walk(s)\n";
-    WaitInsertionPlan plan = materializePlan(decisions, tailDecisions, tailProducers, requirements);
+    WaitInsertionPlan plan =
+        materializePlan(decisions, tailDecisions, tailProducers, requirements, tailKinds, kinds);
     validateNoRedundantWaits(function, plan);
     return plan;
 }
