@@ -305,12 +305,19 @@ namespace TensileLite
             assigned.reserve(incoming.size());
             for(auto const& solution : incoming)
             {
-                const int index        = static_cast<int>(m_nextIndex++);
-                solution->index        = index;
-                solution->tag          = MySolution::MatchingTag::Equal;
+                const int index        = static_cast<int>(m_nextIndex + int64_t(assigned.size()));
                 next->solutions[index] = solution;
                 assigned.push_back(index);
             }
+
+            // Map insertion can throw. Finish allocating before modifying the
+            // caller's solutions or consuming indices, so a failed call can retry.
+            for(size_t i = 0; i < incoming.size(); ++i)
+            {
+                incoming[i]->index = assigned[i];
+                incoming[i]->tag   = MySolution::MatchingTag::Equal;
+            }
+            m_nextIndex += int64_t(assigned.size());
 
             publishLocked(std::move(next));
             return assigned;
