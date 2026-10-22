@@ -259,3 +259,55 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+// MX scale-buffer layout. The defect this guards: the gfx950 compact-scale
+// custom kernels (MXScaleFormat NoSwizzle) were registered into problem shards
+// also served by callers whose scale buffers are host-pre-swizzled. Nothing in
+// the problem geometry tells the two apart -- same extents, same E8M0 element
+// type -- so a NoSwizzle kernel was selectable for a pre-swizzled caller and
+// returned wrong answers rather than failing to launch.
+TEST(Predicates, MXScaleHostPreSwizzleRejectsLayoutMismatch)
+{
+    using namespace TensileLite;
+
+    auto mxProblem = [](bool hostPreSwizzled) {
+        auto p = ContractionProblemGemm::GEMM(true, false, 256, 256, 128, 128, 128, 256, 1.0, false, 1);
+        p.setMXScaleA(rocisa::DataType::E8, 32);
+        p.setMXScaleB(rocisa::DataType::E8, 32);
+        p.setMXScaleHostPreSwizzle(hostPreSwizzled);
+        return p;
+    };
+
+    ContractionProblemGemm preSwizzled = mxProblem(true);
+    ContractionProblemGemm compact     = mxProblem(false);
+
+    auto noSwizzleSolution
+        = std::make_shared<Predicates::Contraction::MXScaleHostPreSwizzle>(false);
+    auto hostPreSwizzleSolution
+        = std::make_shared<Predicates::Contraction::MXScaleHostPreSwizzle>(true);
+
+    // The defect itself: a NoSwizzle kernel must not be selectable for a
+    // pre-swizzled caller.
+    EXPECT_FALSE((*noSwizzleSolution)(preSwizzled));
+    // ... and the converse, which would be just as silently wrong.
+    EXPECT_FALSE((*hostPreSwizzleSolution)(compact));
+
+    // Both kernels stay reachable on the layout they were built for. Without
+    // this half the fix would simply make the compact kernels unselectable.
+    EXPECT_TRUE((*noSwizzleSolution)(compact));
+    EXPECT_TRUE((*hostPreSwizzleSolution)(preSwizzled));
+}
+
+// A problem carries the compact layout unless its caller says otherwise, so an
+// unlabeled solution and an untouched problem agree.
+TEST(Predicates, MXScaleHostPreSwizzleDefaultsToCompact)
+{
+    using namespace TensileLite;
+
+    auto p = ContractionProblemGemm::GEMM(true, false, 256, 256, 128, 128, 128, 256, 1.0, false, 1);
+    EXPECT_FALSE(p.mxScaleHostPreSwizzle());
+
+    auto noSwizzleSolution
+        = std::make_shared<Predicates::Contraction::MXScaleHostPreSwizzle>(false);
+    EXPECT_TRUE((*noSwizzleSolution)(p));
+}
