@@ -3271,9 +3271,10 @@ namespace TensileLite
             rocm_random_common<BFloat16>::signsig_exp(FP_PARAM<BFloat16>::UINT_T signsig,
                                                       FP_PARAM<BFloat16>::UINT_T exp)
         {
-            FP_PARAM<BFloat16>::UINT_T u;
-            u = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
-            return static_cast<BFloat16>(u);
+            // Store u as the raw bits; static_cast<BFloat16>(u) would convert it as a number.
+            BFloat16 r;
+            r.data = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
+            return r;
         }
 
         template <typename T, int LOW_EXP, int HIGH_EXP>
