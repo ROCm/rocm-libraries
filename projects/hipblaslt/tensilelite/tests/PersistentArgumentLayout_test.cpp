@@ -105,6 +105,101 @@ namespace
     };
 }
 
+TEST(PersistentArgumentLayout, InputBiasRequiresOnlyItsSourceAtAlphaZero)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    for(auto source : {Tensor::A, Tensor::B})
+    for(bool pointerArray : {false, true})
+    for(size_t k : {size_t{0}, size_t{65}})
+    {
+        SCOPED_TRACE(::testing::Message() << "source=" << source
+                     << " pointerArray=" << pointerArray << " K=" << k);
+        ContractionSolution solution;
+        configurePersistentSolution(solution, 3, 1);
+        solution.problemType.useBias = 1;
+        solution.problemType.useGradient = true;
+        solution.problemType.biasSrcWhiteList = {source};
+        auto problem = persistentProblem(33, 49, k, 2);
+        problem.setUseBias(1);
+        problem.setUseGradient(true);
+        size_t length = source == Tensor::A ? 33 : 49;
+        problem.setBias(rocisa::DataType::Float, length, length + 7, true, source);
+        problem.setBatchMode(pointerArray ? ContractionProblemGemm::POINTER_ARRAY
+                                         : ContractionProblemGemm::STRIDED);
+        auto device = persistentDevice();
+        auto inputs = persistentInputs(0.0f);
+        inputs.beta = 1.0f;
+        float storage = 1.0f;
+        void const* matrixPointers[] = {&storage, &storage};
+        inputs.c = inputs.d = &storage;
+        inputs.bias = &storage;
+        // Stale direct pointers must not satisfy pointer-array requirements.
+        if(pointerArray)
+            inputs.a = inputs.b = &storage;
+        if(k)
+            EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+        else
+            EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        if(source == Tensor::A)
+        {
+            inputs.a = &storage;
+            inputs.batchA = matrixPointers;
+        }
+        else
+        {
+            inputs.b = &storage;
+            inputs.batchB = matrixPointers;
+        }
+        EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        // GEMM still requires the other input at nonzero alpha and K.
+        inputs.alpha = 1.0f;
+        if(k)
+            EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+        inputs.alpha = 0.0f;
+        inputs.a = inputs.b = nullptr;
+        inputs.batchA = inputs.batchB = nullptr;
+        for(bool nullBias : {false, true})
+        for(bool noBiasType : {false, true})
+        {
+            inputs.bias = nullBias ? nullptr : &storage;
+            problem.setParams().setBiasEnum(noBiasType ? rocisa::DataType::None
+                                                       : rocisa::DataType::Float);
+            if(k)
+                EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+            else
+                EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        }
+        // An ordinary kernel with no compiled input reduction accepts null A/B.
+        solution.problemType.useBias = 0;
+        solution.problemType.useGradient = false;
+        EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+    }
+}
+
+TEST(PersistentArgumentLayout, BatchedInputBiasRejectsOverlappingOutputs)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.problemType.useBias = 1;
+    solution.problemType.useGradient = true;
+    auto problem = persistentProblem(33, 49, 0, 2);
+    problem.setUseBias(1);
+    problem.setUseGradient(true);
+    auto inputs = persistentInputs(0.0f);
+    inputs.beta = 1.0f;
+    float output = 0;
+    inputs.c = inputs.d = &output;
+    inputs.bias = &output;
+    for(size_t stride : {size_t{0}, size_t{32}, size_t{33}, size_t{40}})
+    {
+        problem.setBias(rocisa::DataType::Float, 33, stride, true, ContractionProblemGemm::A);
+        if(stride < 33)
+            EXPECT_THROW(solution.solve(problem, inputs, persistentDevice()), std::runtime_error);
+        else
+            EXPECT_NO_THROW(solution.solve(problem, inputs, persistentDevice()));
+    }
+}
+
 TEST_P(PersistentArgumentLayoutTest, PackedLayoutAndLaunch)
 {
     auto [outer, layout] = GetParam();

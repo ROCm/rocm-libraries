@@ -18655,6 +18655,18 @@ class KernelWriterAssembly(KernelWriter):
     # Num records (SrdBias only valid for BufferStore=1; flat store uses pre-computed 64-bit address)
     if kernel["BufferStore"]:
       module.add(SMulI32(dst=sgpr("SrdBias+2"), src0=hex(biasBpe), src1=sgpr("SrdBias+2"), comment="scaled by BPE"))
+      if kernel["GlobalSplitU"] in (0, 1) and kernel["ProblemType"]["StridedBatched"]:
+        with self.allocTmpSgpr(2, 2, tag="biasBatchOffset") as batchOffset:
+          lo, hi = batchOffset.idx, batchOffset.idx + 1
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(
+            sgpr(lo), sgpr(hi), sgpr("WorkGroup2"), sgpr("BiasStride"),
+            comment="bias batch offset in elements"))
+          module.add(SLShiftLeftB64(dst=sgpr(lo, 2), src=sgpr(lo, 2),
+                                   shiftHex=log2(biasBpe), comment="bias batch offset in bytes"))
+          module.add(SAddU32(dst=sgpr("SrdBias"), src0=sgpr("SrdBias"), src1=sgpr(lo),
+                            comment="bias batch base"))
+          module.add(SAddCU32(dst=sgpr("SrdBias+1"), src0=sgpr("SrdBias+1"), src1=sgpr(hi),
+                             comment="bias batch base carry"))
       module.add(self.shiftSrd("Bias"))
 
     # Local read

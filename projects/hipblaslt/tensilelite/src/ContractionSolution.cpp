@@ -5181,20 +5181,44 @@ namespace TensileLite
 
         bool debug = Debug::Instance().printKernelArguments() || this->kernelArgsLog;
 
-        int boundSize = 1;
+        // Alpha only suppresses GEMM. An active A/B bias gradient still reads
+        // its source over K, including in runtime pointer-array batch mode.
+        bool hasBoundElements = true;
         for(size_t i = 0; i < problem.boundIndices().size(); i++)
-            boundSize *= problem.boundSize(i);
-
-        // Check for nullptrs if alpha is non-zero.
-        if((!CompareValue(inputs.alpha, (double)0) && (boundSize != 0))
-           && ((problem.stridedBatched() && (inputs.a == nullptr || inputs.b == nullptr))
-               || (!problem.stridedBatched()
-                   && (inputs.batchA == nullptr || inputs.batchB == nullptr))))
+            hasBoundElements &= problem.boundSize(i) != 0;
+        bool inputBias = problem.useGradient() && problem.useBias() && (inputs.bias || inputs.batchBias)
+                         && problem.getParams().biasEnum() != rocisa::DataType::None
+                         && (problem.biasSrc() == ContractionProblemGemm::A
+                             || problem.biasSrc() == ContractionProblemGemm::B);
+        // Disabling the output does not disable reads in a compiled gradient
+        // kernel. Its serialized source, rather than runtime BiasType, governs
+        // the pointer requirement. Legacy hand-built solutions may omit it.
+        auto readsBiasSource = [&](ContractionProblemGemm::TENSOR source) {
+            return problemType.useGradient && problemType.useBias
+                   && (problemType.biasSrcWhiteList.empty()
+                           ? problem.biasSrc() == source
+                           : std::find(problemType.biasSrcWhiteList.begin(),
+                                       problemType.biasSrcWhiteList.end(), source)
+                                 != problemType.biasSrcWhiteList.end());
+        };
+        bool product = !CompareValue(inputs.alpha, (double)0);
+        bool needA = hasBoundElements && (product || readsBiasSource(ContractionProblemGemm::A));
+        bool needB = hasBoundElements && (product || readsBiasSource(ContractionProblemGemm::B));
+        bool pointerArray = !problem.stridedBatched()
+                            || problem.batchMode() == ContractionProblemGemm::POINTER_ARRAY;
+        bool missingA = pointerArray ? inputs.batchA == nullptr : inputs.a == nullptr;
+        bool missingB = pointerArray ? inputs.batchB == nullptr : inputs.b == nullptr;
+        if((needA && missingA) || (needB && missingB))
         {
-            std::string matrixID = inputs.a == nullptr ? "A" : "B";
-            std::string msg      = std::string("Unsupported nullptr for ") + matrixID
-                              + std::string(" when (Alpha !=0) && (K != 0)\n");
-            throw std::runtime_error(msg.c_str());
+            std::string matrixID = needA && missingA ? "A" : "B";
+            throw std::runtime_error("Unsupported nullptr for " + matrixID
+                                     + " required by GEMM or input bias gradient when K != 0");
+        }
+        if(inputBias)
+        {
+            auto const& bias = problem.tensor(ContractionProblemGemm::BIAS);
+            if(bias.sizes().at(2) > 1 && bias.strides().at(2) < bias.sizes().at(0))
+                throw std::runtime_error("Batched input bias gradients require non-overlapping output vectors");
         }
 
         // Check if alpha matches problem definition
