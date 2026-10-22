@@ -99,6 +99,34 @@ class TestParseNotes(unittest.TestCase):
         self.assertEqual(res["target_arch"], "gfx1201")
         self.assertEqual(res["occupancy"], 12)  # RDNA model, not the CDNA 4
 
+    def _parse_target(self, target):
+        notes = self._NOTES.replace("amdgcn-amd-amdhsa--gfx1201", target)
+        occupancy.subprocess.run = lambda *a, **k: SimpleNamespace(
+            returncode=0, stdout=notes, stderr=""
+        )
+        return occupancy.parse_notes(b"fake")
+
+    def test_every_target_spelling_names_the_processor(self):
+        # Newer compilers write the empty environment field as "unknown".
+        for target, processor in (
+            ("amdgcn-amd-amdhsa-unknown-gfx1201", "gfx1201"),
+            ("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942"),
+            ("amdgcn-amd-amdhsa-unknown-gfx950:xnack+", "gfx950"),
+            ("amdgcn-amd-amdhsa--gfx11-generic", "gfx11-generic"),
+            ("amdgcn-amd-amdhsa-unknown-gfx9-4-generic", "gfx9-4-generic"),
+        ):
+            with self.subTest(target=target):
+                self.assertEqual(self._parse_target(target)["target"], processor)
+
+    def test_a_target_without_a_processor_is_refused(self):
+        # Never fall back to the caller's arch for a target that cannot be read.
+        for target in ("amdgcn-amd-amdhsa-unknown-", "''", '""'):
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(ValueError, "cannot read a processor"):
+                    self._parse_target(target)
+        with self.assertRaisesRegex(ValueError, "cannot read a processor"):
+            occupancy.resources(b"fake", "gfx950")
+
 
 class TestOccupancyEstimate(unittest.TestCase):
     def test_estimate_is_capped(self):

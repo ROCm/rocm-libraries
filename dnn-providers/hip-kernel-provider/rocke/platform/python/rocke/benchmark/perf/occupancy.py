@@ -10,7 +10,8 @@ Reuses the note-field regexes proven in rocke's `probe_occupancy`. The occupancy
 number is conservative (relative ranking, not an absolute prediction) - for exact
 occupancy use rocprofv3 at runtime.
 
-Returns a dict for the record's `resources` section. Stdlib only.
+Returns a dict for the record's `resources` section. Uses the standard library
+plus rocke's own target-name parsing.
 """
 from __future__ import annotations
 
@@ -21,6 +22,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from rocke.core.arch import target_id_from_isa
 
 # AMDGPU code-object metadata note fields (same patterns as probe_occupancy).
 _NOTE_FIELDS = {
@@ -35,11 +38,15 @@ _NOTE_FIELDS = {
 }
 
 # The code object records the ISA it was built for
-# (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`). That beats any caller-supplied
-# arch: the occupancy model must follow the binary, not a stale CLI flag. The
+# (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`; newer compilers write the empty
+# environment field as `unknown`, `amdgcn-amd-amdhsa-unknown-gfx1201`). That beats
+# any caller-supplied arch: the occupancy model must follow the binary, not a stale
+# CLI flag. ``target_id_from_isa`` reads the target ID out of either form. The
 # processor name may be a generic target (`gfx11-generic`); feature suffixes
-# (`:xnack-`) are not part of it.
-_TARGET_FIELD = r"amdhsa\.target:\s*\S*?--(gfx[0-9a-z-]+)"
+# (`:xnack-`) are not part of it. An empty value is captured too, so it is refused
+# like any other target without a processor.
+_TARGET_FIELD = r"amdhsa\.target:[ \t]*['\"]?([^\s'\"]*)"
+_PROCESSOR = r"gfx[0-9a-z]+(?:-[0-9a-z]+)*"
 
 
 @dataclass(frozen=True)
@@ -99,8 +106,25 @@ def _readelf() -> Optional[str]:
     return None
 
 
+def _processor_from_target(isa: str) -> str:
+    """The processor named by an ``amdhsa.target`` value.
+
+    Raises ``ValueError`` when no processor can be read from it, so a target
+    the parser does not understand is reported instead of being replaced by
+    the caller's arch.
+    """
+    processor = target_id_from_isa(isa).split(":", 1)[0]
+    if not re.fullmatch(_PROCESSOR, processor):
+        raise ValueError(f"cannot read a processor from amdhsa.target {isa!r}")
+    return processor
+
+
 def parse_notes(hsaco_bytes: bytes) -> dict:
-    """Extract raw resource fields from an HSACO's ELF notes ({} on failure)."""
+    """Extract raw resource fields from an HSACO's ELF notes ({} on failure).
+
+    Raises ``ValueError`` when the notes record an ``amdhsa.target`` that names
+    no processor.
+    """
     readelf = _readelf()
     if not readelf:
         return {}
@@ -126,7 +150,7 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
             fields[name] = int(m.group(1))
     m = re.search(_TARGET_FIELD, notes)
     if m:
-        fields["target"] = m.group(1)
+        fields["target"] = _processor_from_target(m.group(1))
     return fields
 
 
@@ -329,8 +353,8 @@ def resources(hsaco_bytes: bytes, arch: str) -> dict:
     the disagreement.
 
     Raises ``ValueError`` when the occupancy model has no data for that processor
-    or for the code object's wave size, or when the notes do not record the wave
-    size.
+    or for the code object's wave size, when the notes do not record the wave
+    size, or when they record a target that names no processor.
     """
     f = parse_notes(hsaco_bytes)
     if not f:
