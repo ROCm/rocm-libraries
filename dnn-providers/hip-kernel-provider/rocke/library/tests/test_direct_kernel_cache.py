@@ -326,7 +326,7 @@ def test_large_depthwise_filters_get_the_tiled_kernel(cache, stride):
         (step,) = plan.steps
         assert step.grid == (
             -(-problem.Wo // knobs["block_w"]),
-            -(-problem.groups // (64 * knobs["block_waves"])),
+            -(-problem.groups // (64 * knobs["block_waves"] * knobs.get("cpl", 1))),
             problem.N * -(-problem.Ho // knobs["block_h"]),
         )
 
