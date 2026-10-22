@@ -201,13 +201,22 @@ def test_output_bias_gradient_intermediate_and_reduction_helper(tmp_path, strate
 
 
 @pytest.mark.parametrize("source", ["A", "B"])
-@pytest.mark.parametrize("nan_unused", [False, True])
-def test_alpha_zero_hardware_config_assembles_all_variants(tmp_path, source, nan_unused):
-    root = Path(tensile_file).parent
-    suffix = ("_nan_b" if source == "A" else "_nan_a") if nan_unused else ""
-    config = yaml.safe_load((root / f"Tests/common/streamk/gfx1250/persistent_input_bias_alpha0{suffix}.yaml").read_text())
+def test_alpha_zero_hardware_config_assembles_all_variants(tmp_path, source):
+    root = Path(tensile_file).parent / "Tests/common/streamk/gfx1250"
+    config = yaml.safe_load((root / "persistent_input_bias_alpha0.yaml").read_text())
     config["BenchmarkProblems"] = [entry for entry in config["BenchmarkProblems"]
                                    if entry[0]["BiasSrc"] == source]
+    unused = "B" if source == "A" else "A"
+    nan_config = yaml.safe_load(
+        (root / f"persistent_input_bias_alpha0_nan_{unused.lower()}.yaml").read_text())
+    # NaN and pointer-array inputs change runtime coverage, not kernel variants.
+    # Keep those numerical fixtures aligned without compiling each kernel twice.
+    assert nan_config["BenchmarkProblems"] == config["BenchmarkProblems"]
+    runtime_only = {"BatchMode", "DataInitTypeA", "DataInitTypeB"}
+    assert {k: v for k, v in nan_config["GlobalParameters"].items() if k not in runtime_only} == {
+        k: v for k, v in config["GlobalParameters"].items() if k not in runtime_only}
+    assert nan_config["GlobalParameters"]["BatchMode"] == 1
+    assert nan_config["GlobalParameters"][f"DataInitType{unused}"] == 4
     path = tmp_path / "alpha_zero.yaml"
     path.write_text(yaml.safe_dump(config))
     results = emit_kernels_from_config(str(path), limit=4, arch="gfx1250", canonical=False)
