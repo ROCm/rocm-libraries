@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Shared paths for the hipBLASLt local kernel CI scripts. Source this file; do
 # not execute it. A local run can export any of these before invoking a script.
 # Defaults match the GitHub Actions layout: the repository root, a build

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Install header-only hipblas-common from this checkout into
 # ${LOCAL_KERNELS_DEPS_DIR}.
 # Locally: bash projects/hipblaslt/scripts/local-kernels/stage-hipblas-common.sh

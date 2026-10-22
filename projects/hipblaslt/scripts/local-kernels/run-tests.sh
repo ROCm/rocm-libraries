@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Run the local kernel tests in hipblaslt-test. Fails if the binary has none,
 # which means HIPBLASLT_ENABLE_LOCAL_KERNELS did not reach the build.
 # Locally: bash projects/hipblaslt/scripts/local-kernels/run-tests.sh

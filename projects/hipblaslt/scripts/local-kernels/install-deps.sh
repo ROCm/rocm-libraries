@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Install the host packages and Python environment the build uses, including
 # what the hipBLASLt clients need: a Fortran compiler, LAPACK, GoogleTest with
 # GoogleMock, and NUMA.

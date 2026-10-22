@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Fetch the compiler, runtime and development pieces of a ROCm SDK, without a
 # prebuilt hipBLASLt. Requires TheRock checked out at ${ROOT}/TheRock.
 # Locally, export SDK_RUN_ID, AMDGPU_FAMILY and LOCAL_KERNELS_ARCHITECTURE first.

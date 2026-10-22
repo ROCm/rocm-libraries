@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Configure the host hipBLASLt library with local kernel registration and build
 # hipblaslt-test. No device kernel library is built: the local kernel tests run
 # over a stub shipped library.
