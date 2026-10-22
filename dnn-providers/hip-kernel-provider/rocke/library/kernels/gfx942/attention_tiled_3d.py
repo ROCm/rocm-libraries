@@ -1441,6 +1441,40 @@ def build_unified_attention_reduce_tiled(
     return b.kernel
 
 
+def supports_unified_attention_reduce_tiled(
+    spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-first predicate for the split-KV reduce kernel (functional limits only).
+
+    Mirrors what ``build_unified_attention_reduce_tiled`` can actually emit:
+    one wave64 splits ``head_size`` evenly over its 64 lanes, and the per-segment
+    rescale factors (fp32, ``num_segments`` of them) live in LDS.
+    """
+    from ..common.attention_arch import (
+        attention_lds_capacity_bytes,
+        validate_tiled_attention_arch,
+    )
+
+    arch_ok, arch_reason = validate_tiled_attention_arch(arch)
+    if not arch_ok:
+        return False, arch_reason
+    if spec.dtype not in ("fp16", "bf16"):
+        return False, f"dtype={spec.dtype!r} unsupported (reduce writes fp16/bf16)"
+    if spec.head_size <= 0 or spec.head_size % 64 != 0:
+        return False, (
+            f"head_size={spec.head_size} must be a positive multiple of 64 "
+            f"(the reduce splits head_size over 64 lanes)"
+        )
+    lds_bytes = 4 * spec.num_segments
+    cap = attention_lds_capacity_bytes(arch)
+    if lds_bytes > cap:
+        return False, (
+            f"num_segments={spec.num_segments} needs {lds_bytes} B of LDS, "
+            f"over the {cap} B limit"
+        )
+    return True, "supported"
+
+
 def supports_tiled_3d_spec(
     spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
