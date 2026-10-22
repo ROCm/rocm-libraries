@@ -44,11 +44,9 @@ Snapshot shape: ``{"returned": <bool>, "valid": <Valid or "unset">}``.
 import copy
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
+from toolchain_test_helpers import shared_full_isa_info_map
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import validateToolchain
 from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
     validateMIParameters,
@@ -56,8 +54,7 @@ from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
 
 pytestmark = pytest.mark.unit
 
-_cxx = validateToolchain("amdclang++")
-isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, _cxx)
+isaInfoMap = shared_full_isa_info_map()
 
 GFX90A = IsaVersion(9, 0, 10)
 GFX942 = IsaVersion(9, 4, 2)

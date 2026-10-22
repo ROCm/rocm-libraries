@@ -1,3 +1,5 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """The toolchain pieces the tests share: one ``Assembler`` and one capability map per ISA.
 
 Tests need an ``Assembler`` (what ``Solution`` reads ``rocm_version`` and the
@@ -17,6 +19,8 @@ the tests are not part of the installed package, so ``Tests/`` is put on
 
 import copy
 import functools
+import multiprocessing
+import os
 
 import pytest
 
@@ -134,6 +138,61 @@ def shared_isa_info_map(arch):
     """The process-wide, read-only capability map holding only ``arch`` (a gfx
     name or an IsaVersion). Every caller gets the same object."""
     return _shared_isa_info_map(_isa_of(arch))
+
+
+def _probe_isa_chunk(arguments):
+    """Probe in a fresh process and return rocisa's pickleable capability data."""
+    import rocisa
+
+    isas, compiler = arguments
+    ri = rocisa.rocIsa.getInstance()
+    for isa in isas:
+        ri.init(tuple(isa), compiler, False)
+    requested = {tuple(isa) for isa in isas}
+    return {isa: info for isa, info in ri.getData().items() if tuple(isa) in requested}
+
+
+def _prime_isa_cache(isas, compiler):
+    import rocisa
+
+    ri = rocisa.rocIsa.getInstance()
+    # Native rocisa uses a C++ IsaVersion as its key, while the Python callers
+    # use IsaVersion namedtuples. Compare plain tuples rather than their hashes.
+    cached = {tuple(isa) for isa in ri.getData()}
+    missing = [isa for isa in isas if tuple(isa) not in cached]
+    if not missing:
+        return
+
+    workers = min(8, len(missing), os.cpu_count() or 1)
+    if workers == 1 or multiprocessing.current_process().daemon:
+        # Daemonic processes cannot create a child pool.
+        for isa in missing:
+            ri.init(tuple(isa), compiler, False)
+        return
+
+    chunks = [missing[i::workers] for i in range(workers)]
+    with multiprocessing.get_context("spawn").Pool(workers) as pool:
+        parts = pool.map(_probe_isa_chunk, [(chunk, compiler) for chunk in chunks])
+
+    # setData replaces the cache: retain entries already initialized by callers,
+    # including ISAs outside SUPPORTED_ISA. It does not change the active kernel.
+    merged = ri.getData()
+    for part in parts:
+        merged.update(part)
+    ri.setData(merged)
+
+
+@functools.lru_cache(maxsize=1)
+def shared_full_isa_info_map():
+    """One read-only map for SUPPORTED_ISA per process, primed by up to eight workers.
+
+    Only missing ISAs are probed. xdist workers keep separate process caches;
+    the probe pool uses spawn so it does not inherit pytest or rocisa state.
+    """
+    from tensilelite.Common.Architectures import SUPPORTED_ISA
+
+    _prime_isa_cache(SUPPORTED_ISA, cxx_compiler())
+    return _ReadOnlyDict({isa: shared_isa_info_map(isa)[isa] for isa in SUPPORTED_ISA})
 
 
 def shared_isa_info_map_or_skip(arch, toolchainRequired=True):

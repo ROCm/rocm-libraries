@@ -14,7 +14,12 @@ if _CODEGEN_DIR not in sys.path:
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
-from toolchain_test_helpers import shared_assembler, shared_isa_info_map_or_skip
+from toolchain_test_helpers import (
+    cxx_compiler as _cxx_compiler,
+    shared_assembler,
+    shared_full_isa_info_map,
+    shared_isa_info_map_or_skip,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +31,16 @@ def _isolate_rocisa_state():
 # Shared toolchain fixtures. Each is one object for the whole run, and the capability
 # maps are read-only (see toolchain_test_helpers): a test that needs to change one takes
 # a copy with copy_isa_info_map.
+@pytest.fixture(scope="session")
+def cxx_compiler():
+    return _cxx_compiler()
+
+
+@pytest.fixture(scope="session")
+def isa_info_map():
+    return shared_full_isa_info_map()
+
+
 @pytest.fixture(scope="session")
 def assembler():
     return shared_assembler()

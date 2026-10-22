@@ -41,11 +41,9 @@ so the snapshots are reproducible in the dev container. See resistance.md.
 
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
+from toolchain_test_helpers import shared_full_isa_info_map
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import validateToolchain
 from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
 )
@@ -53,8 +51,7 @@ from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
 pytestmark = pytest.mark.unit
 
 # Real ISA capability map (asmCaps queried from the assembler once per session).
-_cxx = validateToolchain("amdclang++")
-isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, _cxx)
+isaInfoMap = shared_full_isa_info_map()
 
 # Representative ISAs (see capability survey in resistance.md):
 GFX90A = IsaVersion(9, 0, 10)   # HasMFMA
