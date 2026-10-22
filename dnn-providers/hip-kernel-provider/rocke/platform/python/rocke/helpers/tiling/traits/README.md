@@ -11,10 +11,12 @@ message naming the row and the field, so an edit cannot load half-right.
 ## Schema (`schema_version: 2`)
 
 ```json
-{"_meta": {"schema_version": 2},
+{"_meta": {"schema_version": 2,
+           "excluded_targets": {"gfx940": "<reason>", "gfx941": "<reason>"}},
  "operations": [
   {"op_id": "mfma_f32_16x16x16f16",
    "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x16f16",
+   "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x16f16",
    "family": "dense", "wave_size": 64,
    "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
    "a_dtype": "fp16", "b_dtype": "fp16", "c_dtype": "fp32", "d_dtype": "fp32",
@@ -32,9 +34,10 @@ A row carries exactly these fields (plus `operand_signedness` on integer rows):
 |---|---|
 | `op_id` | Unique. The builtin name without `__builtin_amdgcn_`. A builtin whose A and B formats are picked by an operand has one row per format pair, named `<stem>_<a_dtype>_<b_dtype>` (e.g. `wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1`). |
 | `llvm_builtin` | The clang builtin. |
+| `llvm_intrinsic` | The LLVM intrinsic the builtin lowers to, without its type-overload suffix (see Targets). |
 | `family` | `dense`, `sparse` or `scaled`. |
 | `wave_size` | 32 or 64. |
-| `supported_targets` | The gfx targets the row is listed on. |
+| `supported_targets` | Every gfx target the compiler selects the instruction on; never empty (see Targets). |
 | `a_dtype`, `b_dtype` | A and B operand dtypes. |
 | `c_dtype`, `d_dtype` | The accumulator taken in (C) and the result returned (D). They differ only where the instruction returns another dtype than it accumulates in. |
 | `operand_signedness` | Integer rows only (`i8` / `i4` operands), and required there: `selectable` when each operand has its own signedness flag (integer WMMA), so `u8` / `u4` also match, independently for A and B; `signed` for signed-only operands (integer MFMA). |
@@ -45,6 +48,8 @@ A row carries exactly these fields (plus `operand_signedness` on integer rows):
 | `a_layout`, `b_layout`, `c_d_layout` | The layouts in hardware notation (`K{4} L{K1M} V{K0}`, see Layout strings). `b_layout: "same"` means A's string over N. They state the same layout as `layout_params`, element for element. |
 | `scale` | `null` unless `family` is `scaled`; then `{"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]}`: the K elements sharing one scale (16 or 32), and the scale formats the instruction accepts for A and B (`core.arch` `MmaScaleDType` values). A scale format changes how a scale byte is decoded, never a register layout, so the accepted formats are a set on one row. |
 | `index_layout` | Sparse rows: the sparsity index operand's layout string, else `null`. |
+
+`_meta` holds `schema_version` and `excluded_targets` (see Targets).
 
 ### Dtype names
 
@@ -96,6 +101,32 @@ Example: `K{2, 4} L{K1M} V{K2K0}` (`wmma_f32_16x16x16_f16_w32_gfx12`, `K = 16`) 
 (4 values), `K1` (2) and `K2` (2). Lane `16 * K1 + M` holds slot `4 * K2 + K0`, so lane 0 holds K
 0-3 and 8-11 of row 0, and lane 16 holds K 4-7 and 12-15. `index_layout` uses the same notation (`S`
 there indexes the sparsity selector).
+
+## Targets
+
+`supported_targets` lists real target ids, never a family name such as `gfx11`. A row lists every
+target among rocke's backend targets (`core.arch.known_arches()`) on which the newest clang
+compiles and links the builtin, including the generic targets (`gfx11-generic`,
+`gfx12-generic`) and every member of them that rocke lists. A member that an older compiler does
+not accept by name (`gfx1154`) is listed like the others: rocke compiles it as its generic target
+there (`core.arch.compiler_target_for_flavor`). Every listed id is a backend target, and every
+row lists at least one (`tests/helpers/tiling/traits/test_mma_catalog_integrity.py`). Other ids
+the compiler accepts are not listed until rocke's backend has a target for them.
+
+`_meta.excluded_targets` names the public ids that are deliberately never listed, each with its
+reason (`gfx940` and `gfx941`: superseded by `gfx942`). The loader refuses a row that lists one.
+
+`llvm_intrinsic` is read from the LLVM IR clang emits for the builtin, with the trailing name
+parts that only spell the operand types removed. Builtins that differ only in operand types share
+an intrinsic (`wmma_f32_16x16x16_f16_w32` and `wmma_f32_16x16x16_f16_w32_gfx12` are both
+`llvm.amdgcn.wmma.f32.16x16x16.f16`), and so do the per-format rows of one `f8f6f4` builtin.
+
+A scaled row's `scale.a_dtypes` / `scale.b_dtypes` are the scale formats the newest clang accepts
+in the instruction's scale-format operands, measured by compiling every pair of values. The gfx950 scaled MFMA
+has no scale-format operand and decodes `e8m0`. On gfx1250 an `fp4e2m1` operand takes `e8m0`,
+`e4m3` and `e5m3`, and any other operand takes `e8m0`. One pairing rule is not expressed by the
+per-operand sets: on the `16x16x128` `f8f6f4` rows whose A and B are both `fp4e2m1`, A and B use
+the same scale format (the compiler refuses a mixed pair).
 
 ## Layout-exactness rule
 
@@ -173,8 +204,9 @@ identically.
 
 ## Editing the catalog
 
-1. Edit the row by hand; keep every field the schema lists, and set `layout_source` to where the new
-   values come from.
+1. Edit the row by hand; keep every field the schema lists, set `layout_source` to where the new
+   values come from, and fill `supported_targets`, `llvm_intrinsic` and any scale formats by the
+   Targets rules.
 2. Keep the layout strings and `layout_params` in agreement, following the layout-exactness rule; a
    row whose layout has no independent arbiter goes into Unverified layouts.
 3. Run the tiling tests: `python -m pytest python/rocke/tests/helpers/tiling` (from `platform/`).
