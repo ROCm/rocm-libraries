@@ -50,6 +50,8 @@ by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 The tests need 19 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/hipsparse/clients/matrices`` from the root of the rocm-libraries repository.
 Reading from the DVC storage doesn't require credentials.
+In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
+``git sparse-checkout add .dvc`` first.
 Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.bin`` files,
 or configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
@@ -67,14 +69,15 @@ Use the following commands for a sparse checkout:
 .. note::
 
    To include the rocSPARSE dependencies, set the projects for the sparse checkout using
-   ``git sparse-checkout set projects/hipsparse projects/rocsparse``.
+   ``git sparse-checkout set projects/hipsparse projects/rocsparse .dvc``.
+   The ``.dvc`` directory is needed to download the test matrices with ``dvc pull``.
 
 .. code-block:: shell
 
    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries
    git sparse-checkout init --cone
-   git sparse-checkout set projects/hipsparse # add projects/rocsparse to include dependencies
+   git sparse-checkout set projects/hipsparse .dvc # add projects/rocsparse to include dependencies
    git checkout develop # or use the branch you want to work with
 
 
@@ -121,6 +124,14 @@ Using install.sh to build hipSPARSE with dependencies and clients
 
 The clients contains example code and unit tests. Common use cases of ``install.sh`` to build them are listed in the table below.
 
+.. note::
+
+   The tests need the SuiteSparse test matrices. Before running these commands, pull them with
+   ``dvc pull -R clients/matrices`` from the ``projects/hipsparse`` directory.
+   ``install.sh`` downloads missing matrices only when you pass ``--matrices-dir``.
+   The clients also need GoogleTest, which ``-d`` doesn't install. Install it first, for example the
+   ``libgtest-dev`` or ``gtest-devel`` package.
+
 .. csv-table::
    :header: "Command","Description"
    :widths: 30, 100
@@ -128,7 +139,7 @@ The clients contains example code and unit tests. Common use cases of ``install.
    "``./install.sh -h``", "Print the help information."
    "``./install.sh -dc``", "Install the build dependencies using the distribution package manager, then build the library and client in your local directory. The ``-d`` flag doesn't install GoogleTest, which the client requires. The ``-d`` flag only needs to be used once."
    "``./install.sh -c``", "Build the library and client in your local directory. The script assumes the dependencies are available."
-   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the hipSPARSE package in ``/opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users."
+   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the hipSPARSE package in ``/opt/rocm/hipsparse``. The ``-d`` flag doesn't install GoogleTest, which the client requires. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users."
    "``./install.sh -ic``", "Build the library and client, then build and install the hipSPARSE package in ``opt/rocm/hipsparse``. The script prompts you for ``sudo`` access. This installs hipSPARSE and the clients for all users"
 
 Building hipSPARSE using individual make commands
@@ -164,8 +175,12 @@ You can build hipSPARSE with the dependencies and clients using the following co
 
    GoogleTest is required to build the hipSPARSE clients. Install it, for example the ``libgtest-dev`` or
    ``gtest-devel`` package, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it.
+   ``-DALLOW_FETCH_DEPS=ON`` also downloads the test matrices from SuiteSparse instead of the ``dvc pull`` step.
 
 .. code-block:: shell
+
+   # Pull the test matrices
+   dvc pull -R clients/matrices
 
    # Create and change to build directory
    mkdir -p build/release ; cd build/release
