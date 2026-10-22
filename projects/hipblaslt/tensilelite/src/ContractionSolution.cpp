@@ -27,6 +27,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -1833,7 +1834,7 @@ namespace TensileLite
                                                hasGate ? gate.strides()[i] : 0);
         }
 
-        if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
+        if(scaleAlphaVectorMode(problemType.useScaleAlphaVec) == 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
                                            static_cast<uint32_t>(problem.getParams().factorDim()));
@@ -2391,7 +2392,7 @@ namespace TensileLite
         internalArg0 = 0;
         internalArg1 = 0;
 
-        // GSU bit-width depends on InternalArgsSupport.version/capabilities:
+        // GSU bit-width depends on InternalArgsSupport.version and alpha support:
         //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
         //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
         //           bits 12/13 carry NTA / NTB for AdaptiveGemmNTAB.
@@ -2403,14 +2404,15 @@ namespace TensileLite
         constexpr uint32_t kNtaBitPos               = 12;
         constexpr uint32_t kNtbBitPos               = 13;
         const bool         useNtabBits              = (internalArgsSupport.version >= 3);
-        const uint32_t     gsuMask                  = internalArgsSupport.deviceScalarAlpha
+        const bool         scalarAlphaSupport
+            = scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec);
+        const uint32_t     gsuMask                  = scalarAlphaSupport
                                                           ? kGsuMaskDeviceScalar
                                                           : (useNtabBits ? kGsuMaskV3 : mask14);
-        if(param.deviceScalarAlpha()
-           && (!internalArgsSupport.deviceScalarAlpha || !problemType.useScaleAlphaVec))
+        if(param.deviceScalarAlpha() && !scalarAlphaSupport)
         {
-            throw std::runtime_error("Device scalar alpha requires a UseScaleAlphaVec kernel with "
-                                     "InternalArgsSupport.deviceScalarAlpha.");
+            throw std::runtime_error(
+                "Device scalar alpha requires UseScaleAlphaVec scalar support (5/6/7).");
         }
         // Belt-and-suspenders: if a v<3 solution somehow has AGNTAB!=0, that's a codegen bug.
         assert((useNtabBits || sizeMapping.adaptiveGemmNTAB == 0)
@@ -2499,7 +2501,7 @@ namespace TensileLite
                   + ", InternalArgsSupport.version=" + std::to_string(internalArgsSupport.version)
                   + ", AdaptiveGemmNTAB=" + std::to_string(sizeMapping.adaptiveGemmNTAB)
                   + ", deviceScalarAlphaSupport="
-                  + std::to_string(internalArgsSupport.deviceScalarAlpha)
+                  + std::to_string(scalarAlphaSupport)
                   + "). Bits 12/13 may carry NTA/NTB, and device-scalar-alpha-capable"
                   + " kernels reserve bit 11 for scalar/vector selection.";
             throw std::runtime_error(msg.c_str());
@@ -4020,7 +4022,7 @@ namespace TensileLite
         if(problemType.useScaleAlphaVec && sizeMapping.globalAccumulation == 0)
         {
             rv.args.append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
-            if(problemType.useScaleAlphaVec == 3)
+            if(scaleAlphaVectorMode(problemType.useScaleAlphaVec) == 3)
                 enableFactorDim = true;
         }
 
@@ -4132,9 +4134,9 @@ namespace TensileLite
         if(sizeMapping.globalAccumulation == 0)
         {
             if(!problemType.useGradient)
-                factorDim = problemType.useScaleAlphaVec | problemType.useBias;
+                factorDim = scaleAlphaVectorMode(problemType.useScaleAlphaVec) | problemType.useBias;
             else
-                factorDim = problemType.useScaleAlphaVec;
+                factorDim = scaleAlphaVectorMode(problemType.useScaleAlphaVec);
         }
         if(problemType.useBias && sizeMapping.globalAccumulation == 0 && (!problemType.useGradient))
         {
@@ -4262,7 +4264,7 @@ namespace TensileLite
         else
             args.append("beta", 0.0f, problem.betaType());
 
-        if(problemType.useScaleAlphaVec && internalArgsSupport.deviceScalarAlpha)
+        if(scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
             args.template append<uint32_t>(
                 "deviceScalarAlpha", problem.getParams().deviceScalarAlpha() ? 1u : 0u);
 
@@ -4364,7 +4366,8 @@ namespace TensileLite
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
         // Added the extra check for useScaleAlphaVec with value 3 to match the condition in KernelWriterConversion.py for expecting
         // argument in the kernel side.
-        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec == 3)
+        if((useBias && problemType.useBias == 3)
+           || scaleAlphaVectorMode(problemType.useScaleAlphaVec) == 3)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
@@ -4743,7 +4746,8 @@ namespace TensileLite
         }
 
         int factorDim
-            = std::max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
+            = std::max(problemType.useGradient ? 0 : problemType.useBias,
+                       scaleAlphaVectorMode(problemType.useScaleAlphaVec));
         if(factorDim)
         {
             if(factorDim == 2)
@@ -4817,7 +4821,7 @@ namespace TensileLite
             name += ("_ScaleAlphaVec");
         }
 
-        if(problemType.useScaleAlphaVec && internalArgsSupport.deviceScalarAlpha)
+        if(scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         {
             name += "_DSA";
         }
@@ -6653,7 +6657,7 @@ namespace TensileLite
     bool ContractionSolution::deviceScalarAlphaSupported(Problem const& problem) const
     {
         return !problem.getParams().deviceScalarAlpha()
-               || (internalArgsSupport.deviceScalarAlpha && problemType.useScaleAlphaVec);
+               || scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec);
     }
 
     bool ContractionSolution::deviceScalarAlphaSupported(std::vector<Problem> const& problems) const

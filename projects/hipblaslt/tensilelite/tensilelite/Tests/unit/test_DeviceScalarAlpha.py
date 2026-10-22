@@ -10,8 +10,59 @@ import yaml
 
 from tensilelite.KernelWriter import KernelWriter
 from tensilelite.KernelWriterConversion import KernelWriterConversion
+from tensilelite.Common.ScaleAlphaVec import (
+    VALID_SCALE_ALPHA_VEC_MODES, scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode,
+)
+from tensilelite.SolutionStructs.Problem import ProblemType
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("mode", VALID_SCALE_ALPHA_VEC_MODES)
+def test_scale_alpha_modes_preserve_vector_direction_and_name(mode):
+    problem = ProblemType({"DataType": "s", "UseScaleAlphaVec": mode}, False)
+    direction = mode & 3
+    vector = ProblemType({"DataType": "s", "UseScaleAlphaVec": direction}, False)
+    assert scaleAlphaVectorMode(mode) == direction
+    assert scaleAlphaSupportsDeviceScalar(mode) is (mode in (5, 6, 7))
+    assert str(problem) == str(vector)
+
+
+@pytest.mark.parametrize("mode", [-1, 4, 8, 9])
+def test_scale_alpha_rejects_reserved_or_unknown_modes(mode, capsys):
+    with pytest.raises(SystemExit):
+        ProblemType({"DataType": "s", "UseScaleAlphaVec": mode}, False)
+    assert "UseScaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("isa", [
+    (9, 0, 8), (9, 0, 10), (9, 4, 2), (9, 5, 0),
+    (12, 0, 0), (12, 0, 1), (12, 5, 1),
+])
+@pytest.mark.parametrize("mode", [5, 6, 7])
+@pytest.mark.parametrize("custom", [False, True])
+def test_scalar_capability_rejects_non_gfx1250_before_derivation(
+    isa, mode, custom, capsys, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from tensilelite.Common import IsaVersion
+    from tensilelite.SolutionStructs.Solution import Solution
+
+    def unexpected_derivation(*args, **kwargs):
+        pytest.fail("Unsupported scalar capability must be rejected before derivation")
+
+    monkeypatch.setattr(Solution, "assignDerivedParameters", unexpected_derivation)
+    monkeypatch.setattr(Solution, "_assignCustomKernelParameters", unexpected_derivation)
+    config = {"ISA": list(isa), "ProblemType": {"DataType": "s", "UseScaleAlphaVec": mode}}
+    if custom:
+        config["CustomKernel"] = {"name": "unsupported_scalar"}
+    assembler = SimpleNamespace(code_object_version="default")
+    isa_info = {IsaVersion(*isa): SimpleNamespace(asmCaps={"SupportedISA": True})}
+    solution = Solution(config, False, True, False, assembler, isa_info)
+
+    assert not solution["Valid"]
+    assert "device scalar alpha (5/6/7) is only supported on gfx1250" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
@@ -29,7 +80,6 @@ def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(
 ):
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Contractions import InternalArgsSupport
     from Tensile.LibraryIO import parseLibraryLogicFile
     from Tensile.Toolchain.Assembly import makeAssemblyToolchain
     from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
@@ -45,43 +95,41 @@ def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(
     isa_info = makeIsaInfoMap([gfxToIsa("gfx1250")], cxx)
     solutions = parseLibraryLogicFile(str(logic), assembler, False, False, False, isa_info, False).solutions
     assert solutions
-    assert all(solution["ProblemType"]["UseScaleAlphaVec"] == 1 for solution in solutions)
-    assert all(InternalArgsSupport.FromOriginalState(solution._state).deviceScalarAlpha
+    assert all(solution["ProblemType"]["UseScaleAlphaVec"] == 5 for solution in solutions)
+    assert all("SupportDeviceScalarAlpha" not in solution["InternalSupportParams"]
                for solution in solutions)
 
 
 @pytest.mark.parametrize(
-    "internal_support, expected",
+    "version, mode, expected",
     [
-        ({"KernArgsVersion": 2}, "0x3fff"),
-        ({"KernArgsVersion": 3}, "0xfff"),
-        (
-            {"KernArgsVersion": 2, "SupportDeviceScalarAlpha": True},
-            "0x7ff",
-        ),
-        (
-            {"KernArgsVersion": 3, "SupportDeviceScalarAlpha": True},
-            "0x7ff",
-        ),
+        (2, 1, "0x3fff"),
+        (3, 1, "0xfff"),
+        (2, 5, "0x7ff"),
+        (3, 5, "0x7ff"),
+        (3, 6, "0x7ff"),
+        (3, 7, "0x7ff"),
     ],
 )
-def test_device_scalar_alpha_capability_owns_gsu_bit_11(internal_support, expected):
-    kernel = {"InternalSupportParams": internal_support}
+def test_device_scalar_alpha_capability_owns_gsu_bit_11(version, mode, expected):
+    kernel = {"InternalSupportParams": {"KernArgsVersion": version},
+              "ProblemType": {"UseScaleAlphaVec": mode}}
     assert KernelWriter.gsuMaskHex(None, kernel) == expected
 
 
 @pytest.mark.parametrize(
-    "support_device_scalar_alpha, expected",
+    "mode, expected",
     [
-        (False, [True, False]),
-        (True, [True, False]),
+        (1, [True, False]),
+        (5, [True, False]),
     ],
 )
 def test_device_scalar_conversion_emits_both_runtime_variants(
-    support_device_scalar_alpha, expected
+    mode, expected
 ):
     writer = KernelWriterConversion.__new__(KernelWriterConversion)
-    writer.supportDeviceScalarAlpha = support_device_scalar_alpha
+    writer.state = {"ProblemType": {"UseScaleAlphaVec": mode}}
+    assert writer.deviceScalarAlphaEnabled() is scaleAlphaSupportsDeviceScalar(mode)
     assert writer.groupedGemmModes() == expected
 
 

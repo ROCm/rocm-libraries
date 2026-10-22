@@ -59,6 +59,7 @@
 #endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
@@ -2315,9 +2316,10 @@ namespace
         setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
-        tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setUseScaleAlphaVec(prob.deviceScalarAlpha ? TensileLite::ScaleAlphaVecDeviceScalarBit
+                                                                : prob.scaleAlphaVec != nullptr);
         tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
-        tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+        tensileProblem.setScaleAlphaVec(compute_type, prob.deviceScalarAlpha ? 1 : d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
@@ -2613,9 +2615,10 @@ namespace
         setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
-        tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
+        tensileProblem.setUseScaleAlphaVec(prob.deviceScalarAlpha ? TensileLite::ScaleAlphaVecDeviceScalarBit
+                                                                : prob.scaleAlphaVec != nullptr);
         tensileProblem.setParams().setDeviceScalarAlpha(prob.deviceScalarAlpha);
-        tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
+        tensileProblem.setScaleAlphaVec(compute_type, prob.deviceScalarAlpha ? 1 : d.sizes()[0]);
         tensileProblem.setScaleA(compute_type, 1);
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);

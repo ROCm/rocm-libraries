@@ -27,6 +27,8 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
+#include <Tensile/ScaleAlphaVec.hpp>
+
 #include <cstddef>
 #include <stdexcept>
 
@@ -268,6 +270,10 @@ namespace TensileLite
                 m_useScaleCD = args["use-scaleCD"].as<bool>();
             if(args.count("use-scaleAlphaVec"))
                 m_useScaleAlphaVec = args["use-scaleAlphaVec"].as<int>();
+            if(!validScaleAlphaVecMode(m_useScaleAlphaVec))
+                throw std::invalid_argument("use-scaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7");
+            if(args["device-scalar-alpha"].empty())
+                m_deviceScalarAlpha = scaleAlphaSupportsDeviceScalar(m_useScaleAlphaVec);
             if(m_deviceScalarAlpha && !m_useScaleAlphaVec)
                 throw std::invalid_argument(
                     "device-scalar-alpha requires use-scaleAlphaVec to be enabled");
@@ -339,8 +345,9 @@ namespace TensileLite
             int biasSize       = std::max(1, (int)m_biasTypeArgs.size());
             int gateSize       = std::max(1, (int)m_gateTypeArgs.size());
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
+            const int vectorAlphaMode = scaleAlphaVectorMode(m_useScaleAlphaVec);
             int factorDimSize  = std::max(
-                1, m_useScaleAlphaVec == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
+                1, vectorAlphaMode == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
             // StreamK=5 hybrid-mode toggle variants. When the YAML sets
             // StreamKHybridMode: [0, 1] each base problem is replayed
             // twice (one static pass, one dynamic pass) so a single
@@ -406,12 +413,13 @@ namespace TensileLite
                                     gateStrides
                                         = m_tensorStrides[ContractionProblemGemm::TENSOR::GATE_RESIDUAL][i];
 
-                                if(m_useBias && m_useScaleAlphaVec && m_useBias != m_useScaleAlphaVec)
+                                if(!m_deviceScalarAlpha && m_useBias && vectorAlphaMode
+                                   && m_useBias != vectorAlphaMode)
                                     continue;
 
-                                int factorDim = (m_useScaleAlphaVec == 1 || m_useBias == 1)   ? 0
-                                                : (m_useScaleAlphaVec == 2 || m_useBias == 2) ? 1
-                                                : (m_useScaleAlphaVec == 3 || m_useBias == 3)
+                                int factorDim = (vectorAlphaMode == 1 || m_useBias == 1)   ? 0
+                                                : (vectorAlphaMode == 2 || m_useBias == 2) ? 1
+                                                : (vectorAlphaMode == 3 || m_useBias == 3)
                                                     ? m_factorDimArgs[l]
                                                     : 0;
                                 rv.push_back(ContractionProblemGemm::FromIndexSizes(
@@ -554,7 +562,9 @@ namespace TensileLite
                                 rv.back().setScaleD(
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                             }
-                            rv.back().setUseScaleAlphaVec(m_useScaleAlphaVec);
+                            rv.back().setUseScaleAlphaVec(m_deviceScalarAlpha
+                                                             ? ScaleAlphaVecDeviceScalarBit
+                                                             : vectorAlphaMode);
                             rv.back().setParams().setDeviceScalarAlpha(m_deviceScalarAlpha);
                             rv.back().setScaleAlphaVec(
                                 m_constantTypes[ContractionProblemGemm::CONST::ALPHA],

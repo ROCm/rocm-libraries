@@ -68,6 +68,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry
 from .Common.GlobalParameters import globalParameters
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
@@ -5292,11 +5293,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #   v <  3: GSU is bits 0..13 (mask 0x3FFF)
     #   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF) so bits 12/13
     #           can carry NTA / NTB for AdaptiveGemmNTAB.
-    #   SupportDeviceScalarAlpha: GSU is further narrowed to bits 0..10
+    #   UseScaleAlphaVec scalar capability: GSU is further narrowed to bits 0..10
     #           (mask 0x07FF), reserving bit 11 for scalar/vector selection.
     isp = kernel.get("InternalSupportParams", {})
     version = isp.get("KernArgsVersion", 0) if isp else 0
-    if isp and isp.get("SupportDeviceScalarAlpha", False):
+    if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
       return hex(0x07FF)
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
@@ -10532,7 +10533,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         storeSgprLoad += self.states.rpga
         self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
-        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+        self.states.FactorDim = max(self.states.FactorDim, scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]))
         if self.states.FactorDim == 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:
@@ -11819,7 +11820,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # -- FactorDim -------------------------------------------------------------
     enableFactorDim = False
-    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
+    if scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]) == 3:
       enableFactorDim = True
     if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
       enableFactorDim = True

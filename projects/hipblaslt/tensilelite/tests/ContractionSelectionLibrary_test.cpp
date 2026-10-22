@@ -33,6 +33,7 @@
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Distance.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <thread>
 #include <vector>
 
@@ -260,17 +261,31 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
         worker.join();
 }
 
+TEST(ContractionSelectionLibraryTest, ScaleAlphaModesMatchTheRequestedSource)
+{
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    for(int supported : {0, 1, 2, 3, 5, 6, 7})
+        for(int requested : {0, 1, 2, ScaleAlphaVecDeviceScalarBit})
+        {
+            SCOPED_TRACE(::testing::Message() << "supported=" << supported
+                                             << " requested=" << requested);
+            problem.setUseScaleAlphaVec(requested);
+            Predicates::Contraction::UseScaleAlphaVecCheck predicate(supported);
+            EXPECT_EQ(predicate(problem), requested == 0 || (requested & supported) != 0);
+        }
+}
+
 TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaRequiresAdvertisedKernelSupport)
 {
     auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
-    problem.setUseScaleAlphaVec(1);
+    problem.setUseScaleAlphaVec(ScaleAlphaVecDeviceScalarBit);
     problem.setParams().setDeviceScalarAlpha(true);
 
     ContractionSolution solution;
     solution.problemType.useScaleAlphaVec = 1;
     EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
 
-    solution.internalArgsSupport.deviceScalarAlpha = true;
+    solution.problemType.useScaleAlphaVec = 5;
     EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
 
     problem.setGroupedGemm(true);
@@ -295,22 +310,20 @@ TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaSelectionWithoutUniformSu
     auto solution = std::make_shared<ContractionSolution>();
     SingleContractionLibrary lib(solution);
     for(bool scalar : {false, true})
-        for(bool capability : {false, true})
-            for(int sav : {0, 1, 2, 3})
-            {
-                SCOPED_TRACE(::testing::Message() << "scalar=" << scalar
-                                                 << " capability=" << capability << " SAV=" << sav);
-                problem.setUseScaleAlphaVec(sav);
-                problem.setParams().setDeviceScalarAlpha(scalar);
-                solution->problemType.useScaleAlphaVec = sav;
-                solution->internalArgsSupport.deviceScalarAlpha = capability;
-                Task task(hardware, problem, *solution);
-                const bool supported = !scalar || (capability && sav != 0);
+        for(int sav : {0, 1, 2, 3, 5, 6, 7})
+        {
+            SCOPED_TRACE(::testing::Message() << "scalar=" << scalar << " SAV=" << sav);
+            problem.setUseScaleAlphaVec(scalar ? ScaleAlphaVecDeviceScalarBit
+                                              : scaleAlphaVectorMode(sav));
+            problem.setParams().setDeviceScalarAlpha(scalar);
+            solution->problemType.useScaleAlphaVec = sav;
+            Task task(hardware, problem, *solution);
+            const bool supported = !scalar || scaleAlphaSupportsDeviceScalar(sav);
 
-                EXPECT_EQ(selectionPredicate(task, hardware, *solution, problem), supported);
-                EXPECT_EQ(lib.findBestSolution(problem, hardware) != nullptr, supported);
-                EXPECT_EQ(lib.findAllSolutions(problem, hardware).size(), supported ? 1u : 0u);
-            }
+            EXPECT_EQ(selectionPredicate(task, hardware, *solution, problem), supported);
+            EXPECT_EQ(lib.findBestSolution(problem, hardware) != nullptr, supported);
+            EXPECT_EQ(lib.findAllSolutions(problem, hardware).size(), supported ? 1u : 0u);
+        }
 }
 
 TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeAndCapability)
@@ -329,8 +342,7 @@ TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeA
     problem.setUseScaleAlphaVec(1);
     problem.setGroupedGemm(true);
     auto solution = std::make_shared<SelectionOnlySolution>();
-    solution->problemType.useScaleAlphaVec = 1;
-    solution->internalArgsSupport.deviceScalarAlpha = true;
+    solution->problemType.useScaleAlphaVec = 5;
     solution->requiredHostWorkspaceSizePerProblem = 0;
     solution->problemType.groupedGemm = true;
     SingleSolutionLibrary<ContractionProblemGemm, SelectionOnlySolution> lib(solution);
@@ -338,7 +350,7 @@ TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeA
     for(bool scalar : {false, true})
         for(bool capability : {false, true})
         {
-            solution->internalArgsSupport.deviceScalarAlpha = capability;
+            solution->problemType.useScaleAlphaVec = capability ? 5 : 1;
             problem.setParams().setDeviceScalarAlpha(scalar);
             std::vector<ContractionProblemGemm> problems{problem, problem};
             const bool                          supported = !scalar || capability;
@@ -358,4 +370,40 @@ TEST(ContractionSelectionLibraryTest, DeviceUserScalarAlphaOffsetMatchesCodegen)
 {
     // KernelWriterAssembly selects this fixed offset for the ArgType==2 record.
     EXPECT_EQ(offsetof(DeviceUserArguments<float>, scaleAlphaVec), 144u);
+}
+
+TEST(ContractionSelectionLibraryTest, AlphaSupportModesControlInternalArgBit11AndGsuLimit)
+{
+    ContractionSolution solution;
+    solution.internalArgsSupport.version  = 3;
+    solution.internalArgsSupport.wgm      = false;
+    solution.internalArgsSupport.staggerU = false;
+    solution.sizeMapping.globalSplitUCoalesced = false;
+    solution.sizeMapping.globalSplitUWorkGroupMappingRoundRobin = false;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+
+    for(int mode : {0, 1, 2, 3, 5, 6, 7})
+        for(bool scalar : {false, true})
+            for(int gsu : {1, 2, 2047, 2048, 4095})
+            {
+                SCOPED_TRACE(::testing::Message() << "mode=" << mode << " scalar=" << scalar
+                                                 << " GSU=" << gsu);
+                solution.problemType.useScaleAlphaVec = mode;
+                problem.setParams().setDeviceScalarAlpha(scalar);
+                problem.setParams().setGSU(gsu);
+                uint32_t arg0 = 0, arg1 = 0;
+                auto pack = [&]() {
+                    solution.calculateInternalArgs<false>(arg0, arg1, nullptr, problem.getParams(),
+                                                          0, 0, 0, 0, 0, 0, 0, 1, {});
+                };
+                const bool capable = scaleAlphaSupportsDeviceScalar(mode);
+                if((scalar && !capable) || (capable && gsu > 2047))
+                {
+                    EXPECT_THROW(pack(), std::runtime_error);
+                    continue;
+                }
+                ASSERT_NO_THROW(pack());
+                EXPECT_EQ(arg0, static_cast<uint32_t>(gsu) | (scalar ? 0x800u : 0u));
+                EXPECT_EQ(arg1, 0u);
+            }
 }

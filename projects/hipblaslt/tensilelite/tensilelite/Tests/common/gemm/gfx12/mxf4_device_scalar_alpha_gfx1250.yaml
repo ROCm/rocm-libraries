@@ -33,7 +33,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   -
-    - # Mode 1 (M direction) with a device per-tensor alpha.
+    - # Mode 5: M-direction vector support plus device scalar alpha.
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -46,15 +46,13 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 1
-      UseScaleAlphaVec: 1
+      UseScaleAlphaVec: 5
       MXBlockA: 16
       MXBlockB: 16
       DataTypeMXSA: f8
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
-      InternalSupportParams:
-        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -102,7 +100,7 @@ BenchmarkProblems:
         # Reuse each kernel in scalar and vector mode; keep their results separate.
         - DeviceScalarAlpha: [True, False]
   -
-    - # Mode 2 (N direction) with a device per-tensor alpha.
+    - # Mode 6: N-direction vector support plus device scalar alpha.
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -115,15 +113,13 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      UseScaleAlphaVec: 2
+      UseScaleAlphaVec: 6
       MXBlockA: 16
       MXBlockB: 16
       DataTypeMXSA: f8
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
-      InternalSupportParams:
-        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -167,7 +163,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
         - DeviceScalarAlpha: [True, False]
   -
-    - # Mode 3 (runtime-selected M/N direction) with a device per-tensor alpha.
+    - # Mode 7: runtime-selected M/N vector support plus device scalar alpha.
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -180,15 +176,13 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      UseScaleAlphaVec: 3
+      UseScaleAlphaVec: 7
       MXBlockA: 16
       MXBlockB: 16
       DataTypeMXSA: f8
       DataTypeMXSB: f8
 
     - # Cover direct output, MultipleBuffer conversion, and MBSK reduction.
-      InternalSupportParams:
-        SupportDeviceScalarAlpha: True
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -246,15 +240,13 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      UseScaleAlphaVec: 1
+      UseScaleAlphaVec: 5
       MXBlockA: 16
       MXBlockB: 16
       DataTypeMXSA: f8
       DataTypeMXSB: f8
     - BenchmarkCommonParameters:
         - KernelLanguage: [Assembly]
-      InternalSupportParams:
-        SupportDeviceScalarAlpha: True
       ForkParameters:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]

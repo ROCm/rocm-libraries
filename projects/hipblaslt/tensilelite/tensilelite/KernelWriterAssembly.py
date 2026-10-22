@@ -96,6 +96,7 @@ from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from .Common.DataType import DataType
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
@@ -2551,7 +2552,7 @@ class KernelWriterAssembly(KernelWriter):
     the same ScaleAlphaVec kernarg contains a pointer to one device scalar.
     """
     module = Module("Load device scalar alpha")
-    if not kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+    if not scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
       return module
 
     assert kernel["ProblemType"]["UseScaleAlphaVec"]
@@ -2613,7 +2614,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def deferDeviceScalarAlphaWait(self, kernel):
     """Whether gfx125x can hide the scalar-value load behind strided setup."""
-    return (kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False)
+    return (scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"])
             and kernel["ProblemType"]["StridedBatched"]
             and self.states.version[:2] == (12, 5))
 
@@ -3068,7 +3069,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0 or kernel["AdaptiveGemmNTAB"] != 0:
         moduleRegInit.add(SAndB32(dst=sgpr("GSU"), src0=sgpr(sgprPackedArgs), src1=hex(0xFFFF), comment="Restore GSUConfig and GSU"))
 
-      if kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+      if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
         # Preserve internalArg0 bit 11 in an otherwise unused ArgType bit.
         # ArgType is live through the epilogue, unlike the packed-args temp.
         moduleRegInit.add(SAndB32(dst=sgpr(sgprPackedArgs), src0=sgpr(sgprPackedArgs), src1=hex(0x0800), comment="device scalar alpha bit"))
@@ -16432,7 +16433,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
           module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
-          if kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+          if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
             # Suppress the per-element buffer load so the existing null-vector path stages 1.0.
             module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
             module.add(SCSelectB32(dst=sgpr("SrdScaleAlphaVec+2"), src0=0, src1=sgpr("SrdScaleAlphaVec+2"), comment="device scalar uses ScaleAlphaVec identity"))
@@ -18440,7 +18441,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         # For flat addressing, check if the base pointer is non-null
         module.add(VCmpNeU64(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Address%s"%addressStr, 2), src1=0, comment="address != 0 ?"))
-        if addressStr == "ScaleAlphaVec" and kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+        if addressStr == "ScaleAlphaVec" and scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
           module.add(SBitcmp1B32(src0=sgpr("ArgType"), src1=9, comment="device scalar alpha?"))
           for maskWord in range(self.states.laneSGPRCount):
             maskSgpr = "Address%s%s" % (addressStr, "" if maskWord == 0 else "+%d" % maskWord)
@@ -18610,7 +18611,7 @@ class KernelWriterAssembly(KernelWriter):
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "Bias", biasOffsetVgpr, biasShiftOffset, biasDataType, biasBpe, gwvw, tmpVgpr1Res, biasDstVgpr, dim))
     if scaleAlphaDataType:
       scaleAlphaShiftOffset = self.getGlobalShiftOffset(kernel, scaleAlphaDataType, gwvw)
-      supportDeviceScalarAlpha = kernel.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False)
+      supportDeviceScalarAlpha = scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"])
       if supportDeviceScalarAlpha and not kernel["BufferLoad"]:
         assert scaleAlphaDataType.isSingle() and gwvw == 1 and scaleAlphaShiftOffset == 0
         scaleAlphaReady = Label(label=self.labels.getNameInc("ScaleAlphaVecReady"), comment="")

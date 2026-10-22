@@ -129,9 +129,7 @@ def test_r6_rich_gfx1250_bias_and_scale_present():
 def scalar_config(tmp_path):
     with open(_CONFIG) as stream:
         config = yaml.safe_load(stream)
-    config["BenchmarkProblems"][0][1]["InternalSupportParams"] = {
-        "SupportDeviceScalarAlpha": True
-    }
+    config["BenchmarkProblems"][0][0]["UseScaleAlphaVec"] = 5
     path = tmp_path / "rich_scalar_gemm.yaml"
     path.write_text(yaml.safe_dump(config))
     return path
@@ -277,7 +275,7 @@ def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero(scalar_config
     header = conversion.getHeaderFileString()
 
     assert err == 0
-    assert kernels[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"] is True
+    assert kernels[0]["ProblemType"]["UseScaleAlphaVec"] == 5
     assert "_DSA_PostGSU" in conversion.getKernelName()
     assert "_GG_" in header
     assert "_GG_" in src
@@ -287,7 +285,7 @@ def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero(scalar_config
     assert "if(arg.ScaleAlphaVec != nullptr && !arg.deviceScalarAlpha){" in src
     assert "ScaleAlphaVec[arg.deviceScalarAlpha ? 0 :" not in src
 
-    kernels[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"] = False
+    kernels[0]["ProblemType"]["UseScaleAlphaVec"] = 1
     legacy_conversions = initConversionKernelObjects(kernels[0], iim)
     legacy = legacy_conversions[0]
     legacy_err, legacy_src = legacy.getSourceFileString()

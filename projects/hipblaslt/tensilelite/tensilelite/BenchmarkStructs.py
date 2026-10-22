@@ -202,8 +202,8 @@ class BenchmarkProcess:
         self.paramGroups = _expandGroupedParameters(forkParams.pop("Groups")) if "Groups" in forkParams else []
         self.customKernels = getNonNoneFromConfig("CustomKernels", [])
         self.internalSupportParams = getNonNoneFromConfig("InternalSupportParams", {})
-        if self.customKernels == [] and set(self.internalSupportParams) - {"SupportDeviceScalarAlpha"}:
-            printExit("Only SupportDeviceScalarAlpha may be set in InternalSupportParams for generated kernels")
+        if self.customKernels == [] and self.internalSupportParams:
+            printExit("InternalSupportParams may only be set for custom kernels; use ProblemType.UseScaleAlphaVec for scalar support")
 
         ispPrefix = f"{keyPathPrefix}.InternalSupportParams" if keyPathPrefix \
                     else "InternalSupportParams"
@@ -309,13 +309,6 @@ class BenchmarkProcess:
             params.pop(policyKey, None)
         params.update({**benchmarkCommonParams, **forkParams})
         self.singleValueParams, self.multiValueParams = separateParameters(params)
-        # Forward only the generated-kernel opt-in; other internal ABI overrides
-        # remain exclusive to custom kernels.
-        if "SupportDeviceScalarAlpha" in self.internalSupportParams:
-            self.singleValueParams["InternalSupportParams"] = {
-                "SupportDeviceScalarAlpha": self.internalSupportParams["SupportDeviceScalarAlpha"]
-            }
-
         # print summary of parameter values
         print2("Single Value Parameters:")
         for k, v in self.singleValueParams.items():

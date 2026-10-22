@@ -43,6 +43,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     streamK2DCluster, deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
 from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
@@ -804,6 +805,14 @@ class Solution(collections.abc.Mapping):
     # skip post-derived validation to avoid cascading/noisy type mismatch records.
     pre_records = validateParameterTypes(self._state, srcFile=srcName)
     mergeMismatchRecords(pre_records)
+
+    # Check before either derivation path, including pre-derived/custom kernels.
+    if (scaleAlphaSupportsDeviceScalar(self["ProblemType"]["UseScaleAlphaVec"])
+        and tuple(self["ISA"]) != (12, 5, 0)):
+      reject(self._state, printSolutionRejectionReason,
+             "UseScaleAlphaVec device scalar alpha (5/6/7) is only supported on gfx1250")
+      self["Valid"] = False
+      return
 
     isHandwrittenCustomKernel = ("CustomKernel" in self._state
         and self._state["CustomKernel"].get("name", "")
@@ -2320,16 +2329,12 @@ class Solution(collections.abc.Mapping):
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
         _supportStreamKPerTileExtraIters(state)
 
-    # Explicit opt-in: ordinary SAV kernels retain their existing ABI and GSU
-    # mask. DeviceScalarAlpha is a separate client runtime selector, not a
-    # request to change the generated kernel's capability.
-    if (state["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    if (scaleAlphaSupportsDeviceScalar(state["ProblemType"]["UseScaleAlphaVec"])
           and not isCustomKernelConfig(state)
-          and not (state["ProblemType"]["UseScaleAlphaVec"]
-                   and state["ProblemType"]["ComputeDataType"].isSingle()
+          and not (state["ProblemType"]["ComputeDataType"].isSingle()
                    and state["KernelLanguage"] == "Assembly")):
       reject(state, printRejectionReason,
-             "SupportDeviceScalarAlpha requires an Assembly kernel with UseScaleAlphaVec and FP32 compute")
+             "UseScaleAlphaVec scalar support requires an Assembly kernel with FP32 compute")
       return
 
     if isPersistent(state):
@@ -6756,7 +6761,7 @@ class Solution(collections.abc.Mapping):
     # Calc the required LDS
     vecDT = VectorDataTypes()
     biasDim = state["ProblemType"]["UseBias"]
-    savDim = state["ProblemType"]["UseScaleAlphaVec"]
+    savDim = scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"])
     sAB = state["ProblemType"]["UseScaleAB"] == "Vector"
     # Calc LDS for Bias
     maxTurn = 0
@@ -7265,7 +7270,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Bias reduction does not support GroupLoadStore.")
 
     # Bias and ScaleAlphaVec
-    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != state["ProblemType"]["UseScaleAlphaVec"]:
+    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"]):
       reject(state, printRejectionReason, "When both UseBias and UseScaleAlphaVec are enabled then UseBias and UseScaleAlphaVec must have same settings.")
 
     # ScaleAB or ScaleABVec

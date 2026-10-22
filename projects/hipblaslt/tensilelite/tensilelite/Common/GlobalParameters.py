@@ -483,10 +483,6 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
-    # Explicit kernel capability, separate from the DeviceScalarAlpha client
-    # runtime selector. Opted-in kernels reserve internalArg0 bit 11 for scalar
-    # alpha; all others retain the existing vector-alpha ABI and GSU mask.
-    "SupportDeviceScalarAlpha": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

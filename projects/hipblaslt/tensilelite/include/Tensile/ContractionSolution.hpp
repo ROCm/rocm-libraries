@@ -1326,7 +1326,6 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
-            bool deviceScalarAlpha  = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };

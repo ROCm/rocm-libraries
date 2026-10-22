@@ -30,6 +30,7 @@ from .KernelWriterBase import KernelWriterBase
 from .Common.Architectures import archMacroNames
 from .Common import INDEX_CHARS, IsaInfo
 from .Common.DataType import DataType
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 
 class KernelWriterConversion(KernelWriterBase):
 
@@ -41,9 +42,6 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["_GlobalAccumulation"] = state["_GlobalAccumulation"]
     self.state["ActivationFused"] = state["ActivationFused"]
     self.state["GlobalSplitU"] = state["GlobalSplitU"]
-    self.state["InternalSupportParams"] = deepcopy(state.get("InternalSupportParams", {}))
-    self.supportDeviceScalarAlpha = self.state["InternalSupportParams"].get(
-      "SupportDeviceScalarAlpha", False)
 
     self.state["UnrollOnly"] = state["UnrollOnly"]
 
@@ -81,7 +79,7 @@ class KernelWriterConversion(KernelWriterBase):
         pgrgsu = int(pgrgsu / 2)
 
   def deviceScalarAlphaEnabled(self):
-    return self.supportDeviceScalarAlpha
+    return scaleAlphaSupportsDeviceScalar(self.state["ProblemType"]["UseScaleAlphaVec"])
 
   def groupedGemmModes(self):
     """Both variants use a distinct DSA ABI when scalar support is enabled."""
@@ -153,7 +151,7 @@ class KernelWriterConversion(KernelWriterBase):
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
       scaleAlphaVecPtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
       kStr += "  " + scaleAlphaVecPtrStr + " * " + "ScaleAlphaVec;" + self.endLine
-      if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
+      if scaleAlphaVectorMode(self.state["ProblemType"]["UseScaleAlphaVec"]) == 3:
         enableFactorDim = True
 
     if self.state["ProblemType"]["UseGateResidual"]:
@@ -766,7 +764,7 @@ class KernelWriterConversion(KernelWriterBase):
         scaleAlphaGuard += " && !arg.deviceScalarAlpha"
       kStr += "  if(%s){%s" % (scaleAlphaGuard, self.endLine)
 
-      if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
+      if scaleAlphaVectorMode(self.state["ProblemType"]["UseScaleAlphaVec"]) == 3:
         kStr += "    if(arg.factorDim == 0){" + self.endLine
         for vIdx in range(self.num_dword_load):
           kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id0+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
@@ -775,7 +773,7 @@ class KernelWriterConversion(KernelWriterBase):
           kStr += "      %s[%d] *= (%s)arg.ScaleAlphaVec[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "    }" + self.endLine
         kStr += "  }" + self.endLine
-      elif self.state["ProblemType"]["UseBias"] == 2:
+      elif scaleAlphaVectorMode(self.state["ProblemType"]["UseScaleAlphaVec"]) == 2:
         for vIdx in range(self.num_dword_load):
           kStr += "    %s[%d] *= (%s)arg.ScaleAlphaVec[id1];%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
         kStr += "  }" + self.endLine
@@ -970,7 +968,7 @@ class KernelWriterConversion(KernelWriterBase):
         name += "_Bias%s"%btype.toChar()
 
     factorDim =  0 if state["ProblemType"]["Gradient"] else state["ProblemType"]["UseBias"]
-    factorDim =  max(factorDim, state["ProblemType"]["UseScaleAlphaVec"])
+    factorDim =  max(factorDim, scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"]))
     if factorDim > 1:
         name += "_FD%s"%("N" if factorDim == 2 else "MN")
 
@@ -999,7 +997,7 @@ class KernelWriterConversion(KernelWriterBase):
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
     name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
-    if state.get("InternalSupportParams", {}).get("SupportDeviceScalarAlpha", False):
+    if scaleAlphaSupportsDeviceScalar(state["ProblemType"]["UseScaleAlphaVec"]):
       name += "_DSA"
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:

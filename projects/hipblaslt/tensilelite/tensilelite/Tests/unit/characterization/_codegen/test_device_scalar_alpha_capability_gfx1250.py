@@ -13,18 +13,20 @@ from config_harness import emit_kernels_from_config, solutions_from_config
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("capability", [None, False, True], ids=["omitted", "disabled", "enabled"])
+@pytest.mark.parametrize("vector_mode", [1, 2, 3])
+@pytest.mark.parametrize("capability", [False, True], ids=["legacy", "scalar-capable"])
 @pytest.mark.parametrize("runtime_scalar", [False, True])
-def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, capability, runtime_scalar):
+def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, vector_mode, capability, runtime_scalar):
     from Tensile.Contractions import InternalArgsSupport
     from Tensile.KernelWriter import KernelWriter
 
     source_config = Path(__file__).parent / "data/test_data/_designed/gfx1250/rich_gemm_sb.yaml"
     config = yaml.safe_load(source_config.read_text())
+    problem = config["BenchmarkProblems"][0][0]
+    problem["UseScaleAlphaVec"] = vector_mode | (4 if capability else 0)
+    problem["UseBias"] = vector_mode
     benchmark = config["BenchmarkProblems"][0][1]
     benchmark["BenchmarkFinalParameters"].append({"DeviceScalarAlpha": [runtime_scalar]})
-    if capability is not None:
-        benchmark["InternalSupportParams"] = {"SupportDeviceScalarAlpha": capability}
     benchmark["ForkParameters"] = [
         {key: values[:1] for key, values in fork.items()}
         for fork in benchmark["ForkParameters"]
@@ -36,8 +38,9 @@ def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, capability, runti
     assert len(solutions) == 1
     solution = solutions[0]
     enabled = capability is True
-    assert solution["InternalSupportParams"]["SupportDeviceScalarAlpha"] is enabled
-    assert InternalArgsSupport.FromOriginalState(solution._state).deviceScalarAlpha is enabled
+    assert "SupportDeviceScalarAlpha" not in solution["InternalSupportParams"]
+    from Tensile.Common.Utilities import state
+    assert "deviceScalarAlpha" not in state(InternalArgsSupport.FromOriginalState(solution._state))
     assert KernelWriter.gsuMaskHex(None, solution) == ("0x7ff" if enabled else "0xfff")
 
     results = emit_kernels_from_config(config_path, arch="gfx1250", expected_fork_count=1)
@@ -51,40 +54,34 @@ def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, capability, runti
     assert "*= ScaleAlphaVec" in source
 
 
-def test_generated_kernel_rejects_other_internal_overrides(tmp_path):
+@pytest.mark.parametrize("override", [
+    {"SupportDeviceScalarAlpha": True},
+    {"SupportDeviceScalarAlpha": False},
+    {"KernArgsVersion": 2},
+])
+def test_generated_kernel_rejects_other_internal_overrides(tmp_path, override):
     source_config = Path(__file__).parent / "data/test_data/_designed/gfx1250/rich_gemm_sb.yaml"
     config = yaml.safe_load(source_config.read_text())
-    config["BenchmarkProblems"][0][1]["InternalSupportParams"] = {
-        "SupportDeviceScalarAlpha": True,
-        "KernArgsVersion": 2,
-    }
+    config["BenchmarkProblems"][0][1]["InternalSupportParams"] = override
     config_path = tmp_path / "unsupported_override.yaml"
     config_path.write_text(yaml.safe_dump(config))
     with pytest.raises(SystemExit):
         solutions_from_config(config_path, arch="gfx1250", limit_solutions=1)
 
 
-@pytest.mark.parametrize("sav", [False, True], ids=["missing-sav", "i32-compute"])
-def test_scalar_capability_rejects_unsupported_problem(tmp_path, capsys, monkeypatch, sav):
+def test_scalar_capability_rejects_unsupported_problem(tmp_path, capsys, monkeypatch):
     from Tensile.Common.GlobalParameters import globalParameters
 
     # Keep rejection output in this process instead of a reused joblib worker.
     monkeypatch.setitem(globalParameters, "CpuThreads", 1)
-    source_config = (
-        Path(__file__).resolve().parents[3] / "common/gemm/gfx12/i8ii_gfx1250.yaml"
-        if sav else
-        Path(__file__).parent / "data/test_data/_designed/gfx1250/rich_gemm_sb.yaml"
-    )
+    source_config = Path(__file__).resolve().parents[3] / "common/gemm/gfx12/i8ii_gfx1250.yaml"
     config = yaml.safe_load(source_config.read_text())
     config["GlobalParameters"]["PrintSolutionRejectionReason"] = True
-    config["BenchmarkProblems"][0][0]["UseScaleAlphaVec"] = int(sav)
-    config["BenchmarkProblems"][0][1]["InternalSupportParams"] = {
-        "SupportDeviceScalarAlpha": True
-    }
+    config["BenchmarkProblems"][0][0]["UseScaleAlphaVec"] = 5
     config_path = tmp_path / "unsupported_scalar.yaml"
     config_path.write_text(yaml.safe_dump(config))
     assert not solutions_from_config(config_path, arch="gfx1250", limit_solutions=1)
-    assert "SupportDeviceScalarAlpha requires" in capsys.readouterr().out
+    assert "UseScaleAlphaVec scalar support requires" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("problem_index", range(4))
@@ -93,7 +90,7 @@ def test_scalar_runtime_yaml_explicitly_enables_all_kernels(problem_index):
                      / "common/gemm/gfx12/mxf4_device_scalar_alpha_gfx1250.yaml")
     solutions = solutions_from_config(source_config, arch="gfx1250", problem_index=problem_index)
     assert solutions
-    assert all(solution["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    assert all(solution["ProblemType"]["UseScaleAlphaVec"] in (5, 6, 7)
                for solution in solutions)
 
 
@@ -122,7 +119,7 @@ def test_i32_sav_does_not_read_device_scalar_selector(tmp_path, support_user_arg
     assert solution["ProblemType"]["UseScaleAlphaVec"] == 1
     assert solution["ProblemType"]["SupportUserArgs"] is support_user_args
     assert solution["BufferLoad"]
-    assert not solution["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    assert "SupportDeviceScalarAlpha" not in solution["InternalSupportParams"]
 
     results = emit_kernels_from_config(
         config_path, arch="gfx1250", expected_fork_count=1
@@ -151,7 +148,7 @@ def test_grouped_scalar_alpha_selects_record_layout(tmp_path, support_user_args)
     problem, benchmark = config["BenchmarkProblems"][0]
     problem["GroupedGemm"] = True
     problem["SupportUserArgs"] = support_user_args
-    benchmark["InternalSupportParams"] = {"SupportDeviceScalarAlpha": True}
+    problem["UseScaleAlphaVec"] = 5
     benchmark["ForkParameters"] = [
         {key: values[:1] for key, values in fork.items()}
         for fork in benchmark["ForkParameters"]
@@ -160,7 +157,7 @@ def test_grouped_scalar_alpha_selects_record_layout(tmp_path, support_user_args)
     config_path.write_text(yaml.safe_dump(config))
     solutions = solutions_from_config(config_path, arch="gfx1250", expected_fork_count=1)
     assert len(solutions) == 1
-    assert solutions[0]["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    assert solutions[0]["ProblemType"]["UseScaleAlphaVec"] == 5
     results = emit_kernels_from_config(config_path, arch="gfx1250", expected_fork_count=1)
     assert len(results) == 1
     _, source, error = results[0]
@@ -174,8 +171,9 @@ def test_grouped_scalar_alpha_selects_record_layout(tmp_path, support_user_args)
         assert "fixed device-user-args layout" not in source
 
 
+@pytest.mark.parametrize("vector_mode", [1, 2, 3])
 @pytest.mark.parametrize("algorithm", ["SingleBuffer", "MultipleBuffer"])
-def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
+def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm, vector_mode):
     """SingleBuffer workspace already includes alpha*A*B and beta*C."""
     from tensilelite.KernelHelperNaming import initConversionKernelObjects
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
@@ -189,6 +187,7 @@ def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
     # FP16 output forces SingleBuffer to use the FP32 workspace + conversion.
     problem["DestDataType"] = "h"
     problem["UseBias"] = 0
+    problem["UseScaleAlphaVec"] = vector_mode | 4
     forks = {key: values[:1] for fork in benchmark["ForkParameters"]
              for key, values in fork.items()}
     forks.update(GlobalSplitU=[2], GlobalSplitUAlgorithm=[algorithm], StoreRemapVectorWidth=[0])
@@ -200,7 +199,7 @@ def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
     assert len(solutions) == 1
     kernel = generateKernelObjectsFromSolutions(solutions)[0]
     assert kernel["_GlobalAccumulation"] == algorithm
-    assert kernel["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+    assert kernel["ProblemType"]["UseScaleAlphaVec"] == vector_mode | 4
     _, isa_info = _toolchain_for("gfx1250")
     conversions = initConversionKernelObjects(kernel, isa_info)
     assert {conversion.num_elements_load for conversion in conversions} == {1, 2, 4}
@@ -212,4 +211,9 @@ def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm):
         # Scalar mode must still suppress per-element scaling, even when the
         # workspace is already scaled; legacy vector mode keeps its multiply.
         assert "if(arg.ScaleAlphaVec != nullptr && !arg.deviceScalarAlpha){" in source
-        assert "arg.ScaleAlphaVec[id0+0]" in source
+        if vector_mode != 2:
+            assert "arg.ScaleAlphaVec[id0+0]" in source
+        if vector_mode != 1:
+            assert "arg.ScaleAlphaVec[id1]" in source
+        if vector_mode == 2:
+            assert "arg.ScaleAlphaVec[id0+0]" not in source

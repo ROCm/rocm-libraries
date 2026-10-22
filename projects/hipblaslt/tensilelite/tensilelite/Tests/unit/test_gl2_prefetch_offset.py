@@ -637,6 +637,7 @@ def _make_kernel(cfg):
     m_spec = next((t for t in cfg.tensors if t.is_m), None)
     kernel = {
         "ProblemType": {
+            "UseScaleAlphaVec": 0,
             "Batched": cfg.batched,
             "StridedBatched": cfg.batched,
             "IndicesBatch": [2] if cfg.batched else [],

@@ -158,8 +158,7 @@ TEST(PredictionLibraryTest, DeviceScalarAlphaFiltersUnadvertisedSolutions)
     auto legacy = makeMappedSolution(0);
     auto scalar = makeMappedSolution(1);
     legacy->problemType.useScaleAlphaVec = 1;
-    scalar->problemType.useScaleAlphaVec = 1;
-    scalar->internalArgsSupport.deviceScalarAlpha = true;
+    scalar->problemType.useScaleAlphaVec = 5;
     SolutionMap<ContractionSolution> solutions{{0, legacy}, {1, scalar}};
     ContractionProblemPredictionLibrary lib;
     loadPredictionLibrary({0, 1}, solutions, lib);
@@ -186,8 +185,7 @@ TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
     legacy->libraryLogicIndex = 0;
     scalar->libraryLogicIndex = 1;
     legacy->problemType.useScaleAlphaVec = 1;
-    scalar->problemType.useScaleAlphaVec = 1;
-    scalar->internalArgsSupport.deviceScalarAlpha = true;
+    scalar->problemType.useScaleAlphaVec = 5;
     MLPClassificationLibrary<ContractionProblemGemm> lib;
     lib.solutionmap = {{0, legacy}, {1, scalar}};
     lib.probFeatures = {std::make_shared<MLFeatures::FreeSizeA>(),

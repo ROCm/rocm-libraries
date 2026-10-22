@@ -99,7 +99,7 @@ ProblemType:
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 1
+  UseScaleAlphaVec: 5
   UseScaleCD: false
   isMixMode: false
 DefaultSolution:
@@ -321,7 +321,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportDeviceScalarAlpha: true,
     SupportStreamKPerTileExtraIters: false, SupportUserGSU: false, UseSFC: false,
     UseUniversalArgs: true}
   Kernel: true
@@ -595,7 +594,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
-    SupportDeviceScalarAlpha: true,
     SupportStreamKPerTileExtraIters: false, SupportUserGSU: false, UseSFC: false,
     UseUniversalArgs: true}
   Kernel: true

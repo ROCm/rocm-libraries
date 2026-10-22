@@ -92,20 +92,19 @@ def test_size_mapping(solution_state, snapshot):
     assert isinstance(state(sm), dict)
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_internal_args_support(solution_state, enabled):
-    explicit_state = deepcopy(solution_state)
-    explicit_state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = enabled
-    ias = C.InternalArgsSupport.FromOriginalState(explicit_state)
-    assert ias is not None
-    assert ias.deviceScalarAlpha is enabled
+@pytest.mark.parametrize("mode", [0, 1, 2, 3, 5, 6, 7])
+def test_internal_args_support_does_not_duplicate_alpha_capability(solution_state, mode):
+    from tensilelite.Common.Utilities import state
 
-
-def test_internal_args_support_device_scalar_alpha_defaults_false(solution_state):
-    old_state = deepcopy(solution_state)
-    old_state["InternalSupportParams"].pop("SupportDeviceScalarAlpha")
-    ias = C.InternalArgsSupport.FromOriginalState(old_state)
-    assert ias.deviceScalarAlpha is False
+    source = deepcopy(solution_state)
+    source["ProblemType"]["UseScaleAlphaVec"] = mode
+    serialized = state(C.InternalArgsSupport.FromOriginalState(source))
+    assert set(serialized) == {
+        "version", "persistentLoopArgsVersion", "gsu", "wgm", "staggerU",
+        "perTileExtraIters", "useUniversalArgs", "useSFC",
+    }
+    problem = C.ProblemType.FromOriginalState(source["ProblemType"])
+    assert problem.useScaleAlphaVec == mode
 
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):

@@ -249,6 +249,15 @@ def _write_ini(tmp_path, monkeypatch, pt, pt_dict, problem_sizes=None,
 # 1. checkConstStride  (lines 406-412)
 # ===========================================================================
 
+@pytest.mark.parametrize("mode", [0, 1, 2, 3, 5, 6, 7])
+def test_scale_alpha_problem_type_sets_default_runtime_mode(tmp_path, monkeypatch, mode):
+    problem = dict(_PLAIN_GEMM_PT_DICT, UseScaleAlphaVec=mode)
+    pt = ContractionsProblemType.FromOriginalState(problem)
+    content = _write_ini(tmp_path, monkeypatch, pt, problem)
+    assert f"use-scaleAlphaVec={mode}\n" in content
+    assert f"device-scalar-alpha={mode in (5, 6, 7)}\n" in content
+
+
 class TestCheckConstStride:
     """checkConstStride -- lines 406-412."""
 

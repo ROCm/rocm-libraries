@@ -34,6 +34,7 @@ from glob import glob
 
 from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
 from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -700,9 +701,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
-        # BenchmarkFinalParameters.DeviceScalarAlpha selects runtime variants
-        # in runClient; the base configuration uses ordinary alpha semantics.
-        param('device-scalar-alpha', False)
+        # An optional BenchmarkFinalParameters sweep overrides this default
+        # without generating a second set of kernels.
+        param('device-scalar-alpha', scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
