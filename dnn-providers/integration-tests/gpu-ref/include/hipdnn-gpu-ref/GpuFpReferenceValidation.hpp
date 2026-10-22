@@ -7,14 +7,17 @@
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
 #include <limits>
+#include <optional>
 
 namespace hipdnn_gpu_ref
 {
 
 // GPU-based floating-point tensor validator implementing IReferenceValidation.
 // Launches a HipRTC kernel to perform element-wise tolerance comparison on the GPU
-// using a single atomic failure flag. Supports both packed and strided tensors;
-// allClose() throws std::invalid_argument for ragged tensors.
+// using a single atomic failure flag. Supports packed, strided and ragged (RFC 0014)
+// tensors. A ragged pair must share one ragged layout; positions past a batch's stored
+// rows and positions where the reference is NaN are skipped, and a ragged comparison
+// that grades no element fails, matching CpuFpReferenceValidation.
 template <class T>
 class GpuFpReferenceValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
@@ -33,8 +36,10 @@ public:
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override;
 
 private:
-    bool gpuAllClose(hipdnn_data_sdk::utilities::ITensor& reference,
-                     hipdnn_data_sdk::utilities::ITensor& implementation) const;
+    bool gpuAllClose(
+        hipdnn_data_sdk::utilities::ITensor& reference,
+        hipdnn_data_sdk::utilities::ITensor& implementation,
+        const std::optional<hipdnn_data_sdk::utilities::RaggedIterationInfo>& raggedLayout) const;
 
     float _absoluteTolerance;
     float _relativeTolerance;

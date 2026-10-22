@@ -8,7 +8,8 @@
 //
 // Both reference and implementation tensors share the same element type.
 // validateAllClose/validateExact set a single atomic failureFlag (0 = all passed,
-// 1 = any failed); validateRms accumulates the totals the host needs for the ratio.
+// 1 = any failed) and accept ragged (RFC 0014) layouts; validateRms accumulates the
+// totals the host needs for the ratio and is dense-only.
 
 #include "GpuRefTypes.h"
 #include "GpuRefValidatorArgs.h"
@@ -63,10 +64,69 @@ __device__ inline void decomposeAndComputeOffsets(long long linearIdx,
     }
 }
 
+// Ragged counterpart of decomposeAndComputeOffsets (RFC 0014). The batch coordinate picks
+// a base from args.rowOffsets in place of a batch stride, as RaggedTensorBase::getIndexImpl
+// does. Returns false for a position past its batch's stored sequence rows: it has no
+// storage of its own (it aliases another batch or runs past the buffer) and must not be read.
+__device__ inline bool decomposeRaggedAndComputeOffsets(long long linearIdx,
+                                                        const ValidatorArgs& args,
+                                                        long long& refOffset,
+                                                        long long& implOffset)
+{
+    refOffset = 0;
+    implOffset = 0;
+    long long seqCoord = 0;
+    for(int d = args.ndim - 1; d >= 1; --d)
+    {
+        long long coord = linearIdx % args.dims[d];
+        linearIdx /= args.dims[d];
+        if(d == args.seqAxis)
+        {
+            seqCoord = coord;
+        }
+        refOffset += coord * args.refStrides[d];
+        implOffset += coord * args.implStrides[d];
+    }
+
+    // What remains of linearIdx is the batch coordinate.
+    const long long base = args.rowOffsets[linearIdx];
+    const long long seqExtent = (args.rowOffsets[linearIdx + 1] - base) / args.seqStride;
+    if(seqCoord >= seqExtent)
+    {
+        return false;
+    }
+    refOffset += base;
+    implOffset += base;
+    return true;
+}
+
+// Maps a logical element index to each tensor's element offset for whichever layout args
+// describe. Returns false when the index is a ragged out-of-block position to skip.
+__device__ inline bool
+    resolveOffsets(long long idx, const ValidatorArgs& args, long long& refIdx, long long& implIdx)
+{
+    refIdx = idx;
+    implIdx = idx;
+    if(args.rowOffsets != nullptr)
+    {
+        return decomposeRaggedAndComputeOffsets(idx, args, refIdx, implIdx);
+    }
+    if(args.ndim > 0)
+    {
+        decomposeAndComputeOffsets(
+            idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
+    }
+    return true;
+}
+
 // Floating-point allClose validation kernel.
 // For each element i: passes if |impl[i] - ref[i]| <= atol + rtol * |ref[i]|
 // Fails on NaN or Inf in either tensor.
 // Sets failureFlag to 1 atomically if any element fails.
+// For a ragged layout, out-of-block positions and positions where the reference is NaN are
+// skipped (a ragged reference marks the positions it leaves undefined with NaN, RFC 0014),
+// and comparedFlag records that at least one element was graded, as CpuFpReferenceValidation
+// does.
 extern "C" __global__ void validateAllClose(ValidatorArgs args)
 {
     auto idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -83,16 +143,28 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
     const auto* ref = static_cast<const DATA_TYPE*>(args.reference);
     const auto* impl = static_cast<const DATA_TYPE*>(args.implementation);
 
-    long long refIdx = idx;
-    long long implIdx = idx;
-    if(args.ndim > 0)
+    long long refIdx;
+    long long implIdx;
+    if(!resolveOffsets(idx, args, refIdx, implIdx))
     {
-        decomposeAndComputeOffsets(
-            idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
+        return;
     }
 
     auto refVal = toAccum(ref[refIdx]);
     auto implVal = toAccum(impl[implIdx]);
+
+    if(args.rowOffsets != nullptr)
+    {
+        if(isnan(refVal))
+        {
+            return;
+        }
+        // Checked first so a large tensor does not pay one atomic per element.
+        if(*args.comparedFlag == 0)
+        {
+            atomicMax(args.comparedFlag, 1);
+        }
+    }
 
     if(isnan(refVal) || isnan(implVal) || isinf(refVal) || isinf(implVal))
     {
@@ -112,7 +184,8 @@ extern "C" __global__ void validateAllClose(ValidatorArgs args)
 
 // Integer exact-equality validation kernel.
 // Sets failureFlag to 1 atomically if any element differs, or if either side holds the
-// unwritten-output sentinel (see isIntegerSentinel).
+// unwritten-output sentinel (see isIntegerSentinel). For a ragged layout, out-of-block
+// positions are skipped, as CpuIntReferenceValidation does.
 extern "C" __global__ void validateExact(ValidatorArgs args)
 {
     auto idx = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -129,12 +202,11 @@ extern "C" __global__ void validateExact(ValidatorArgs args)
     const auto* ref = static_cast<const DATA_TYPE*>(args.reference);
     const auto* impl = static_cast<const DATA_TYPE*>(args.implementation);
 
-    long long refIdx = idx;
-    long long implIdx = idx;
-    if(args.ndim > 0)
+    long long refIdx;
+    long long implIdx;
+    if(!resolveOffsets(idx, args, refIdx, implIdx))
     {
-        decomposeAndComputeOffsets(
-            idx, args.dims, args.refStrides, args.implStrides, args.ndim, refIdx, implIdx);
+        return;
     }
 
     const auto refVal = ref[refIdx];
