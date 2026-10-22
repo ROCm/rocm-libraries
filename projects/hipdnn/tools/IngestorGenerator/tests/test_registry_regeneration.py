@@ -568,9 +568,13 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
     failures = _hydration_failures(
         manifest, [("renamed", renamed), ("declined", declined)]
     )
-    assert [f.split(":")[0] for f in failures] == ["renamed", "declined"], failures
-    assert "unexpected spec field" in failures[0], failures[0]
-    assert "spec rejected by" in failures[1], failures[1]
+    # One failure per launch: a multi-launch kernel's launches each hydrate on their own.
+    by_kernel = collections.defaultdict(list)
+    for failure in failures:
+        by_kernel[failure.split(":")[0].split("[")[0]].append(failure)
+    assert list(by_kernel) == ["renamed", "declined"], failures
+    assert all("unexpected spec field" in f for f in by_kernel["renamed"]), failures
+    assert all("spec rejected by" in f for f in by_kernel["declined"]), failures
 
 
 def _observation_failures(manifest: dict, kernels: list) -> list:
