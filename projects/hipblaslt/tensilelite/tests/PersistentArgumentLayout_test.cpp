@@ -1020,3 +1020,55 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
         EXPECT_EQ(previousEnd, blocks * iters);
     }
 }
+
+TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSplits)
+{
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx1250;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 0;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
+        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
+    for(auto [m, n, batch, k, cs, cn, whole] :
+        std::vector<std::tuple<size_t, size_t, size_t, size_t, uint32_t, uint32_t, bool>>{
+            {257, 129, 8, 4096, 4, 1, true}, {257, 129, 8, 4096, 2, 1, true},
+            {129, 257, 8, 4096, 2, 1, true},
+            {333, 777, 1, 1535, 4, 1, true}, {512, 1024, 16, 256, 8, 1, true},
+            {511, 769, 1, 4097, 2, 1, false}, {128, 128, 1, 8192, 4, 1, false},
+            // At this ragged two-axis boundary, whole blocks measured slower:
+            // 66 whole-block iterations versus 41 + 24 estimated split cost.
+            {512, 832, 1, 4161, 2, 4, false}})
+    {
+        SCOPED_TRACE(::testing::Message() << m << ',' << n << ',' << batch << ',' << k << ',' << cs << ',' << cn);
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        solution.internalArgsSupport.perTileExtraIters = true;
+        auto problem = clusterProblem(m, n, k, batch);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.clusterSchedule.wholeBlocksOnly, whole);
+        EXPECT_EQ(launch.workspaceBytes == 0, whole);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+        if(whole)
+        {
+            EXPECT_EQ(launch.clusterSchedule.fallbackReason, "whole-block-cost");
+            EXPECT_EQ(launch.grid, launch.clusterSchedule.blocks);
+            EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
+            EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+        }
+        // Explicit fixed grids bypass the performance policy.
+        device.persistentFixedGrid = launch.selectedGrid;
+        const auto fixed = solution.resolvePersistentSettings(problem, device);
+        EXPECT_TRUE(fixed.clusterSchedule.fixedGridUsed);
+        EXPECT_NE(fixed.clusterSchedule.fallbackReason, "whole-block-cost");
+        device.persistentFixedGrid = 0;
+        // A CU cap bounds the new whole-block candidate as well as splits.
+        problem.setParams().setSmCountTarget(32);
+        const auto capped = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(capped.clusterSchedule.physicalGrid, 32u * 6u);
+    }
+}

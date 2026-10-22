@@ -6525,6 +6525,51 @@ namespace TensileLite
             launch.grid = std::min(launch.grid, cluster.blocks);
             cluster.split = {};
         };
+        // The tile predictor does not price spatial block padding or clustered
+        // tree fixup. Compare its resolved physical grid with a whole-block
+        // candidate, in units of DepthU iterations on the busiest CU. Count
+        // physical waves (including padded peers), not just logical workers.
+        // The fixup allowance is calibrated for gfx1250 dense clustered tree
+        // kernels at a full physical wave, scaled by the block footprint so
+        // underfilled waves still favor K parallelism. Keep small grids (<1/4
+        // CU coverage), other
+        // architectures and parallel reduction on their existing policies.
+        if(!cluster.fixedGridUsed && !wholeTileGrid && cluster.blocks % launch.grid != 0
+           && gpu->processor == AMDGPU::Processor::gfx1250
+           && gpu->persistentDynamicGrid == static_cast<int>(origami::grid_selection_t::k_split_aware)
+           && launch.reduction == origami::reduction_t::tree
+           && !handwrittenCustomKernel() && !sizeMapping.useSubtileImpl
+           && !problemType.useGradient && !problemType.sparse && k != 0)
+        {
+            size_t cuBudget = gpu->computeUnitCount;
+            if(gpu->persistentMaxCUs > 0)
+                cuBudget = std::min(cuBudget, static_cast<size_t>(gpu->persistentMaxCUs));
+            if(launch.smCountTarget > 0)
+                cuBudget = std::min(cuBudget, static_cast<size_t>(launch.smCountTarget));
+            const size_t clustersPerWave = std::max(size_t{1}, cuBudget / cluster.clusterSize);
+            const size_t wholeWaves = divideUp(cluster.blocks, clustersPerWave);
+            const size_t splitWaves = divideUp(launch.grid, clustersPerWave);
+            const size_t wholeWork = checkedMultiply(wholeWaves, iters);
+            const size_t splitWork = checkedMultiply(splitWaves, divideUp(totalIters, launch.grid));
+            constexpr size_t TreeFixupItersPerWave = 48;
+            const size_t fixupWork = checkedMultiply(
+                checkedMultiply(splitWaves, TreeFixupItersPerWave),
+                std::min(cluster.blocks, clustersPerWave)) / clustersPerWave;
+            const size_t splitCost = checkedAdd(splitWork, fixupWork);
+            if(cluster.blocks >= divideUp(clustersPerWave, size_t{4}) && wholeWork <= splitCost)
+            {
+                launch.grid = std::min(cluster.blocks, launchLimit / cluster.clusterSize);
+                // Respect a caller's CU cap even though whole blocks do not
+                // need the cooperative residency/flag limit.
+                if(cuBudget < static_cast<size_t>(gpu->computeUnitCount))
+                    launch.grid = std::min(launch.grid, checkedMultiply(clustersPerWave,
+                        static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1))));
+                wholeBlocks("whole-block-cost");
+                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
+                return launch;
+            }
+        }
         if(k == 0)
             wholeBlocks("zero-k");
         else if(Debug::Instance().useStreamKDataParrallel())
