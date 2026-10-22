@@ -85,6 +85,13 @@ on a packaged build would select nothing and pass. The packaged entries are not 
 `MIOPEN_NO_GPU`, which describes the build machine; packages are often built without a GPU and
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
+With the flag on, the packaged tests' scripts, data files, `forwarding_failure_probe` and the
+fake hipDNN backend install under `bin/miopen_wrapper_tests/`, and the test list refers to
+them as `../miopen_wrapper_tests/…`. `miopen_gtest` stays in `bin/`. The files share one
+folder so that packagers can keep the fake backend, which has the real backend's file name,
+out of runtime packages with a single pattern. TheRock's `ml-libs/artifact-miopen.toml` names
+the folder; change both together.
+
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
 two built libraries. It also checks the wrapper's list of required shared libraries
 (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the

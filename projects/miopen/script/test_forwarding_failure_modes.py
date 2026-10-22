@@ -87,6 +87,16 @@ class ForwardingFailureModesTest(unittest.TestCase):
             if not name.startswith(("MIOPEN_", "HIPDNN_"))
         }
         clean["HIPDNN_BACKEND_LIBRARY_PATH"] = str(self.fake_backend)
+        if os.name == "nt":
+            # Windows finds a program's DLLs beside it or on PATH, and the installed
+            # probe is one folder below MIOpen.dll.
+            clean["PATH"] = os.pathsep.join(
+                [
+                    str(self.probe.parent),
+                    str(self.probe.parent.parent),
+                    clean.get("PATH", ""),
+                ]
+            )
         clean.update(env or {})
         completed = subprocess.run(
             [str(self.probe), *steps],
