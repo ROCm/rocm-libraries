@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -31,6 +33,23 @@ template <typename THandle>
 class IKernelDispatchHandler
 {
 public:
+    /// The launch names this handler launches: the keys of the `sources` map of every kernel
+    /// of its pack (RFC 0017 §15.1). The empty set, which is the default, is a
+    /// single-launch handler that reads `kernel_source`, so no existing handler changes.
+    ///
+    /// The state manager drops any kernel whose launch-name set differs from this one when
+    /// it builds its catalog, so a kernel that reaches `prepare` carries exactly these
+    /// launches.
+    ///
+    /// This declaration is provisional: it stands in for the `launches[]` dispatch-descriptor
+    /// program, which does not exist yet. Until it does, the handler also owns launch order,
+    /// workspace and the hand-off between stages.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual std::set<std::string> launchNames() const
+    {
+        return {};
+    }
+
     virtual ~IKernelDispatchHandler() = default;
 
     /// Global scratch this kernel requires, in bytes. Lives on this interface

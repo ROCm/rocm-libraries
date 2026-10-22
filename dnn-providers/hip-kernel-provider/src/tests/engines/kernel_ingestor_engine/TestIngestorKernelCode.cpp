@@ -145,6 +145,30 @@ TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
     }
 }
 
+/// A kernel that still carries its `sources` has no `source` of its own to load: building it
+/// whole would read the default one and fail as a missing file. Refused with the name of the
+/// helper that returns one launch's definition, before anything is resolved.
+TEST(TestIngestorKernelCode, RejectsAKernelThatStillCarriesItsLaunches)
+{
+    GuardHarness harness;
+    auto kernel = makeKpackKernel("/nonexistent", "/nonexistent", "absent.kpack");
+    kernel.sources.emplace("decode", kernel.source);
+    kernel.sources.emplace("merge", kernel.source);
+    kernel.source = KernelSource{};
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a kernel that still carries its launches to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("launchKernelDefinition"), std::string::npos)
+            << error.what();
+    }
+}
+
 TEST(TestIngestorKernelCode, RejectsAnAbsoluteLibraryOutsideTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);

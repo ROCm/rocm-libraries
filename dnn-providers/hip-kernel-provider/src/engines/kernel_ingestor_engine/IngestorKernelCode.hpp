@@ -748,6 +748,17 @@ inline IngestorKernelCode buildForSourceKind(
 {
     using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
+    // A multi-launch kernel has no `source`: the default one would compile nothing and read
+    // as a missing file. The pack launches an entry through launchKernelDefinition().
+    if(!kernel.sources.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            hipdnn_plugin_sdk::ingestor::describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                + " carries several launches ('sources'); pass one launch's definition from "
+                  "launchKernelDefinition() to buildIngestorKernelCode");
+    }
+
     switch(kernel.source.kind)
     {
     case KernelSourceKind::EMBEDDED_SOURCE:

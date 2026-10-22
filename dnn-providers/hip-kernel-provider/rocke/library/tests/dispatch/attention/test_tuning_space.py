@@ -287,14 +287,14 @@ class TestTuningSpace(unittest.TestCase):
             "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
         )
         base = specs[0]
-        at_limit = base.with_num_kv_blocks(65536)
-        above_limit = base.with_num_kv_blocks(65537)
+        at_limit = base.with_num_kv_blocks(65534)
+        above_limit = base.with_num_kv_blocks(65535)
         self.assertFalse(at_limit.kernel_spec.use_i64_kv_addr)
         self.assertEqual(at_limit.tuning_id, base.tuning_id)
         self.assertTrue(above_limit.kernel_spec.use_i64_kv_addr)
         self.assertEqual(above_limit.tuning_id, base.tuning_id)
         self.assertNotEqual(spec_identity(above_limit), spec_identity(base))
-        self.assertEqual(above_limit.num_kv_blocks, 65537)
+        self.assertEqual(above_limit.num_kv_blocks, 65535)
 
         _candidate, _req, split_specs = _specs_for(
             "attention_gfx950_u3d_splitkv_seg64_t1xb",
@@ -302,7 +302,7 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_k=4096,
         )
         split = split_specs[0]
-        split_i64 = split.with_num_kv_blocks(65537)
+        split_i64 = split.with_num_kv_blocks(65535)
         self.assertTrue(split_i64.kernel_spec.use_i64_kv_addr)
         self.assertEqual(split_i64.reduce_spec, split.reduce_spec)
         self.assertEqual(split_i64.tuning_id, split.tuning_id)
@@ -315,7 +315,23 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_k=4096,
         )
         with self.assertRaisesRegex(NotImplementedError, "does not support"):
-            gfx942_split_specs[0].with_num_kv_blocks(65537)
+            gfx942_split_specs[0].with_num_kv_blocks(65535)
+
+        # The 4-warp GQA builder has no i64 path either, but shares its spec
+        # class with the default builder. Its i32 element offsets read 2^31
+        # elements (131072 of these blocks), so it stays i32 past the buffer
+        # range and the tuning spec refuses it only past that.
+        _candidate, _req, fourwarp_specs = _specs_for(
+            "attention_gfx942_u2d_gfx942_4warp",
+            arch="gfx942",
+            dtype="bf16",
+            sliding_window=16,
+        )
+        fourwarp = fourwarp_specs[0]
+        for n in (65534, 65535, 131072):
+            self.assertFalse(fourwarp.with_num_kv_blocks(n).kernel_spec.use_i64_kv_addr)
+        with self.assertRaisesRegex(NotImplementedError, "no i64 KV path"):
+            fourwarp.with_num_kv_blocks(131073)
 
         _candidate, _req, fp8_specs = _specs_for(
             "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
@@ -323,10 +339,10 @@ class TestTuningSpace(unittest.TestCase):
             fp8_fnuz=False,
         )
         self.assertFalse(
-            fp8_specs[0].with_num_kv_blocks(131072).kernel_spec.use_i64_kv_addr
+            fp8_specs[0].with_num_kv_blocks(131068).kernel_spec.use_i64_kv_addr
         )
         self.assertTrue(
-            fp8_specs[0].with_num_kv_blocks(131073).kernel_spec.use_i64_kv_addr
+            fp8_specs[0].with_num_kv_blocks(131069).kernel_spec.use_i64_kv_addr
         )
 
     def test_tuning_wrapper_preserves_fp8_encoding(self):

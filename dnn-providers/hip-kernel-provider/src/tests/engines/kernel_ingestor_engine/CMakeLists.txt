@@ -7,6 +7,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorKernelCode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanRestoreChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestLaunchKernelDefinition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
