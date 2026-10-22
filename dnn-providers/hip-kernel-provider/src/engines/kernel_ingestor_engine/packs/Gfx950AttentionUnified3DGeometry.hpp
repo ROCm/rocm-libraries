@@ -33,7 +33,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /// One wave64 CTA for both kernels (`SEGMENT_THREADS`; the reduce builder's `THREADS`).
-inline constexpr unsigned GFX950_UNIFIED_3D_CTA_THREADS = 64;
+inline constexpr unsigned GFX950_UNIFIED_3D_CTA_THREADS
+    = static_cast<unsigned>(GFX950_UNIFIED_ATTENTION_TRAITS.waveLanes);
 
 /// The segment kernel fixes BLOCK_M at 16 query rows, so a GQA group must divide 16
 /// (`supports_tiled_3d`).
@@ -44,7 +45,7 @@ inline constexpr int64_t GFX950_UNIFIED_3D_BLOCK_M = 16;
 inline constexpr int64_t GFX950_UNIFIED_3D_MAX_SEGMENTS = 4096;
 
 /// Bytes of one f32 element of the segment scratch.
-inline constexpr std::size_t GFX950_UNIFIED_3D_SCRATCH_ELEMENT = sizeof(float);
+inline constexpr std::size_t GFX950_UNIFIED_3D_SCRATCH_ELEMENT = UNIFIED_ATTENTION_SCRATCH_ELEMENT;
 
 /**
  * @brief Whether gfx950 builds the segment and reduce kernels for these fields.
@@ -160,49 +161,9 @@ inline Gfx950Unified3DLaunchGeometry gfx950Unified3DLaunchGeometry(int64_t numQu
     return geometry;
 }
 
-/// Where each workspace section sits, in bytes: the identity paged-KV metadata (exactly
-/// Unified2D's layout), then the three segment scratch arrays.
-struct Gfx950Unified3DWorkspaceLayout
-{
-    Gfx950Unified2DWorkspaceLayout identity;
-    std::size_t segmOutputOffset = 0;
-    std::size_t segmOutputBytes = 0;
-    std::size_t segmMaxOffset = 0;
-    std::size_t segmMaxBytes = 0;
-    std::size_t segmExpsumOffset = 0;
-    std::size_t segmExpsumBytes = 0;
-    std::size_t totalBytes = 0;
+using Gfx950Unified3DWorkspaceLayout = UnifiedAttention3DWorkspaceLayout;
 
-    friend bool operator==(const Gfx950Unified3DWorkspaceLayout& a,
-                           const Gfx950Unified3DWorkspaceLayout& b)
-    {
-        return a.identity == b.identity && a.segmOutputOffset == b.segmOutputOffset
-               && a.segmOutputBytes == b.segmOutputBytes && a.segmMaxOffset == b.segmMaxOffset
-               && a.segmMaxBytes == b.segmMaxBytes && a.segmExpsumOffset == b.segmExpsumOffset
-               && a.segmExpsumBytes == b.segmExpsumBytes && a.totalBytes == b.totalBytes;
-    }
-};
-
-/**
- * @brief The workspace both kernels share, or nullopt when it cannot be laid out.
- *
- * Six sections, each starting on a 256-byte boundary:
- *
- *     block_tables     int32 [batch, Skv / block_size]          the identity metadata,
- *     seq_lens         int32 [batch]                            laid out as Unified2D
- *     query_start_len  int32 [batch + 1]                        lays it out
- *     segm_output      f32   [total_q, Hq, num_segments, D]
- *     segm_max         f32   [total_q, Hq, num_segments]
- *     segm_expsum      f32   [total_q, Hq, num_segments]
- *
- * The reduce kernel's descriptors index the scratch exactly so
- * (`build_unified_attention_reduce_tiled`). Only the identity prefix is host-written; the
- * segment kernel writes every scratch element the reduce reads, including a neutral entry
- * for a segment past the sequence's end, so the scratch needs no initialisation.
- *
- * nullopt whenever gfx950Unified2DWorkspaceLayout() is, for a non-positive scratch
- * dimension, and for a scratch the kernels' 32-bit element indexing cannot address.
- */
+/// `unifiedAttention3DWorkspaceLayout`, named for this pack.
 inline std::optional<Gfx950Unified3DWorkspaceLayout>
     gfx950Unified3DWorkspaceLayout(int64_t batch,
                                    int64_t seqLenQ,
@@ -212,37 +173,8 @@ inline std::optional<Gfx950Unified3DWorkspaceLayout>
                                    int64_t headSize,
                                    int64_t numSegments)
 {
-    const auto identity = gfx950Unified2DWorkspaceLayout(batch, seqLenKv, blockSize);
-    if(!identity.has_value() || seqLenQ <= 0 || numQueryHeads <= 0 || headSize <= 0
-       || numSegments <= 0)
-    {
-        return std::nullopt;
-    }
-
-    int64_t rows = 0;
-    int64_t outputElements = 0;
-    if(__builtin_mul_overflow(batch, seqLenQ, &rows)
-       || __builtin_mul_overflow(rows, numQueryHeads, &rows)
-       || __builtin_mul_overflow(rows, numSegments, &rows)
-       || __builtin_mul_overflow(rows, headSize, &outputElements) || outputElements > INT32_MAX)
-    {
-        return std::nullopt;
-    }
-
-    Gfx950Unified3DWorkspaceLayout layout;
-    layout.identity = *identity;
-    layout.segmOutputOffset = identity->totalBytes;
-    layout.segmOutputBytes
-        = static_cast<std::size_t>(outputElements) * GFX950_UNIFIED_3D_SCRATCH_ELEMENT;
-    layout.segmMaxOffset
-        = layout.segmOutputOffset + detail::alignWorkspaceSection(layout.segmOutputBytes);
-    layout.segmMaxBytes = static_cast<std::size_t>(rows) * GFX950_UNIFIED_3D_SCRATCH_ELEMENT;
-    layout.segmExpsumOffset
-        = layout.segmMaxOffset + detail::alignWorkspaceSection(layout.segmMaxBytes);
-    layout.segmExpsumBytes = layout.segmMaxBytes;
-    layout.totalBytes
-        = layout.segmExpsumOffset + detail::alignWorkspaceSection(layout.segmExpsumBytes);
-    return layout;
+    return unifiedAttention3DWorkspaceLayout(
+        batch, seqLenQ, seqLenKv, blockSize, numQueryHeads, headSize, numSegments);
 }
 
 /**
