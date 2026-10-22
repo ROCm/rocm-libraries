@@ -23,9 +23,9 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
-from Tensile.Common import IsaVersion
+from tensilelite.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
+from tensilelite.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
+from tensilelite.Common import IsaVersion
 
 # Helper to create a mock data type
 def _mock_dtype(is_16bit=False, is_8bit=False, num_bytes=4):

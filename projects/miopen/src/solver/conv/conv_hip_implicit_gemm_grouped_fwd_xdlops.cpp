@@ -387,20 +387,13 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
-        if(!loader.IsLoaded())
-            return false;
-
-        auto data_type = problem.GetInDataType();
-        use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
-
-        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKSolverType::GrpConvFwd, problem, data_type, use_tf32);
-
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
+        InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-
-        assert(!valid_kernels.empty());
         return true;
     }
     if((index + 1) < valid_kernels.size())

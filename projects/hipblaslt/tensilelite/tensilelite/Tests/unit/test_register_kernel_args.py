@@ -26,9 +26,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.Activation import ActivationType
-from Tensile.Common import DataDirection
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.Activation import ActivationType
+from tensilelite.Common import DataDirection
+from tensilelite.KernelWriter import KernelWriter
 
 pytestmark = pytest.mark.unit
 
