@@ -3,7 +3,7 @@
 """Feature catalog for ``BatchnormInferenceAttributes`` (batch norm, inference).
 
 The features come from ``batchnorm_inference_attributes.fbs``: ``dtype``,
-``precision``, ``rank`` and ``layout``, read from ``x`` and ``y`` as
+``precision``, ``spatial`` and ``layout``, read from ``x`` and ``y`` as
 ``batchnorm`` describes. ``y`` is often the virtual fp32 intermediate into a
 fused pointwise.
 

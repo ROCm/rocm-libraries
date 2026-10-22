@@ -15,7 +15,7 @@ shape roles: the activation (fwd ``x``, bwd ``dx``, wrw ``x``), the filter
 - ``precision:mixed``: the op's non-virtual tensors do not all share one
   dtype. A virtual tensor -- the fp32 intermediate between a conv and its
   fused pointwise -- is not counted: the caller never sees it.
-- ``rank`` (exclusive): 1, 2 or 3 spatial dims.
+- ``spatial`` (exclusive): 1, 2 or 3 spatial dims.
 - ``layout`` (exclusive): channels first (NCW / NCHW / NCDHW) or channels last
   (NWC / NHWC / NDHWC), read from the strides. A dim of size 1 has no place in
   the order, so it is skipped; a tensor whose remaining order fits both
@@ -53,7 +53,7 @@ from support_features import Feature, FeatureError
 from support_matrix_units import dtype_label
 
 DTYPES = ("fp32", "fp16", "bf16")
-RANKS = {1: "rank:1d", 2: "rank:2d", 3: "rank:3d"}
+SPATIAL = {1: "spatial:1d", 2: "spatial:2d", 3: "spatial:3d"}
 LAYOUTS = ("nchw", "nhwc")
 # The serializer's spelling (Graph.hpp) -> feature id.
 MODES = {
@@ -82,7 +82,7 @@ def catalog(ports: Ports) -> tuple[Feature, ...]:
             tensors,
             "the non-virtual tensors do not all share one dtype",
         ),
-        *(Feature(rank, tensors) for rank in RANKS.values()),
+        *(Feature(spatial, tensors) for spatial in SPATIAL.values()),
         Feature("layout:nchw", tensors, "channels first"),
         Feature("layout:nhwc", tensors, "channels last"),
         Feature("groups:grouped", (ports.activation, ports.filter), "groups > 1"),
@@ -167,7 +167,7 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
     if len(ranks) != 1:
         raise FeatureError(f"tensor ranks differ: {sorted(ranks)}")
     spatial = ranks.pop() - 2
-    if spatial not in RANKS:
+    if spatial not in SPATIAL:
         raise FeatureError(f"{spatial} spatial dims are not catalogued")
     for name in PARAMETERS:
         if len(params.get(name) or ()) != spatial:
@@ -208,7 +208,7 @@ def features(node: dict, tensors_by_uid: dict, ports: Ports) -> set[str]:
         raise FeatureError(f"{w['dims'][0]} filters do not split into {groups} groups")
     check_response(x["dims"], w["dims"], y["dims"], params)
 
-    features = {f"dtype:{dtype}", RANKS[spatial], mode}
+    features = {f"dtype:{dtype}", SPATIAL[spatial], mode}
     if len(seen) > 1:
         features.add("precision:mixed")
 

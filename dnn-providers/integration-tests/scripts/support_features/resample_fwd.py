@@ -20,7 +20,7 @@ catalog takes the same. By group:
   themselves whether padded cells count, and a window that stays on ``x``
   reads none.
 - ``dtype`` (exclusive): the dtype of ``x``, which ``y`` shares.
-- ``rank`` (exclusive): 2 or 3 spatial dims.
+- ``spatial`` (exclusive): 2 or 3 spatial dims.
 - ``layout`` (exclusive, when the strides tell): ``nchw`` or ``nhwc``, read
   from ``x``, ``y`` and the index, as for convolution.
 - ``padding:symmetric``, ``padding:asymmetric``: non-zero padding, with
@@ -63,9 +63,9 @@ PARAMETERS = (PRE, POST, STRIDE, WINDOW)
 # "not_set" and "padding_not_set", which the API rejects.
 MODES = ("maxpool", "avgpool_exclude_padding", "avgpool_include_padding")
 PADDING_MODES = ("neg_inf_pad", "zero_pad")
-# Tensor rank -> spatial rank feature: 4D and 5D, as the provider and the
+# Tensor rank -> spatial feature: 4D and 5D, as the provider and the
 # CPU reference take.
-RANKS = {4: "rank:2d", 5: "rank:3d"}
+SPATIAL = {4: "spatial:2d", 5: "spatial:3d"}
 INDEX_DTYPE = "int32"
 
 FEATURES = (
@@ -81,7 +81,7 @@ FEATURES = (
         "maxpool takes a padded cell as 0",
     ),
     *(Feature(f"dtype:{dtype}", (X,)) for dtype in layernorm.DTYPES),
-    *(Feature(rank, (X, Y)) for rank in RANKS.values()),
+    *(Feature(spatial, (X, Y)) for spatial in SPATIAL.values()),
     Feature("layout:nchw", (X, Y, INDEX), "channels first"),
     Feature("layout:nhwc", (X, Y, INDEX), "channels last"),
     Feature("padding:symmetric", (PRE, POST), "non-zero, pre = post"),
@@ -109,7 +109,7 @@ def catalogued_mode(node: dict) -> str:
 def checked_shapes(
     node: dict, big: dict, big_port: str, small: dict, small_port: str
 ) -> int:
-    """The spatial rank, or raise where the provider rejects the shapes:
+    """The spatial dim count, or raise where the provider rejects the shapes:
     ``big`` is the pooled tensor (fwd ``x``, bwd ``dx``), ``small`` the
     pooled-to one (fwd ``y``, bwd ``dy``)."""
     big_dims, small_dims = big["dims"], small["dims"]
@@ -118,7 +118,7 @@ def checked_shapes(
             f"{small_port} dims {small_dims} are not the rank of {big_port} dims "
             f"{big_dims}"
         )
-    if len(big_dims) not in RANKS:
+    if len(big_dims) not in SPATIAL:
         raise FeatureError(
             f"{big_port} dims {big_dims}: rank {len(big_dims)} is not catalogued"
         )
@@ -235,7 +235,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     features = {
         f"mode:{mode}",
         f"dtype:{dtype}",
-        RANKS[spatial + 2],
+        SPATIAL[spatial + 2],
         *layout_features(layout_tensors),
         *geometry_features(node),
     }

@@ -3,7 +3,7 @@
 """Feature catalog for ``BatchnormBackwardAttributes`` (batch norm, backward).
 
 The features come from ``batchnorm_backward_attributes.fbs``. ``dtype``,
-``precision``, ``rank`` and ``layout`` are read from ``dy``, ``x`` and ``dx``
+``precision``, ``spatial`` and ``layout`` are read from ``dy``, ``x`` and ``dx``
 as ``batchnorm`` describes, the dtype from ``x``: ``dy`` is often the virtual
 fp32 gradient out of a fused pointwise backward, which the caller never sees.
 The rest:

@@ -1830,7 +1830,7 @@ class TestConvolutionOpBinding:
     this checks what differs per op: which schema field plays which role.
     """
 
-    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "mode:cross_correlation"}
+    PLAIN = {"dtype:fp32", "spatial:2d", "layout:nchw", "mode:cross_correlation"}
 
     def test_plain_graph(self, module) -> None:
         assert module.extract(*_conv(module)) == self.PLAIN
@@ -1889,7 +1889,7 @@ class TestConvolutionOpBinding:
 
 
 class TestConvolutionFwdExtract:
-    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "mode:cross_correlation"}
+    PLAIN = {"dtype:fp32", "spatial:2d", "layout:nchw", "mode:cross_correlation"}
 
     def _extract(self, **kwargs) -> set[str]:
         return convolution_fwd.extract(*_conv(convolution_fwd, **kwargs))
@@ -1903,10 +1903,10 @@ class TestConvolutionFwdExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
-    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+    def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
         features = self._extract(spatial=spatial, layout=layout)
         assert features == {
             "dtype:fp32",
@@ -2290,7 +2290,7 @@ class TestBatchnormTrainingBinding:
 class TestBatchnormTrainingExtract:
     PLAIN = {
         "dtype:fp32",
-        "rank:2d",
+        "spatial:2d",
         "layout:nchw",
         "affine:full_rank",
         "epsilon:fixed",
@@ -2310,18 +2310,20 @@ class TestBatchnormTrainingExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
-    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+    def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
         features = self._extract(spatial=spatial, layout=layout)
-        rank_and_layout = {expected, f"layout:{layout}"}
-        assert features == self.PLAIN - {"rank:2d", "layout:nchw"} | rank_and_layout
+        spatial_and_layout = {expected, f"layout:{layout}"}
+        assert (
+            features == self.PLAIN - {"spatial:2d", "layout:nchw"} | spatial_and_layout
+        )
 
-    def test_rank_0d_adds_no_layout(self) -> None:
+    def test_spatial_none_adds_no_layout(self) -> None:
         # [N, C] is the same in both layouts.
         features = self._extract(spatial=())
-        assert features == self.PLAIN - {"rank:2d", "layout:nchw"} | {"rank:0d"}
+        assert features == self.PLAIN - {"spatial:2d", "layout:nchw"} | {"spatial:none"}
 
     def test_disagreeing_layouts_raise(self) -> None:
         self._raises("layouts disagree", y_layout="nhwc")
@@ -2559,7 +2561,7 @@ def _bn_bwd(
 
 
 class TestBatchnormBackwardExtract:
-    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "saved_stats:on"}
+    PLAIN = {"dtype:fp32", "spatial:2d", "layout:nchw", "saved_stats:on"}
 
     def _extract(self, **kwargs) -> set[str]:
         return batchnorm_backward.extract(*_bn_bwd(**kwargs))
@@ -2585,9 +2587,9 @@ class TestBatchnormBackwardExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((), "rank:0d"), ((8,), "rank:1d"), ((4, 8, 8), "rank:3d")],
+        [((), "spatial:none"), ((8,), "spatial:1d"), ((4, 8, 8), "spatial:3d")],
     )
-    def test_rank(self, spatial, expected: str) -> None:
+    def test_spatial(self, spatial, expected: str) -> None:
         assert expected in self._extract(spatial=spatial)
 
     def test_layout(self) -> None:
@@ -2715,7 +2717,7 @@ def _bn_inf(
 
 
 class TestBatchnormInferenceExtract:
-    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw"}
+    PLAIN = {"dtype:fp32", "spatial:2d", "layout:nchw"}
 
     def _extract(self, **kwargs) -> set[str]:
         return batchnorm_inference.extract(*_bn_inf(**kwargs))
@@ -2745,15 +2747,15 @@ class TestBatchnormInferenceExtract:
 
     @pytest.mark.parametrize(
         "spatial, expected",
-        [((8,), "rank:1d"), ((8, 8), "rank:2d"), ((4, 8, 8), "rank:3d")],
+        [((8,), "spatial:1d"), ((8, 8), "spatial:2d"), ((4, 8, 8), "spatial:3d")],
     )
     @pytest.mark.parametrize("layout", convolution.LAYOUTS)
-    def test_rank_and_layout(self, spatial, expected: str, layout: str) -> None:
+    def test_spatial_and_layout(self, spatial, expected: str, layout: str) -> None:
         features = self._extract(spatial=spatial, layout=layout)
         assert features == {"dtype:fp32", expected, f"layout:{layout}"}
 
-    def test_rank_0d_adds_no_layout(self) -> None:
-        assert self._extract(spatial=()) == {"dtype:fp32", "rank:0d"}
+    def test_spatial_none_adds_no_layout(self) -> None:
+        assert self._extract(spatial=()) == {"dtype:fp32", "spatial:none"}
 
     @pytest.mark.parametrize(
         "dtype, expected",
@@ -2781,7 +2783,7 @@ class TestBatchnormInferenceExtract:
 
     def test_one_value_per_channel_is_allowed(self) -> None:
         # The statistics are given, not computed from the batch.
-        assert "rank:2d" in self._extract(batch=1, spatial=(1, 1))
+        assert "spatial:2d" in self._extract(batch=1, spatial=(1, 1))
 
     def test_activation_shapes_that_differ_raise(self) -> None:
         node, tensors = _bn_inf()
@@ -2825,7 +2827,7 @@ class TestBatchnormInferenceExtract:
 class TestBatchnormInferenceVarianceExtExtract:
     """What differs from BatchnormInferenceAttributes; the rest is shared."""
 
-    PLAIN = {"dtype:fp32", "rank:2d", "layout:nchw", "epsilon:fixed"}
+    PLAIN = {"dtype:fp32", "spatial:2d", "layout:nchw", "epsilon:fixed"}
 
     def _extract(self, **kwargs) -> set[str]:
         kwargs.setdefault("epsilon", "fixed")
@@ -5466,7 +5468,7 @@ class TestResampleFwdExtract:
     PLAIN = {
         "mode:maxpool",
         "dtype:fp32",
-        "rank:2d",
+        "spatial:2d",
         "layout:nchw",
         "stride:strided",
         "index:generated",
@@ -5577,11 +5579,11 @@ class TestResampleFwdExtract:
     @pytest.mark.parametrize(
         "dims, window, stride, expected",
         [
-            ((2, 3, 8, 8), (2, 2), (2, 2), "rank:2d"),
-            ((2, 3, 4, 8, 8), (2, 2, 2), (2, 2, 2), "rank:3d"),
+            ((2, 3, 8, 8), (2, 2), (2, 2), "spatial:2d"),
+            ((2, 3, 4, 8, 8), (2, 2, 2), (2, 2, 2), "spatial:3d"),
         ],
     )
-    def test_rank(
+    def test_spatial(
         self,
         dims: tuple[int, ...],
         window: tuple[int, ...],
@@ -5589,7 +5591,7 @@ class TestResampleFwdExtract:
         expected: str,
     ) -> None:
         features = self._extract(dims=dims, window=window, stride=stride)
-        assert self._group(features, "rank") == {expected}
+        assert self._group(features, "spatial") == {expected}
 
     @pytest.mark.parametrize(
         "dims, window, stride",
@@ -5852,7 +5854,7 @@ class TestResampleFwdExtract:
                 },
                 {
                     "mode:avgpool_include_padding",
-                    "rank:3d",
+                    "spatial:3d",
                     "padding:asymmetric",
                     "stride:strided",
                     "window:overlapping",
@@ -5871,7 +5873,7 @@ class TestResampleFwdExtract:
                 },
                 {
                     "mode:avgpool_exclude_padding",
-                    "rank:2d",
+                    "spatial:2d",
                     "padding:asymmetric",
                     "stride:strided",
                     "window:overlapping",
@@ -5890,7 +5892,7 @@ class TestResampleFwdExtract:
                 },
                 {
                     "mode:avgpool_include_padding",
-                    "rank:2d",
+                    "spatial:2d",
                     "padding:asymmetric",
                     "stride:strided",
                     "window:overlapping",
@@ -5904,7 +5906,7 @@ class TestResampleFwdExtract:
                 },
                 {
                     "mode:maxpool",
-                    "rank:3d",
+                    "spatial:3d",
                     "stride:strided",
                     "window:overlapping",
                     "index:generated",
@@ -5912,7 +5914,7 @@ class TestResampleFwdExtract:
             ),
             (
                 {"dims": (2, 3, 8, 6)},
-                {"mode:maxpool", "rank:2d", "stride:strided", "index:generated"},
+                {"mode:maxpool", "spatial:2d", "stride:strided", "index:generated"},
             ),
             (
                 {
@@ -5925,7 +5927,7 @@ class TestResampleFwdExtract:
                 {
                     "mode:maxpool",
                     "padding_mode:zero_pad",
-                    "rank:2d",
+                    "spatial:2d",
                     "padding:symmetric",
                     "stride:strided",
                     "window:overlapping",
@@ -5986,7 +5988,13 @@ def _rsb(*, index: bool = True, **kwargs) -> tuple[dict, dict]:
 
 
 class TestResampleBwdExtract:
-    PLAIN = {"mode:maxpool", "dtype:fp32", "rank:2d", "layout:nchw", "stride:strided"}
+    PLAIN = {
+        "mode:maxpool",
+        "dtype:fp32",
+        "spatial:2d",
+        "layout:nchw",
+        "stride:strided",
+    }
     # The average modes take no index: the provider rejects one.
     AVG = {"index": False}
 
@@ -6098,11 +6106,11 @@ class TestResampleBwdExtract:
     @pytest.mark.parametrize(
         "dims, window, stride, expected",
         [
-            ((2, 3, 8, 8), (2, 2), (2, 2), "rank:2d"),
-            ((2, 3, 4, 8, 8), (2, 2, 2), (2, 2, 2), "rank:3d"),
+            ((2, 3, 8, 8), (2, 2), (2, 2), "spatial:2d"),
+            ((2, 3, 4, 8, 8), (2, 2, 2), (2, 2, 2), "spatial:3d"),
         ],
     )
-    def test_rank(
+    def test_spatial(
         self,
         dims: tuple[int, ...],
         window: tuple[int, ...],
@@ -6110,7 +6118,7 @@ class TestResampleBwdExtract:
         expected: str,
     ) -> None:
         features = self._extract(dims=dims, window=window, stride=stride)
-        assert self._group(features, "rank") == {expected}
+        assert self._group(features, "spatial") == {expected}
 
     @pytest.mark.parametrize(
         "dims, window, stride",

@@ -14,9 +14,9 @@ these groups are read from them:
 - ``precision:mixed``: the non-virtual activation tensors do not all share one
   dtype. A virtual ``y`` -- the fp32 intermediate into a fused pointwise -- is
   not counted: the caller never sees it.
-- ``rank`` (exclusive): 0 to 3 spatial dims after ``[N, C]``. The API's floor
-  is ``[N, C]``; MIOpen starts at one spatial dim, but the API is the
-  denominator.
+- ``spatial`` (exclusive): 0 to 3 spatial dims after ``[N, C]``, 0 as
+  ``spatial:none``. The API's floor is ``[N, C]``; MIOpen starts at one
+  spatial dim, but the API is the denominator.
 - ``layout`` (exclusive): channels first or channels last, read from the
   strides as ``convolution.tensor_layouts`` reads them. If no activation
   tensor tells, the graph adds no layout feature.
@@ -35,7 +35,7 @@ from support_features import Feature, FeatureError, convolution
 from support_matrix_units import dtype_label
 
 DTYPES = convolution.DTYPES
-RANKS = {0: "rank:0d", **convolution.RANKS}
+SPATIAL = {0: "spatial:none", **convolution.SPATIAL}
 CHANNEL_DTYPE = "fp32"
 
 # NOT_FEATURES reason for a per-channel port the API requires.
@@ -50,7 +50,7 @@ def catalog(data: str, io: tuple[str, ...]) -> tuple[Feature, ...]:
             io,
             "the non-virtual activation tensors do not all share one dtype",
         ),
-        *(Feature(rank, io) for rank in RANKS.values()),
+        *(Feature(spatial, io) for spatial in SPATIAL.values()),
         Feature("layout:nchw", io, "channels first"),
         Feature("layout:nhwc", io, "channels last"),
     )
@@ -82,7 +82,7 @@ def io_features(
         shapes = {port: t["dims"] for port, t in zip(io, tensors)}
         raise FeatureError(f"activation shapes differ: {shapes}")
     spatial = len(dims) - 2
-    if spatial not in RANKS:
+    if spatial not in SPATIAL:
         raise FeatureError(f"{data} dims {dims}: {spatial} spatial dims")
 
     dtype = dtype_label(tensors_by_uid[by_port[data]].get("data_type"))
@@ -96,7 +96,7 @@ def io_features(
         )
     seen = {dtype_label(t.get("data_type")) for t in tensors if not t.get("virtual")}
 
-    features = {f"dtype:{dtype}", RANKS[spatial]}
+    features = {f"dtype:{dtype}", SPATIAL[spatial]}
     if len(seen) > 1:
         features.add("precision:mixed")
     telling = [

@@ -3,7 +3,7 @@
 """Feature catalog for ``BatchnormAttributes`` (batch norm, training forward).
 
 The features come from ``batchnorm_attributes.fbs``. ``dtype``,
-``precision``, ``rank`` and ``layout`` are read from ``x`` and ``y`` as
+``precision``, ``spatial`` and ``layout`` are read from ``x`` and ``y`` as
 ``batchnorm`` describes; the rest, by group:
 
 - ``affine`` (exclusive): the shape ``scale`` and ``bias`` share.

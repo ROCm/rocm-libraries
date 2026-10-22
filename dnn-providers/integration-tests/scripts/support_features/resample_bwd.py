@@ -14,7 +14,7 @@ takes the same. By group, as for ``resample_fwd``:
 
 - ``mode`` (exclusive): the pooling, by its serialized name.
 - ``dtype`` (exclusive): the dtype of ``dy``, which ``dx`` shares.
-- ``rank`` (exclusive): 2 or 3 spatial dims.
+- ``spatial`` (exclusive): 2 or 3 spatial dims.
 - ``layout`` (exclusive, when the strides tell): ``nchw`` or ``nhwc``, read
   from ``dy``, ``dx`` and the index.
 - ``padding:symmetric``, ``padding:asymmetric``: non-zero padding, with
@@ -45,7 +45,7 @@ from support_features.resample_fwd import (
     PADDING_MODE,
     POST,
     PRE,
-    RANKS,
+    SPATIAL,
     STRIDE,
     WINDOW,
 )
@@ -59,7 +59,7 @@ DY, DX = "dy_tensor_uid", "dx_tensor_uid"
 FEATURES = (
     *(Feature(f"mode:{mode}", (MODE,)) for mode in resample_fwd.MODES),
     *(Feature(f"dtype:{dtype}", (DY,)) for dtype in layernorm.DTYPES),
-    *(Feature(rank, (DY, DX)) for rank in RANKS.values()),
+    *(Feature(spatial, (DY, DX)) for spatial in SPATIAL.values()),
     Feature("layout:nchw", (DY, DX, INDEX), "channels first"),
     Feature("layout:nhwc", (DY, DX, INDEX), "channels last"),
     Feature("padding:symmetric", (PRE, POST), "non-zero, pre = post"),
@@ -103,7 +103,7 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     return {
         f"mode:{mode}",
         f"dtype:{dtype}",
-        RANKS[spatial + 2],
+        SPATIAL[spatial + 2],
         *resample_fwd.layout_features(layout_tensors),
         *resample_fwd.geometry_features(node),
     }
