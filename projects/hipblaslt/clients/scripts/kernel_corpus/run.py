@@ -322,6 +322,7 @@ class Shard:
         self.log_path = self.dir / "hipblaslt-test.log"
         self.records: dict[int, dict] = {}
         self.base: dict = {}
+        self.canary_output = ""
 
     def done_case_ids(self) -> set[str]:
         """Cases with a final result. A harness error is retried on the next run, and a
@@ -390,16 +391,19 @@ class Shard:
                         str(path),
                         f"--gtest_filter={plan.gtest_filter()}",
                     ],
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True,
+                    errors="replace",
                     timeout=300,
                     cwd=self.dir,
                     env=self.tool.env(),
                 ).stdout
+                self.canary_output = out
                 if re.search(r"\[  PASSED  \] 1 test", out):
                     return True
             except subprocess.TimeoutExpired:
-                pass
+                self.canary_output = "[runner] the one-GEMM check timed out after 300 s"
             time.sleep(30)
         return False
 
@@ -442,10 +446,14 @@ class Shard:
                             flush=True,
                         )
                 if ending in ("crash", "timeout", "fault") and not self.healthy():
+                    # Usually the GPU, but a hipblaslt-test that cannot run any case at all
+                    # (mismatched test-data files, say) fails the check the same way.
                     print(
-                        "error: the GPU no longer runs a basic GEMM; stopping this shard",
+                        "error: hipblaslt-test no longer runs a basic GEMM; stopping this shard. "
+                        "Its output:",
                         file=sys.stderr,
                     )
+                    print(self.canary_output[-3000:], file=sys.stderr)
                     return EXIT_GPU_UNHEALTHY
                 if not rows:
                     stalls += 1
