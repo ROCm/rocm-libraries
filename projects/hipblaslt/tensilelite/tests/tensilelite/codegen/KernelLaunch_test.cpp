@@ -5,6 +5,7 @@
 #include <tensilelite/codegen/Kernel.hpp>
 
 #include "ExpectLines.hpp"
+#include "HipTestSupport.hpp"
 
 #include "container.hpp"
 #include "instruction/common.hpp"
@@ -18,30 +19,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <type_traits>
 #include <vector>
-
-#define ASSERT_HIP_SUCCESS(expr)                                               \
-  do {                                                                         \
-    hipError_t status = (expr);                                                \
-    ASSERT_EQ(status, hipSuccess)                                              \
-        << #expr << ": " << hipGetErrorString(status);                         \
-  } while (0)
 
 namespace {
 
 using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
-using rocm::tensilelite::codegen::test::expectLinesInOrder;
-
-// Deleters cannot assert, so they ignore errors.
-struct ModuleUnload {
-  void operator()(hipModule_t module) const { (void)hipModuleUnload(module); }
-};
-
-struct DeviceFree {
-  void operator()(void *ptr) const { (void)hipFree(ptr); }
-};
+using namespace rocm::tensilelite::codegen::test;
 
 TEST(KernelLaunch, EmptyKernelAssemblesLoadsAndLaunches) {
   Target target = Target::get("gfx950");
@@ -54,14 +38,12 @@ TEST(KernelLaunch, EmptyKernelAssemblesLoadsAndLaunches) {
       assembleToHSACO(kernel.toAssembly(), kernel.target().isaName());
   EXPECT_FALSE(hsaco.empty());
 
-  int deviceCount = 0;
-  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+  if (!hasHipDevice())
     GTEST_SKIP() << "no HIP device";
 
   hipModule_t rawModule = nullptr;
   ASSERT_HIP_SUCCESS(hipModuleLoadData(&rawModule, hsaco.data()));
-  std::unique_ptr<std::remove_pointer_t<hipModule_t>, ModuleUnload> module(
-      rawModule);
+  ModulePtr module(rawModule);
   hipFunction_t function = nullptr;
   ASSERT_HIP_SUCCESS(
       hipModuleGetFunction(&function, rawModule, "codegen_empty_kernel"));
@@ -139,8 +121,7 @@ void runAgprRoundTrip(const std::vector<uint8_t> &hsaco,
                       std::vector<int32_t> &out) {
   hipModule_t rawModule = nullptr;
   ASSERT_HIP_SUCCESS(hipModuleLoadData(&rawModule, hsaco.data()));
-  std::unique_ptr<std::remove_pointer_t<hipModule_t>, ModuleUnload> module(
-      rawModule);
+  ModulePtr module(rawModule);
   hipFunction_t function = nullptr;
   ASSERT_HIP_SUCCESS(hipModuleGetFunction(&function, rawModule, roundTripName));
 
@@ -180,8 +161,7 @@ TEST(KernelLaunch, AgprRoundTripOnDevice) {
   std::vector<uint8_t> hsaco =
       assembleToHSACO(assembly, kernel.target().isaName());
   ASSERT_FALSE(hsaco.empty());
-  int deviceCount = 0;
-  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+  if (!hasHipDevice())
     GTEST_SKIP() << "no HIP device";
 
   std::vector<int32_t> in(roundTripElements);

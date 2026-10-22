@@ -15,6 +15,7 @@ if(TENSILELITE_ENABLE_JIT)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/KernelLaunch_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Saxpy_test.cpp"
     )
 endif()
 
