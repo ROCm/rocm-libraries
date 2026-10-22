@@ -239,6 +239,36 @@ def _find_llvm_tool(name):
     return None
 
 
+def _lists_amdgpu_backend(version_text):
+    """Whether ``llc --version`` output lists the AMDGPU backend (``amdgcn``)."""
+    return re.search(r"^\s*amdgcn\b", version_text, re.MULTILINE) is not None
+
+
+def _find_amdgpu_llc():
+    """An llc built with the AMDGPU backend, or None.
+
+    The installed test suite runs against whatever llc it finds, which may be
+    built without AMDGPU. The compiler-backed checks skip there instead of
+    failing on a compiler that cannot target the GPU at all.
+    """
+    llc = _find_llvm_tool("llc")
+    if llc is None:
+        return None
+    try:
+        out = subprocess.run(
+            [llc, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not _lists_amdgpu_backend(out.stdout):
+        return None
+    return llc
+
+
 def _vgpr_kernel_ir(vgprs, wave_size=32, agprs=0):
     """An AMDGPU kernel that uses exactly ``vgprs`` VGPRs and ``agprs`` AGPRs
     (it clobbers the top register of each).
@@ -258,18 +288,33 @@ def _vgpr_kernel_ir(vgprs, wave_size=32, agprs=0):
     )
 
 
+def _llc_output(result):
+    """The output of a finished llc run; None when llc did not know the processor.
+
+    That diagnostic is checked before the exit status, since an llc that predates
+    a processor may also exit non-zero. Any other failure is a test failure.
+    """
+    if b"not a recognized processor" in result.stderr:
+        return None
+    if result.returncode != 0:
+        raise AssertionError(
+            f"llc failed with exit status {result.returncode}: "
+            f"{result.stderr.decode(errors='replace').strip()}"
+        )
+    return result.stdout
+
+
 def _run_llc(llc, processor, ir, *extra_args):
     """Run llc on ``ir``; None when this llc does not know ``processor``."""
-    out = subprocess.run(
-        [llc, "-mtriple=amdgcn-amd-amdhsa", f"-mcpu={processor}", *extra_args],
-        input=ir.encode(),
-        capture_output=True,
-        timeout=120,
-        check=True,
+    return _llc_output(
+        subprocess.run(
+            [llc, "-mtriple=amdgcn-amd-amdhsa", f"-mcpu={processor}", *extra_args],
+            input=ir.encode(),
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
     )
-    if b"not a recognized processor" in out.stderr:
-        return None
-    return out.stdout
 
 
 def _llc_occupancy(llc, processor, vgprs, agprs=0):
@@ -350,9 +395,9 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
         self.assertEqual(rdna, set(_MEASURED_RDNA_WAVES))
 
     def test_model_matches_the_local_compiler(self):
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None:
-            self.skipTest("llc not found")
+            self.skipTest("no llc with the AMDGPU backend found")
         checked = 0
         for processor in _MEASURED_RDNA_WAVES:
             for vgprs in _VGPR_SWEEP:
@@ -369,9 +414,9 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
     def test_code_object_target_selects_the_processor(self):
         # Real code objects: the notes name the processor (a generic target too),
         # and that processor's register file sets the estimate.
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         for processor in ("gfx1100", "gfx1102", "gfx11-generic", "gfx12-generic"):
             with self.subTest(processor=processor):
                 code_object = _llc_code_object(llc, processor, 128)
@@ -439,9 +484,9 @@ class TestCdnaVgprFile(unittest.TestCase):
     def test_code_objects_match_the_local_compiler(self):
         # Real code objects, with and without AGPRs: the estimate read from the
         # notes equals the wave count llc reports for the same kernel.
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         for processor in _MEASURED_CDNA_PROCESSORS:
             for vgprs, agprs in _CDNA_REGISTER_USES:
                 with self.subTest(processor=processor, vgprs=vgprs, agprs=agprs):
@@ -457,9 +502,9 @@ class TestCdnaVgprFile(unittest.TestCase):
 
     def test_multi_limiter_model_uses_the_same_allocation_step(self):
         # A 72-VGPR kernel with no LDS: the register limiter binds at 7 waves.
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         for processor in _MEASURED_CDNA_PROCESSORS:
             with self.subTest(processor=processor):
                 code_object = _llc_code_object(llc, processor, 72, wave_size=64)
@@ -482,15 +527,52 @@ class TestUnmodelledCodeIsRefused(unittest.TestCase):
             occupancy._occupancy_estimate(64, "gfx1100", 64)
 
     def test_real_code_objects(self):
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         unknown = _llc_code_object(llc, "gfx1030", 64)
         with self.assertRaisesRegex(ValueError, "processor 'gfx1030'"):
             occupancy.resources(unknown, "gfx1100")
         wave64 = _llc_code_object(llc, "gfx1100", 64, wave_size=64)
         with self.assertRaisesRegex(ValueError, "wave64 code on gfx1100"):
             occupancy.resources(wave64, "gfx1100")
+
+
+class TestCompilerAvailability(unittest.TestCase):
+    """The compiler-backed checks skip when llc cannot target the GPU, and fail
+    on any other compiler error."""
+
+    def test_amdgpu_backend_is_read_from_the_version_text(self):
+        with_amdgpu = (
+            "LLVM version 20.0.0git\n  Registered Targets:\n"
+            "    amdgcn - AMD GCN GPUs\n    x86-64 - 64-bit X86: EM64T and AMD64\n"
+        )
+        without_amdgpu = (
+            "LLVM version 20.0.0git\n  Registered Targets:\n"
+            "    x86-64 - 64-bit X86: EM64T and AMD64\n"
+        )
+        self.assertTrue(_lists_amdgpu_backend(with_amdgpu))
+        self.assertFalse(_lists_amdgpu_backend(without_amdgpu))
+
+    def test_unknown_processor_is_not_an_error_even_on_a_failed_run(self):
+        result = SimpleNamespace(
+            returncode=1,
+            stdout=b"",
+            stderr=b"'gfx1154' is not a recognized processor for this target "
+            b"(ignoring processor)\n",
+        )
+        self.assertIsNone(_llc_output(result))
+
+    def test_other_compiler_errors_fail(self):
+        result = SimpleNamespace(
+            returncode=1, stdout=b"", stderr=b"error: invalid register name\n"
+        )
+        with self.assertRaisesRegex(AssertionError, "invalid register name"):
+            _llc_output(result)
+
+    def test_successful_run_returns_the_output(self):
+        result = SimpleNamespace(returncode=0, stdout=b"asm", stderr=b"")
+        self.assertEqual(_llc_output(result), b"asm")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,11 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 from rocke.benchmark.perf import schema
-from rocke.benchmark.perf.tests.test_occupancy import _find_llvm_tool, _llc_code_object
+from rocke.benchmark.perf.tests.test_occupancy import (
+    _find_amdgpu_llc,
+    _find_llvm_tool,
+    _llc_code_object,
+)
 from rocke.benchmark.perf.tool import cli, store
 import rocke.benchmark.perf.tool.cli as cli_mod
 
@@ -204,9 +208,9 @@ class TestOccupancyCmd(unittest.TestCase):
         # A real gfx942 code object, with --arch given as a full ISA name in both
         # spellings compilers write: the command reads the processor from it and
         # warns about nothing.
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         with tempfile.NamedTemporaryFile(suffix=".o") as f:
             f.write(_llc_code_object(llc, "gfx942", 64, wave_size=64))
             f.flush()
@@ -249,9 +253,9 @@ class TestOccupancyCmd(unittest.TestCase):
     def test_occupancy_refuses_an_unmodelled_processor(self):
         # A real code object for a processor the occupancy model has no data for:
         # the command stops with the model's reason instead of a traceback.
-        llc = _find_llvm_tool("llc")
+        llc = _find_amdgpu_llc()
         if llc is None or _find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+            self.skipTest("no llc with the AMDGPU backend, or no llvm-readelf, found")
         with tempfile.NamedTemporaryFile(suffix=".o") as f:
             f.write(_llc_code_object(llc, "gfx1030", 64))
             f.flush()
