@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.ValidParameters import (
     checkParametersAreValid,
     validParameters,
     validateInternalSupportParams,
 )
-from Tensile.SolutionStructs.Problem import validateProblemTypeParameterTypes
-from Tensile.SolutionStructs.Solution import validateParameterTypes
+from tensilelite.SolutionStructs.Problem import validateProblemTypeParameterTypes
+from tensilelite.SolutionStructs.Solution import validateParameterTypes
 
 pytestmark = pytest.mark.unit
 
