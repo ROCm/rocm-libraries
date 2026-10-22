@@ -76,7 +76,7 @@ jobs:
         uses: ./.github/actions/ci-env
 
   rocjitsu-race-check-linux:
-    name: rocjitsu ${{ inputs.random_gemm_count > 0 && 'random GEMMs' || 'race check' }} (${{ inputs.amdgpu_families || 'gfx950-dcgpu' }})
+    name: rocjitsu ${{ inputs.random_gemm_count > 0 && 'GEMM race checks' || 'race check' }} (${{ inputs.amdgpu_families || 'gfx950-dcgpu' }})
     needs: ci-env
     # This job is advisory. Failures remain visible, but continue-on-error keeps
     # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
@@ -204,7 +204,7 @@ jobs:
         run: |
           if [ -f race-reports/random-gemms/summary.json ]; then
             {
-              echo '### Random GEMMs (gfx950)'
+              echo '### GEMM race and numerical checks (gfx950)'
               echo '```json'
               cat race-reports/random-gemms/summary.json
               echo '```'

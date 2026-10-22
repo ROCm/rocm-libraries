@@ -9,15 +9,15 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
-# TODO(newling) expand the GEMM-space tested.
+# RANDOM_GEMM_COUNT selects sampled gfx950 hipBLASLt GEMMs. Zero selects the
+# hipBLASLt and TensileLite smoke workloads.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
 #   3. Select a rocjitsu config for gfx942 or gfx950.
-#   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
-#      logging plugins enabled in per-workload configs.
+#   4. Run the selected GEMM workloads with the race and logging plugins enabled
+#      in per-workload configs.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
