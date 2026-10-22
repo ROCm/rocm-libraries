@@ -283,6 +283,16 @@ for each thread's coalesced output chunk:
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
 
+### Split-K Forward (gfx1250)
+
+`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA only; `mem` or `wavelet` pipeline, 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
+
+- The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
+- The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
+- Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
+
+It is in the AOT kernel cache (`kernels/conv/aot_jobs.py`) and in `benchmark_implicit_gemm_conv --run-from-cache`; the dispatcher does not select it. `split_k = 1` emits exactly the plain kernel.
+
 ### Step-By-Step Trace (one workgroup)
 
 ```text

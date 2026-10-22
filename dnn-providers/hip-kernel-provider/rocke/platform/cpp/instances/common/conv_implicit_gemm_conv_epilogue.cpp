@@ -103,6 +103,7 @@ typedef struct rocke_conv_d_addr_ctx
 {
     const rocke_tensor_descriptor_t* D_desc;
     rocke_value_t* k_out_group_base; /* NULL => groups==1 */
+    rocke_value_t* slab_base; /* split-K workspace slab base; NULL => store into D */
 } rocke_conv_d_addr_ctx_t;
 
 static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
@@ -128,6 +129,10 @@ static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
     values[1] = k_out;
 
     rocke_transforms_descriptor_offset(b, dctx->D_desc, names, values, 2, &off, &valid);
+    /* Split-K: the slab is a packed N[D]HWK tensor like D; only its base is
+     * added (Python wraps d_addr: b.add(_slab_base, off)). */
+    if(dctx->slab_base != NULL)
+        off = rocke_b_add(b, dctx->slab_base, off);
     if(out_valid != NULL)
         *out_valid = valid;
     return off;
@@ -215,6 +220,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
         dctx.k_out_group_base = k_out_group_base;
+        dctx.slab_base = NULL; /* split-K is WMMA-only */
         rocke_direct_epilogue_store(b,
                                     &epi,
                                     accs,
@@ -252,6 +258,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* ir_c_K_pw,
                                           const rocke_tensor_descriptor_t* D_desc,
                                           rocke_value_t* k_out_group_base,
+                                          rocke_value_t* slab_base,
                                           rocke_value_t* bound_m,
                                           rocke_value_t* bound_n)
 {
@@ -368,6 +375,9 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                     values[1] = k_out;
                     rocke_transforms_descriptor_offset(
                         b, D_desc, names, values, 2, &d_off_elems, &valid);
+                    /* Split-K: offset into this slice's workspace slab. */
+                    if(slab_base != NULL)
+                        d_off_elems = rocke_b_add(b, slab_base, d_off_elems);
                 }
                 d_off_bytes = rocke_b_mul(b, d_off_elems, rocke_b_const_i32(b, elem_bytes));
                 safe_off = rocke_b_select(
@@ -408,6 +418,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,
+                                       rocke_value_t* slab_base,
+                                       const char* out_dtype,
                                        rocke_value_t* bound_m,
                                        rocke_value_t* bound_n)
 {
@@ -442,6 +454,14 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         else
             max_store_vec = (kpg % 8 == 0) ? 8 : (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
     }
+    /* The stored element type: dtype_d, except the split-K binary, which
+     * stores fp32 partials. Python's CShuffleEpilogue.from_grid[_op] caps an
+     * fp32 store at 4 elements (16 bytes); the C helpers learn out_dtype only
+     * after construction, so the cap is applied here. A no-op for a dtype_d
+     * fp32 spec, whose store width already derives as <= 4. */
+    const char* store_dtype = (out_dtype != NULL) ? out_dtype : spec->dtype_d;
+    if(store_dtype != NULL && strcmp(store_dtype, "fp32") == 0 && max_store_vec > 4)
+        max_store_vec = 4;
     int _war_barriers = (spec->pipeline && strcmp(spec->pipeline, "wavelet") == 0) ? 2 : 1;
     rocke_cshuffle_epilogue_t epi;
     if(op != NULL && op->family != NULL && strcmp(op->family, "wmma") == 0)
@@ -454,7 +474,10 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
             = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
         epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     }
-    epi.out_dtype = spec->dtype_d;
+    /* out_dtype: the stored element type. dtype_d, except the split-K binary,
+     * which stores fp32 partials (the store width above still derives from
+     * dtype_d, as in Python). */
+    epi.out_dtype = store_dtype;
     epi.no_alias = spec->cshuffle_no_alias;
     epi.war_barriers = _war_barriers;
 
@@ -482,6 +505,7 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         rocke_conv_d_addr_ctx_t dctx;
         dctx.D_desc = D_desc;
         dctx.k_out_group_base = k_out_group_base;
+        dctx.slab_base = slab_base;
         rocke_cshuffle_epilogue_store(
             b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
     }
@@ -539,14 +563,21 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           ctx->op,
                                           ctx->D_desc,
                                           ctx->d_k_out_group_base,
+                                          ctx->fwd_split ? ctx->fwd_slab_base : NULL,
+                                          ctx->fwd_split ? "fp32" : NULL,
                                           ctx->p_M,
                                           ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)
     {
+        /* Split-K stores fp32 partials: Python hands this epilogue the spec
+         * with dtype_d replaced by fp32 (_epi_spec). */
+        rocke_implicit_gemm_conv_spec_t epi_spec = *spec;
+        if(ctx->fwd_split)
+            epi_spec.dtype_d = "fp32";
         rocke_conv_emit_direct_epilogue_wmma(b,
-                                             spec,
+                                             &epi_spec,
                                              ctx->op,
                                              final_accs,
                                              num_accs,
@@ -560,6 +591,7 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                              ctx->ir_c_K_pw,
                                              ctx->D_desc,
                                              ctx->d_k_out_group_base,
+                                             ctx->fwd_split ? ctx->fwd_slab_base : NULL,
                                              ctx->p_M,
                                              ctx->merged ? ctx->c_gm : ctx->p_kpg);
     }

@@ -554,7 +554,60 @@ def _spec_raw(idx: int):
             ),
             "gfx1250",
         )
+    if 36 <= idx <= 39:
+        return _split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# Split-K forward (split_k > 1) on gfx1250 WMMA. Keep in lockstep with
+# make_cfg_split_k() in conv_implicit_gemm_emit.c.
+#   36: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+#   37: mem/cshuffle, 64x64 tile, 2x2 warps
+#   38: mem/default (vector_size_c=1), 32x32x32 tile
+#   39: grouped (groups=2) wavelet/cshuffle
+_SMALL_M = dict(N=1, Hi=7, Wi=7, C=256, K=64, fy=3, fx=3, pH=1, pW=1)
+_CSH_64 = dict(N=2, Hi=12, Wi=12, C=128, K=96, fy=3, fx=3, pH=1, pW=1)
+_DEFAULT = dict(N=1, Hi=9, Wi=9, C=64, K=40, fy=3, fx=3, pH=1, pW=1)
+_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=64, fy=3, fx=3, pH=1, pW=1, groups=2)
+
+
+def _split_k_spec(idx: int):
+    base = dict(
+        tile_m=16,
+        tile_n=16,
+        tile_k=64,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=32,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="wavelet",
+        epilogue="cshuffle",
+        num_load_waves=1,
+        split_k=2,
+    )
+    tile_64 = dict(tile_m=64, tile_n=64, warp_m=2, warp_n=2)
+    tile_def = dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=1,
+        epilogue="default",
+        vector_size_c=1,
+    )
+    prob, kw = {
+        36: (_SMALL_M, {}),
+        37: (_CSH_64, dict(tile_64, pipeline="mem")),
+        38: (_DEFAULT, dict(tile_def, pipeline="mem")),
+        39: (_GROUPED, {}),
+    }[idx]
+    cfg = dict(base, **kw)
+    return ImplicitGemmConvSpec(problem=_cp(**prob), **cfg), "gfx1250"
 
 
 def main() -> int:

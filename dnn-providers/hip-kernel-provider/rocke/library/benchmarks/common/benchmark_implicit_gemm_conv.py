@@ -108,6 +108,14 @@ _SPLIT_K_BUILD = 2
 # conv split-K resolver reads no environment; this benchmark maps the variable
 # onto its explicit ``override`` argument.
 _ENV_CONV_SPLIT_K = "ROCKE_CONV_SPLIT_K"
+# Degrees a cached split-K forward binary is timed at (the degree is a kernarg).
+# Forward split-K serves small-M layers, whose reduction is a few thousand deep:
+# past 32 the slices are a tile or two and the fp32 slabs dominate.
+_FWD_SPLIT_K_AUTO = (32, 16, 8, 4, 2)
+# A forward split only pays while the unsplit grid underfills the device: a
+# degree whose grid would exceed this many workgroups is not offered (it also
+# keeps large layers from timing hundreds of split candidates that cannot win).
+_FWD_SPLIT_K_MAX_CTAS = 16384
 
 
 def _conv_split_k_override() -> int | None:
@@ -4786,7 +4794,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # A split-K wgrad binary is one kernel for every degree > 1
                 # (the degree is a kernarg), so --split-k decides whether it
                 # is timed at one degree or at each degree it can use.
-                if direction == "wgrad" and ident.split_k > 1:
+                if direction in ("wgrad", "fwd") and ident.split_k > 1:
                     degrees = _runtime_split_ks(
                         problem, ident, args.split_k, args.split_k_degrees
                     )
@@ -4795,7 +4803,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             f"  [skip] {ident.label()}: "
                             + (
                                 "no split-K degree > 1 fits this problem"
+                                + (
+                                    " (K tiles, i32 workspace, workgroup cap)"
+                                    if direction == "fwd"
+                                    else ""
+                                )
+                                # fwd has no degree formula: -1 sweeps too.
                                 if args.split_k == 0
+                                or (direction == "fwd" and args.split_k == -1)
                                 else f"--split-k {args.split_k} does not fit "
                                 f"this problem (degree 1 is a separate "
                                 f"non-split-K binary)"
@@ -5103,7 +5118,7 @@ def _signature_for_identity(ident, dtype):
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
-    return conv_args_signature(dtype, is_3d=ident.is_3d)
+    return conv_args_signature(dtype, is_3d=ident.is_3d, two_stage=ident.two_stage)
 
 
 def _ws_replicas_of(ident) -> int:
@@ -5349,6 +5364,7 @@ def _split_k_degrees(
     degrees: tuple = _SPLIT_K_AUTO,
     ws_replicas: int = 0,
     include_resolved: bool = True,
+    direction: str = "wgrad",
 ) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with, largest first.
 
@@ -5365,21 +5381,26 @@ def _split_k_degrees(
     are a property of the problem, not of how the degree was chosen -- so a
     pinned degree the shape cannot take drops out here rather than failing at
     launch.
+
+    ``direction="fwd"`` serves the split-K forward binary: there is no
+    resolver degree, and a degree is also dropped when its grid exceeds
+    ``_FWD_SPLIT_K_MAX_CTAS`` workgroups or its fp32 workspace passes the i32
+    byte range.
     """
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_split_k import resolve_conv_split_k
 
-    wg_k = ConvArgs.from_problem(
+    args_ = ConvArgs.from_problem(
         problem,
-        direction="wgrad",
+        direction=direction,
         tile_m=tile_m,
         tile_n=tile_n,
         tile_k=tile_k,
-    ).gemm_k
-    k_tiles = -(-wg_k // tile_k)
+    )
+    k_tiles = -(-args_.gemm_k // tile_k)
     grid_groups = max(1, problem.groups // max(1, group_merge))
     candidates = set(degrees)
-    if include_resolved:
+    if include_resolved and direction == "wgrad":
         try:
             candidates.add(
                 resolve_conv_split_k(
@@ -5400,10 +5421,24 @@ def _split_k_degrees(
             )
         except ValueError:
             pass  # this binary's reduction cannot serve the problem; nothing to add
+
+    def _fits(sk: int) -> bool:
+        if direction != "fwd":
+            return True
+        if args_.num_pid_m * args_.num_pid_n * grid_groups * sk > _FWD_SPLIT_K_MAX_CTAS:
+            return False
+        # The forward workspace is sk fp32 slabs of the output; it is
+        # addressed through an i32 byte count like every operand.
+        from kernels.common.conv_fwd_split_k_reduce import (
+            fwd_split_k_workspace_nbytes,
+        )
+
+        return fwd_split_k_workspace_nbytes(args_.gemm_m, problem.K, sk) <= _INT32_MAX
+
     return tuple(
         sk
         for sk in sorted(candidates, reverse=True)
-        if 1 < sk <= k_tiles and grid_groups * sk <= _MAX_GRID_DIM_Z
+        if 1 < sk <= k_tiles and grid_groups * sk <= _MAX_GRID_DIM_Z and _fits(sk)
     )
 
 
@@ -5423,6 +5458,23 @@ def _runtime_split_ks(
     different binary, so ``--split-k 1`` yields no degree and the caller skips
     the entry rather than silently timing it at some other degree.
     """
+    if ident.direction == "fwd":
+        # No resolver for the forward split: -1 sweeps the forward ladder like
+        # 0, a positive value pins the degree.
+        return _split_k_degrees(
+            problem,
+            arch=ident.arch,
+            dtype=ident.dtype_d,
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+            group_merge=1,
+            two_stage=True,
+            degrees=_FWD_SPLIT_K_AUTO if requested in (0, -1) else (requested,),
+            include_resolved=False,
+            direction="fwd",
+        )
     if requested == 0:
         swept, include_resolved = degrees, True
     elif requested == -1:
@@ -5621,10 +5673,83 @@ def _cached_bind(
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
+    if direction == "fwd" and ident.two_stage:
+        # Split-K forward: Stage 1 stores every slab element (no clearing),
+        # then Stage 2 folds the slabs and casts into D. Both are its cost.
+        s2_launcher, s2_values, s2_cfg = _fwd_stage2(
+            problem,
+            case_dtype,
+            arch,
+            stage2_kernels,
+            KernelLauncher,
+            extras,
+            d_ptr=ptrs[2],
+            d_bytes=sizes[2],
+        )
+
+        def run(
+            values=values,
+            cfg=cfg,
+            s2_launcher=s2_launcher,
+            s2_values=s2_values,
+            s2_cfg=s2_cfg,
+        ):
+            launcher(values, config=cfg)
+            s2_launcher(s2_values, config=s2_cfg)
+
     label = ident.label()
     if split_k is not None:
         label += f" @split_k={split_k}"
     return run, label
+
+
+def _fwd_stage2(
+    problem, dtype_d, arch, compiled, KernelLauncher, extras, *, d_ptr, d_bytes
+):
+    """``(launcher, values, config)`` of the split-K forward Stage 2 fold.
+
+    The fold is shape-generic (the element count is a kernarg) and specialised
+    for the degree, which unrolls its slab loop so every load issues at once --
+    a runtime loop over the slabs costs ~2.5x on the small layers split-K
+    serves. It is compiled once per (dtype, vector width, degree) in a run,
+    like wgrad's Stage 2.
+    """
+    from rocke import compile_kernel
+    from rocke.runtime.launcher import LaunchConfig
+    from kernels.common.conv_fwd_split_k_reduce import (
+        FwdSplitKReduceSpec,
+        build_conv_fwd_split_k_reduce,
+        fwd_split_k_reduce_grid,
+        fwd_split_k_reduce_signature,
+        fwd_split_k_reduce_vec,
+    )
+
+    elems = extras["elems"]
+    spec = FwdSplitKReduceSpec(
+        dtype_d=dtype_d, vec=fwd_split_k_reduce_vec(elems), degree=extras["split_k"]
+    )
+    key = ("fwd_split_k", dtype_d, spec.vec, spec.degree)
+    if key not in compiled:
+        art = compile_kernel(build_conv_fwd_split_k_reduce(spec, arch=arch), arch=arch)
+        compiled[key] = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=fwd_split_k_reduce_signature(spec),
+        )
+    values = {
+        "ws_ptr": extras["ws_ptr"],
+        "d_ptr": d_ptr,
+        "elems": elems,
+        "ws_bytes": extras["ws_bytes"],
+        "d_bytes": d_bytes,
+        "ks_count": extras["split_k"],
+    }
+    cfg = LaunchConfig(
+        grid=fwd_split_k_reduce_grid(spec, elems),
+        block=(spec.block_size, 1, 1),
+        stream=0,
+    )
+    return compiled[key], values, cfg
 
 
 def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
@@ -5694,6 +5819,31 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             extras["ws_bytes"] = ws_bytes
         return extras, _grid_for(direction, problem, ident, split_k)
 
+    if ident.two_stage:
+        # Split-K forward: one fp32 slab of the output per K slice. Every slab
+        # element is stored by Stage 1, so it is not cleared.
+        from kernels.common.conv_fwd_split_k_reduce import (
+            fwd_split_k_workspace_nbytes,
+        )
+
+        if split_k is None or split_k < 1:
+            raise ValueError(f"split-K forward launched without a degree ({split_k})")
+        elems = (
+            ConvArgs.from_problem(
+                problem, tile_m=ident.tile_m, tile_n=ident.tile_n
+            ).gemm_m
+            * problem.K
+        )
+        ws_bytes = fwd_split_k_workspace_nbytes(elems, 1, split_k)
+        if ws_bytes > _INT32_MAX:
+            raise ValueError(f"split-K workspace of {ws_bytes} bytes exceeds i32")
+        extras["split_k"] = split_k
+        extras["elems"] = elems
+        extras["tile_k"] = ident.tile_k
+        extras["ws_ptr"] = rt.alloc(ws_bytes)
+        extras["ws_bytes"] = ws_bytes
+        return extras, _grid_for(direction, problem, ident, split_k)
+
     return extras, _grid_for(direction, problem, ident)
 
 
@@ -5715,6 +5865,9 @@ def _grid_for(direction, problem, ident, split_k=None):
             problem, direction="dgrad", tile_m=tm, tile_n=tn
         ).grid()
     gx, gy, gz = ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
+    if getattr(ident, "two_stage", False):
+        # Split-K forward: the group and the K slice share z.
+        return gx, gy, gz * (split_k or 1)
     # A group-merged fwd kernel runs one workgroup per Gm groups. Its merged
     # GEMM-N (Gm) fits one tile, as the true one (kpg = 1) does, so gx agrees.
     return gx, gy, gz // max(1, ident.group_merge)
