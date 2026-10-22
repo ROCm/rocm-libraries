@@ -206,6 +206,13 @@ CASES = {
         layout="paged", ps=32, lens_q=(4, 40), gaps=(2, 0), lens_k=(70, 200),
         Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="sut",
     ),
+    # A stale seqused_k past seqlen_k (the longest sequence's keys) is clamped
+    # to seqlen_k: unclamped, the lookup would walk into the poisoned row padding
+    # and the next sequence's block_table row.
+    "paged16_seqused_k_past_seqlen_k": dict(
+        layout="paged", ps=16, lens_q=(9, 4), lens_k=(150, 60), kover=(100, 0),
+        dq=128, mask="causal", br=1, wr=0,
+    ),
     # A -inf bias / QQ-bias over a row's first whole key tile: the running max
     # stays -inf through an unmasked tile, which must not produce -inf - -inf.
     # bf16 finfo.min (the torch padding-mask idiom) overflows to -inf in log2.
@@ -320,7 +327,7 @@ def test_prefill_feature_matches_reference(case, dtype):
     opt = dict(
         layout="dense", Hq=4, Hkv=2, Hv=None, dv=None, mask="none", br=0, wl=-1,
         wr=-1, flags="", cap=None, scale=None, ps=0, bias=None, qq=None, bn=32,
-        unsplit=False, ninf=None, gaps=None,
+        unsplit=False, ninf=None, gaps=None, kover=None,
     )  # fmt: skip
     opt.update(CASES[case])
     if opt["unsplit"] and _ARCH != "gfx12-generic":
@@ -520,7 +527,10 @@ def test_prefill_feature_matches_reference(case, dtype):
                 nan = 0x7F if fp8 else np.nan  # NaN-poison every unused slot
                 k_all = np.full((n_pages, ps, Hk, dq), nan, kv_np)
                 v_all = np.full((n_pages, ps, Hv, dv), nan, kv_np)
-                table = np.zeros((B, max_pages + 2), np.int32)  # padded rows
+                # Padded rows; the padding is never read, so poison it with ids
+                # outside [0, num_blocks).
+                table = np.zeros((B, max_pages + 2), np.int32)
+                table[:, max_pages:] = (-1, n_pages + 5)
                 table_v = table.copy()
                 nxt = 0
                 for bi, n in enumerate(lens_k):
@@ -532,7 +542,10 @@ def test_prefill_feature_matches_reference(case, dtype):
                         t0, t1 = pg * ps, min(n, (pg + 1) * ps)
                         k_all[phys, : t1 - t0] = ks_dev[bi][t0:t1]
                         v_all[phys_v, : t1 - t0] = vs_dev[bi][t0:t1]
-                values["seqused_k"] = dev.put(np.array(lens_k, np.int32))
+                used_k = np.array(lens_k, np.int32) + np.array(
+                    opt["kover"] or (0,) * B, np.int32
+                )
+                values["seqused_k"] = dev.put(used_k)
                 values["block_table"] = dev.put(table)
                 # Without "t" one table maps both caches: pass it twice.
                 values["block_table_v"] = (

@@ -965,7 +965,13 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             Sk_b = e.sub(l, k_start);
         }
         else
-            Sk_b = rocke_b_global_load_i32(b, P("seqused_k"), batch, 4);
+        {
+            /* seqlen_k bounds the keys a block_table row maps (the binding
+             * checks it against the table width * page); a longer seqused_k is
+             * clamped so the page lookup stays within this sequence's row. */
+            Val used = rocke_b_global_load_i32(b, P("seqused_k"), batch, 4);
+            Sk_b = rocke_b_smin(b, used, Sk);
+        }
         rows_b = e.mul(g, Sq_b);
         Sq_d = rocke_b_smax(b, Sq_b, c1);
     }

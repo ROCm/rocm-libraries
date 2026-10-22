@@ -690,7 +690,10 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
                 b.global_load_i32(p["cu_seqlens_k"], b.add(batch, c1)), k_start
             )
         else:
-            Sk_b = b.global_load_i32(p["seqused_k"], batch)
+            # seqlen_k bounds the keys a block_table row maps (the binding
+            # checks it against the table width * page); a longer seqused_k is
+            # clamped so the page lookup stays within this sequence's row.
+            Sk_b = b.smin(b.global_load_i32(p["seqused_k"], batch), Sk)
         rows_b = b.mul(g, Sq_b)
         Sq_d = b.smax(
             Sq_b, c1
