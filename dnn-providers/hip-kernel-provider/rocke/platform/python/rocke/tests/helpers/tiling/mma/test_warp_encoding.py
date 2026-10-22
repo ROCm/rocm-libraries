@@ -132,3 +132,27 @@ def test_multi_block_instruction_is_a_named_encoder_boundary(encoding_fn) -> Non
         "-- TODO: not implemented yet"
     )
     assert reason in str(excinfo.value)
+
+
+def test_a_operand_with_two_m_register_blocks_is_two_stacked_row_blocks() -> None:
+    # wmma_f32_32x16x128_f4 holds A's 32 rows as two blocks of 16: the lanes span 16 rows and the
+    # second block sits in the atom's most significant registers. That is exactly a 16-row A
+    # operand stacked twice along M.
+    traits = _traits("wmma_f32_32x16x128_f4")
+    assert traits.layout_params.a_m_register_blocks == 2
+    one_block = dataclasses.replace(
+        traits,
+        m=16,
+        layout_params=dataclasses.replace(traits.layout_params, a_m_register_blocks=1),
+    )
+    assert a_warp_encoding(traits) == a_warp_encoding(one_block, m_iter=2)
+
+
+def test_one_m_register_block_adds_no_encoding_level() -> None:
+    # Every other row has one M block of A per lane, and its A encoding is the CK encoding: the
+    # lanes span all M rows, with no extra register level.
+    for traits in load_mma_traits().by_op_id.values():
+        if traits.b == 1 and traits.layout_params.a_m_register_blocks == 1:
+            assert a_warp_encoding(traits).hierarchical_lengths[0] == (
+                traits.m,
+            ), traits.op_id

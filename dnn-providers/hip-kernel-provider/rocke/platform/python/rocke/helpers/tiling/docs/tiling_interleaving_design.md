@@ -66,8 +66,9 @@ against the interleave reference tables (MFMA/WMMA, CDNA + RDNA).
 **Scope.** One recipe (§6, §8, §9) builds the intra-lane `reorder` tier **cross-lane-free**, by adjusting
 the **static distribution** read from the target's traits. It covers **every dense square atom** — any
 AMDGPU arch (CDNA, and RDNA/gfx11 via operand **replication**, §9), any dtype **including f64** — with no
-special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) over-subscribes the wave on
-one operand and does **not** interleave under this construction; it is deferred (task #21). Which rows
+special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) holds two M blocks of A per
+lane in its registers, which this construction does not model, so it does **not** interleave (`InterleavedStyle`
+refuses it by name); it is deferred (task #21). Which rows
 interleave is enumerated and locked by the proof sweep `test_interleave_all_dense.py` — read the census
 there, never copy a count into prose. What varies per instance is **validation depth**: the construction is
 proven cross-lane-free across the whole square catalogue (incl. f64) by that CPU sweep; GPU **bit-exact**

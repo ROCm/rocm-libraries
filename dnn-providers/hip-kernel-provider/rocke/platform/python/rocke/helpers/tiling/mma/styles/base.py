@@ -51,7 +51,20 @@ class AtomNumbers:
 
     @classmethod
     def from_traits(cls, traits: MmaTraits) -> "AtomNumbers":
+        """Derive the atom quantities from ``traits``.
+
+        Raises ``NotImplementedError`` for an atom whose lane holds several M blocks of A in its
+        registers (``a_m_register_blocks > 1``): these numbers describe one block per lane, and the
+        interleaved construction (the style that reads them) does not model more.
+        """
         params = traits.layout_params
+        if params.a_m_register_blocks > 1:
+            raise NotImplementedError(
+                f"InterleavedStyle cannot lay out {traits.op_id!r}: each lane holds "
+                f"{params.a_m_register_blocks} M blocks of A in registers, which the "
+                f"interleaved construction does not model -- TODO: not implemented yet; "
+                f"use the canonical style"
+            )
         return cls(
             m=traits.m,
             n=traits.n,
