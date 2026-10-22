@@ -215,6 +215,39 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
             self.driver.resolve_configs(args), [str(self.driver.DEFAULT_CONFIG)]
         )
 
+    def test_reduction_override_preserves_limited_vector_fallback(self):
+        for reduction in (None, "atomic", "linear", "tree"):
+            with self.subTest(reduction=reduction):
+                argv = [
+                    "streamk_gemm_full_benchmark.py",
+                    "--arch",
+                    "gfx1250",
+                    "--max-kernels",
+                    "1",
+                ]
+                if reduction is not None:
+                    argv.extend(["--reduction-strategy", reduction])
+                with patch.object(sys, "argv", argv), patch.object(
+                    self.driver, "resolve_devices", return_value=["0"]
+                ), patch.object(
+                    self.driver,
+                    "load_problems",
+                    return_value=[{"M": 128, "N": 128, "K": 33}],
+                ), patch.object(
+                    self.driver,
+                    "setup_multiple_gemm_dispatchers",
+                    side_effect=lambda configs, **kwargs: [None] * len(configs),
+                ) as build, contextlib.redirect_stdout(
+                    io.StringIO()
+                ):
+                    self.assertEqual(self.driver.main(), 1)
+                configs = build.call_args.args[0]
+                self.assertEqual(sum(not any(c.vector_sizes) for c in configs), 1)
+                self.assertTrue(any(any(c.vector_sizes) for c in configs))
+                self.assertEqual(
+                    {c.reduction_strategy for c in configs}, {reduction or "atomic"}
+                )
+
     def test_ocp_reference_matches_device_input_quantization(self):
         try:
             import ml_dtypes
@@ -234,17 +267,15 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                     expected = a.astype(numpy_type).astype(np.float32) @ b
                     if corrupt:
                         expected = expected + 1
-                    runner = SimpleNamespace(
-                        kernel_name=f"gemm_{dtype}_rcr_streamk",
-                        run=lambda *args: SimpleNamespace(
-                            success=True, output=expected, time_ms=1, tflops=1
-                        ),
+                    runner = object.__new__(gemm_utils.GpuGemmRunner)
+                    runner._kernel_name = f"gemm_{dtype}_rcr_streamk"
+                    runner._use_ocp = True
+                    runner.run = lambda *args: SimpleNamespace(
+                        success=True, output=expected, time_ms=1, tflops=1
                     )
                     output = io.StringIO()
                     with patch.object(
                         self.worker, "GpuGemmRunner", return_value=runner
-                    ), patch.object(
-                        sys.modules["gemm_utils"], "_default_use_ocp", return_value=True
                     ), patch.object(
                         np.random, "randn", side_effect=[a / 0.1, b / 0.1]
                     ), contextlib.redirect_stdout(

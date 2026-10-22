@@ -10,7 +10,7 @@ from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
-from rocke.core.backend import resolve_backend
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
@@ -61,16 +61,22 @@ def _build_scaled_atom(*, scale16: bool):
 
 
 class TestGfx1250ScaledWmma(unittest.TestCase):
-    def test_backend_rejects_unsupported_scale_type_on_either_input(self):
+    def test_backend_selects_scale_type_independently_on_either_input(self):
         catalog = ArchTarget.from_gfx("gfx1250").mma
-        for field in ("a_scale_dtype", "b_scale_dtype"):
-            atom = replace(_scaled_atom(), **{field: "e4m3"})
-            with (
-                self.subTest(field=field),
-                mock.patch.object(catalog, "by_op_id", return_value=atom),
-                self.assertRaisesRegex(ValueError, "unsupported scaled WMMA"),
-            ):
-                gfx1250_scaled_wmma(atom.op_id)
+        for operand, field in enumerate(("a_scale_dtype", "b_scale_dtype")):
+            for selector, dtype in enumerate(("e8m0", "e5m3", "e4m3")):
+                matrix_field = ("a_dtype", "b_dtype")[operand]
+                atom = replace(
+                    _scaled_atom(), **{matrix_field: "fp4e2m1", field: dtype}
+                )
+                with (
+                    self.subTest(field=field, dtype=dtype),
+                    mock.patch.object(catalog, "by_op_id", return_value=atom),
+                ):
+                    spec = gfx1250_scaled_wmma(atom.op_id)
+                    expected = [0, 0]
+                    expected[operand] = selector
+                    self.assertEqual(spec.scale_formats, tuple(expected))
 
     def test_scale_fragment_counts_are_checked_for_each_source(self):
         catalog = ArchTarget.from_gfx("gfx1250").mma
@@ -233,7 +239,12 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 self.assertIn(f", {scale_ty} %", ll)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
-        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        # A native rejection is retried in Python unless strict C++ is requested.
+        error_type = (
+            RuntimeError
+            if resolve_backend() == "cpp" and _cpp_strict()
+            else NotImplementedError
+        )
         for flavor in ("llvm20", "llvm22"):
             with (
                 self.subTest(flavor=flavor),
@@ -343,14 +354,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             M=16,
             N=16,
             K=128,
-            dtype_b="bf8",
+            dtype_b="fp16",
             scale_dtype="e8m0",
             block_k=32,
             matrix_path="wmma_scale",
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("requested operand and scale contract", why)
+        self.assertIn("A/B must be", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",

@@ -19,8 +19,8 @@ retune either decode mode or the GDN prefill path.
 - [Files](#files)
 - [Environment](#environment)
 - [Check correctness](#check-correctness)
-- [Benchmark dispatched kernels](#benchmark-dispatched-kernels)
-- [Retune the tile table](#retune-the-tile-table)
+- [Benchmark registered candidates](#benchmark-registered-candidates)
+- [Measure candidate tiles](#measure-candidate-tiles)
 - [Run tests](#run-tests)
 - [Prefill](#prefill)
 - [Understand the output](#understand-the-output)
@@ -32,16 +32,23 @@ retune either decode mode or the GDN prefill path.
 | File | Purpose |
 |---|---|
 | [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent fp32 reference |
-| [`tune.py`](tune.py) | Search every legal tile for GDN or KDA; GDN reports by batch, KDA compares equal-work head geometries |
-| [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, scalar/vector gate delta, and GPU mapping |
-| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark GDN's dispatcher-selected kernel |
-| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the production dispatcher; optionally sweep all legal tiles |
-| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Store gfx950 capability plus separate GDN batch-keyed and KDA work-keyed tables |
+| [`tune.py`](tune.py) | Measure legal GDN registry candidates or KDA work-keyed candidates |
+| [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
+| [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, and the command that regenerates them |
+| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
+| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
+| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
+| [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
-| [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, pool-index range |
+| [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
+| [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, fp32 reference |
+| [`library/tests/test_gdn_decode_fused_gfx950_numeric.py`](../../../tests/test_gdn_decode_fused_gfx950_numeric.py) | On-device fused-mode output, state and conv-state correctness |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
-| [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness, tuned tiles, and dispatch-to-launch coverage |
-| [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds |
+| [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
+| [`library/tests/test_gdn_decode_knobs.py`](../../../tests/test_gdn_decode_knobs.py) | CPU contract of the performance knobs: validation, `*_applies` predicates, name injectivity, emitted effect |
+| [`library/tests/test_gdn_decode_knobs_gfx950_numeric.py`](../../../tests/test_gdn_decode_knobs_gfx950_numeric.py) | On-device correctness of every knob on every registered tile (and every `BPV=1` fused tile) it applies to at the default heads, at head dims 64 and 256, `out_lds` at `DV` 256 / 512, and with f16 I/O and an f16 state |
+| [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds (Python lowering) |
+| [`library/tests/test_gdn_decode_ir_cpp_parity.py`](../../../tests/test_gdn_decode_ir_cpp_parity.py) | The C++ engine lowers every golden case to byte-identical LLVM IR |
 | [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
 | [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
 | [`library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_prefill_wiring.py) | Prefill dispatch: candidate selection, the two-launch guard, launch geometry |
@@ -86,8 +93,10 @@ worst=<largest error> tol=1.0e-02
 
 The driver checks **two results**:
 
-- `out_err`: maximum absolute error in this token's output;
-- `state_err`: maximum absolute error in the updated recurrent state.
+- `out_err`: maximum absolute error in this token's output (for a
+  `fuse_out_norm` spec, relative to `max(1, |ref|)`; see below);
+- `state_err`: maximum absolute error in the updated recurrent state (and, for
+  a `fuse_conv` spec, the conv state).
 
 Both must stay below `TOL`. Checking only `out` is insufficient because a bad
 state write may not affect the visible output until the next decode step.
@@ -109,81 +118,99 @@ python3 library/builders/gfx950/gdn/gdn_decode.py \
 `--no-check` skips the fp32 reference and should be used only for focused
 measurement after correctness has already been established.
 
-## Benchmark dispatched kernels
+### f32 state and fused modes
 
-Both benchmarks ask dispatch which tile production would use for each batch;
-neither times one hardcoded tile across the whole range.
+The recurrent state may be `f32` (`GdnDecodeSpec(state_dtype="f32")`); only the
+state widens, and the inputs, output and fp32 reference are unchanged. Two
+optional flags fuse a hybrid layer's neighbours into the kernel: `fuse_conv`
+(causal conv1d + SiLU on the packed q/k/v row) and `fuse_out_norm` (gated
+RMSNorm on the output; SiLU gate for GDN, sigmoid for KDA). What they compute,
+the tensors they add and the spec rules they need are in
+[`ALGORITHM.md` §4.9](ALGORITHM.md#49-optional-fusions-conv1d-and-gated-rmsnorm).
 
-GDN:
+`make_inputs()` draws the extra tensors for a fused spec (`mixed_qkv` replaces
+`query`/`key`/`value`), `ref_fp32()` applies the conv first and the norm last,
+and `check()` also compares the written conv state and the untouched conv-state
+slots. For a `fuse_out_norm` spec `out_err` is **relative to `max(1, |ref|)`**,
+not absolute: the normalised output reaches a few units, where one bf16
+rounding step of an exact answer already exceeds `TOL` in absolute terms. It
+equals the absolute error wherever `|ref| <= 1`:
+
+```python
+from builders.gfx950.gdn.gdn_decode import TOL, check
+from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+spec = GdnDecodeSpec(num_k_heads=16, num_v_heads=16, gate_kind="kda",
+                     state_dtype="f32", num_warps=4, warp_threads_k=16,
+                     blocks_per_v_dim=1, fuse_conv=True, fuse_out_norm=True)
+out_err, state_err = check(spec, batch=8)
+assert max(out_err, state_err) < TOL
+```
+
+### Performance knobs
+
+Ten spec fields change how the warp-tiled kernel computes, not what it
+computes (the two state hints and `waves_per_eu` also apply on the reference
+path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
+`stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
+`waves_per_eu`. Every one defaults to the code the kernel emitted before it
+existed, so a default spec keeps its name and its IR. Dispatch does not set
+them yet; build a spec directly to try one. Their rules and the tiles where
+each changes code are in
+[`ALGORITHM.md` §4.10](ALGORITHM.md#410-performance-knobs).
+
+## Benchmark registered candidates
+
+The GDN benchmark asks the registry for every legal candidate. The default D128
+request admits 54 of 180 configured triples and also reports the static
+dispatcher-default `auto` selection:
 
 ```bash
 python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
   --batches 1,16,64,256
 ```
 
-KDA, production fused and recurrence-only precomputed-log-decay variants:
+Each row includes a stable `spec_id`
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`. Dispatcher `auto`
+prefers `(2, 16, 8)` whenever legal; measurements never change that choice.
+
+KDA remains a separate work-keyed benchmark:
 
 ```bash
 python3 -m benchmarks.gfx950.gdn.benchmark_kda_decode \
   --batches 1,8,32,128
 ```
 
-The KDA benchmark also offers the diagnostic simple emitter and an exhaustive
-legal-tile proof:
-
-```bash
-python3 -m benchmarks.gfx950.gdn.benchmark_kda_decode \
-  --batches 8 --variants fused,precomputed,simple \
-  --sweep-tiles --top 5
-```
-
-`precomputed` excludes log-decay production cost; it measures recurrence-only
-cost, not an unfused production pipeline. `--sweep-tiles` prints the
-dispatcher-selected tile, fastest legal tile, their ratio, and top candidates.
-
 Both benchmarks print eager and device timing. Eager includes host launch and
 synchronisation; device timing uses replayed HIP graphs. Small-batch decode can
-be launch-bound, so the two clocks answer different questions.
+be launch-bound, so the two clocks answer different questions. If graph capture
+is unavailable, pass `--no-device`.
 
-If graph capture is unavailable, pass `--no-device`.
+## Measure candidate tiles
 
-## Retune the tile tables
-
-The dispatcher tables are empirical. Re-run the sweep after changing the
-kernel, compiler, target, or supported shape.
-
-GDN uses its original batch-keyed table:
+`tune.py` consumes the dispatch candidate set. It correctness-checks every tile
+against the FP32 reference, graph-times the correct candidates, then reports
+them fastest first:
 
 ```bash
 python3 library/builders/gfx950/gdn/tune.py \
-  --gate-kind gdn --batches 1,16,64,256
+  --gate-kind gdn --batches 1,16,64,256 --top 5
 ```
 
-KDA uses `work = batch × num_v_heads`, so compare equal-work cells across head
-geometries:
+For every GDN cell, it also reports the static dispatcher default, the fastest
+legal candidate, the default's rank and time ratio, and a manual
+`DEFAULT_TILE` recommendation. Measurements never update the shipped default.
+
+Use KDA's work-keyed study across head geometries when retuning KDA:
 
 ```bash
 python3 library/builders/gfx950/gdn/tune.py \
-  --gate-kind kda \
-  --geometries 16/32,8/16,4/8 \
-  --batches 1,2,4,8,16,32,64,128 \
-  --top 5
+  --gate-kind kda --geometries 16/32,8/16,4/8 \
+  --batches 1,2,4,8,16,32,64,128 --top 5
 ```
 
-The sweep:
-
-1. enumerates the configured tile search space;
-2. lets `is_valid_spec` reject illegal combinations;
-3. computes the fp32 reference once per shape;
-4. runs every valid tile and rejects numerically wrong results;
-5. graph-times the remaining tiles and prints them fastest first;
-6. reports whether equal-work KDA cells agree on the best tile.
-
-Device time is the tuning metric because host launch overhead is nearly the
-same for every tile and can hide kernel differences at small batch. Update
-`_TUNED_TILES_GDN` or `_TUNED_TILES_KDA` as appropriate, keep bands coarse,
-and rerun dispatch wiring plus numeric tests. Only measured points are
-evidence; boundaries between measured points are interpolation.
+GDN measurements are report-only. KDA's measured winners may justify updating
+its work-keyed bands; rerun dispatch wiring and numeric tests after doing so.
 
 ## Run tests
 
@@ -192,10 +219,21 @@ CPU-only coverage:
 ```bash
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
+  library/tests/test_gdn_decode_fused.py \
+  library/tests/test_gdn_decode_knobs.py \
   library/tests/test_gdn_decode_golden.py \
+  library/tests/test_gdn_decode_prepare.py \
+  library/tests/test_gdn_decode_ir_cpp_parity.py \
+  library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
+  library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```
+
+`test_gdn_decode_ir_cpp_parity.py` needs the `rocke_engine` extension (built
+from `platform/cpp/bindings`) on `PYTHONPATH`. Without it the test skips,
+unless `ROCKE_BACKEND` is `cpp` or `both`: there the engine is expected, so
+its absence fails the test.
 
 On-device numeric coverage:
 
@@ -203,6 +241,8 @@ On-device numeric coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_gfx950_numeric.py \
   library/tests/test_kda_decode_gfx950_numeric.py \
+  library/tests/test_gdn_decode_fused_gfx950_numeric.py \
+  library/tests/test_gdn_decode_knobs_gfx950_numeric.py \
   -m gpu
 ```
 
@@ -268,11 +308,13 @@ For the simple reference path, there is no V split:
 grid = batch * num_v_heads
 ```
 
-At small batch, `blocks_per_v_dim` may be greater than one to create more
-workgroups and fill the GPU. At large batch, dispatch normally reduces the split
-because the batch already provides enough workgroups.
+For GDN, `auto` always uses the static `(2, 16, 8)` registry priority when it
+is legal; batch changes the grid but not the tile. KDA alone changes its
+work-keyed table choice with `batch * num_v_heads`.
 
-`out_err` and `state_err` are maximum absolute errors against the fp32 reference.
+`out_err` and `state_err` are maximum absolute errors against the fp32 reference
+(except `out_err` of a `fuse_out_norm` spec, relative to `max(1, |ref|)`; see
+[f32 state and fused modes](#f32-state-and-fused-modes)).
 In the current coverage, state error is larger than output error. Both remain
 separate because state becomes an input to the next decode step; a correct
 current output cannot prove that the next step will read correct state.

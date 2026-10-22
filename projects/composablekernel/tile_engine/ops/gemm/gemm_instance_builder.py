@@ -35,12 +35,20 @@ get_dtype_string = _validation_utils.get_dtype_string
 
 # gfx1250 pipelines. Only the ops listed here may emit them; every other op
 # raises instead of silently generating an unsupported kernel.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
 ASYNC_PIPELINES = ("comp_async",)
 GFX1250_PIPELINES = TDM_PIPELINES + ASYNC_PIPELINES
 GFX1250_PIPELINE_OPS = ("gemm_universal", "batched_gemm")
 # Pipelines whose CShuffle epilogue problem receives DoubleSmemBuffer.
 DOUBLE_SMEM_EPILOGUE_PIPELINES = ("comp_async",) + TDM_PIPELINES
+# Pipelines whose LDS A/B staging is double-buffered in the emitted instance.
+DOUBLE_SMEM_BUFFER_PIPELINES = (
+    "compv4",
+    "preshufflev2",
+    "comp_async",
+    "comp_async_eight_waves",
+    "weight_preshuffle",
+) + TDM_PIPELINES
 
 
 def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
@@ -54,6 +62,11 @@ def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
 
 
 class GemmKernelBuilder:
+    # Ops that generate (arch, dtype) pairs the shared warp-tile table does not
+    # cover (gfx1250, fp32, gfx1201 non-fp16) set this to True so their warp
+    # tiles are also checked against op_warp_tile_allowed().
+    USE_OP_WARP_TILE_ROWS = False
+
     def __init__(
         self,
         kernel_name_prefix,
@@ -500,6 +513,11 @@ class GemmKernelBuilder:
         pipeline,
     ):
         """Validate that tile configuration is reasonable"""
+        if self.USE_OP_WARP_TILE_ROWS and not _validation_utils.op_warp_tile_allowed(
+            self.gpu_target, self.datatype, (warp_tile_m, warp_tile_n, warp_tile_k)
+        ):
+            return False
+
         # Validate preshuffle specific constraints
         if (
             self.config.get("permute_n") is not None
@@ -636,6 +654,7 @@ class GemmKernelBuilder:
                 "comp_async": "ck_tile::GemmPipelineAgBgCrCompAsync",
                 "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
                 "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
+                "comp_tdm_pc": "ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
@@ -645,6 +664,7 @@ class GemmKernelBuilder:
                 "comp_async": "ck_tile::BaseGemmPipelineAgBgCrCompAsync",
                 "comp_tdm": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_pc": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
             self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
             if validate:
@@ -869,14 +889,36 @@ struct SelectedKernel {{
             persistent,
         ) = self._normalize_trait_combo(trait_combo)
 
+        is_gfx1250 = self.gpu_target.split(":")[0] == "gfx1250"
+        transpose_c_expr = (
+            "std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> "
+            "&& WarpTileM == WarpTileN"
+        )
+        # MX GEMM has always emitted the symmetric-warp-tile transposed C
+        # descriptor on gfx1250. The non-MX pipelines (comp_tdm / comp_tdm_v2 /
+        # comp_tdm_pc) do not: on gfx1250 every warp tile is 16x16xK and
+        # gemm_universal C is always RowMajor, so TransposeC is a no-op there --
+        # verified by compiling all 496 emitted comp_tdm_pc configs both ways
+        # (identical ISA, identical VGPR count, both correct on hardware).
+        # Keeping comp_tdm_pc on "false" keeps it directly comparable to
+        # comp_tdm_v2.
+        transpose_c = (
+            transpose_c_expr
+            if is_gfx1250 and self.kernel_name_prefix == "mx_gemm"
+            else "false"
+        )
+        double_smem_buffer = (
+            "true" if pipeline in DOUBLE_SMEM_BUFFER_PIPELINES else "false"
+        )
+
         instance_code = f"""
 
     // Traits configurations
     static constexpr bool kPadM = {"true" if pad_m in [True, "true"] else "false"};
     static constexpr bool kPadN = {"true" if pad_n in [True, "true"] else "false"};
     static constexpr bool kPadK = {"true" if pad_k in [True, "true"] else "false"};
-    static constexpr bool TransposeC = {"std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> && WarpTileM == WarpTileN" if self.kernel_name_prefix == "mx_gemm" and self.gpu_target.split(":")[0] == "gfx1250" else "false"};
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm", "comp_tdm_v2", "comp_async_eight_waves", "weight_preshuffle"] else "false"};"""
+    static constexpr bool TransposeC = {transpose_c};
+    static constexpr bool DoubleSmemBuffer = {double_smem_buffer};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
             instance_code += f"""

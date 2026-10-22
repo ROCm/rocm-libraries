@@ -11,7 +11,20 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
+#       [--config CONFIG]
+#
+# The two filters are separate by *vocabulary*, not by gate. `--only` selects
+# *families* for the byte-identity gate; `--only-ir` selects *case ids*
+# (`family/arch/variant`) for both corpus gates -- emitted-IR validity and
+# arch-domain. The vocabularies overlap without being the same, and a word can
+# be a legal family while matching no corpus case; the tools read an empty
+# selection oppositely (run_diff reports green, the corpus gates call it FATAL),
+# so forwarding one substring to all of them can go red for a filter that was
+# valid where the user aimed it. Any new corpus gate belongs on `--only-ir`.
+#
+# Filtering is separate from skipping: an unfiltered gate still runs in full;
+# use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` to opt out of one.
 
 from __future__ import annotations
 
@@ -115,10 +128,94 @@ def ctest_ready(build_root: Path, config: str) -> bool:
     return False
 
 
+# Native C++ test binaries that a pytest file drives through an env var. With a
+# configured build each one is resolved from CTest, so its pytest cases run
+# instead of skipping: (env var, CTest name, label).
+NATIVE_PARITY_TESTS = (
+    ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
+    (
+        "ROCKE_NONTEMPORAL_HIP_TEST",
+        "rocke_nontemporal_hip",
+        "native nontemporal HIP parity",
+    ),
+    (
+        "ROCKE_UNSIGNED_INT_OPS_CLI",
+        "rocke_unsigned_int_ops",
+        "native unsigned integer op C API parity",
+    ),
+)
+
+
+def _native_executable(
+    env: dict[str, str], build_root: Path, config: str, var: str, ctest_name: str
+) -> str | None:
+    """An explicit env value wins; otherwise ask CTest for the built binary."""
+    executable = env.get(var)
+    if not executable and (build_root / "CMakeCache.txt").is_file():
+        tests = ctest_tests(build_root, config, f"^{ctest_name}$")
+        commands = [
+            test.get("command", []) for test in tests if test["name"] == ctest_name
+        ]
+        if len(commands) != 1 or not commands[0]:
+            raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
+        executable = commands[0][0]
+    return executable
+
+
+def _cmake_home(build_root: Path) -> Path | None:
+    cache = build_root / "CMakeCache.txt"
+    if not cache.is_file():
+        return None
+    for line in cache.read_text(errors="ignore").splitlines():
+        if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL="):
+            return Path(line.split("=", 1)[1]).resolve()
+    return None
+
+
+def configure_pytest_build(build_root: Path, config: str) -> None:
+    """Configure run_all's native artifacts independently of earlier gates."""
+    home = _cmake_home(build_root)
+    if home is not None and home != ROCKE.resolve():
+        return
+    if home is None and (build_root / "CMakeCache.txt").exists():
+        return  # A synthetic/external test build; do not replace its project.
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(ROCKE),
+            "-B",
+            str(build_root),
+            f"-DCMAKE_BUILD_TYPE={config}",
+            "-DROCKE_BUILD_SHARED_ENGINE=ON",
+            "-DBUILD_TESTING=ON",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+def _built_file(
+    build_root: Path, config: str, relative_names: tuple[str, ...]
+) -> Path | None:
+    """Find a single- or multi-config CMake artifact by its relative name."""
+    for relative in relative_names:
+        for root in (build_root, build_root / config):
+            candidate = root / relative
+            if candidate.is_file():
+                return candidate.resolve()
+    return None
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
-    """Build the configured suite and supply native parity to both pytest passes."""
+    """Build the configured suite and supply its native artifacts to pytest."""
     env = dict(os.environ)
-    executable = env.get("ROCKE_STORAGE_TEST")
+    # The canonical runner owns these artifacts. Ambient selections must not
+    # survive a missing or partial configured build.
+    env.pop("ROCKE_ONLINE_LIB", None)
+    env.pop("ROCKE_REPLAY_CLI", None)
+    env.pop("ROCKE_PROVENANCE_MANIFEST", None)
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [
@@ -130,28 +227,87 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
-        if not executable:
-            tests = ctest_tests(build_root, config, "^rocke_storage$")
-            commands = [
-                test.get("command", [])
-                for test in tests
-                if test["name"] == "rocke_storage"
-            ]
-            if len(commands) != 1 or not commands[0]:
-                raise ValueError(
-                    "CTest did not resolve the built rocke_storage executable"
-                )
-            executable = commands[0][0]
-    if executable:
-        path = Path(executable).resolve()
-        if not path.is_file():
-            raise ValueError(f"native storage test executable does not exist: {path}")
-        env["ROCKE_STORAGE_TEST"] = str(path)
-        print(f"\n== native storage parity: {path} ==")
+    for var, ctest_name, label in NATIVE_PARITY_TESTS:
+        executable = _native_executable(env, build_root, config, var, ctest_name)
+        if executable:
+            path = Path(executable).resolve()
+            if not path.is_file():
+                raise ValueError(f"{label} test executable does not exist: {path}")
+            env[var] = str(path)
+            print(f"\n== {label}: {path} ==")
+        else:
+            print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
+
+    # Keep every portable-IR binary on this one configured source snapshot.
+    # In the ordinary run_all flow check_byte_identity configured the shared
+    # target before this function built the full suite. Explicit caller values
+    # are intentionally replaced: the canonical runner owns its artifacts.
+    shared = _built_file(
+        build_root,
+        config,
+        ("librocke.so", "librocke.dylib", "rocke.dll"),
+    )
+    if shared:
+        env["ROCKE_ONLINE_LIB"] = str(shared)
+        print(f"== portable-IR shared engine: {shared} ==")
+    elif _cmake_home(build_root) == ROCKE.resolve():
+        raise ValueError("configured rocKE build produced no portable-IR shared engine")
     else:
+        print("== portable-IR shared engine: not in configured build ==")
+
+    replay_cli = _built_file(
+        build_root,
+        config,
+        (
+            "tests/rocke_portable_ir_replay_cli",
+            "tests/rocke_portable_ir_replay_cli.exe",
+            f"tests/{config}/rocke_portable_ir_replay_cli",
+            f"tests/{config}/rocke_portable_ir_replay_cli.exe",
+        ),
+    )
+    if replay_cli:
+        env["ROCKE_REPLAY_CLI"] = str(replay_cli)
+        print(f"== portable-IR replay CLI: {replay_cli} ==")
+    elif _cmake_home(build_root) == ROCKE.resolve():
+        raise ValueError("configured rocKE build produced no portable-IR replay CLI")
+    else:
+        print("== portable-IR replay CLI: not in configured build ==")
+
+    if shared and replay_cli and _cmake_home(build_root) == ROCKE.resolve():
+        from rocke.portable_ir.src import online
+
+        try:
+            (engine_version, engine_id), _ = online.validate_artifact_bundle(
+                str(shared), str(replay_cli)
+            )
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
+        flavor = env.get("ROCKE_LLVM_FLAVOR", "auto")
         print(
-            "\n== native storage parity: SKIPPED (no configured build or ROCKE_STORAGE_TEST) =="
+            f"== portable-IR provenance: {engine_version} build-id={engine_id} "
+            f"LLVM flavor={flavor} =="
         )
+
+    # The byte-identity stage has already built this production archive. The
+    # native compiler-detection tests otherwise configure and compile a second
+    # copy in pytest's temporary directory, then repeat that work in the
+    # differential pytest pass. Reuse is safe because the fixture explicitly
+    # asks for the same production archive and only links test wrappers around
+    # it; an explicit caller override still wins.
+    archive = env.get("ROCKE_TEST_ENGINE_ARCHIVE")
+    if not archive:
+        # Multi-config generators put archives in the selected configuration.
+        for directory in (build_root / config, build_root):
+            candidate = directory / "librocke_core.a"
+            if candidate.is_file():
+                archive = str(candidate.resolve())
+                break
+    if archive:
+        path = Path(archive).resolve()
+        if not path.is_file():
+            raise ValueError(f"native detector archive does not exist: {path}")
+        env["ROCKE_TEST_ENGINE_ARCHIVE"] = str(path)
+        print(f"== native detector archive: {path} ==")
     return env
 
 
@@ -215,6 +371,17 @@ def main() -> int:
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
     ap.add_argument(
+        "--no-ir-validity",
+        action="store_true",
+        help="skip the emitted-IR validity gate (compile+link every corpus case)",
+    )
+    ap.add_argument(
+        "--no-arch-domain",
+        action="store_true",
+        help="skip the arch-domain warning gate (lower every corpus case at "
+        "every committed LLVM flavor)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -222,7 +389,15 @@ def main() -> int:
     ap.add_argument(
         "--only",
         default="",
-        help="restrict byte-identity gate to families containing SUBSTR",
+        help="restrict byte-identity gate to families containing SUBSTR "
+        "(comma-separated); does not affect the corpus gates",
+    )
+    ap.add_argument(
+        "--only-ir",
+        default="",
+        help="restrict the corpus gates (emitted-IR validity, arch-domain) to "
+        "case ids containing SUBSTR (comma-separated); a case id is "
+        "family/arch/variant",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
@@ -249,11 +424,40 @@ def main() -> int:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
 
+    if not args.no_ir_validity:
+        # Complements the gate above rather than duplicating it: byte-identity
+        # proves the two engines agree, this proves what they agree on is legal
+        # IR the AMDGPU toolchain accepts. Self-skips (green, loudly) on a host
+        # with no LLVM tools -- pass --strict there to make that a failure.
+        print("\n== emitted-IR validity gate ==")
+        ir_gate = [sys.executable, str(TOOLS / "check_ir_validity.py")]
+        # `--only-ir`, never `--only`: see the module header. An empty selection
+        # is FATAL in that tool and that stays correct here, because reaching it
+        # now means the user aimed a case-id filter at the case-id gate and hit
+        # nothing -- a typo, which is worth a red.
+        if args.only_ir:
+            ir_gate += ["--only", args.only_ir]
+        status |= subprocess.run(ir_gate).returncode
+
+    if not args.no_arch_domain:
+        # The gate above's question asked of committed data instead of a
+        # compiler: does any kernel demand an intrinsic its target provably
+        # cannot lower? Needs no toolchain, so it rules on every LLVM flavor.
+        print("\n== arch-domain warning gate ==")
+        ad_gate = [sys.executable, str(TOOLS / "check_arch_domain.py")]
+        # `--only-ir`, not `--only`: this gate matches case ids, like
+        # check_ir_validity. See the note at the top of this file.
+        if args.only_ir:
+            ad_gate += ["--only", args.only_ir]
+        status |= subprocess.run(ad_gate).returncode
+
     if not args.no_pytest:
         try:
-            pytest_env = native_pytest_env(Path(args.build_root).resolve(), args.config)
+            build_root = Path(args.build_root).resolve()
+            configure_pytest_build(build_root, args.config)
+            pytest_env = native_pytest_env(build_root, args.config)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-            print(f"native storage parity setup failed: {exc}", file=sys.stderr)
+            print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
         print("\n== pytest ==")
         status |= subprocess.run(

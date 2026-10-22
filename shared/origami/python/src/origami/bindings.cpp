@@ -26,6 +26,8 @@ NB_MODULE(origami, m) {
       .value("gfx950", hardware_t::architecture_t::gfx950)
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1170", hardware_t::architecture_t::gfx1170)
+      .value("gfx1171", hardware_t::architecture_t::gfx1171)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
       .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
@@ -167,6 +169,8 @@ NB_MODULE(origami, m) {
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
+      .def_rw("non_temporal_a_available", &origami::config_t::non_temporal_a_available)
+      .def_rw("non_temporal_b_available", &origami::config_t::non_temporal_b_available)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
@@ -417,8 +421,6 @@ NB_MODULE(origami, m) {
         nanobind::arg("problem"),
         nanobind::arg("hardware"),
         nanobind::arg("config"),
-        nanobind::arg("non_temporal_a_available") = true,
-        nanobind::arg("non_temporal_b_available") = true,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions

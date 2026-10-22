@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <tuple>
 
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
@@ -632,9 +634,7 @@ void log_config_rejection(const config_t& config, const char* reason) {
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
-                              model_t model,
-                              bool non_temporal_a_available = true,
-                              bool non_temporal_b_available = true) {
+                              model_t model) {
   if (model == model_t::attention) {
     if (!attention::check_rf_capacity(hardware, config.mt, problem.a_dtype)) {
       log_config_rejection(config, "Register File (RF) capacity exceeded");
@@ -651,8 +651,7 @@ double compute_ranked_latency(const problem_t& problem,
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(
-      problem, hardware, config, non_temporal_a_available, non_temporal_b_available);
+  return gemm::compute_total_latency(problem, hardware, config);
 }
 
 }  // namespace
@@ -673,16 +672,8 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   valid_configs.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
-  bool non_temporal_a_available = false;
-  bool non_temporal_b_available = false;
   for (const auto& config : configs) {
-    non_temporal_a_available |= config.cache_hints_a == 4;
-    non_temporal_b_available |= config.cache_hints_b == 4;
-  }
-
-  for (auto& config : configs) {
-    const double latency = compute_ranked_latency(
-        problem, hardware, config, model, non_temporal_a_available, non_temporal_b_available);
+    const double latency = compute_ranked_latency(problem, hardware, config, model);
 
     if (latency != kRejectedLatency) {
       valid_configs.push_back({latency, std::cref(config)});
@@ -899,5 +890,22 @@ double compute_perf_gflops(const hardware_t& hardware,
   // Convert to GFLOPS
   double GFLOPS = FLOPS / 1e9;  // 1 TFLOP = 1e9 FLOPs
   return GFLOPS;
+}
+
+void memoize_non_temporal_availability(std::vector<config_t>& configs) {
+  // Same macro tile only. An NT-B kernel at 128x256 must not mark a 256x256
+  // temporal kernel as having a non-temporal sibling.
+  std::map<std::tuple<size_t, size_t, size_t>, std::pair<bool, bool>> nt_by_tile;
+  for (const auto& config : configs) {
+    auto& flags = nt_by_tile[{config.mt.m, config.mt.n, config.mt.k}];
+    flags.first |= config.cache_hints_a == 4;
+    flags.second |= config.cache_hints_b == 4;
+  }
+
+  for (auto& config : configs) {
+    const auto& flags               = nt_by_tile.at({config.mt.m, config.mt.n, config.mt.k});
+    config.non_temporal_a_available = flags.first;
+    config.non_temporal_b_available = flags.second;
+  }
 }
 }  // namespace origami

@@ -351,7 +351,7 @@ By default, hipDNN includes JSON serialization support via [nlohmann_json](https
 ```bash
 cmake --preset release -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON
 ```
-This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
+This disables JSON-based graph serialization and deserialization. Binary serialization remains available. It also leaves the engine-query helpers `hipdnn_frontend/EngineQueryTypes.hpp` and `hipdnn_frontend/detail/EngineQueries.hpp` empty. In builds that keep them, `detail/EngineQueries.hpp` decodes FlatBuffers pages, so its consumers link `hipdnn_flatbuffers_sdk` themselves.
 
 ### Kernel packing (rocm_kpack)
 
@@ -421,7 +421,9 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
 
 #### Descriptor packaging Python environment
 
-With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can run `-m pip` and import `msgpack` and `zstandard`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it must also be able to run `-m pip`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF`, the hip producer packs alone under the supplied interpreter: no wheel is installed, pip is not needed, and no private import directory is added to `PYTHONPATH`. Every root is packed with its `rocKE/` folder excluded and `rocke` descriptors anywhere else pruned, as architecture pruning prunes. A root left with nothing to pack is skipped rather than failed: the production root goes dormant at configure (for example the in-tree gfx950 `attention_dense` bundle on a gfx950 build), and the census and integration tests of engines it does not ship are not registered. The rest of this section applies only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`.
 
 Packaging installs the exact local `rocke` and `rocke_library` wheels into the build-owned `hkp-rocke-python` directory, using `pip --target --no-index --no-deps --disable-pip-version-check`. `ROCKE_BUILD_PYENV=ON` supplies generated wheels through the existing rocKE developer build; with `ROCKE_BUILD_PYENV=OFF`, supply `ROCKE_WHEEL_DIR` and `ROCKE_WHEEL_VERSION`. Neither packaging mode installs rocKE into the supplied Python environment.
 
@@ -512,7 +514,7 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 |--------|-------------|
 | \<no target\> | Build all components |
 | `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md)) |
-| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
+| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `ffm-quick`, `unit`, and `integration` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
 | `hipdnn-tidy` | Run clang-tidy on hipDNN sources |
@@ -625,11 +627,12 @@ endif()
 | Component | Directory | Key Target | External Dependencies |
 |-----------|-----------|------------|-----------------------|
 | hipdnn | `projects/hipdnn/` | `hipdnn_backend` | ROCm/HIP |
+| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
+| hipdnn-integration-tests | `dnn-providers/integration-tests/` | `hipdnn_integration_tests` | Provider plugins at test runtime |
 | miopen-provider | `dnn-providers/miopen-provider/` | `miopen_plugin` | MIOpen |
 | hipblaslt-provider | `dnn-providers/hipblaslt-provider/` | `hipblaslt_plugin` | hipBLASLt |
 | hip-kernel-provider | `dnn-providers/hip-kernel-provider/` | `hip_kernel_provider` | HIP, HIP-RTC |
 | hipdnn-samples | `projects/hipdnn/samples/` | `hipdnn_samples` | ROCm/HIP; provider plugins at runtime |
-| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
 
 The configure presets above select the components for you. To choose components directly instead, set `ROCM_LIBS_ENABLE_COMPONENTS`:
 

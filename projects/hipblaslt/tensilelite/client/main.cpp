@@ -42,6 +42,7 @@
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
 #include "SolutionIterator.hpp"
+#include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
 
@@ -263,11 +264,15 @@ namespace TensileLite
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
                 ("init-mx-a",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
                 ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
+                ("mx-data-generator",        po::value<int>()->default_value(-1), "A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: init-a/init-b like non-MX inputs, MX or not, with MX scales from init-mx-a/init-mx-b (MX FP8/BF8/FP4 data).")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
+                ("check-synchronizer",       po::value<bool>()->default_value(true),
+                "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
+                " Solutions known not to use the buffer are skipped.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -932,6 +937,10 @@ int main(int argc, const char* argv[])
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
+            // Before ReferenceValidator: postSolution runs listeners in
+            // reverse, so the dirty-buffer verdict lands after the reference
+            // one rather than being overwritten by it.
+            listeners.addListener(std::make_shared<SynchronizerValidator>(args));
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
@@ -1148,6 +1157,7 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("pre_solution");
                         listeners.preSolution(solution.get());
                     }
+                    bool deviceLost = false;
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try
@@ -1294,6 +1304,16 @@ int main(int argc, const char* argv[])
                             reporters->report(ResultKey::Validation, "INVALID");
                             reporters->log(LogLevel::Error,
                                            concatenate("Exception occurred: ", err.what(), "\n"));
+                            // A sticky error (e.g. a kernel memory fault) leaves the device unusable.
+                            hipError_t syncErr = hipDeviceSynchronize();
+                            if(syncErr != hipSuccess)
+                            {
+                                deviceLost = true;
+                                reporters->log(LogLevel::Error,
+                                               concatenate("Device unusable (",
+                                                           hipGetErrorName(syncErr),
+                                                           "), aborting.\n"));
+                            }
                         }
                     }
 
@@ -1302,11 +1322,11 @@ int main(int argc, const char* argv[])
                         listeners.postSolution();
                     }
 
-                    if(exitOnError && listeners.error() > 0)
+                    if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
                         flushTimingBuffer();
                         // error range in shell is [0-255]
-                        return std::min(listeners.error(), 255);
+                        return std::clamp(listeners.error(), 1, 255);
                     }
                 }
 
