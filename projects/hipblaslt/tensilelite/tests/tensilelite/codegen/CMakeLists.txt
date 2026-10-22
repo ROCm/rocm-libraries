@@ -3,6 +3,7 @@
 
 target_sources(tensilelite-tests
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocisaCore_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target_test.cpp"
