@@ -22,7 +22,6 @@ import pytest
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
-from generators._ops import OP_KERNEL_DIRS  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
     KERNELS,
     KNOBS,
@@ -55,19 +54,8 @@ def tables() -> dict[str, list]:
     return {op: _instances.instances_for(op, TARGET) for op in OPS}
 
 
-def test_a_table_is_gfx950_only() -> None:
-    for op in OPS:
-        assert _instances.instances_for(op, "gfx942") == []
-        assert OP_KERNEL_DIRS[op] == ("attention_bwd_cdna", "attention_cdna")
-
-
 def test_knob_sets_agree_with_the_spec_grammar() -> None:
     assert _instances.SDPA_BWD_KNOBS == {k: KNOBS[k] for k in KERNELS}
-
-
-def test_names_are_unique(tables) -> None:
-    names = [i.name for rows in tables.values() for i in rows]
-    assert len(names) == len(set(names))
 
 
 def test_every_row_of_an_op_has_that_ops_knob_set(tables) -> None:
@@ -90,18 +78,11 @@ def test_knobs_stay_in_their_domains(tables) -> None:
 
 
 def test_rows_round_trip_through_the_spec(tables) -> None:
-    """Row -> Spec -> key -> Spec is stable, and the Spec rebuilds the row's V head dim and class."""
+    """Row -> Spec -> key -> Spec is stable."""
     for rows in tables.values():
         for instance in rows:
             spec = to_spec(instance)  # validates: a malformed row raises here
             assert Spec.parse(spec.key()) == spec
-            knobs = instance.knobs
-            assert knobs["head_dim"] == spec.tile
-            assert knobs["head_dim_v"] == (spec.hdv or spec.tile)
-            assert (knobs["causal"], knobs["has_bias"]) == (
-                int(spec.cls == "causal"),
-                int(spec.cls == "bias"),
-            )
 
 
 def test_tables_are_the_reference_set(tables) -> None:

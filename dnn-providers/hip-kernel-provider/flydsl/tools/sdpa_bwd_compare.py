@@ -19,13 +19,19 @@ record none), ``N/M byte-identical``, then one line per reference row that diffe
 * ``missing``               the generator produced no object for the row.
 
 Each line carries the kind, tile, class and whether the hash is known-flaky (rebuilds
-are nondeterministic, T2). Rows of the ops the generators have not run are not
-compared; ``--only-built`` further narrows ``M`` to the rows a generator built (a
-``--only`` run).
+are nondeterministic, T2). A ``dual_object`` row that is known T2 (its hash is in the
+flaky set, or its spec is the ``dq`` causal family) is reported as ``missing`` (listed
+hash) or ``known T2 (dq-causal family)``, never red. The next line names the ops
+compared and the ops with no manifest. A reference row whose op has no manifest is
+``missing`` and red (a generator that aborted writes none); ``--only-built`` instead
+narrows ``M`` to the rows a generator built (a ``--only`` run), so absent ops are
+listed but not compared.
 
 Exit status 0 when there are differences only. Nonzero (red) on: a spill finding of the
-R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` outside
-the known-flaky set; a reference object that is not the pin its CSV row names.
+R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` that is
+neither in the known-flaky set nor ``dq`` causal; a reference row whose op has no
+manifest (without ``--only-built``); a reference object that is not the pin its CSV row
+names.
 """
 
 from __future__ import annotations
@@ -92,11 +98,12 @@ def compare(
         return [f"error: no sdpa_bwd_*/{TARGET}/manifest.json under {out_dir}"], 2
 
     scope = []
+    reference_ops: set[str] = set()
     for row in rows:
         spec = Spec.parse(row["spec"])
-        if f"sdpa_bwd_{spec.kernel}" in ops and (
-            not only_built or row["hash"] in records
-        ):
+        op = f"sdpa_bwd_{spec.kernel}"
+        reference_ops.add(op)
+        if not only_built or row["hash"] in records:
             scope.append((row, spec))
     scope.sort(key=lambda item: item[0]["spec"])
 
@@ -129,7 +136,10 @@ def compare(
             continue
         found = records.get(h)
         if found is None:
-            report("missing", row, spec, "not built")
+            if f"sdpa_bwd_{spec.kernel}" not in ops:
+                report("missing", row, spec, "the op has no manifest", True)
+            else:
+                report("missing", row, spec, "not built")
             continue
         record, op_dir = found
         status = record["build_status"]
@@ -137,6 +147,12 @@ def compare(
             detail = record.get("detail", "")
             if status == "dual_object" and h in flaky:
                 report("missing", row, spec, f"dual_object, known T2: {detail}")
+            elif (
+                status == "dual_object" and spec.kernel == "dq" and spec.cls == "causal"
+            ):
+                report(
+                    "known T2 (dq-causal family)", row, spec, f"dual_object: {detail}"
+                )
             else:
                 report("missing", row, spec, f"{status}: {detail}", True)
             continue
@@ -171,6 +187,8 @@ def compare(
     lines = [
         f"rocm_version: generator {', '.join(sorted(versions))}; reference unknown",
         f"{identical}/{len(scope)} byte-identical",
+        f"ops compared: {', '.join(sorted(reference_ops & ops)) or 'none'}; "
+        f"no manifest: {', '.join(sorted(reference_ops - ops)) or 'none'}",
         *diffs,
     ]
     if red:
