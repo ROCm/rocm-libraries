@@ -53,6 +53,38 @@ struct NonDeduced
     using type = T;
 };
 
+// Device binding of an optional SDPA attention sink [1, H, 1, 1]: head h at ptr[h * headStride].
+struct SdpaSinkBinding
+{
+    const void* ptr = nullptr;
+    int64_t headStride = 0;
+};
+
+// Checks the sink shape against the query head count, appends -DSINK_TYPE (always, so the
+// kernel compiles with or without a sink) and returns the device binding (null without a sink).
+template <typename SinkDataType>
+inline SdpaSinkBinding bindSdpaSink(hipdnn_data_sdk::utilities::TensorBase<SinkDataType>* sink,
+                                    int64_t numHeads,
+                                    std::vector<std::string>& defines,
+                                    const std::string& who)
+{
+    defines.emplace_back(std::string("-DSINK_TYPE=") + HipRtcTypeName<SinkDataType>::VALUE);
+    SdpaSinkBinding binding;
+    if(sink == nullptr)
+    {
+        return binding;
+    }
+    const auto& dims = sink->dims();
+    if(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeads || dims[2] != 1 || dims[3] != 1)
+    {
+        throw std::invalid_argument(who + ": sink must be [1, " + std::to_string(numHeads)
+                                    + ", 1, 1]");
+    }
+    binding.ptr = sink->memory().deviceData();
+    binding.headStride = sink->strides()[1];
+    return binding;
+}
+
 } // namespace detail
 
 class GpuFpReferenceSdpa
@@ -73,12 +105,18 @@ public:
     // bfloat16; the kernel converts to float on read). It is passed to the kernel as
     // -DMASK_TYPE after the buildSdpaDefines set (Q/K/V/O/COMPUTE_TYPE/probability mode).
     // The mask parameter is non-deduced: name MaskDataType when passing a non-float mask.
+    //
+    // The optional attention sink is [1, H, 1, 1] of SinkDataType (float, half or bfloat16), one
+    // raw logit per query head: it joins the softmax max and denominator, is not scaled, has no
+    // value row, and is included in the LSE. A row with no visible key then gives O = 0 and
+    // LSE = sink. Name SinkDataType when passing a non-float sink.
     template <class QDataType,
               class KDataType = QDataType,
               class VDataType = QDataType,
               class ODataType = QDataType,
               class ComputeDataType = float,
-              class MaskDataType = ComputeDataType>
+              class MaskDataType = ComputeDataType,
+              class SinkDataType = float>
     static void fprop(
         hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
         hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
@@ -92,7 +130,10 @@ public:
         int64_t rightBound = -1,
         bool topLeftAlignment = true,
         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT)
+        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<SinkDataType>::type>*
+            sink
+        = nullptr)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
@@ -113,6 +154,8 @@ public:
                 probabilityMode);
         defines.emplace_back(std::string("-DMASK_TYPE=")
                              + detail::HipRtcTypeName<MaskDataType>::VALUE);
+        const auto sinkBinding
+            = detail::bindSdpaSink<SinkDataType>(sink, numHeads, defines, "GpuFpReferenceSdpa");
 
         const void* maskPtr = nullptr;
         std::vector<int64_t> maskDims;
@@ -169,6 +212,7 @@ public:
                       leftBound,
                       rightBound,
                       topLeftAlignment,
+                      sinkBinding,
                       defines);
 
         o.memory().markDeviceModified();
@@ -258,6 +302,7 @@ private:
                               int64_t leftBound,
                               int64_t rightBound,
                               bool topLeftAlignment,
+                              const detail::SdpaSinkBinding& sink,
                               const std::vector<std::string>& defines);
 };
 

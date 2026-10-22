@@ -156,7 +156,8 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Dropout | Not supported | Not supported | Not supported |
 | ALiBi / padding mask | Not supported | Not supported | ALiBi not supported; `padding_mask` accepted either way (seq lens are always honored) |
 | Paged KV cache | Not supported | Not supported | Supported: K/V containers `[num_blocks, H, block_size, D]` with any strides, `INT32` page tables `[B, 1, M, 1]` with any strides (may be one shared tensor) |
-| Block-sparse attention, attention sinks | Not supported | Not supported | Not supported |
+| Block-sparse attention | Not supported | Not supported | Not supported |
+| Attention sinks (`sink_token`) | Supported: `[1, H, 1, 1]`, `FP32` or the Q type when `FP16`/`BFP16` | Supported (same rules) | Supported (same rules) |
 | Softmax max / sum-exp stats outputs | Not supported | - | Not supported |
 | Additive attention bias (`attn_mask`) | - | Not supported | Not supported |
 
@@ -169,7 +170,10 @@ both dense or both ragged. Key row `skv` of batch `b` is row `skv % block_size` 
 `page_table[b, 0, skv / block_size, 0]`; only the first `ceil(seq_len_kv[b] / block_size)` entries
 are read, and each must lie in `[0, num_blocks)` (checked on the host). Query rows at or past
 `seq_len_q[b]` are left untouched; a live row with no unmasked key (including `seq_len_kv[b] == 0`)
-writes zeros and LSE `-inf`. The harness records the
+writes zeros and LSE `-inf`, or the head's sink when a sink token is set. Sinks follow the
+[attention-sink contract](../../../projects/hipdnn/docs/SdpaPagedAttention.md#attention-sinks): the
+sink joins the softmax max and denominator, is not scaled, has no value row and is part of the
+LSE. The harness records the
 dense-path gaps (variable sequence lengths, FP8) in `knownReferenceGaps()`
 (`ReferenceOpCoverage.cpp`) so those bundles report "not applicable" instead of failing.
 

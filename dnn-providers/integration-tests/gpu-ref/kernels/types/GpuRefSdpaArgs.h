@@ -46,6 +46,10 @@ struct SdpaFwdArgs
     float scale;
     long long leftBound, rightBound;
     int topLeftAlignment;
+    // Optional attention sink, SINK_TYPE [1, H, 1, 1]: head h at h * sinkHeadStride. nullptr
+    // disables it.
+    const void* sink;
+    long long sinkHeadStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -117,6 +121,10 @@ struct SdpaRaggedFwdArgs
     long long blockSize;
     // Dense Q/O (raggedOffsetQ == nullptr): Sq, the per-batch Q extent.
     long long seqQMax;
+    // Optional attention sink, SINK_TYPE [1, H, 1, 1]: head h at h * sinkHeadStride. nullptr
+    // disables it.
+    const void* sink;
+    long long sinkHeadStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

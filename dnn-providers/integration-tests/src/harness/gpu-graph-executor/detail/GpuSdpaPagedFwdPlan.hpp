@@ -19,11 +19,13 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
 #include "GpuScalarOperand.hpp"
 #include "GpuSdpaFwdPlan.hpp" // reuse sdpaProbabilityMode<>()
+#include "GpuSdpaSinkOperand.hpp"
 #include "IGpuGraphNodePlanBuilder.hpp"
 #include "IGpuGraphNodePlanExecutor.hpp"
 
@@ -66,7 +68,8 @@ struct GpuSdpaPagedFwdParams
                           const TensorAttributes* raggedOffsetLseAttributes = nullptr,
                           const TensorAttributes* descaleQAttributes = nullptr,
                           const TensorAttributes* descaleKAttributes = nullptr,
-                          const TensorAttributes* descaleVAttributes = nullptr)
+                          const TensorAttributes* descaleVAttributes = nullptr,
+                          const TensorAttributes* sinkAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -87,6 +90,7 @@ struct GpuSdpaPagedFwdParams
         , descaleQTensor(unpackOptional(descaleQAttributes))
         , descaleKTensor(unpackOptional(descaleKAttributes))
         , descaleVTensor(unpackOptional(descaleVAttributes))
+        , sinkTensor(unpackOptional(sinkAttributes))
     {
     }
 
@@ -115,6 +119,8 @@ struct GpuSdpaPagedFwdParams
     std::optional<TensorAttributesT> descaleQTensor;
     std::optional<TensorAttributesT> descaleKTensor;
     std::optional<TensorAttributesT> descaleVTensor;
+    // Attention sink [1, H, 1, 1]: FLOAT, or the Q data type when HALF/BFLOAT16.
+    std::optional<TensorAttributesT> sinkTensor;
 };
 
 // Runs the paged SDPA GPU reference (GpuFpReferenceSdpaRagged::fpropPaged) on the variant-pack
@@ -230,30 +236,39 @@ public:
             multipliers.lse = _params.lseTensor->ragged_offset_multiplier;
         }
 
-        hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::
-            fpropPaged<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
-                qTensor,
-                kTensor,
-                vTensor,
-                oTensor,
-                raggedOffsetQ,
-                raggedOffsetO,
-                pageTableKTensor,
-                pageTableVTensor,
-                seqLenKvTensor,
-                seqLenQ,
-                _params.maxSeqLenKv,
-                attnScale,
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                raggedOffsetLse,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
-                descaleQ,
-                descaleK,
-                descaleV,
-                multipliers);
+        withSdpaSinkOperand<QDataType>(
+            _params.sinkTensor, variantPack, [&](auto* sinkTensor, auto sinkTag) {
+                using SinkDataType = typename decltype(sinkTag)::type;
+                hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::fpropPaged<QDataType,
+                                                                     KDataType,
+                                                                     VDataType,
+                                                                     ODataType,
+                                                                     ComputeDataType,
+                                                                     SinkDataType>(
+                    qTensor,
+                    kTensor,
+                    vTensor,
+                    oTensor,
+                    raggedOffsetQ,
+                    raggedOffsetO,
+                    pageTableKTensor,
+                    pageTableVTensor,
+                    seqLenKvTensor,
+                    seqLenQ,
+                    _params.maxSeqLenKv,
+                    attnScale,
+                    _params.leftBound,
+                    _params.rightBound,
+                    _params.topLeftAlignment,
+                    lseTensor.has_value() ? &lseTensor.value() : nullptr,
+                    raggedOffsetLse,
+                    sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                    descaleQ,
+                    descaleK,
+                    descaleV,
+                    multipliers,
+                    sinkTensor);
+            });
     }
 
 private:
@@ -379,9 +394,14 @@ public:
             return false;
         }
 
-        // Unsupported: block sparse attention and sinks
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        // Unsupported: block sparse attention
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Supported: an attention sink of the frontend-contract shape and data type.
+        if(!hipdnn_test_sdk::detail::isSdpaSinkSupported(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -514,7 +534,8 @@ public:
                                   raggedOffsetLsePtr,
                                   optionalPtr(nodeAttributes->descale_q_tensor_uid()),
                                   optionalPtr(nodeAttributes->descale_k_tensor_uid()),
-                                  optionalPtr(nodeAttributes->descale_v_tensor_uid())));
+                                  optionalPtr(nodeAttributes->descale_v_tensor_uid()),
+                                  optionalPtr(nodeAttributes->sink_token_tensor_uid())));
     }
 
 private:

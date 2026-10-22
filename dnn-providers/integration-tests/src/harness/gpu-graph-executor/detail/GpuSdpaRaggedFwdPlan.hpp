@@ -19,10 +19,12 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "GpuScalarOperand.hpp"
 #include "GpuSdpaFwdPlan.hpp" // reuse sdpaProbabilityMode<>()
+#include "GpuSdpaSinkOperand.hpp"
 #include "IGpuGraphNodePlanBuilder.hpp"
 #include "IGpuGraphNodePlanExecutor.hpp"
 
@@ -53,7 +55,8 @@ struct GpuSdpaRaggedFwdParams
         = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -91,6 +94,10 @@ struct GpuSdpaRaggedFwdParams
                              ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
                                    *descaleVAttributes))
                              : std::nullopt)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(
+                               hipdnn_test_sdk::detail::unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -115,6 +122,8 @@ struct GpuSdpaRaggedFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    // Attention sink [1, H, 1, 1]: FLOAT, or the Q data type when HALF/BFLOAT16.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
 };
 
 // Runs the ragged SDPA GPU reference on the variant-pack device buffers.
@@ -215,27 +224,36 @@ public:
             multipliers.lse = _params.lseTensor->ragged_offset_multiplier;
         }
 
-        hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::
-            fpropRagged<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
-                qTensor,
-                kTensor,
-                vTensor,
-                oTensor,
-                raggedOffsetQTensor,
-                raggedOffsetKTensor,
-                raggedOffsetVTensor,
-                raggedOffsetOTensor,
-                attnScale,
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                raggedOffsetLseTensor.has_value() ? &raggedOffsetLseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
-                descaleQ,
-                descaleK,
-                descaleV,
-                multipliers);
+        withSdpaSinkOperand<QDataType>(
+            _params.sinkTensor, variantPack, [&](auto* sinkTensor, auto sinkTag) {
+                using SinkDataType = typename decltype(sinkTag)::type;
+                hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::fpropRagged<QDataType,
+                                                                      KDataType,
+                                                                      VDataType,
+                                                                      ODataType,
+                                                                      ComputeDataType,
+                                                                      SinkDataType>(
+                    qTensor,
+                    kTensor,
+                    vTensor,
+                    oTensor,
+                    raggedOffsetQTensor,
+                    raggedOffsetKTensor,
+                    raggedOffsetVTensor,
+                    raggedOffsetOTensor,
+                    attnScale,
+                    _params.leftBound,
+                    _params.rightBound,
+                    _params.topLeftAlignment,
+                    lseTensor.has_value() ? &lseTensor.value() : nullptr,
+                    raggedOffsetLseTensor.has_value() ? &raggedOffsetLseTensor.value() : nullptr,
+                    sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                    descaleQ,
+                    descaleK,
+                    descaleV,
+                    multipliers,
+                    sinkTensor);
+            });
     }
 
 private:
@@ -341,8 +359,13 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
+        {
+            return false;
+        }
+
+        // Supported: an attention sink of the frontend-contract shape and data type.
+        if(!hipdnn_test_sdk::detail::isSdpaSinkSupported(*nodeAttributes, tensorMap))
         {
             return false;
         }
@@ -463,6 +486,7 @@ public:
         const auto* descaleQPtr = descalePtr(nodeAttributes->descale_q_tensor_uid());
         const auto* descaleKPtr = descalePtr(nodeAttributes->descale_k_tensor_uid());
         const auto* descaleVPtr = descalePtr(nodeAttributes->descale_v_tensor_uid());
+        const auto* sinkPtr = descalePtr(nodeAttributes->sink_token_tensor_uid());
 
         int64_t leftBound = (nodeAttributes->left_bound().has_value())
                                 ? nodeAttributes->left_bound().value()
@@ -528,7 +552,8 @@ public:
                                    raggedOffsetLsePtr,
                                    descaleQPtr,
                                    descaleKPtr,
-                                   descaleVPtr));
+                                   descaleVPtr,
+                                   sinkPtr));
     }
 
 private:

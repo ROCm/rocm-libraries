@@ -46,6 +46,7 @@ constexpr int64_t PAGE_TABLE_K_UID = 30;
 constexpr int64_t PAGE_TABLE_V_UID = 31;
 constexpr int64_t SEQ_LEN_KV_UID = 32;
 constexpr int64_t SEQ_LEN_Q_UID = 33;
+constexpr int64_t SINK_UID = 34;
 
 // Not in the tensor map. Setting an unsupported-mode uid to it is enough to reject the node.
 constexpr int64_t UNUSED_UID = 99;
@@ -174,13 +175,20 @@ SdpaAttributesT bottomRightCausal()
 
 // Runs the bf16 plan for @p attrs and fpropPaged directly with @p band on the same inputs and
 // expects identical outputs (same kernel, same arguments), including untouched padding rows.
+// @p sinkDataType adds a sink_token of that type (FLOAT or BFLOAT16).
 void checkExecuteMatchesDirect(bool raggedQ,
                                SdpaAttributesT attrs = bottomRightCausal(),
-                               ExpectedBand band = {-1, 0, false})
+                               ExpectedBand band = {-1, 0, false},
+                               std::optional<DataType> sinkDataType = std::nullopt)
 {
     attrs.attn_scale_value = 0.25f;
     PagedSdpaFwdGraphOptions options = raggedQ ? raggedQOptions() : PagedSdpaFwdGraphOptions{};
     options.statsUid = STATS_UID;
+    if(sinkDataType.has_value())
+    {
+        options.sinkUid = SINK_UID;
+        options.sinkDataType = sinkDataType.value();
+    }
     auto graphBuilder = makePagedGraph(attrs, DataType::BFLOAT16, options);
     auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -204,6 +212,18 @@ void checkExecuteMatchesDirect(bool raggedQ,
     const int32_t seqStride = HEADS * HEAD_DIM;
     auto offQ = makeInt32({BATCH + 1, 1, 1, 1}, {0, 3 * seqStride, 4 * seqStride});
     auto offO = makeInt32({BATCH + 1, 1, 1, 1}, {0, 3 * seqStride, 4 * seqStride});
+    // Per-head sinks in both supported types; the graph binds the one of sinkDataType.
+    Tensor<float> sinkFloat({1, HEADS, 1, 1});
+    Tensor<bfloat16> sinkBf16({1, HEADS, 1, 1});
+    for(int64_t h = 0; h < HEADS; ++h)
+    {
+        const float value = 1.5f - 2.0f * static_cast<float>(h);
+        sinkFloat.setHostValue(value, 0, h, 0, 0);
+        sinkBf16.setHostValue(static_cast<bfloat16>(value), 0, h, 0, 0);
+    }
+    sinkFloat.memory().markHostModified();
+    sinkBf16.memory().markHostModified();
+    const bool bf16Sink = sinkDataType == DataType::BFLOAT16;
 
     const auto makeO = [&]() {
         Tensor<bfloat16> o(Q_DIMS, raggedStrides(Q_DIMS));
@@ -236,29 +256,55 @@ void checkExecuteMatchesDirect(bool raggedQ,
         variantPack.emplace(RAGGED_OFFSET_Q_UID, offQ.memory().deviceData());
         variantPack.emplace(RAGGED_OFFSET_O_UID, offO.memory().deviceData());
     }
+    if(sinkDataType.has_value())
+    {
+        variantPack.emplace(
+            SINK_UID, bf16Sink ? sinkBf16.memory().deviceData() : sinkFloat.memory().deviceData());
+    }
     plan->execute(variantPack);
     oPlan.markDeviceModified();
     lsePlan.markDeviceModified();
 
-    hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::fpropPaged<bfloat16>(
-        q,
-        k,
-        v,
-        oDirect,
-        raggedQ ? &offQ : nullptr,
-        raggedQ ? &offO : nullptr,
-        pageTableK,
-        pageTableV,
-        seqLenKv,
-        raggedQ ? &seqLenQ : nullptr,
-        MAX_SEQ_LEN_KV,
-        0.25f,
-        band.leftBound,
-        band.rightBound,
-        band.topLeftAlignment,
-        &lseDirect,
-        nullptr,
-        sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>());
+    const auto runDirect = [&](auto* sink, auto sinkTag) {
+        using SinkT = typename decltype(sinkTag)::type;
+        hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::
+            fpropPaged<bfloat16, bfloat16, bfloat16, bfloat16, float, SinkT>(
+                q,
+                k,
+                v,
+                oDirect,
+                raggedQ ? &offQ : nullptr,
+                raggedQ ? &offO : nullptr,
+                pageTableK,
+                pageTableV,
+                seqLenKv,
+                raggedQ ? &seqLenQ : nullptr,
+                MAX_SEQ_LEN_KV,
+                0.25f,
+                band.leftBound,
+                band.rightBound,
+                band.topLeftAlignment,
+                &lseDirect,
+                nullptr,
+                sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>(),
+                nullptr,
+                nullptr,
+                nullptr,
+                {},
+                sink);
+    };
+    if(!sinkDataType.has_value())
+    {
+        runDirect(static_cast<Tensor<float>*>(nullptr), SdpaSinkTypeTag<float>{});
+    }
+    else if(bf16Sink)
+    {
+        runDirect(&sinkBf16, SdpaSinkTypeTag<bfloat16>{});
+    }
+    else
+    {
+        runDirect(&sinkFloat, SdpaSinkTypeTag<float>{});
+    }
 
     const auto* op = oPlan.memory().hostData();
     const auto* od = oDirect.memory().hostData();
@@ -371,7 +417,6 @@ TEST(TestGpuSdpaPagedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         [](SdpaAttributesT& a) { a.dropout_probability = 0.1f; },
         [](SdpaAttributesT& a) { a.seed_tensor_uid = UNUSED_UID; },
         [](SdpaAttributesT& a) { a.block_mask_tensor_uid = UNUSED_UID; },
-        [](SdpaAttributesT& a) { a.sink_token_tensor_uid = UNUSED_UID; },
         [](SdpaAttributesT& a) { a.max_tensor_uid = UNUSED_UID; },
         [](SdpaAttributesT& a) { a.sum_exp_tensor_uid = UNUSED_UID; },
         [](SdpaAttributesT& a) { a.descale_s_tensor_uid = UNUSED_UID; },
@@ -383,6 +428,49 @@ TEST(TestGpuSdpaPagedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         edits[i](attrs);
         EXPECT_FALSE(isApplicable<Bf16Builder>(makePagedGraph(attrs))) << "edit " << i;
     }
+}
+
+namespace
+{
+PagedSdpaFwdGraphOptions sinkOptions(DataType sinkDataType)
+{
+    PagedSdpaFwdGraphOptions options;
+    options.sinkUid = SINK_UID;
+    options.sinkDataType = sinkDataType;
+    return options;
+}
+} // namespace
+
+// Attention sinks: [1, H, 1, 1] FLOAT, or the Q data type when HALF/BFLOAT16.
+TEST(TestGpuSdpaPagedFwdPlanBuilder, IsApplicableWithSink)
+{
+    EXPECT_TRUE(isApplicable<Bf16Builder>(
+        makePagedGraph({}, DataType::BFLOAT16, sinkOptions(DataType::FLOAT))));
+    EXPECT_TRUE(isApplicable<Bf16Builder>(
+        makePagedGraph({}, DataType::BFLOAT16, sinkOptions(DataType::BFLOAT16))));
+    EXPECT_TRUE(
+        isApplicable<Fp16Builder>(makePagedGraph({}, DataType::HALF, sinkOptions(DataType::HALF))));
+    auto ragged = raggedQOptions();
+    ragged.sinkUid = SINK_UID;
+    EXPECT_TRUE(isApplicable<Bf16Builder>(makePagedGraph({}, DataType::BFLOAT16, ragged)));
+}
+
+TEST(TestGpuSdpaPagedFwdPlanBuilder, IsNotApplicableWithInvalidSink)
+{
+    // A sink in another half type than Q, or an integer sink.
+    EXPECT_FALSE(isApplicable<Bf16Builder>(
+        makePagedGraph({}, DataType::BFLOAT16, sinkOptions(DataType::HALF))));
+    EXPECT_FALSE(isApplicable<Bf16Builder>(
+        makePagedGraph({}, DataType::BFLOAT16, sinkOptions(DataType::INT32))));
+    // One sink per KV head instead of per query head.
+    const auto kvHeadSink
+        = mutateGraph(makePagedGraph({}, DataType::BFLOAT16, sinkOptions(DataType::FLOAT)),
+                      [](GraphT& g) { tensorWithUid(g, SINK_UID).dims = {1, 1, 1, 1}; });
+    EXPECT_FALSE(isApplicable<Bf16Builder>(kvHeadSink));
+    // A sink uid with no tensor behind it.
+    SdpaAttributesT dangling;
+    dangling.sink_token_tensor_uid = UNUSED_UID;
+    EXPECT_FALSE(isApplicable<Bf16Builder>(makePagedGraph(dangling)));
 }
 
 TEST(TestGpuSdpaPagedFwdPlanBuilder, IsNotApplicableForNonPagedNodes)
@@ -467,4 +555,13 @@ TEST(TestGpuSdpaPagedFwdPlan, ExecuteComposesTheCausalFlagWithTheBand)
     bottomRightFlagWindow.causal_mask_bottom_right = true;
     bottomRightFlagWindow.left_bound = 3;
     checkExecuteMatchesDirect(/*raggedQ=*/false, bottomRightFlagWindow, {3, 0, false});
+}
+
+TEST(TestGpuSdpaPagedFwdPlan, ExecuteWithSinkMatchesDirectFpropPaged)
+{
+    SKIP_IF_NO_DEVICES();
+    checkExecuteMatchesDirect(
+        /*raggedQ=*/false, bottomRightCausal(), {-1, 0, false}, DataType::FLOAT);
+    checkExecuteMatchesDirect(
+        /*raggedQ=*/true, bottomRightCausal(), {-1, 0, false}, DataType::BFLOAT16);
 }

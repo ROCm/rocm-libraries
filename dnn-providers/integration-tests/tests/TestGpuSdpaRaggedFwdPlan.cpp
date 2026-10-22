@@ -1315,3 +1315,41 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)
     EXPECT_THROW(bf16Builder.buildNodePlan(badRightWrap, badRightWrap.getNode(0)),
                  std::invalid_argument);
 }
+
+namespace
+{
+
+constexpr int64_t SINK_UID = 23;
+
+// The bf16 ragged graph plus a sink_token tensor of the given type and dims.
+bool bf16BuilderAcceptsSink(DataType sinkDataType, const std::vector<int64_t>& sinkDims)
+{
+    const auto source = makeRaggedGraph();
+    auto graph = UnPackGraph(source.GetBufferPointer());
+    auto sink = std::make_unique<TensorAttributesT>();
+    sink->uid = SINK_UID;
+    sink->name = "Sink";
+    sink->data_type = sinkDataType;
+    sink->dims = sinkDims;
+    sink->strides = generateStrides(sinkDims);
+    graph->tensors.push_back(std::move(sink));
+    graph->nodes[0]->attributes.AsSdpaAttributes()->sink_token_tensor_uid = SINK_UID;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    return Bf16Builder().isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+}
+
+} // namespace
+
+// Attention sinks: [1, H, 1, 1] FLOAT, or BFLOAT16 like Q.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableWithSink)
+{
+    const int64_t heads = DIMS[1];
+    EXPECT_TRUE(bf16BuilderAcceptsSink(DataType::FLOAT, {1, heads, 1, 1}));
+    EXPECT_TRUE(bf16BuilderAcceptsSink(DataType::BFLOAT16, {1, heads, 1, 1}));
+    EXPECT_FALSE(bf16BuilderAcceptsSink(DataType::HALF, {1, heads, 1, 1}));
+    EXPECT_FALSE(bf16BuilderAcceptsSink(DataType::FLOAT, {1, heads + 1, 1, 1}));
+    EXPECT_FALSE(bf16BuilderAcceptsSink(DataType::FLOAT, {heads}));
+}

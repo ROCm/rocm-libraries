@@ -444,6 +444,10 @@ struct PagedSdpaFwdGraphOptions
     std::optional<int64_t> raggedOffsetOUid;
     // Dense FLOAT LSE output [B, H, Sq, 1].
     std::optional<int64_t> statsUid;
+    // Attention sink [1, H, 1, 1] of sinkDataType.
+    std::optional<int64_t> sinkUid;
+    hipdnn_flatbuffers_sdk::data_objects::DataType sinkDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 };
 
 // Builds a one-node paged-KV SDPA forward graph (vLLM block tables). Q/O are [B, H, Sq, D] with
@@ -490,6 +494,10 @@ inline flatbuffers::FlatBufferBuilder
     if(options.statsUid.has_value())
     {
         attrs.stats_tensor_uid = options.statsUid;
+    }
+    if(options.sinkUid.has_value())
+    {
+        attrs.sink_token_tensor_uid = options.sinkUid;
     }
 
     flatbuffers::FlatBufferBuilder builder;
@@ -579,6 +587,20 @@ inline flatbuffers::FlatBufferBuilder
                                                        DataType::FLOAT,
                                                        &statsStrides,
                                                        &statsDims));
+    }
+
+    std::vector<int64_t> sinkDims;
+    std::vector<int64_t> sinkStrides;
+    if(options.sinkUid.has_value())
+    {
+        sinkDims = {1, qDims[1], 1, 1};
+        sinkStrides = generateStrides(sinkDims);
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       options.sinkUid.value(),
+                                                       "Sink",
+                                                       options.sinkDataType,
+                                                       &sinkStrides,
+                                                       &sinkDims));
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);

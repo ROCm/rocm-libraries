@@ -45,6 +45,12 @@ using namespace hipdnn_gpu_ref;
 namespace
 {
 
+template <typename T>
+struct TypeTag
+{
+    using type = T;
+};
+
 constexpr unsigned int SEED_Q = 42;
 constexpr unsigned int SEED_K = 43;
 constexpr unsigned int SEED_PAGES_K = 45;
@@ -170,6 +176,10 @@ struct PagedCase
     // One page table tensor serves K and V.
     bool sharedPageTable = false;
     bool withLse = false;
+    // Attention sink per query head; empty means none. sinkInIoType binds it as T (rounded),
+    // otherwise as float.
+    std::vector<float> sinks;
+    bool sinkInIoType = false;
 };
 
 template <typename T>
@@ -249,6 +259,25 @@ void checkPaged(const PagedCase& c)
         seqLenQ.emplace(makeSeqLens(*c.seqLenQ));
     }
 
+    // The sink as the GPU reads it, and the same values (rounded to T for an I/O-type sink) as
+    // the CPU references take them.
+    Tensor<float> sinkFloat({1, h, 1, 1});
+    Tensor<T> sinkIo({1, h, 1, 1});
+    std::vector<float> sinkValues = c.sinks;
+    for(int64_t hh = 0; hh < static_cast<int64_t>(c.sinks.size()); ++hh)
+    {
+        auto& value = sinkValues[static_cast<size_t>(hh)];
+        if(c.sinkInIoType)
+        {
+            value = static_cast<float>(static_cast<T>(value));
+        }
+        sinkFloat.setHostValue(value, 0, hh, 0, 0);
+        sinkIo.setHostValue(static_cast<T>(value), 0, hh, 0, 0);
+    }
+    sinkFloat.memory().markHostModified();
+    sinkIo.memory().markHostModified();
+    const std::vector<float>* sinkPerHead = c.sinks.empty() ? nullptr : &sinkValues;
+
     // 1. CPU paged reference, first, while the host buffers are untouched.
     {
         auto* seqLenQPtr = seqLenQ.has_value() ? &seqLenQ.value() : nullptr;
@@ -278,7 +307,11 @@ void checkPaged(const PagedCase& c)
                                                                       c.leftBound,
                                                                       c.rightBound,
                                                                       c.topLeftAlignment,
-                                                                      lsePtr);
+                                                                      lsePtr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      sinkPerHead);
         }
         else
         {
@@ -295,7 +328,11 @@ void checkPaged(const PagedCase& c)
                                                                       c.leftBound,
                                                                       c.rightBound,
                                                                       c.topLeftAlignment,
-                                                                      lsePtr);
+                                                                      lsePtr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      sinkPerHead);
         }
     }
 
@@ -306,23 +343,45 @@ void checkPaged(const PagedCase& c)
         ShallowGpuTensor<T> vDev(kvDevice + vOffset, vDims, vStrides);
         auto offQ = makeRaggedOffset(cumQ, h * d);
         auto offO = makeRaggedOffset(cumQ, h * d);
-        GpuFpReferenceSdpaRagged::fpropPaged<T, T, T, T, float>(
-            q,
-            kDev,
-            vDev,
-            oGpu,
-            raggedQ ? &offQ : nullptr,
-            raggedQ ? &offO : nullptr,
-            pageTableK,
-            pageTableVUsed,
-            seqLenKv,
-            seqLenQ.has_value() ? &seqLenQ.value() : nullptr,
-            maxSeqLenKv,
-            scale,
-            c.leftBound,
-            c.rightBound,
-            c.topLeftAlignment,
-            c.withLse ? &lseGpu : nullptr);
+        const auto runGpu = [&](auto* sink, auto sinkTag) {
+            using SinkT = typename decltype(sinkTag)::type;
+            GpuFpReferenceSdpaRagged::fpropPaged<T, T, T, T, float, SinkT>(
+                q,
+                kDev,
+                vDev,
+                oGpu,
+                raggedQ ? &offQ : nullptr,
+                raggedQ ? &offO : nullptr,
+                pageTableK,
+                pageTableVUsed,
+                seqLenKv,
+                seqLenQ.has_value() ? &seqLenQ.value() : nullptr,
+                maxSeqLenKv,
+                scale,
+                c.leftBound,
+                c.rightBound,
+                c.topLeftAlignment,
+                c.withLse ? &lseGpu : nullptr,
+                nullptr,
+                SdpaSoftmaxProbabilityMode::FLOAT,
+                nullptr,
+                nullptr,
+                nullptr,
+                {},
+                sink);
+        };
+        if(c.sinks.empty())
+        {
+            runGpu(static_cast<Tensor<float>*>(nullptr), TypeTag<float>{});
+        }
+        else if(c.sinkInIoType)
+        {
+            runGpu(&sinkIo, TypeTag<T>{});
+        }
+        else
+        {
+            runGpu(&sinkFloat, TypeTag<float>{});
+        }
     }
 
     const float tol = tolerance<T>();
@@ -396,7 +455,8 @@ void checkPaged(const PagedCase& c)
                     if(c.withLse)
                     {
                         EXPECT_EQ(lg[b * lseStr[0] + hh * lseStr[1] + s * lseStr[2]],
-                                  -std::numeric_limits<float>::infinity());
+                                  c.sinks.empty() ? -std::numeric_limits<float>::infinity()
+                                                  : sinkValues[static_cast<size_t>(hh)]);
                     }
                 }
             }
@@ -449,8 +509,20 @@ void checkPaged(const PagedCase& c)
                 }
             }
         }
-        CpuFpReferenceSdpa::forward<float, float, float, float>(
-            qb, kb, vb, ob, scale, nullptr, c.leftBound, c.rightBound, c.topLeftAlignment, &lseb);
+        CpuFpReferenceSdpa::forward<float, float, float, float>(qb,
+                                                                kb,
+                                                                vb,
+                                                                ob,
+                                                                scale,
+                                                                nullptr,
+                                                                c.leftBound,
+                                                                c.rightBound,
+                                                                c.topLeftAlignment,
+                                                                &lseb,
+                                                                nullptr,
+                                                                nullptr,
+                                                                nullptr,
+                                                                sinkPerHead);
         for(int64_t s = 0; s < sQ; ++s)
         {
             for(int64_t hh = 0; hh < h; ++hh)
@@ -666,5 +738,89 @@ TEST(TestGpuSdpaPagedFwdBf16, SeqLenKvAboveMaxThrows)
     auto seqLenKv = makeSeqLens({17});
     EXPECT_THROW((GpuFpReferenceSdpaRagged::fpropPaged<bfloat16>(
                      q, k, v, o, nullptr, nullptr, pageTable, pageTable, seqLenKv, nullptr, 16)),
+                 std::invalid_argument);
+}
+
+// Attention sinks, GPU vs CPU and vs the gathered dense oracle with the same sinks. The empty
+// batch must give O = 0 and LSE = sink.
+TEST(TestGpuSdpaPagedFwdBf16, SinksGqaDecodeInIoType)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedCase c;
+    c.seqLenKv = {37, 0, 16, 70};
+    c.numHeads = 8;
+    c.numHeadsK = 2;
+    c.numHeadsV = 2;
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.withLse = true;
+    c.sinks = {0.5f, -1.25f, 2.0f, -0.75f, 0.0f, 1.5f, -2.0f, 0.25f};
+    c.sinkInIoType = true;
+    checkPaged<bfloat16>(c);
+}
+
+TEST(TestGpuSdpaPagedFwdFp16, SinksFloatCausalSq4)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedCase c;
+    c.seqLenKv = {20, 3, 48};
+    c.seqQMax = 4;
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.withLse = true;
+    c.sinks = {1.0f, -0.5f, 3.0f, -4.0f};
+    checkPaged<half>(c);
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, SinksRaggedQSlidingWindow)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedCase c;
+    c.seqLenKv = {10, 0, 40};
+    c.raggedQTokens = std::vector<int64_t>{3, 2, 6};
+    c.seqLenQ = std::vector<int64_t>{2, 2, 6};
+    c.seqQMax = 6;
+    c.leftBound = 5;
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.withLse = true;
+    c.sinks = {0.25f, -1.0f, 1.75f, 0.5f};
+    c.sinkInIoType = true;
+    checkPaged<bfloat16>(c);
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, SinkShapeMismatchThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<bfloat16> q({1, 2, 1, 16});
+    Tensor<bfloat16> k({1, 2, 16, 16});
+    Tensor<bfloat16> v({1, 2, 16, 16});
+    Tensor<bfloat16> o({1, 2, 1, 16});
+    auto pageTable = makeSeqLens({0});
+    auto seqLenKv = makeSeqLens({1});
+    Tensor<float> sink({1, 1, 1, 1}); // one sink for two query heads
+    EXPECT_THROW((GpuFpReferenceSdpaRagged::fpropPaged<bfloat16>(q,
+                                                                 k,
+                                                                 v,
+                                                                 o,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 pageTable,
+                                                                 pageTable,
+                                                                 seqLenKv,
+                                                                 nullptr,
+                                                                 16,
+                                                                 std::nullopt,
+                                                                 -1,
+                                                                 -1,
+                                                                 true,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 SdpaSoftmaxProbabilityMode::FLOAT,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 {},
+                                                                 &sink)),
                  std::invalid_argument);
 }

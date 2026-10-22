@@ -3,7 +3,8 @@
 
 // GPU reference SDPA forward for ragged tensors (RFC-0014: packed BSHD + ragged_offset), and for
 // paged K/V (vLLM block tables) with dense or ragged Q.
-// Compiled via HipRTC with -DQ_TYPE, -DK_TYPE, -DV_TYPE, -DO_TYPE and -DCOMPUTE_TYPE.
+// Compiled via HipRTC with -DQ_TYPE, -DK_TYPE, -DV_TYPE, -DO_TYPE, -DCOMPUTE_TYPE and -DSINK_TYPE
+// (the dtype of the optional attention sink, read as float).
 //
 // Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
 // q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
@@ -32,6 +33,10 @@ static_assert(__is_same(COMPUTE_TYPE, float), "GpuRefSdpaRaggedFwd requires COMP
 
 #ifndef SDPA_SOFTMAX_PROBABILITY_MODE
 #define SDPA_SOFTMAX_PROBABILITY_MODE SDPA_SOFTMAX_PROBABILITY_FLOAT
+#endif
+
+#ifndef SINK_TYPE
+#define SINK_TYPE float
 #endif
 
 namespace
@@ -279,8 +284,15 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         return s;
     };
 
-    // Pass 1: row max for a stable softmax.
-    COMPUTE_TYPE maxVal = negInf;
+    // Attention sink of this head (a raw logit, not scaled): joins the max and the denominator,
+    // has no value row. -inf when absent, which is exactly no sink.
+    const COMPUTE_TYPE sink
+        = args.sink != nullptr
+              ? toAccum(static_cast<const SINK_TYPE*>(args.sink)[h * args.sinkHeadStride])
+              : negInf;
+
+    // Pass 1: row max for a stable softmax, seeded with the sink.
+    COMPUTE_TYPE maxVal = sink;
     for(long long skv = 0; skv < seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
@@ -302,8 +314,9 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
               : b * args.lseStr.s[0];
     long long lseIdx = lseBatchBase + h * args.lseStr.s[1] + sq * args.lseStr.s[2];
 
-    // Fully masked row, including seqKv == 0: write zero to match CpuFpReferenceSdpa and
-    // avoid a 0/0 NaN.
+    // Fully masked row without a sink, including seqKv == 0: write zero to match
+    // CpuFpReferenceSdpa and avoid a 0/0 NaN. With a sink such a row takes the normal path:
+    // maxVal = sink, sumExp = 1, O = 0, LSE = sink.
     if(maxVal == negInf)
     {
         o[oIdx] = fromAccum(static_cast<COMPUTE_TYPE>(0), tag);
@@ -315,8 +328,8 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         return;
     }
 
-    // Pass 2: softmax denominator.
-    COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
+    // Pass 2: softmax denominator, including the sink.
+    COMPUTE_TYPE sumExp = expf(sink - maxVal);
     for(long long skv = 0; skv < seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);

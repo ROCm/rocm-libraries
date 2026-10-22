@@ -1405,3 +1405,139 @@ TEST(TestGpuSdpaRaggedFwdFp32, PackedLseOfFullyMaskedRows)
     }
     EXPECT_EQ(maskedRows, (2 + 3) * numHeads);
 }
+
+// --- Attention sinks ---
+
+namespace
+{
+
+// Ragged GPU vs CPU with one sink logit per query head (bound as SinkT) and a dense LSE.
+template <typename T, typename SinkT>
+void checkRaggedSinks(const std::vector<int64_t>& seqQ,
+                      const std::vector<int64_t>& seqKv,
+                      int64_t numHeads,
+                      int64_t numHeadsKv,
+                      int64_t headDim,
+                      int64_t leftBound,
+                      int64_t rightBound,
+                      bool topLeftAlignment)
+{
+    const auto batch = static_cast<int64_t>(seqQ.size());
+    const auto sMaxQ = maxOf(seqQ);
+    const auto totalQ = sum(seqQ);
+    const auto totalKv = sum(seqKv);
+    const auto cumQ = cumTokens(seqQ);
+    const auto cumKv = cumTokens(seqKv);
+    const float scale = 0.25f;
+
+    const std::vector<int64_t> qDims = raggedDims(batch, sMaxQ, numHeads, headDim);
+    const std::vector<int64_t> kDims = raggedDims(batch, maxOf(seqKv), numHeadsKv, headDim);
+    Tensor<T> q(qDims, raggedStrides(qDims));
+    Tensor<T> k(kDims, raggedStrides(kDims));
+    Tensor<T> v(kDims, raggedStrides(kDims));
+    Tensor<T> oGpu(qDims, raggedStrides(qDims));
+    fillPackedRandom(q, totalQ * numHeads * headDim, -1.0f, 1.0f, SEED_Q);
+    fillPackedRandom(k, totalKv * numHeadsKv * headDim, -1.0f, 1.0f, SEED_K);
+    fillPackedRandom(v, totalKv * numHeadsKv * headDim, -1.0f, 1.0f, SEED_V);
+
+    Tensor<SinkT> sink({1, numHeads, 1, 1});
+    std::vector<float> sinkValues;
+    for(int64_t h = 0; h < numHeads; ++h)
+    {
+        const auto value = static_cast<SinkT>(1.5f - 0.5f * static_cast<float>(h));
+        sink.setHostValue(value, 0, h, 0, 0);
+        sinkValues.push_back(static_cast<float>(value));
+    }
+    sink.memory().markHostModified();
+
+    const std::vector<int64_t> lseDims = {batch, numHeads, sMaxQ, 1};
+    Tensor<float> lseCpu(lseDims);
+    Tensor<float> lseGpu(lseDims);
+    lseCpu.fillWithValue(0.0f);
+    lseGpu.fillWithValue(0.0f);
+
+    std::vector<T> oCpuBack(static_cast<size_t>(totalQ * numHeads * headDim), static_cast<T>(0.0f));
+    {
+        auto qR = wrapRagged(q.memory().hostData(), qDims, numHeads * headDim, cumQ);
+        auto kR = wrapRagged(k.memory().hostData(), kDims, numHeadsKv * headDim, cumKv);
+        auto vR = wrapRagged(v.memory().hostData(), kDims, numHeadsKv * headDim, cumKv);
+        auto oR = wrapRagged(oCpuBack.data(), qDims, numHeads * headDim, cumQ);
+        CpuFpReferenceSdpaRagged::forward<T, T, T, T, float>(qR,
+                                                             kR,
+                                                             vR,
+                                                             oR,
+                                                             scale,
+                                                             leftBound,
+                                                             rightBound,
+                                                             topLeftAlignment,
+                                                             &lseCpu,
+                                                             nullptr,
+                                                             nullptr,
+                                                             nullptr,
+                                                             &sinkValues);
+    }
+
+    auto offQ = makeRaggedOffset(cumQ, numHeads * headDim);
+    auto offK = makeRaggedOffset(cumKv, numHeadsKv * headDim);
+    auto offV = makeRaggedOffset(cumKv, numHeadsKv * headDim);
+    auto offO = makeRaggedOffset(cumQ, numHeads * headDim);
+    GpuFpReferenceSdpaRagged::fpropRagged<T, T, T, T, float, SinkT>(
+        q,
+        k,
+        v,
+        oGpu,
+        offQ,
+        offK,
+        offV,
+        offO,
+        scale,
+        leftBound,
+        rightBound,
+        topLeftAlignment,
+        &lseGpu,
+        nullptr,
+        SdpaSoftmaxProbabilityMode::FLOAT,
+        nullptr,
+        nullptr,
+        nullptr,
+        {},
+        &sink);
+
+    compareRaggedPacked(oGpu, oCpuBack, gpuRefFwdTolerance<T>());
+    const auto* lg = lseGpu.memory().hostData();
+    const auto* lc = lseCpu.memory().hostData();
+    for(int64_t b = 0; b < batch; ++b)
+    {
+        for(int64_t h = 0; h < numHeads; ++h)
+        {
+            for(int64_t s = 0; s < seqQ[static_cast<size_t>(b)]; ++s)
+            {
+                const auto i = static_cast<size_t>((b * numHeads + h) * sMaxQ + s);
+                EXPECT_NEAR(lg[i], lc[i], gpuRefFwdTolerance<float>())
+                    << "LSE mismatch batch " << b << " head " << h << " row " << s;
+            }
+        }
+    }
+}
+
+} // namespace
+
+// Bottom-right causal with more queries than keys in batch 0, so its first rows see no key and
+// give O = 0, LSE = sink on both references.
+TEST(TestGpuSdpaRaggedFwdBfp16, SinksGqaCausalBottomRightInIoType)
+{
+    SKIP_IF_NO_DEVICES();
+    checkRaggedSinks<bfloat16, bfloat16>({5, 3}, {3, 6}, 4, 2, 64, -1, 0, false);
+}
+
+TEST(TestGpuSdpaRaggedFwdFp32, SinksSlidingWindowFloat)
+{
+    SKIP_IF_NO_DEVICES();
+    checkRaggedSinks<float, float>({8, 6}, {8, 6}, 2, 2, 16, 2, 0, false);
+}
+
+TEST(TestGpuSdpaRaggedFwdBfp16, SinksFloatSinkWithBf16Io)
+{
+    SKIP_IF_NO_DEVICES();
+    checkRaggedSinks<bfloat16, float>({4, 1}, {7, 9}, 4, 1, 64, -1, 0, false);
+}

@@ -89,6 +89,7 @@ void GpuFpReferenceSdpaRagged::launchSdpaRaggedFwd(const void* qPtr,
                                                    int64_t rightBound,
                                                    bool topLeftAlignment,
                                                    const PagedKvLaunch& paged,
+                                                   const detail::SdpaSinkBinding& sink,
                                                    const std::vector<std::string>& defines)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
@@ -145,6 +146,8 @@ void GpuFpReferenceSdpaRagged::launchSdpaRaggedFwd(const void* qPtr,
     args.pageTableVStr2 = static_cast<long long>(paged.pageTableVStr2);
     args.blockSize = static_cast<long long>(paged.blockSize);
     args.seqQMax = static_cast<long long>(paged.seqQMax);
+    args.sink = sink.ptr;
+    args.sinkHeadStride = static_cast<long long>(sink.headStride);
 
     auto totalElements = totalQ * numHeads * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));

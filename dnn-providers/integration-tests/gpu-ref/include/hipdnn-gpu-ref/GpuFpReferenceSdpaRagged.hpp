@@ -43,7 +43,8 @@ struct RaggedOffsetMultipliers
 // match K's.
 // The optional LSE is [B, H, Sq, 1], ragged if raggedOffsetLse is given, else dense.
 // Softmax numerics match the dense reference. Supports GQA/MQA and per-batch causal and
-// sliding window. No bias, alibi or dropout, since the ASM v3 path gates them off.
+// sliding window. No bias, alibi or dropout, since the ASM v3 path gates them off. An optional
+// attention sink [1, H, 1, 1] of SinkDataType follows GpuFpReferenceSdpa::fprop.
 // fpropPaged runs the same kernel with paged K/V (vLLM block tables) and dense or ragged Q.
 class GpuFpReferenceSdpaRagged
 {
@@ -53,27 +54,31 @@ public:
               class KDataType = QDataType,
               class VDataType = QDataType,
               class ODataType = QDataType,
-              class ComputeDataType = float>
-    static void
-        fpropRagged(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                    hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                    hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                    hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                    hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetQ,
-                    hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetK,
-                    hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetV,
-                    hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetO,
-                    std::optional<float> attnScaleValue = std::nullopt,
-                    int64_t leftBound = -1,
-                    int64_t rightBound = -1,
-                    bool topLeftAlignment = true,
-                    hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                    hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetLse = nullptr,
-                    SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
-                    hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
-                    hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                    hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
-                    const RaggedOffsetMultipliers& offsetMultipliers = {})
+              class ComputeDataType = float,
+              class SinkDataType = float>
+    static void fpropRagged(
+        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetQ,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetK,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetV,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& raggedOffsetO,
+        std::optional<float> attnScaleValue = std::nullopt,
+        int64_t leftBound = -1,
+        int64_t rightBound = -1,
+        bool topLeftAlignment = true,
+        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetLse = nullptr,
+        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+        const RaggedOffsetMultipliers& offsetMultipliers = {},
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<SinkDataType>::type>*
+            sink
+        = nullptr)
     {
         // fp8 is input-only: the kernel can decode fp8 but not encode it (AITER writes bf16).
         static_assert(!std::is_same_v<ODataType, hipdnn_data_sdk::types::fp8_e4m3>,
@@ -133,6 +138,7 @@ public:
         auto defines
             = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
                 probabilityMode);
+        const auto sinkBinding = detail::bindSdpaSink<SinkDataType>(sink, numHeads, defines, who);
 
         void* lsePtr = nullptr;
         void* raggedOffsetLsePtr = nullptr;
@@ -223,6 +229,7 @@ public:
                             rightBound,
                             topLeftAlignment,
                             PagedKvLaunch{},
+                            sinkBinding,
                             defines);
 
         o.memory().markDeviceModified();
@@ -242,36 +249,40 @@ public:
     // Key row skv of batch b is container row skv % block_size of block pageTable[b, 0, skv /
     // block_size, 0]. Only the first ceil(seqLenKv[b] / block_size) entries are read; each must be
     // in [0, num_blocks). Rows sq >= seqQ[b] are left untouched; a live row with no unmasked key
-    // (including seqLenKv[b] == 0) writes zeros and LSE -inf. The optional LSE is [B, H, Sq, 1],
-    // ragged (with raggedOffsetLse, ragged Q only) or dense.
+    // (including seqLenKv[b] == 0) writes zeros and LSE -inf (LSE = sink with a sink). The
+    // optional LSE is [B, H, Sq, 1], ragged (with raggedOffsetLse, ragged Q only) or dense.
     template <class QDataType,
               class KDataType = QDataType,
               class VDataType = QDataType,
               class ODataType = QDataType,
-              class ComputeDataType = float>
-    static void
-        fpropPaged(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                   hipdnn_data_sdk::utilities::TensorBase<KDataType>& kContainer,
-                   hipdnn_data_sdk::utilities::TensorBase<VDataType>& vContainer,
-                   hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetQ,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetO,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTableK,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTableV,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>& seqLenKv,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ,
-                   int64_t maxSeqLenKv,
-                   std::optional<float> attnScaleValue = std::nullopt,
-                   int64_t leftBound = -1,
-                   int64_t rightBound = -1,
-                   bool topLeftAlignment = true,
-                   hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                   hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetLse = nullptr,
-                   SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
-                   hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
-                   hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                   hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
-                   const RaggedOffsetMultipliers& offsetMultipliers = {})
+              class ComputeDataType = float,
+              class SinkDataType = float>
+    static void fpropPaged(
+        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        hipdnn_data_sdk::utilities::TensorBase<KDataType>& kContainer,
+        hipdnn_data_sdk::utilities::TensorBase<VDataType>& vContainer,
+        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetQ,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetO,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTableK,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTableV,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>& seqLenKv,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ,
+        int64_t maxSeqLenKv,
+        std::optional<float> attnScaleValue = std::nullopt,
+        int64_t leftBound = -1,
+        int64_t rightBound = -1,
+        bool topLeftAlignment = true,
+        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* raggedOffsetLse = nullptr,
+        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+        const RaggedOffsetMultipliers& offsetMultipliers = {},
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<SinkDataType>::type>*
+            sink
+        = nullptr)
     {
         static_assert(!std::is_same_v<ODataType, hipdnn_data_sdk::types::fp8_e4m3>,
                       "fpropPaged: fp8 output is not supported; pass a bf16 or float ODataType");
@@ -427,6 +438,7 @@ public:
         auto defines
             = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
                 probabilityMode);
+        const auto sinkBinding = detail::bindSdpaSink<SinkDataType>(sink, numHeads, defines, who);
 
         void* lsePtr = nullptr;
         void* raggedOffsetLsePtr = nullptr;
@@ -529,6 +541,7 @@ public:
                             rightBound,
                             topLeftAlignment,
                             paged,
+                            sinkBinding,
                             defines);
 
         o.memory().markDeviceModified();
@@ -748,6 +761,7 @@ private:
                                     int64_t rightBound,
                                     bool topLeftAlignment,
                                     const PagedKvLaunch& paged,
+                                    const detail::SdpaSinkBinding& sink,
                                     const std::vector<std::string>& defines);
 };
 
