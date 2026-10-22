@@ -26,8 +26,11 @@
 #include "instruction/mfma.hpp"
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 #include <typeindex>
 
@@ -37,9 +40,19 @@ namespace rocisa
 {
     // This function can be used for prototyping in Python, but it's slower
     // e.g. counType(item, Instruction)
-    int countType(const std::shared_ptr<Item>& Item, nb::object& obj)
+    int countType(const std::shared_ptr<Item>& item, nb::object& obj)
     {
-        return Item->countType(obj);
+        if(auto module = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : module->itemList)
+                count += countType(i, obj);
+            return count;
+        }
+        // DummyItem is a placeholder and never counts.
+        if(std::dynamic_pointer_cast<DummyItem>(item))
+            return 0;
+        return static_cast<int>(nb::isinstance(nb::cast(*item), obj));
     }
 
     // Use typeid for exact match, use dynamic_pointer_cast for inheritance match

@@ -33,7 +33,7 @@ namespace rocisa
     //   - dstIdx must be two consecutive registers ; on exit the lower one will contain the quotient.  The upper is used as a temp.
     //   - First parm is passed as an integer vgpr index ; remaining are vgpr or sgpr symbolic names
     //   - dstIdx+1 cannot be same as dividend.  dividend+0 can be same as dividend and this may be useful for chaining divides.
-    std::shared_ptr<Macro> MacroVMagicDiv(int algo)
+    inline std::shared_ptr<Macro> MacroVMagicDiv(int algo)
     {
         auto macro = Macro(
             "V_MAGIC_DIV",
@@ -57,7 +57,7 @@ namespace rocisa
         return std::make_shared<Macro>(macro);
     }
 
-    std::shared_ptr<Macro> PseudoRandomGenerator()
+    inline std::shared_ptr<Macro> PseudoRandomGenerator()
     {
         auto macro = Macro("PRND_GENERATOR",
                            {"vgprRand:req", "vgprAcc:req", "vgprTemp0:req", "vgprTemp1:req"});
@@ -118,7 +118,7 @@ namespace rocisa
         return std::make_shared<Macro>(macro);
     }
 
-    std::shared_ptr<Module> VMagicDiv(int                                algo, 
+    inline std::shared_ptr<Module> VMagicDiv(int                                algo,
                                       int                                dstIdx, 
                                       std::shared_ptr<RegisterContainer> dividend,
                                       std::shared_ptr<RegisterContainer> magicNumber,
@@ -148,7 +148,7 @@ namespace rocisa
         return std::make_shared<Module>(module);
     }
 
-    std::shared_ptr<Module> PseudoRandomGeneratorModule(int Rand, int Acc, int Temp0, int Temp1)
+    inline std::shared_ptr<Module> PseudoRandomGeneratorModule(int Rand, int Acc, int Temp0, int Temp1)
     {
         auto module = Module("PRND_GENERATOR");
         module.addComment0("PRND_GENERATOR: vgprRand=RND(vgprAcc, sgprSeed, vgprTid)");

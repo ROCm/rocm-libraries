@@ -24,6 +24,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -175,7 +176,15 @@ void init_code(nb::module_ m)
         .def("appendModule", &rocisa::Module::appendModule)
         .def("addModuleAsFlatItems", &rocisa::Module::addModuleAsFlatItems)
         .def("findIndex", &rocisa::Module::findIndex)
-        .def("findIndexByType", &rocisa::Module::findIndexByType)
+        .def("findIndexByType",
+             [](const rocisa::Module& self, nb::object type) {
+                 for(int i = 0; i < static_cast<int>(self.itemList.size()); ++i)
+                 {
+                     if(nb::isinstance(nb::cast(*self.itemList[i]), type))
+                         return i;
+                 }
+                 return -1;
+             })
         .def("addComment", &rocisa::Module::addComment)
         .def("addCommentAlign", &rocisa::Module::addCommentAlign)
         .def("addComment0", &rocisa::Module::addComment0)

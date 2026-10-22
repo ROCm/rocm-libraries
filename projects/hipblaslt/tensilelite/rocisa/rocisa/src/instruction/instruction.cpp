@@ -25,9 +25,11 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/bind_vector.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
