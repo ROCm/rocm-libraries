@@ -14,6 +14,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocisaCore_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Select_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMM_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitTracker_test.cpp"
 )

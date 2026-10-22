@@ -36,7 +36,7 @@ if(NOT COMMAND nanobind_add_module)
     )
     FetchContent_MakeAvailable(nanobind)
 endif()
-message(STATUS "tensilelite_jit: using nanobind from ${NB_DIR}")
+message(STATUS "tensilelite bindings: using nanobind from ${NB_DIR}")
 
 nanobind_add_module(tensilelite_jit NOMINSIZE NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/Bindings.cpp"
@@ -47,3 +47,15 @@ set_target_properties(tensilelite_jit
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         BUILD_RPATH "$<TARGET_FILE_DIR:tensilelite-jit>"
 )
+
+if(TENSILELITE_ENABLE_CODEGEN)
+    nanobind_add_module(tensilelite_codegen NOMINSIZE NB_SUPPRESS_WARNINGS
+        "${CMAKE_CURRENT_SOURCE_DIR}/CodegenBindings.cpp"
+    )
+    target_link_libraries(tensilelite_codegen PRIVATE roc::tensilelite-codegen)
+    # Same directory as tensilelite_jit, so one PYTHONPATH entry serves both.
+    set_target_properties(tensilelite_codegen
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    )
+endif()
