@@ -32,7 +32,10 @@ _BUILD = {
 
 
 def _hip_sources_root(dst):
-    """The hip fixture with pointwise.kdp.json's two UKDs fused into one `sources` UKD."""
+    """The hip fixture with pointwise.kdp.json's two UKDs fused into one `sources` UKD.
+
+    The fused KDP gets a UDD of its own: the fixture's other pointwise KDPs stay
+    single-launch, and one dispatch handler declares one launch set."""
     hip_source(dst)
     kdp = json.loads((dst / KDP).read_text())
     first = kdp["kernelDescriptors"][0]
@@ -48,6 +51,14 @@ def _hip_sources_root(dst):
         for launch, entry in (("add", "PointwiseAdd"), ("mul", "PointwiseMul"))
     }
     kdp["kernelDescriptors"] = [ukd]
+    udd = json.loads((dst / "pointwise.udd.json").read_text())
+    udd.update(
+        id="udd-pointwise-sources",
+        name="Pointwise multi-launch dispatch",
+        dispatch_symbol="hipkernel.pointwise_sources.dispatch",
+    )
+    (dst / "pointwise_sources.udd.json").write_text(json.dumps(udd, indent=2))
+    kdp["dispatch"] = udd["id"]
     (dst / KDP).write_text(json.dumps(kdp, indent=2))
     return dst
 

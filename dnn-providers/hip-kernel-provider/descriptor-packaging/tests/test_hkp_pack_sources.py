@@ -10,12 +10,18 @@ import hashlib
 import json
 import itertools
 import re
+from pathlib import Path
 
 import pytest
 
 from hkp_pack import agreement, desk_check, pipeline, provenance_sidecar, sources
 from hkp_pack.descriptor_context import Entry
-from hkp_pack.descriptors import _validate_ukd_fields, load_flat_input
+from hkp_pack.descriptors import (
+    Descriptor,
+    FlatInput,
+    _validate_ukd_fields,
+    load_flat_input,
+)
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
 from pack_helpers import GENERIC_TARGETS, _kdp, _restamp, _silent, _write_json
@@ -1494,9 +1500,13 @@ def _inline(ukd_id, names):
     )
 
 
-def _kdp_of(kdp_id, *entries):
+def _kdp_of(kdp_id, *entries, dispatch=None):
+    """A shard KDP over `entries`; its UDD is its own unless `dispatch` names one."""
     return pipeline.ArchKDP(
-        id=kdp_id, filename=f"{kdp_id}.kdp.json", header={}, entries=list(entries)
+        id=kdp_id,
+        filename=f"{kdp_id}.kdp.json",
+        header={"dispatch": dispatch or f"udd-{kdp_id}"},
+        entries=list(entries),
     )
 
 
@@ -1509,9 +1519,34 @@ def _shard(*kdps, standalone=()):
     )
 
 
-class TestOneLaunchSetPerKdp:
+def _udds(inter, symbols=None):
+    """The input holding one UDD per dispatch the shard's KDPs name. Each UDD names
+    the handler `handler.<udd id>` unless `symbols` maps its id to another."""
+    symbols = symbols or {}
+    ids = sorted({kdp.header["dispatch"] for kdp in inter.kdps})
+    return FlatInput(
+        descriptors=[
+            Descriptor(
+                path=Path(f"{udd_id}.udd.json"),
+                doc={
+                    "id": udd_id,
+                    "name": udd_id,
+                    "dispatch_symbol": symbols.get(udd_id, f"handler.{udd_id}"),
+                },
+            )
+            for udd_id in ids
+        ]
+    )
+
+
+def _check(inter, symbols=None):
+    pipeline._check_launch_sets(_udds(inter, symbols), inter)
+
+
+class TestOneLaunchSetPerDispatchHandler:
     """One native dispatch handler declares one launch set and serves every kernel
-    of its KDP; the packer refuses a KDP whose kernels disagree."""
+    of every KDP whose UDD names it; the packer refuses kernels of one handler that
+    disagree, whether they share a KDP, a UDD, or only the dispatch symbol."""
 
     def test_kernels_naming_different_launch_sets_are_refused(self, tmp_path):
         inter = _shard(
@@ -1522,8 +1557,9 @@ class TestOneLaunchSetPerKdp:
             )
         )
         with pytest.raises(HkpPackError) as info:
-            pipeline.pack_arch(None, inter, tmp_path, None, None)
+            pipeline.pack_arch(_udds(inter), inter, tmp_path, None, None)
         message = str(info.value)
+        assert "dispatch handler 'handler.udd-kdp-mixed'" in message
         assert "KDP 'kdp-mixed'" in message
         assert "['ukd-one'] name launches ['decode', 'merge']" in message
         assert "['ukd-two'] name launches ['reduce', 'segment']" in message
@@ -1535,7 +1571,7 @@ class TestOneLaunchSetPerKdp:
             )
         )
         with pytest.raises(HkpPackError) as info:
-            pipeline._check_launch_sets(inter)
+            _check(inter)
         message = str(info.value)
         assert "KDP 'kdp-mixed'" in message
         assert "['ukd-plain'] name launches []" in message
@@ -1547,10 +1583,10 @@ class TestOneLaunchSetPerKdp:
             standalone=[_inline("ukd-alone", [])],
         )
         with pytest.raises(HkpPackError, match=r"\['ukd-alone'\] name launches \[\]"):
-            pipeline._check_launch_sets(inter)
+            _check(inter)
 
     def test_the_same_launch_set_in_a_different_key_order_is_accepted(self):
-        pipeline._check_launch_sets(
+        _check(
             _shard(
                 _kdp_of(
                     "kdp-demo",
@@ -1560,14 +1596,40 @@ class TestOneLaunchSetPerKdp:
             )
         )
 
-    def test_each_kdp_may_name_its_own_launch_set(self):
+    def test_two_kdps_sharing_one_udd_are_held_to_one_launch_set(self):
+        # Each KDP agrees with itself; the loader still resolves one handler for
+        # both, so the second KDP's kernel would be dropped at load.
+        inter = _shard(
+            _kdp_of("kdp-a", _inline("ukd-a", ["decode", "merge"]), dispatch="udd-x"),
+            _kdp_of("kdp-b", _inline("ukd-b", ["decode", "reduce"]), dispatch="udd-x"),
+        )
+        with pytest.raises(HkpPackError) as info:
+            _check(inter)
+        message = str(info.value)
+        assert "dispatch handler 'handler.udd-x'" in message
+        assert "KDP 'kdp-a' (kdp-a.kdp.json) UKD(s) ['ukd-a']" in message
+        assert "KDP 'kdp-b' (kdp-b.kdp.json) UKD(s) ['ukd-b']" in message
+        assert "name launches ['decode', 'merge']" in message
+        assert "name launches ['decode', 'reduce']" in message
+
+    def test_two_udds_naming_one_dispatch_symbol_are_held_to_one_launch_set(self):
+        inter = _shard(
+            _kdp_of("kdp-multi", _inline("ukd-multi", ["decode", "merge"])),
+            _kdp_of("kdp-plain", _inline("ukd-plain", [])),
+        )
+        symbols = {"udd-kdp-multi": "sdpa.fwd", "udd-kdp-plain": "sdpa.fwd"}
+        with pytest.raises(HkpPackError, match=r"dispatch handler 'sdpa\.fwd'"):
+            _check(inter, symbols)
+
+    def test_each_dispatch_handler_may_serve_its_own_launch_set(self):
         shared = _inline("ukd-shared", ["a", "b"])
-        pipeline._check_launch_sets(
+        _check(
             _shard(
                 _kdp_of("kdp-ab", _inline("ukd-x", ["a", "b"]), "ukd-shared"),
                 _kdp_of("kdp-cd", _inline("ukd-y", ["c", "d"])),
                 _kdp_of("kdp-plain", _inline("ukd-z", [])),
-                _kdp_of("kdp-ab-again", "ukd-shared"),
+                # Shares kdp-ab's UDD, and its launch set with it.
+                _kdp_of("kdp-ab-again", "ukd-shared", dispatch="udd-kdp-ab"),
                 standalone=[shared],
             )
         )

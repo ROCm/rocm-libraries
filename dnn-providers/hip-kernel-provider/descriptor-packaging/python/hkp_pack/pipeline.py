@@ -1743,17 +1743,23 @@ def _launch_set(inter, entry):
     return frozenset(entry.launches)
 
 
-def _check_launch_sets(inter):
-    """Every kernel of one KDP names the same launch set, per shard.
+def _check_launch_sets(flat, inter):
+    """Every kernel one dispatch handler serves names the same launch set, per shard.
 
-    One native dispatch handler declares one launch set and serves every kernel of
-    its KDP, so a kernel with a different set, or a single-launch kernel beside a
-    multi-launch one (whose set is empty), belongs in a KDP of its own. The check
-    sees the entries that ship in this shard and runs per KDP, since a standalone
-    UKD may be referenced by several.
+    One native dispatch handler declares one launch set, and the loader resolves it
+    from the `dispatch_symbol` of the KDP's UDD. A handler therefore serves every
+    kernel of every KDP whose UDD names that symbol, whether the KDPs share one UDD or
+    name the symbol from two. A kernel with a different set, or a single-launch kernel
+    beside a multi-launch one (whose set is empty), needs a KDP whose UDD names a
+    handler of its own. The check sees the entries that ship in this shard, since a
+    standalone UKD may be referenced by several KDPs.
     """
+    udds = flat.generic_by_id()
+    by_handler = {}
     for kdp in inter.kdps:
-        by_set = {}
+        # Validation resolved every KDP's dispatch reference inside this root.
+        symbol = udds[canonical_id(kdp.header["dispatch"])].doc["dispatch_symbol"]
+        by_set = by_handler.setdefault(symbol, {})
         for entry in kdp.entries:
             if isinstance(entry, str):
                 ident = entry
@@ -1761,16 +1767,24 @@ def _check_launch_sets(inter):
                 ident = entry.doc.get("id")
             else:
                 ident = entry.id
-            by_set.setdefault(_launch_set(inter, entry), []).append(ident)
+            by_kdp = by_set.setdefault(_launch_set(inter, entry), {})
+            by_kdp.setdefault((kdp.id, kdp.filename), []).append(ident)
+    for symbol, by_set in by_handler.items():
         if len(by_set) > 1:
             detail = "; ".join(
-                f"UKD(s) {sorted(map(str, ids))} name launches {sorted(names)}"
-                for names, ids in sorted(by_set.items(), key=lambda kv: sorted(kv[0]))
+                ", ".join(
+                    f"KDP '{kdp_id}' ({filename}) UKD(s) {sorted(map(str, ids))}"
+                    for (kdp_id, filename), ids in sorted(by_kdp.items())
+                )
+                + f" name launches {sorted(names)}"
+                for names, by_kdp in sorted(
+                    by_set.items(), key=lambda kv: sorted(kv[0])
+                )
             )
             raise HkpPackError(
-                f"KDP '{kdp.id}' ({kdp.filename}): its kernels name different "
-                f"launch sets ({detail}); one dispatch handler declares one launch "
-                "set, so put each launch set in its own KDP"
+                f"dispatch handler '{symbol}' serves kernels that name different "
+                f"launch sets ({detail}); one dispatch handler declares one launch set, "
+                "so give each launch set a KDP whose UDD names a handler of its own"
             )
 
 
@@ -1808,7 +1822,7 @@ def pack_arch(
     out_arch_dir = Path(out_arch_dir)
     out_arch_dir.mkdir(parents=True, exist_ok=True)
 
-    _check_launch_sets(inter)
+    _check_launch_sets(flat, inter)
     standalone = list(inter.standalone_ukds.values())
 
     def _all_ukds():

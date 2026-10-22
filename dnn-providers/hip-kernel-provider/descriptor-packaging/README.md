@@ -397,11 +397,15 @@ between stages belong to the native dispatch handler of the pack. That handler d
 launch names it launches (`IKernelDispatchHandler::launchNames`, empty by default, which is
 a single-launch handler reading `kernel_source`). The state manager drops a kernel whose
 launch names differ from that set, before applicability, so an accepted kernel is always
-launchable. A variant with a different launch set therefore belongs in its own pack, and
-the packer enforces it: kernels of one KDP that name different launch sets, or a
-single-launch kernel beside a multi-launch one, fail the pack, naming the KDP and each
-kernel's launch set. The order of the `sources` keys carries no meaning, so the same names
-in another order are one set. The handler reaches one launch's definition with
+launchable. The loader resolves one handler per `dispatch_symbol`, so a handler serves every
+KDP whose UDD names that symbol, whether the KDPs share one UDD or each has its own. A
+variant with a different launch set therefore needs a KDP whose UDD names a handler of its
+own, and the packer enforces it per shard: kernels served by one dispatch symbol that name
+different launch sets, or a single-launch kernel beside a multi-launch one, fail the pack,
+naming the dispatch symbol, each KDP and each kernel's launch set. The order of the
+`sources` keys carries no meaning, so the same names in another order are one set. The
+check sees one packaging root, so two roots that register the same dispatch symbol are not
+compared. The handler reaches one launch's definition with
 `launchKernelDefinition(kernel, "merge")` and hands it to `buildIngestorKernelCode`.
 
 ## Emitted-bundle census
