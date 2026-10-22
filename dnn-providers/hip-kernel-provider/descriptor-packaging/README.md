@@ -17,7 +17,7 @@ identical across member folders and separate per-arch builds, and the loader col
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
 Kernels sharing a metadata tuple are ranked per device by arch tier; see
-[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate).
+[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine).
 
 Authoring rules. Each violation fails the packer, raises a generator ConfigError, and makes the
 loader log an ERROR and drop the pack:
