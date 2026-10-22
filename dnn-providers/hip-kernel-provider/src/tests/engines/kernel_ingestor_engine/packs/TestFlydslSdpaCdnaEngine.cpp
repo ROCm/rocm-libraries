@@ -1284,7 +1284,8 @@ std::vector<KernelDefinition> stagedCdnaCandidates(const MatchContext& context,
                                             arches,
                                             kernel.originDirectory,
                                             kernel.name,
-                                            kernel.treeRoot};
+                                            kernel.treeRoot,
+                                            kernel.sources};
                 if(matchesCdnaKernel(context, definition, bound))
                 {
                     candidates.push_back(std::move(definition));

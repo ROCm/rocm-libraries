@@ -86,7 +86,8 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
                                                                             arches,
                                                                             kernel.originDirectory,
                                                                             kernel.name,
-                                                                            kernel.treeRoot});
+                                                                            kernel.treeRoot,
+                                                                            kernel.sources});
         }
     }
     return kernels;

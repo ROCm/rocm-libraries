@@ -197,7 +197,8 @@ bool findStagedKernel(const std::string& dtype,
                                    kernel.arch.empty() ? pack.arch : kernel.arch,
                                    kernel.originDirectory,
                                    kernel.name,
-                                   kernel.treeRoot};
+                                   kernel.treeRoot,
+                                   kernel.sources};
             return true;
         }
     }
@@ -1928,7 +1929,8 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {64, 4096}),
                                packedArchDeviceProperties());
     const auto context = fixture.context();
-    const auto& engineName = loadedSet(FLYDSL_RMSNORM.engineName).engine.name;
+    // The identity makeStateManager() keys the shard by: name, revision, UHD and model hash.
+    const auto engine = engineIdentity(loadedSet(FLYDSL_RMSNORM.engineName));
     const auto& arch = context.deviceProperties.gcnArchName;
 
     {
@@ -1946,7 +1948,7 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
             winnerKeyFor(context), recordOver(inverted), WinnerWriteCause::FRESH_MISS);
     }
 
-    const auto shard = winnerCacheShardPath(engineName, arch);
+    const auto shard = winnerCacheShardPath(engine, arch);
     ASSERT_FALSE(shard.empty()) << "no usable cache root; the scoped temp dir did not take";
     EXPECT_TRUE(std::filesystem::exists(shard)) << shard.string();
 
@@ -1955,7 +1957,9 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
     // component is sanitized and carries a hash suffix, so it is checked for
     // distinctness rather than for spelling.
     EXPECT_EQ(shard.parent_path().filename().string(), arch);
-    EXPECT_NE(winnerCacheShardPath("hip_kernel_provider.some_other_engine", arch), shard)
+    auto otherEngine = engine;
+    otherEngine.name = "hip_kernel_provider.some_other_engine";
+    EXPECT_NE(winnerCacheShardPath(otherEngine, arch), shard)
         << "two engines share a shard; one engine's sweep would then be served to the "
            "other";
 

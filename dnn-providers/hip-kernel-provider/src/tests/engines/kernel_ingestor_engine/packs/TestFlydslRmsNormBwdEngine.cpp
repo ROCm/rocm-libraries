@@ -135,7 +135,8 @@ bool findStagedBwdKernel(
                                    kernel.arch.empty() ? pack.arch : kernel.arch,
                                    kernel.originDirectory,
                                    kernel.name,
-                                   kernel.treeRoot};
+                                   kernel.treeRoot,
+                                   kernel.sources};
             return true;
         }
     }

@@ -1156,7 +1156,8 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                         kernel.arch.empty() ? pack.arch : kernel.arch,
                                         kernel.originDirectory,
                                         kernel.name,
-                                        kernel.treeRoot};
+                                        kernel.treeRoot,
+                                        kernel.sources};
             if(exact)
             {
                 return definition;
@@ -1326,7 +1327,8 @@ std::optional<KernelDefinition> findStagedAiwKernel(const std::string& dtype,
                                         arches,
                                         kernel.originDirectory,
                                         kernel.name,
-                                        kernel.treeRoot};
+                                        kernel.treeRoot,
+                                        kernel.sources};
             if(exact)
             {
                 return definition;

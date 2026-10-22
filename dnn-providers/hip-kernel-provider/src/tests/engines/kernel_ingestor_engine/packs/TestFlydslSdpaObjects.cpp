@@ -565,7 +565,8 @@ TEST_P(TestFlydslSdpaObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromItsM
                                               kernel.arch.empty() ? pack.arch : kernel.arch,
                                               kernel.originDirectory,
                                               kernel.name,
-                                              kernel.treeRoot};
+                                              kernel.treeRoot,
+                                              kernel.sources};
             for(const auto& arch : definition.arch)
             {
                 objectsPerArch[arch].push_back(definition);
