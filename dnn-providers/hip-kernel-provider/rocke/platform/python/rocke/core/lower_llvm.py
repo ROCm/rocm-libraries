@@ -63,6 +63,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -650,6 +651,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    # 1-byte buffer load and store: the narrowest access, range-checked whole,
+    # for 1-byte elements (i8, u8, fp8, bf8) one at a time.
+    "raw.ptr.buffer.load.i8": (
+        "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.store.i8": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8("
+        "i8, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -1083,6 +1094,24 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
 # Declaration key of the K=128 f8f6f4 MFMA (A and B as ``<8 x i32>``). The key is
 # the intrinsic name without the ``llvm.amdgcn.`` prefix, as for the 32x32x64 key.
 _F8F6F4_16X16X128_KEY = "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+
+
+class _BufferAccessForm(NamedTuple):
+    """The raw buffer intrinsic form that moves one access of a given width."""
+
+    suffix: str  # the intrinsic's type suffix: raw.ptr.buffer.load.<suffix>
+    llvm_type: str  # the integer type the access is loaded or stored as
+    load_hint: str  # the name hint of the loaded integer
+
+
+# One form per buffer access width in bytes (core/ir.py _BUFFER_ACCESS_BYTES).
+_BUFFER_ACCESS_FORMS: dict[int, _BufferAccessForm] = {
+    1: _BufferAccessForm("i8", "i8", "bli8"),
+    2: _BufferAccessForm("i16", "i16", "bli16"),
+    4: _BufferAccessForm("i32", "i32", "bli32"),
+    8: _BufferAccessForm("v2i32", "<2 x i32>", "blv2"),
+    16: _BufferAccessForm("v4i32", "<4 x i32>", "blv4"),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -5963,43 +5992,49 @@ class _Lowerer:
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
-        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
-        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
-        (4-byte) elements.
+        One raw buffer load of the result's width (``_BUFFER_ACCESS_FORMS``),
+        bitcast to the ``<n x elem>`` result.
         """
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count  # elements in the result vector
-        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
-        llvm_elem = _LLVM_ELEM[elem_type]
-        if dwords == 1:
-            self._need("raw.ptr.buffer.load.i32")
-            tmp = self._fresh("bli32")
-            self._current().emit(
-                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
-            )
-        else:
-            intr = f"raw.ptr.buffer.load.v{dwords}i32"
-            self._need(intr)
-            tmp = self._fresh(f"blv{dwords}")
-            self._current().emit(
-                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
-            )
+        result_type = op.result.type
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.load.{form.suffix}")
+        tmp = self._fresh(form.load_hint)
+        self._current().emit(
+            f"  {tmp} = call {form.llvm_type} "
+            f"@llvm.amdgcn.raw.ptr.buffer.load.{form.suffix}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
+            f"{_llvm_type(result_type)}"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer store: the value bitcast to one
+        integer of its width (``_BUFFER_ACCESS_FORMS``) and stored with the
+        matching raw buffer store."""
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.store.{form.suffix}")
+        bc = self._fresh("bsbc")
+        self._current().emit(
+            f"  {bc} = bitcast {_llvm_type(val.type)} {self._operand(val)} to "
+            f"{form.llvm_type}"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.{form.suffix}("
+            f"{form.llvm_type} {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         """Dtype-generic scalar buffer load (single element, OOB-clamped).

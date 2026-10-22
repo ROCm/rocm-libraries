@@ -36,6 +36,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -234,6 +235,17 @@ _VEC_PREFIX = {
     "i8": "i8x",
     "fp8e4m3": "i8x",
     "bf8e5m2": "i8x",
+}
+
+
+# One buffer access per width in bytes (core/ir.py _BUFFER_ACCESS_BYTES): the
+# raw buffer builtin's suffix and the integer type it loads or stores.
+_HIP_BUFFER_ACCESS = {
+    1: ("_b8", "unsigned char"),
+    2: ("_b16", "unsigned short"),
+    4: ("_b32", "int"),
+    8: ("_b64", "i32x2"),
+    16: ("_b128", "i32x4"),
 }
 
 
@@ -1171,26 +1183,33 @@ class _Lowerer:
         )
 
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
-        # Dtype-generic vectorised buffer load.
-        # Loads <dwords x i32> via __builtin_amdgcn_raw_buffer_load_b{32,64,128},
-        # then memcpy-punches to the target vector type (f16xN, bf16xN, f32xN).
+        # Dtype-generic vectorised buffer load: one raw buffer load of the
+        # result's width (_HIP_BUFFER_ACCESS), copied into the result vector.
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count
-        # Map our IR elem name → HIP vector typedef prefix
-        _HIP_VEC = {"f16": "f16x", "bf16": "bf16x", "f32": "f32x", "i32": "i32x"}
-        hip_vec_t = f"{_HIP_VEC[elem_type]}{n}"
-        b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
-        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        result_type = op.result.type
+        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
-            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
+            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{suffix}("
             f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
         )
         self._emit(
-            f"{hip_vec_t} {_name(op.result)}; "
-            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {dwords * 4});"
+            f"{_type_to_hip(result_type)} {_name(op.result)}; "
+            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {nbytes});"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        # Dtype-generic vectorised buffer store: the value copied into one
+        # integer of its width (_HIP_BUFFER_ACCESS) and stored. The braces
+        # scope the temporary, so two stores of one value do not redeclare it.
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
+        self._emit(
+            f"{{ {raw_t} _bs; __builtin_memcpy(&_bs, &{_name(val)}, {nbytes}); "
+            f"__builtin_amdgcn_raw_buffer_store{suffix}(_bs, "
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0); }}"
         )
 
     def _op_tile_buffer_load(self, op: Op) -> None:

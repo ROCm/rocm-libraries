@@ -297,6 +297,119 @@ int rocke_i_type_bits(const rocke_type_t* t)
     return rocke_require_dtype_info(t->name)->encoded_bits;
 }
 
+/* Python core/ir.py::_buffer_access_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_access_bytes(
+    const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap)
+{
+    int bits;
+    int64_t nbytes;
+    if(elem->kind != ROCKE_TYPE_SCALAR)
+    {
+        snprintf(
+            err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
+        return 0;
+    }
+    /* Python _SCALE_ENCODING_SCALARS: whole bytes, but no value form in the IR
+     * (no LLVM or HIP type in either engine). */
+    if(strcmp(elem->name, "e8m0") == 0 || strcmp(elem->name, "e5m3") == 0)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: %s is an MMA scale encoding with no value form; move its bytes as u8",
+                 op_name,
+                 elem->name);
+        return 0;
+    }
+    bits = rocke_i_type_bits(elem);
+    if(bits % 8 != 0)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: %s elements are %d bits, not whole bytes; a buffer access moves whole bytes",
+                 op_name,
+                 elem->name,
+                 bits);
+        return 0;
+    }
+    if(count < 1)
+    {
+        snprintf(err, err_cap, "%s: n must be at least 1, got %d", op_name, count);
+        return 0;
+    }
+    /* In 64 bits: count * bits overflows an int for a large count (Python's
+     * ints do not overflow, and the texts must match). */
+    nbytes = (int64_t)count * bits / 8;
+    if(nbytes != 1 && nbytes != 2 && nbytes != 4 && nbytes != 8 && nbytes != 16)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: %d x %s is %lld bytes; a buffer access moves 1, 2, 4, 8 or 16 bytes",
+                 op_name,
+                 count,
+                 elem->name,
+                 (long long)nbytes);
+        return 0;
+    }
+    return (int)nbytes;
+}
+
+/* Python core/ir.py::_buffer_vector_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_vector_bytes(
+    const char* op_name, const char* role, const rocke_type_t* t, char* err, size_t err_cap)
+{
+    if(t->kind != ROCKE_TYPE_VECTOR)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: the %s must be a vector, got %s; a one-element vector is vector_splat(x, 1)",
+                 op_name,
+                 role,
+                 t->name);
+        return 0;
+    }
+    return rocke_i_buffer_access_bytes(op_name, t->elem, t->count, err, err_cap);
+}
+
+/* Python core/ir.py::_buffer_op_bytes; the texts are the Python engine's. */
+int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap)
+{
+    int operands, results;
+    const char* role;
+    const char* expected;
+    if(op->opcode == ROCKE_OP_TILE_BUFFER_LOAD_VN)
+    {
+        operands = 3;
+        results = 1;
+        role = "result";
+        expected = "3 operands / 1 result";
+    }
+    else if(op->opcode == ROCKE_OP_TILE_BUFFER_STORE_VN)
+    {
+        operands = 4;
+        results = 0;
+        role = "value";
+        expected = "4 operands / 0 results";
+    }
+    else
+    {
+        snprintf(err, err_cap, "%s is not a buffer_load_vN or buffer_store_vN op", op->name);
+        return 0;
+    }
+    if(op->num_operands != operands || op->num_results != results)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: expected %s, got %d / %d",
+                 op->name,
+                 expected,
+                 op->num_operands,
+                 op->num_results);
+        return 0;
+    }
+    return rocke_i_buffer_vector_bytes(
+        op->name, role, results ? op->results[0]->type : op->operands[3]->type, err, err_cap);
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -939,7 +1052,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.fdot2",
 
     /* tile.buffer_load (dtype-generic scalar buffer load) */
-    "tile.buffer_load"};
+    "tile.buffer_load",
+
+    /* tile.* dtype-generic buffer store */
+    "tile.buffer_store_vN"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1225,7 +1341,9 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
 
     /* arith.fdot2 */
     /* arith.fdot2                */ false,
-    /* tile.buffer_load           */ false};
+    /* tile.buffer_load           */ false,
+    /* tile.* dtype-generic buffer store (effectful) */
+    /* buffer_store_vN            */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

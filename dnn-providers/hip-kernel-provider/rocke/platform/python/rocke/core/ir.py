@@ -815,6 +815,94 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
     return None
 
 
+# The sizes one raw buffer load or store moves: the i8, i16, i32, v2i32 and v4i32
+# forms of the raw buffer intrinsics. The hardware range-checks an access of 4
+# bytes or more per 4-byte component and a 1- or 2-byte access whole, so the
+# narrow forms are the ones that keep a byte-exact last element.
+_BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
+
+# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
+# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
+# vector of them. Their bytes move as u8.
+_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
+
+
+def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
+    """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
+
+    The element is any scalar whose width is whole bytes and that has a value
+    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
+    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
+    refuses with the same texts.
+    """
+    if isinstance(elem, (VectorType, PtrType, SmemType)):
+        raise TypeError(
+            f"{op_name}: the element type must be a scalar, got {elem.name}"
+        )
+    if elem.name in _SCALE_ENCODING_SCALARS:
+        raise TypeError(
+            f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
+            "move its bytes as u8"
+        )
+    bits = type_bits(elem)
+    if bits % 8 != 0:
+        raise ValueError(
+            f"{op_name}: {elem.name} elements are {bits} bits, not whole bytes; "
+            "a buffer access moves whole bytes"
+        )
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError(f"{op_name}: n must be an int, got {count!r}")
+    if count < 1:
+        raise ValueError(f"{op_name}: n must be at least 1, got {count}")
+    nbytes = count * bits // 8
+    if nbytes not in _BUFFER_ACCESS_BYTES:
+        raise ValueError(
+            f"{op_name}: {count} x {elem.name} is {nbytes} bytes; a buffer access "
+            "moves 1, 2, 4, 8 or 16 bytes"
+        )
+    return nbytes
+
+
+def _buffer_vector_bytes(op_name: str, role: str, vector_type: Type) -> int:
+    """The bytes a buffer access whose ``role`` (the loaded result, the stored
+    value) has type ``vector_type`` moves, or refuse it.
+
+    Both are vectors; their elements and width follow
+    :func:`_buffer_access_bytes`. The C++ engine refuses with the same texts.
+    """
+    if not isinstance(vector_type, VectorType):
+        raise TypeError(
+            f"{op_name}: the {role} must be a vector, got {vector_type.name}; "
+            "a one-element vector is vector_splat(x, 1)"
+        )
+    return _buffer_access_bytes(op_name, vector_type.elem, vector_type.count)
+
+
+def _buffer_op_bytes(op: Op) -> int:
+    """:func:`_buffer_vector_bytes` for a built ``tile.buffer_load_vN`` (three
+    operands, one result: the loaded vector) or ``tile.buffer_store_vN`` (four
+    operands, the last the stored vector, no result), after its operand and
+    result counts: serialized IR reaches the verifier and the lowerings without
+    passing the builder. The C++ engine (``rocke_i_buffer_op_bytes``) refuses
+    with the same texts."""
+    if op.name == "tile.buffer_load_vN":
+        operands, results, role = 3, 1, "result"
+        expected = "3 operands / 1 result"
+    elif op.name == "tile.buffer_store_vN":
+        operands, results, role = 4, 0, "value"
+        expected = "4 operands / 0 results"
+    else:
+        raise ValueError(f"{op.name} is not a buffer_load_vN or buffer_store_vN op")
+    if len(op.operands) != operands or len(op.results) != results:
+        raise ValueError(
+            f"{op.name}: expected {expected}, got {len(op.operands)} / "
+            f"{len(op.results)}"
+        )
+    access_type = op.results[0].type if results else op.operands[3].type
+    return _buffer_vector_bytes(op.name, role, access_type)
+
+
 # ----------------------------- Values / Ops ------------------------------
 
 
@@ -5335,35 +5423,32 @@ class IRBuilder:
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
-        Supported dtypes and widths:
-          - f16 / bf16 (2-byte): n in {2, 4, 8} → dwords = n // 2
-          - f32 / i32  (4-byte): n in {1, 2, 4} → dwords = n
+        ``dtype`` is any scalar whose width is whole bytes (i8, u8, fp8, bf8,
+        i16, f16, bf16, i32, f32, i64, f64), and the ``n`` elements together
+        move 1, 2, 4, 8 or 16 bytes. The access is one ``i8``, ``i16``,
+        ``i32``, ``<2 x i32>`` or ``<4 x i32>`` load, bitcast to the
+        ``<n x dtype>`` result. The HIP lowering has no vector type for u8 or
+        i64 elements, so those two lower through LLVM only.
 
-        The raw `<dwords x i32>` payload is bitcast to `<n x dtype>` so
-        the returned Value has the correct IR type for the smem store.
-        Bounds-checked: an out-of-range voffset returns 0 (the
-        runbook §6.1 lever for tail-safe loads).
+        Out of range bytes read 0. The hardware checks an access of 4 bytes
+        or more per 4-byte component and a 1- or 2-byte access whole, so a
+        load that straddles the end of the buffer keeps only its whole
+        in-range components, and only a 1- or 2-byte load reads a last
+        element that ends off a 4-byte boundary.
+
+        Attrs: ``elem_type``, and ``dwords`` for an access of whole dwords.
+        Both lowerings take the access width from the result type.
         """
-        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
-        eb = _elem_bytes.get(dtype.name)
-        if eb is None:
-            raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
-        if n <= 0 or (n * eb) % 4 != 0:
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
-                "of dwords"
-            )
-        dwords = (n * eb) // 4
-        if dwords not in (1, 2, 4):
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} → dwords={dwords} "
-                "must be 1, 2, or 4"
-            )
+        nbytes = _buffer_access_bytes("buffer_load_vN", dtype, n)
+        attrs: dict[str, Any] = {}
+        if nbytes >= 4:
+            attrs["dwords"] = nbytes // 4
+        attrs["elem_type"] = dtype.name
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],
             [VectorType(dtype, n)],
-            attrs={"dwords": int(dwords), "elem_type": dtype.name},
+            attrs=attrs,
             result_name_hint=f"bl{n}",
         ).result
 
@@ -5570,6 +5655,24 @@ class IRBuilder:
             [rsrc, voffset, soffset, value],
             attrs={"dwords": int(n)},
         )
+
+    def buffer_store_vN(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+    ) -> None:
+        """Dtype-generic vectorised `raw_ptr_buffer_store` of a vector value.
+
+        The store twin of :meth:`buffer_load_vN`: ``value`` is a vector of any
+        scalar whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. It is
+        bitcast to one ``i8``, ``i16``, ``i32``, ``<2 x i32>`` or ``<4 x i32>``
+        and stored with the matching raw buffer store.
+
+        Out of range bytes are not written. The hardware checks a store of 4
+        bytes or more per 4-byte component and a 1- or 2-byte store whole: a
+        store that straddles the end of the buffer writes only its whole
+        in-range components and leaves every other byte untouched.
+        """
+        _buffer_vector_bytes("buffer_store_vN", "value", value.type)
+        self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
 
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
