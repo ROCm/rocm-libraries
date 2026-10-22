@@ -65,6 +65,14 @@ def test_unpinned_lse_spec_has_its_own_identity(arch):
     assert on.kernel_id.spec_hash != off.kernel_id.spec_hash
 
 
+@pytest.mark.parametrize("bad", ["false", 0, 1, None])
+def test_attention_spec_rejects_non_boolean_emit_lse(bad):
+    """AttentionSpec is public: a truthy non-bool must not become an LSE identity."""
+    spec = dispatch_attention(_decode_request("gfx950")).spec
+    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+        dataclasses.replace(spec, emit_lse=bad)
+
+
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_pinned_split_kv_spec_follows_the_request(arch):
     spec_id = _SPLIT_KV_SPEC[arch]
