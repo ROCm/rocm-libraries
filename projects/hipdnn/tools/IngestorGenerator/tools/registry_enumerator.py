@@ -795,7 +795,7 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
     combos = registry.cells()
     raw = [registry.space(cell) for cell in combos]
     selectors, neutral = registry.selector_fields, registry.neutral_fields
-    if not selectors and not neutral:
+    if not combos or (not selectors and not neutral):
         return CellSpaces(combos, raw, [], len(combos))
     names = _spec_fields(raw[0][0])
     unknown = [n for n in neutral if n not in names]
@@ -1167,7 +1167,7 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
     print(f"plan space: {manifest['engine']['name']} @ {arch}", file=out)
     for fields, rows in registry.groups:
         print(f"  cell group {fields}: {len(rows)} values", file=out)
-    if merged.picks:
+    if merged.combos > len(cells):
         print(
             f"  cells: {len(cells)} ({merged.combos} request combos merged on "
             f"selector_fields {registry.selector_fields}, neutral_fields "

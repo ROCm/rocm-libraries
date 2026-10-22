@@ -638,6 +638,15 @@ def test_plan_space_counts_after_merging(split, tmp_path, capsys):
     assert "num_seqs: {" not in out
 
 
+def test_plan_space_does_not_claim_a_merge_when_nothing_merges(split, tmp_path, capsys):
+    """neutral_fields alone merges no combo: the cell line says so plainly."""
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", _dedup(split, selector=()))
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    out = capsys.readouterr().out
+    assert "  cells: 12\n" in out
+    assert "merged" not in out
+
+
 def _also_feature(m):
     m["enumerate"]["selector_fields"] = ["hdim", "batch"]
 
