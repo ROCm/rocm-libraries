@@ -528,7 +528,7 @@ dtypes -- MFMA on CDNA, WMMA on RDNA -- with no author-side gfx branch.
 TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> mfma_f32_16x16x16f16
 # same author code, different target (verified):
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx12",
+TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx1201",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> wmma_f32_16x16x16_f16_w32_gfx12 (wave 32)
 ```
 

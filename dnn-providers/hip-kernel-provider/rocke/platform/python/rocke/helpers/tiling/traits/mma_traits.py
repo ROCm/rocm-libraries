@@ -68,6 +68,7 @@ _ROW_FIELDS = frozenset(
     {
         "op_id",
         "llvm_builtin",
+        "llvm_intrinsic",
         "family",
         "wave_size",
         "supported_targets",
@@ -88,7 +89,7 @@ _ROW_FIELDS = frozenset(
 )
 _OPTIONAL_ROW_FIELDS = frozenset({"operand_signedness"})
 _SCALE_FIELDS = frozenset({"block_k", "a_dtypes", "b_dtypes"})
-_META_FIELDS = frozenset({"schema_version"})
+_META_FIELDS = frozenset({"schema_version", "excluded_targets"})
 
 
 def _positive_int(value: object) -> bool:
@@ -171,12 +172,15 @@ class MmaTraits:
     ``a_dtype`` / ``b_dtype`` are the A and B operand dtypes, ``c_dtype`` the accumulator taken in,
     ``d_dtype`` the result returned (they differ only where the instruction says so). ``m``..``s``
     are the dims: ``b`` independent blocks per instruction, ``r`` replication, ``s`` as named by
-    the layout strings. ``auto_select=False`` marks a pin-only row: reachable by its name, never
+    the layout strings. ``llvm_intrinsic`` is the LLVM intrinsic the builtin lowers to, without
+    its type-overload suffix. ``supported_targets`` lists every gfx target the compiler selects
+    the instruction on. ``auto_select=False`` marks a pin-only row: reachable by its name, never
     chosen by :meth:`MmaTraitsCatalog.select`.
     """
 
     op_id: str
     llvm_builtin: str
+    llvm_intrinsic: str
     family: str
     wave_size: int
     supported_targets: tuple[str, ...]
@@ -244,8 +248,10 @@ class MmaTraits:
             raise ValueError(
                 f"{row}: family {self.family!r} takes no index_layout (sparse rows only)"
             )
-        # An empty supported_targets is accepted here: such a row is reachable by name only and
-        # never matches a selection.
+        if not self.supported_targets:
+            raise ValueError(
+                f"{row} lists no targets -- list every id the compiler selects it on"
+            )
 
     def _check_signedness(self, row: str) -> None:
         """Integer rows state how their operands accept signedness; other rows omit the field."""
@@ -310,6 +316,7 @@ class MmaTraits:
         return cls(
             op_id=op_id,
             llvm_builtin=str(record["llvm_builtin"]),
+            llvm_intrinsic=str(record["llvm_intrinsic"]),
             family=str(record["family"]),
             wave_size=record["wave_size"],  # type: ignore[arg-type]
             supported_targets=tuple(record["supported_targets"]),  # type: ignore[arg-type]
@@ -510,6 +517,20 @@ def _check_unique_selection(rows: list[MmaTraits]) -> None:
             )
 
 
+def _check_no_excluded_target(
+    rows: list[MmaTraits], excluded_targets: Mapping[str, str]
+) -> None:
+    """Load-time invariant: no row lists a target ``_meta.excluded_targets`` leaves out on
+    purpose (each excluded id maps to the reason it is not listed)."""
+    for traits in rows:
+        for target in traits.supported_targets:
+            if target in excluded_targets:
+                raise ValueError(
+                    f"mma_traits.json row {traits.op_id!r} lists {target!r}, which "
+                    f"_meta.excluded_targets excludes: {excluded_targets[target]}"
+                )
+
+
 def load_mma_traits(path: Path = DEFAULT_TRAITS_PATH) -> MmaTraitsCatalog:
     """Load ``mma_traits.json`` into a :class:`MmaTraitsCatalog`; any data error fails the load."""
     if not path.is_file():
@@ -541,6 +562,15 @@ def load_mma_traits(path: Path = DEFAULT_TRAITS_PATH) -> MmaTraitsCatalog:
                 f"instruction variant; name multi-format variants "
                 f"'<stem>_<a_dtype>_<b_dtype>'"
             )
+    excluded_targets = meta.get("excluded_targets", {})
+    if not isinstance(excluded_targets, Mapping) or not all(
+        isinstance(reason, str) and reason for reason in excluded_targets.values()
+    ):
+        raise ValueError(
+            "mma_traits.json _meta.excluded_targets must map each excluded target id to "
+            "the reason it is not listed -- see helpers/tiling/traits/README.md"
+        )
     rows = [MmaTraits.from_record(record) for record in operations]
+    _check_no_excluded_target(rows, excluded_targets)
     _check_unique_selection(rows)
     return MmaTraitsCatalog(by_op_id={traits.op_id: traits for traits in rows})

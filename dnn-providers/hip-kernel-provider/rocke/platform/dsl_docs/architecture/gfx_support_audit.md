@@ -112,21 +112,16 @@ Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_represent
 3. **gfx90a** — catalog + backend present, but no `instances/`/`examples/` lane and no independent numeric gate (folded into the CDNA gate). Lowering-only today.
 4. **RDNA breadth** — gfx1151/1201/1250 support GEMM only; WMMA conv/attention/MoE are unimplemented.
 5. **Numeric gaps** — gfx1201 and gfx1250 have no on-GPU numeric test gate; golden IR for gfx1250 is mostly GEMM.
-6. **Arch registry and MMA traits key on DISJOINT namespaces** — a raw target string matches at most one, and there is no bridge between them. Same class as item 2, generalized: a target present in one registry and absent from the other.
+6. **Arch registry and MMA catalog share one target namespace.** The tiling MMA catalog
+   (`helpers/tiling/traits/data/mma_traits.json`) lists real target ids only, never a family name
+   such as `gfx11` or `gfx12`, and every id it lists is an `arch_specs.json` target
+   (`known_arches()`); `tests/helpers/tiling/traits/test_mma_catalog_integrity.py` enforces both.
+   A target therefore resolves in both registries by its own id, generic targets
+   (`gfx11-generic`, `gfx12-generic`) and their members included. A target the backend knows may
+   still have no catalog row for a given shape and dtype; that is a missing instruction, not a
+   namespace mismatch. Ids deliberately left out of the catalog are recorded with their reason in
+   its `_meta.excluded_targets`.
 
-   Measured (`arch_specs.json` keys vs the union of `supported_targets` over `load_mma_traits()`):
-
-   | | targets |
-   |---|---|
-   | in both | `gfx1250`, `gfx908`, `gfx90a`, `gfx942`, `gfx950` |
-   | arch registry only | `gfx11-generic`, `gfx1151`, `gfx12-generic`, `gfx1201` |
-   | traits table only | `gfx11`, `gfx12` |
-
-   The arch registry holds **specific targets**; the traits table holds a mix of specifics and **family umbrellas** (`gfx11`, `gfx12`). Overlap is partial in **both** directions, so a lookup miss in one namespace must never be reported as "this target is unsupported".
-
-   **`target_family` does not bridge them.** It matches a traits key for exactly one target (`gfx950`), and only because that target's family string happens to be its own name — the other values (`gfx9_mfma`, `gfx11_rdna`, `gfx12_rdna`, `gfx12_cdna`) are lowering-path labels and match **zero** traits rows. Closing this needs a new ordered match-key set per target, resolved once and passed as an object; see `multi_arch_data_layout.md` → "Resolving a target against the MMA catalog".
-
-   Related: `MmaTraits.supports()` takes a raw `str` and tests exact membership, which is the signature that makes the mismatch reachable.
 7. **A matrix capability flag is not sufficient to emit a primitive** — a registered target can report a matrix capability TRUE while the catalog offers zero usable rows for it. Authority for "can I emit this" is the row carrying the layout parameters, not the flag.
 
 ## Proposed gap-closure priority
