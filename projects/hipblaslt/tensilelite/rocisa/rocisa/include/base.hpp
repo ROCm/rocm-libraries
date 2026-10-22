@@ -33,6 +33,7 @@
 #include <thread>
 #include <typeinfo>
 #include <utility>
+#include <vector>
 
 #include "hardware_caps.hpp"
 #include "helper.hpp"
@@ -103,16 +104,15 @@ namespace rocisa
         // Same as calling init() for each arch, but probes the assembler
         // capabilities of all not-yet-initialized ISAs concurrently.  Each
         // probe is an independent assembler run, so results are unchanged.
-        void initMany(const nb::iterable& archs,
-                      const std::string&  assemblerPath,
-                      bool                debug = false)
+        // Python tuple conversion and the GIL release live in the nanobind
+        // wrapper; this core entry point stays nanobind-free.
+        void initMany(const std::vector<IsaVersion>& archs,
+                      const std::string&             assemblerPath,
+                      bool                           debug = false)
         {
             std::vector<IsaVersion> isaVersions;
-            for(nb::handle arch : archs)
+            for(const IsaVersion& isaVersion : archs)
             {
-                auto       t = nb::cast<nb::tuple>(arch);
-                IsaVersion isaVersion
-                    = {nb::cast<int>(t[0]), nb::cast<int>(t[1]), nb::cast<int>(t[2])};
                 if(m_isainfo.find(isaVersion) == m_isainfo.end()
                    && std::find(isaVersions.begin(), isaVersions.end(), isaVersion)
                           == isaVersions.end())
@@ -121,7 +121,6 @@ namespace rocisa
             std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
             std::vector<std::exception_ptr>         errors(isaVersions.size());
             {
-                nb::gil_scoped_release release;
                 // jthread joins on destruction, so the probes already started are
                 // joined even if starting a later thread throws.
                 std::vector<std::jthread> threads;
