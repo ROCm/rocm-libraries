@@ -96,6 +96,12 @@ struct FmhaFwdSplitKVKernel
     static constexpr bool kUsesTdmAffineDramPath =
         detail::splitkv_uses_tdm_affine_dram_path_v<FmhaPipeline>;
 
+    // PageBlockNavigator's VirtualDim names the dimension that is paged, i.e.
+    // the one holding seqlen_k. The generic path transposes V to
+    // (hdim_v, seqlen_k) and so pages dim 1, while the untransposed path keeps
+    // the native (seqlen_k, hdim_v) and pages dim 0. K is always (seqlen_k, hdim_q).
+    static constexpr index_t kVPagedDim = kUsesUntransposedVKernelPath ? 0 : 1;
+
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    !kHasMask));
@@ -824,8 +830,10 @@ struct FmhaFwdSplitKVKernel
         // intersection) is enough, it is always >= the range the pipeline walks.
         // This does not replace the -inf erase inside the pipeline: the clamp
         // zero-fills, and exp(0) == 1 would pollute softmax.
+        // Paged-kv is excluded: there the descriptor spans one page, not
+        // seqlen_k, so capping it at a split bound would be meaningless.
         const index_t tdm_split_seqlen_k = [&, i_split_ = i_split]() {
-            if constexpr(kUsesTdmAffineDramPath)
+            if constexpr(kUsesTdmAffineDramPath && !kIsPagedKV)
             {
                 const index_t x_per_split =
                     max(1, integer_divide_ceil(kargs.seqlen_k, kargs.num_splits));
@@ -972,7 +980,7 @@ struct FmhaFwdSplitKVKernel
                 const long_index_t fixed_offset =
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v;
 
-                return make_page_block_navigator<const VDataType, 1>(
+                return make_page_block_navigator<const VDataType, kVPagedDim>(
                     kargs.v_ptr,
                     kargs.batch_stride_v, // vcache page-block stride/size
                     fixed_offset,

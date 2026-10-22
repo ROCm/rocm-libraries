@@ -925,6 +925,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             Pipeline = FmhaFwdSplitKVPipeline
             for mask in get_mask_map(mask_impl).keys():
                 pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", "t", "f", mask))  # fmt: skip
         return pipelines
 
     @staticmethod

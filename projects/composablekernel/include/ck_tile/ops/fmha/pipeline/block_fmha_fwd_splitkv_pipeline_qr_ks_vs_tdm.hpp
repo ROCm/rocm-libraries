@@ -109,6 +109,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
+    static constexpr bool kIsPagedKV       = Problem::kIsPagedKV;
 
     // Tell FmhaFwdSplitKVKernel which K/V DRAM views this pipeline wants.
     //
@@ -117,10 +118,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // still works there: fmha_fwd_kernel.hpp's !kUsesUntransposedVKernelPath
     // branch already hands out a native row-major (seqlen, hdim_v) V view,
     // while fmha_fwd_splitkv_kernel.hpp's corresponding branch transposes to
-    // (hdim_v, seqlen) and pads. This pipeline steps V with
-    // move_tile_window(v_dram_window, {kN0, 0}) -- a seqlen stride on dim 0 --
-    // so it needs the untransposed view, or the stride lands on the head-dim
-    // axis instead (symptom: O comes out low, worsening with every KV tile).
+    // (hdim_v, seqlen) and pads. This pipeline steps V by {kN0, 0} -- a seqlen
+    // stride on dim 0 -- so it needs the untransposed view, or the stride lands
+    // on the head-dim axis instead (symptom: O comes out low, worsening with
+    // every KV tile). The same choice sets the V navigator's VirtualDim to 0.
     //
     // The affine flag is the same requirement make_k_dram documents: this path
     // loads K and V with bare load_tile_tdm (not LoadTdmFullTileOrPadded), and
@@ -581,16 +582,27 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     }
 
     // Single V, double K LDS buffer path.
+    //
+    // K and V arrive as window lengths plus a page block navigator rather than
+    // ready-made windows: the navigator is what resolves a global seqlen_k
+    // coordinate to a page and a page-local origin. For non-paged problems it is
+    // a TrivialPageBlockNavigator whose make_tile_window / move_tile_window /
+    // prefetch_table_id degenerate to the plain tile window calls, so both paths
+    // share one body.
     template <typename QDramBlockWindowTmp,
-              typename KDramBlockWindowTmp,
-              typename VDramBlockWindowTmp,
+              typename KDramBlockWindowLengths,
+              typename KPageBlockNavigator,
+              typename VDramBlockWindowLengths,
+              typename VPageBlockNavigator,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
-        const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
-        const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
-        const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+        const QDramBlockWindowTmp& q_dram_block_window_tmp,         // M0*K0 tile
+        const KDramBlockWindowLengths& k_dram_block_window_lengths, // N0*K0 tile
+        const KPageBlockNavigator& k_page_block_navigator,
+        const VDramBlockWindowLengths& v_dram_block_window_lengths, // N1*K1 tile
+        const VPageBlockNavigator& v_page_block_navigator,
         const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
         LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
         index_t num_splits,
@@ -598,6 +610,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         FmhaMask mask,
         PositionEncoding position_encoding,
         float scale_s,
+        index_t kv_l2p_offset,
         void* smem_arena,
         float sink_v,
         const float* k_descale_ptr,
@@ -617,19 +630,17 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         auto* smem_ptrv =
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset);
         static_assert(
-            std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
-                std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
-                std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
+            std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>>,
             "wrong!");
 
         // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
         // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
-                          kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                          kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
-                          kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                          kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          kN0 == KDramBlockWindowLengths{}[I0] &&
+                          kK0 == KDramBlockWindowLengths{}[I1] &&
+                          kN1 == VDramBlockWindowLengths{}[I0] &&
+                          kK1 == VDramBlockWindowLengths{}[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
@@ -823,10 +834,22 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // K tile in LDS
         // For sink: kv_load_start is 0 when there are sink tokens (we start
         // reading from seq position 0), otherwise seqlen_k_start.
-        const auto kv_load_start =
-            (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
-        const index_t physical_seqlen_k_start = logical_seqlen_k_start;
-        const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
+        // kv_l2p_offset shifts logical seqlen_k coordinates into the physical
+        // ones the page table is indexed by. It is 0 for every non-paged problem.
+        const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
+        const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
+
+        // Paged-kv needs the first tile to sit entirely inside one page, so the
+        // walk starts on a kN0 boundary. A split boundary is not kN0 aligned, so
+        // that start can precede this split's range -- the head of the first
+        // tile then belongs to the previous split and is erased from s_acc in
+        // the main loop. Without paging there is nothing to align to.
+        const index_t aligned_physical_seqlen_k_start =
+            kIsPagedKV ? kN0 * integer_divide_floor(physical_seqlen_k_start, kN0)
+                       : physical_seqlen_k_start;
+        const auto kv_load_start = (sink_seq_end == 0 && aligned_physical_seqlen_k_start > 0)
+                                       ? aligned_physical_seqlen_k_start
+                                       : 0;
 
         // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS)
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
@@ -839,10 +862,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // K is staged a whole (kN0 x kSubQKHeaddim) tile at a time, into two
         // ping-pong buffers: the tile consumed this iteration and the next
         // iteration's tile, prefetched one iteration ahead.
-        auto k_dram_window =
-            make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
-                             Policy::template MakeKDramTileDistribution<Problem, true>());
+        // kv_load_start is a global seqlen_k coordinate; the navigator resolves
+        // it to a page and a page-local origin (identity when not paged).
+        auto [i_page_block_k, k_dram_window] = k_page_block_navigator.make_tile_window(
+            k_dram_block_window_lengths,
+            {kv_load_start, 0},
+            Policy::template MakeKDramTileDistribution<Problem, true>());
 
         // K LDS writer (TDM) and reader share plain row-major desc; see Q
         // comment above for the no-swizzle rationale.
@@ -878,10 +903,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
         // with V's DRAM dist switched to trivial tile-major and the V LDS read
         // view kept plain row-major (matches the write view).
-        auto v_dram_window =
-            make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
-                             Policy::template MakeVDramTileDistribution<Problem>());
+        // V is untransposed here, so seqlen_k is dim 0 for the navigator too
+        // (the kernel builds it with VirtualDim 0 for this pipeline).
+        auto [i_page_block_v, v_dram_window] = v_page_block_navigator.make_tile_window(
+            v_dram_block_window_lengths,
+            {kv_load_start, 0},
+            Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(smem_ptrv),
@@ -911,7 +938,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         auto q_tile = load_tile(q_lds_read_window);
 
         const index_t num_total_loop =
-            integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
+            integer_divide_ceil(physical_seqlen_k_end - aligned_physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
         index_t i_total_loops      = 0;
@@ -942,6 +969,24 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 return smem_ptrk1;
         };
 
+        // Every DRAM advance on K and V goes through the navigator: it both
+        // steps the window and, when paged, swaps the page pointer underneath
+        // it. The table lookup is pulled into a scalar first, the same shape as
+        // block_fmha_fwd_splitkv_pipeline_qr_ks_vs. For a trivial navigator all
+        // of this folds down to a plain move_tile_window.
+        auto advance_k = [&](index_t step) {
+            const auto next_id = amd_wave_read_first_lane(
+                k_page_block_navigator.prefetch_table_id(i_page_block_k, k_dram_window, {step, 0}));
+            i_page_block_k = k_page_block_navigator.move_tile_window(
+                i_page_block_k, k_dram_window, {step, 0}, next_id);
+        };
+        auto advance_v = [&](index_t step) {
+            const auto next_id = amd_wave_read_first_lane(
+                v_page_block_navigator.prefetch_table_id(i_page_block_v, v_dram_window, {step, 0}));
+            i_page_block_v = v_page_block_navigator.move_tile_window(
+                i_page_block_v, v_dram_window, {step, 0}, next_id);
+        };
+
         // Prologue: issue K for the first KV tile (q_tile has already been read
         // out of LDS above, so reusing the Q region for K0 is safe), then point
         // the K dram window at the next tile -- the in-loop load prefetches the
@@ -949,7 +994,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // iteration 0 consumes buffer 0 and therefore runs at parity 0.
         block_sync_lds();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
+        advance_k(num_total_loop > 1 ? kN0 : 0);
 
         // One KV-tile iteration. i_parity is the compile-time LDS buffer
         // parity: the iteration consumes buffer i_parity and prefetches the
@@ -965,7 +1010,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             [[maybe_unused]] const index_t kv_tile_start =
                 (num_sink_loop > i_total_loops)
                     ? kv_load_start + i_total_loops * kN0
-                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
+                    : aligned_physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
@@ -981,7 +1026,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
-            move_tile_window(v_dram_window, {kN0, 0});
+            advance_v(kN0);
 
             // The K load below prefetches the NEXT iteration's tile, so the
             // sink->normal jump has to be applied one iteration earlier than it
@@ -999,12 +1044,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    advance_k(aligned_physical_seqlen_k_start - sink_seq_end);
                 }
             }
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kNextBuf>{}));
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+            advance_k(i_total_loops + 2 < num_total_loop ? kN0 : 0);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -1131,16 +1176,29 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             if constexpr(kHasUnevenSplits)
             {
-                if(i_total_loops == (num_total_loop - 1))
+                // The tail of the last tile reaches past this split's end,
+                // because a split bound is not kN0 aligned. Under paged-kv the
+                // first tile additionally starts before the split, since the
+                // walk was aligned down to a page-friendly boundary -- that head
+                // belongs to the previous split. Sink tiles are exempt from the
+                // head check: they legitimately start at column 0.
+                const bool is_last_tile  = (i_total_loops == (num_total_loop - 1));
+                const bool is_sink_tile  = (num_sink_loop > i_total_loops);
+                const bool check_head    = kIsPagedKV && !is_sink_tile &&
+                                        (i_total_loops == num_sink_loop);
+                if(is_last_tile || check_head)
                 {
                     set_tile_if(s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
+                                [&,
+                                 physical_seqlen_k_start_ = physical_seqlen_k_start,
+                                 physical_seqlen_k_end_   = physical_seqlen_k_end,
+                                 check_head_              = check_head,
+                                 is_last_tile_            = is_last_tile](auto tile_idx) {
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
 
-                                    {
-                                        return physical_seqlen_k_end_ <= col;
-                                    }
+                                    return (check_head_ && col < physical_seqlen_k_start_) ||
+                                           (is_last_tile_ && physical_seqlen_k_end_ <= col);
                                 });
                 }
             }
@@ -1170,8 +1228,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                    move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
+                    advance_v(aligned_physical_seqlen_k_start - sink_seq_end);
+                    move_tile_window(bias_dram_window,
+                                     {0, aligned_physical_seqlen_k_start - sink_seq_end});
                 }
             }
 
@@ -1469,28 +1528,18 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                void* smem_ptr,
                float sink_v) const
     {
-        static_assert(!Problem::kIsPagedKV,
-                      "qr_tdm split-kv does not implement paged-kv yet: the K ping-pong "
-                      "prefetches a whole tile one iteration ahead, so page turns cannot "
-                      "reuse the qr_ks_vs pattern");
         static_assert(!kIsGroupMode, "qr_tdm split-kv is batch mode only");
         static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                       "qr_tdm split-kv does not implement bias");
         static_assert(!kQuantized, "qr_tdm split-kv does not implement quantization");
 
-        // Non-paged: a trivial navigator hands back one window over the whole
-        // K/V cache, which is exactly what the loop below wants.
-        auto [i_page_block_k, k_dram_block_window] =
-            k_page_block_navigator.make_tile_window(k_dram_block_window_lengths, {0, 0});
-        auto [i_page_block_v, v_dram_block_window] =
-            v_page_block_navigator.make_tile_window(v_dram_block_window_lengths, {0, 0});
-        ignore = i_page_block_k;
-        ignore = i_page_block_v;
-        ignore = kv_l2p_offset;
-
+        // The navigators are forwarded as-is: run_ builds its own K/V windows
+        // through them, so a page turn and a plain window step are the same call.
         return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
-                                                k_dram_block_window,
-                                                v_dram_block_window,
+                                                k_dram_block_window_lengths,
+                                                k_page_block_navigator,
+                                                v_dram_block_window_lengths,
+                                                v_page_block_navigator,
                                                 bias_dram_block_window_tmp,
                                                 lse_acc_dram_block_window_tmp,
                                                 num_splits,
@@ -1498,6 +1547,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                                 mask,
                                                 position_encoding,
                                                 scale_s,
+                                                kv_l2p_offset,
                                                 smem_ptr,
                                                 sink_v,
                                                 nullptr,
