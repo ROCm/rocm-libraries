@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from ..ExecutionPolicy import normalize_execution_policy
 from .BinaryLibraryIO import iterSolutionRecords
 from .DataTypes import TYPE_PROPERTIES
 
@@ -130,7 +131,20 @@ class LibraryMetadata:
             raise ValueError(
                 f"Solution {solution_index}: tile and DepthU must be positive integers"
             )
-        strategy = mapping.get("tileProcessingStrategy", "None")
+        policy_fields = (
+            ("tileProcessingStrategy", "TileProcessingStrategy"),
+            ("workAssignment", "WorkAssignment"),
+            ("streamK", "StreamK"),
+            ("streamKForceDPOnly", "StreamKForceDPOnly"),
+            ("streamKAtomic", "StreamKAtomic"),
+        )
+        policy = {name: mapping[key] for key, name in policy_fields if key in mapping}
+        try:
+            strategy = normalize_execution_policy(policy, regenerate=False)[
+                "TileProcessingStrategy"
+            ]
+        except ValueError as error:
+            raise ValueError(f"Solution {solution_index}: {error}") from error
         # Persistent scheduling disables fixed split-K with zero. Its workload
         # is deferred, while zero remains invalid for an ordinary solution.
         if type(split) is not int or split < -1 or (split == 0 and strategy == "None"):

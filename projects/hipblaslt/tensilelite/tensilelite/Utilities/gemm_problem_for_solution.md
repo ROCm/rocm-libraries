@@ -59,6 +59,8 @@ Unknown datatype names and invalid tile/reduction sizes raise `ValueError`.
 The formula does not solve arbitrary solution predicates. Native support checks
 still decide whether a solution accepts the descriptor; this initial workload
 does not cover reduction tails, output edges or varied scalar/epilogue settings.
+Hardware predicates can require a particular device ID or compute-unit count,
+so a matching GPU target alone does not establish support.
 
 Datatype descriptions are preserved independently of bench's supported inputs,
 across GPU targets. The `gemm_problem_bench` adapter translates datatype names
