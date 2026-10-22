@@ -2043,6 +2043,7 @@ read the validator before combining flags. Cohort impact is from §17.4.
 | `use_k_single_buffer` | One `K_lds` slot instead of two, keeping `T=2*block_size` | In the tree but **not the production lever** — it addressed an llvm20 occupancy wall that does not exist on llvm22 (the d128 body is already 213 VGPR / 2 WG/CU) |
 | `use_sched_barrier` | Compile-time `llvm.amdgcn.sched.barrier` fence between the QK MFMA cluster and the post-QK prefetch issue (keeps QK MFMAs packed) | An early llvm20 measurement gave +35–36 % at `num_warps==1` only; **backend-specific and superseded** by `use_softmax_mfma_interleave` on llvm22 — off on every live cohort, kept for the mechanism |
 | `use_agpr_alloc_zero` | Force VGPR-form MFMA | Bit-accurate but **not** the d128 lever on llvm22 (leaves the inter-MFMA gap unchanged); redundant on R4 (already 0 AGPR moves) |
+| `use_additive_bias` | **Feature flag, not a perf lever** — adds an fp32 `[B,H,Sq,Sk]` bias (stride 0 broadcasts B/H) to the scores; also on `UnifiedAttention3DTiledSpec`. gfx950 only, default OFF, driven by `UnifiedAttentionProblem.use_additive_bias` | Do not sweep. Rejected with the transposed softmax VALU opts, `use_grouped_kv2_softmax` and `use_register_pv`; see the [builders/common Knob reference](../../../library/builders/common/README.md#knob-reference) |
 
 **Selector-driven (auto-on) attention routing levers.** The single-batch d128
 levers above are *selected automatically* by
