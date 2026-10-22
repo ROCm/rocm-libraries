@@ -158,17 +158,17 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
         const auto invoke_params = miopen::conv::DataInvokeParams{
             tensors, wspace.ptr(), wspace.size(), false, alpha, beta};
 
-        auto run = [&](const miopen::conv::ProblemDescription& problem, const auto& cfg) {
-            auto sol = solv.GetSolution(ctx, problem, cfg);
+        auto run = [&](const miopen::conv::ProblemDescription& prob,
+                       const auto& perf_cfg,
+                       tensor<float>& result) {
+            auto sol = solv.GetSolution(ctx, prob, perf_cfg);
             EXPECT_TRUE(sol.Succeeded());
             EXPECT_TRUE(sol.invoker_factory);
             const auto invoker =
                 handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
             (invoker)(handle, invoke_params);
             handle.Finish();
-            tensor<float> result = output;
             handle.ReadToVec(out_dev, result.data);
-            return result;
         };
 
         // Heuristic config for the TF32 problem, then round-trip it through the perf-db
@@ -183,8 +183,10 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
         ASSERT_FALSE(restored.UseTF32())
             << "test precondition: a reloaded perf-db config must have dropped use_tf32";
 
-        const auto out_tf32 = run(problem_tf32, restored);
-        const auto out_fp32 = run(problem_fp32, restored);
+        tensor<float> out_tf32 = output;
+        run(problem_tf32, restored, out_tf32);
+        tensor<float> out_fp32 = output;
+        run(problem_fp32, restored, out_fp32);
 
         ASSERT_EQ(miopen::range_distance(out_tf32), miopen::range_distance(out_fp32));
         const auto diff = miopen::rms_range(out_fp32, out_tf32);
