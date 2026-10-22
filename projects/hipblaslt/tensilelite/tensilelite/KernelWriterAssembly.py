@@ -87,6 +87,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
+from .SolutionStructs.Solution import storeRemapMultiColumn
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -142,7 +143,7 @@ def _tdmSparseMetadataKOffset(writer, kernel):
                      src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
   return mod
 
-from math import ceil, floor, log, prod
+from math import ceil, floor, gcd, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -15137,6 +15138,8 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(self.vgprs.storeRemapOffsetCoord1)
       for v in self.vgprs.storeRemapAS:
         self.vgprPool.checkIn(v)
+      for v in self.storeRemapPhaseVgprs:
+        self.vgprPool.checkIn(v)
     if kernel["BufferStore"]:
       self.vgprPool.checkIn(self.vgprs.cinRowPtr)
       self.vgprPool.checkIn(self.vgprs.coutRowPtrD)
@@ -15255,9 +15258,11 @@ class KernelWriterAssembly(KernelWriter):
     rpv = rpe * gwvw
 
     storeRegs = self.vgprs.storeRemapAS
-    src = vgpr(self.vgprs.storeRemapLR)
+    numPhases = len(self.storeRemapPhases)
     for rIdx, i in enumerate(range(0, nElements, gwvw)):
-      offset = self.storeRemapLrOffset * bpe * (i//gwvw)
+      period, phase = divmod(i//gwvw, numPhases)
+      src = vgpr(self.storeRemapPhases[phase][0])
+      offset = self.storeRemapLrOffset * bpe * period
       ds  = DSModifiers(offset=offset)
       dst = vgpr(storeRegs[rIdx], rpv)
       # Match the storeRemap lw token so the whole epilogue store BB is consistent
@@ -15280,17 +15285,25 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
       isGlc, isSlc, isNT, scope, th, nv = forceCoherentNonTemporal(
           self.states.asmCaps, isNT, _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"), scope)
+    if self.storeRemapWholeLines(kernel, edge):
+      th = TemporalHint.TH_NT
 
     if not edge:
       for rIdx, i in enumerate(range(0, nElements, gwvw)):
-        if i == 0:
+        period, phase = divmod(i//gwvw, numPhases)
+        _, coord0, col = self.storeRemapPhases[phase]
+        if col is not None:
+          module.add(VAddU32(dst=addr0, src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=vgpr(col), comment="coord1 = wave coord1 + column of phase %u" % phase))
+          if period:
+            module.add(VAddU32(dst=addr0, src0=addr0, src1=(self.storeRemapNCPL * period), comment="coord1 += columns per period"))
+        elif i == 0:
           module.add(VMovB32(dst=addr0, src=vgpr(self.vgprs.storeRemapOffsetCoord1), comment="coord1"))
         else:
           currentStep = i//gwvw
           module.add(VAddU32(dst=addr0, src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=(self.storeRemapNCPL * currentStep), comment="coord1 += nColPerLoad"))
 
         module.add(VMulLOU32(dst=addr0, src0=addr0, src1=sgpr(strideD1), comment="coord1 offset =  coord1 * StrideD"))
-        module.add(VAddLShiftLeftU32(dst=addr0, src0=addr0, src1=vgpr(self.vgprs.storeRemapCoord0), shiftHex=hex(log2(bpe)), comment="global write D address"))
+        module.add(VAddLShiftLeftU32(dst=addr0, src0=addr0, src1=vgpr(coord0), shiftHex=hex(log2(bpe)), comment="global write D address"))
 
         dscnt = min((nElements-i)//gwvw - 1, 15)
         module.add(SWaitCnt(dscnt=dscnt, comment="wait for LDS read"))
@@ -15323,12 +15336,22 @@ class KernelWriterAssembly(KernelWriter):
               else self.sizeRef(kernel["ProblemType"]["Index1"])
 
           currentStep = i//srvw
+          period, phase = divmod(currentStep, numPhases)
+          _, phaseCoord0, col = self.storeRemapPhases[phase]
 
           # calculate global coordination
-          module.add(VAddU32(dst=vgpr(coord1), src0=vgpr(self.vgprs.storeRemapCoord1), src1=(self.storeRemapNCPL * currentStep), comment="coord1 += nColPerLoad"))
-          module.add(VAddU32(dst=vgpr(coord0), src0=vgpr(self.vgprs.storeRemapCoord0), src1=vi, comment="coord0 += element index of load vector"))
-          module.add(VAddU32(dst=addr0, src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=(self.storeRemapNCPL * currentStep), \
-                      comment="offset coord1 += nColPerLoad"))
+          if col is not None:
+            module.add(VAddU32(dst=vgpr(coord1), src0=vgpr(self.vgprs.storeRemapCoord1), src1=vgpr(col), comment="coord1 = wave coord1 + column of phase %u" % phase))
+            module.add(VAddU32(dst=addr0, src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=vgpr(col), comment="offset coord1 = wave coord1 + column"))
+            if period:
+              module.add(VAddU32(dst=vgpr(coord1), src0=vgpr(coord1), src1=(self.storeRemapNCPL * period), comment="coord1 += columns per period"))
+              module.add(VAddU32(dst=addr0, src0=addr0, src1=(self.storeRemapNCPL * period), comment="offset coord1 += columns per period"))
+          else:
+            module.add(VAddU32(dst=vgpr(coord1), src0=vgpr(self.vgprs.storeRemapCoord1), src1=(self.storeRemapNCPL * currentStep), comment="coord1 += nColPerLoad"))
+          module.add(VAddU32(dst=vgpr(coord0), src0=vgpr(phaseCoord0), src1=vi, comment="coord0 += element index of load vector"))
+          if col is None:
+            module.add(VAddU32(dst=addr0, src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=(self.storeRemapNCPL * currentStep), \
+                        comment="offset coord1 += nColPerLoad"))
 
           module.add(VCmpLtU32(dst=sgpr(tmpS01,self.states.laneSGPRCount), src0=vgpr(coord0), src1=sizeBoundary[0], comment="coord0 < size0" ))
           module.add(VCmpLtU32(dst=sgpr(tmpS23,self.states.laneSGPRCount), src0=vgpr(coord1), src1=sizeBoundary[1], comment="coord1 < size1" ))
@@ -15363,9 +15386,96 @@ class KernelWriterAssembly(KernelWriter):
     return module, numStoreInst
 
   ##############################################################################
+  # Store remap, MT0 / SRVW lanes per column that dont divide the wave
+  ##############################################################################
+  def storeRemapMultiColumnVgprs(self, kernel, storeRemapLR, tid0, tid1, coord1Offset, waveCoord1, tmpQ, \
+                                 ldsStride, ldsPad, tmpS0, wgMT1, bpeShift, reuse=False):
+    """
+    Lane chunk f = store * W + lane goes to column f // T at element (f % T) * SRVW of the LDS slab,
+    T = MT0 / SRVW. With T % (128B / store bytes) == 0 every line of a column comes from one store.
+    The pattern repeats every P = T / gcd(T, W) stores, so each phase keeps its own LDS read address,
+    global coord0 and column, and a store in period q adds q * W * P / T columns to its phase.
+    """
+    module = Module("storeRemapMultiColumnVgprs")
+    wave = self.states.kernel["WavefrontSize"]
+    gwvw = kernel["StoreRemapVectorWidth"]
+    lanesPerCol = kernel["MacroTile0"] // gwvw
+    numPhases = lanesPerCol // gcd(lanesPerCol, wave)
+    colsPerPeriod = wave * numPhases // lanesPerCol
+    # with VectorWidthB a lane's slab column c is D column c * VWB (+ vc1 of the block, already in SrdD)
+    vwB = kernel["VectorWidthB"]
+    self.storeRemapNCPL = colsPerPeriod * vwB
+    self.storeRemapLrOffset = (kernel["MacroTile0"] + ldsPad) * colsPerPeriod
+
+    module.addComment0("Store Remap multi-column: %u lanes per column, %u phases of %u columns" % (lanesPerCol, numPhases, colsPerPeriod))
+    # the magic-number divide by a non power of 2 shifts a 64-bit pair, which has to be even aligned
+    tmpV0 = self.vgprPool.checkOutAligned(2, 2, "SR divide tmp")
+    module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", wave, ContinuousRegister(tmpV0, 2)))
+    module.add(VMulLOU32(dst=vgpr(waveCoord1), src0=hex(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(tid1), \
+              comment="coord1 offset of LDS for each Wave"))
+    # same wave to column split as the single-column path
+    module.add(vectorStaticDivideAndRemainder(tmpQ, coord1Offset, tid1, kernel["MIWaveGroup"][0], ContinuousRegister(tmpV0, 2)))
+    module.add(VMulLOU32(dst=vgpr(coord1Offset), src0=hex(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(coord1Offset), \
+              comment="waveCoord0 * MiN / WaveGroupM"))
+    module.add(VMadU32U24(dst=vgpr(coord1Offset), src0=(kernel["MatrixInstN"] * kernel["MatrixInstBN"]), src1=vgpr(tmpQ), src2=vgpr(coord1Offset), \
+              comment="coord1 offset of this wave in MacroTile"))
+    if vwB > 1:
+      module.add(VLShiftLeftB32(dst=vgpr(coord1Offset), shiftHex=hex(log2(vwB)), src=vgpr(coord1Offset), comment="coord1 offset *= VectorWidthB"))
+    module.add(SMulI32(dst=sgpr(tmpS0), src0=hex(kernel["MacroTile0"]), src1=sgpr("WorkGroup0"), comment="%s = wg0*MT0"%sgpr(tmpS0)))
+
+    reserved = self.storeRemapPhases if reuse else None
+    self.storeRemapPhases = []
+    for p in range(numPhases):
+      if reuse:
+        lr, c0, col = reserved[p]
+      else:
+        lr = storeRemapLR if p == 0 else self.vgprPool.checkOut(1, "SR local read phase %u" % p)
+        c0 = self.vgprPool.checkOut(1, "SR coord0 phase %u" % p)
+        col = self.vgprPool.checkOut(1, "SR column phase %u" % p)
+        self.storeRemapPhaseVgprs += ([lr] if p else []) + [c0, col]
+      module.add(VAddU32(dst=vgpr(c0), src0=hex(p * wave), src1=vgpr(tid0), comment="lane chunk of phase %u" % p))
+      module.add(vectorStaticDivideAndRemainder(col, c0, c0, lanesPerCol, ContinuousRegister(tmpV0, 2)))
+      module.add(VLShiftLeftB32(dst=vgpr(c0), shiftHex=hex(log2(gwvw)), src=vgpr(c0), comment="coord0 offset *= gwvw"))
+      module.add(VAddU32(dst=vgpr(lr), src0=vgpr(waveCoord1), src1=vgpr(col), comment="lds column"))
+      module.add(VMulLOU32(dst=vgpr(lr), src0=vgpr(lr), src1=vgpr(ldsStride), comment="lds column * lds stride"))
+      module.add(VAddLShiftLeftU32(dst=vgpr(lr), src0=vgpr(lr), src1=vgpr(c0), shiftHex=bpeShift, comment="local read C address phase %u" % p))
+      if vwB > 1:
+        module.add(VLShiftLeftB32(dst=vgpr(col), shiftHex=hex(log2(vwB)), src=vgpr(col), comment="D column of phase %u *= VectorWidthB" % p))
+      module.add(VAddCOU32(dst=vgpr(c0), dst1=VCC(), src0=sgpr(tmpS0), src1=vgpr(c0), comment="coord0 = coord0 + wg0 * MT0"))
+      self.storeRemapPhases.append((lr, c0, col))
+    self.vgprPool.checkIn(tmpV0)
+
+    module.add(SMulI32(dst=sgpr(wgMT1), src0="MT1", src1=sgpr("WorkGroup1"), comment="<- wg1*MT1"))
+    module.add(VAddCOU32(dst=vgpr(tid1), dst1=VCC(), src0=sgpr(wgMT1), src1=vgpr(coord1Offset), comment="coord1 of this wave = wave coord1 + wg1*MT1"))
+    module.addSpaceLine()
+    return module
+
+  def storeRemapWholeLines(self, kernel, edge):
+    """gfx1250: every store of the remap writes whole cache lines, so mark D streaming (th:TH_STORE_NT).
+    Only when the solution leaves TemporalHintD alone; half lines made NT double the DRAM writes."""
+    lineBytes = self.states.archCaps["CacheLineBytes"]
+    storeBytes = kernel["StoreRemapVectorWidth"] * self.states.bpeCexternal
+    return self.states.version[:2] == (12, 5) and not edge \
+      and kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel" \
+      and _temporalHint(kernel, "D") == TemporalHint.TH_RT \
+      and lineBytes % storeBytes == 0 and (kernel["MacroTile0"] * self.states.bpeCexternal) % lineBytes == 0
+
+  ##############################################################################
   # Store remap compute vgprs:
   ##############################################################################
-  def storeRemapComputeStoreVgprs(self, kernel):
+  def storeRemapComputeStoreVgprs(self, kernel, reuse=False):
+    # gfx1250 sends only full tiles of the final D through the remap, so the setup and the barrier that ends it
+    # go into the remap block (storeRemapSetup); edge tiles and tiles off the cache lines dont pay for them.
+    # Here the registers are only reserved for the whole epilogue.
+    if not reuse and self.states.version[:2] == (12, 5):
+      self._storeRemapComputeStoreVgprs(kernel, False)
+      return Module("storeRemapComputeStoreVgprs (emitted in the remap block)")
+    return self._storeRemapComputeStoreVgprs(kernel, reuse)
+
+  def storeRemapSetup(self, kernel):
+    return self._storeRemapComputeStoreVgprs(kernel, True)
+
+  def _storeRemapComputeStoreVgprs(self, kernel, reuse):
     module = Module("storeRemapComputeStoreVgprs")
     module.addComment0("Store Remap Local Write address")
 
@@ -15376,11 +15486,16 @@ class KernelWriterAssembly(KernelWriter):
       wg0="WorkGroup0"
       wg1="WorkGroup1"
 
-      tid0 = self.vgprPool.checkOut(1, "SR coord0")
-      tid1 = self.vgprPool.checkOut(1, "SR coord1")
-      coord1Offset = self.vgprPool.checkOut(1, "SR coord1 offset")
-      storeRemapLW = self.vgprPool.checkOut(1, "SR local write")
-      storeRemapLR = self.vgprPool.checkOut(1, "SR local read")
+      if reuse:
+        tid0, tid1 = self.vgprs.storeRemapCoord0, self.vgprs.storeRemapCoord1
+        coord1Offset = self.vgprs.storeRemapOffsetCoord1
+        storeRemapLW, storeRemapLR = self.vgprs.storeRemapLW, self.vgprs.storeRemapLR
+      else:
+        tid0 = self.vgprPool.checkOut(1, "SR coord0")
+        tid1 = self.vgprPool.checkOut(1, "SR coord1")
+        coord1Offset = self.vgprPool.checkOut(1, "SR coord1 offset")
+        storeRemapLW = self.vgprPool.checkOut(1, "SR local write")
+        storeRemapLR = self.vgprPool.checkOut(1, "SR local read")
 
       tmpV0 = self.vgprPool.checkOut(5, tag="storeRemapComputeStoreVgprs_tmpV0")
       waveCoord0 = tmpV1 = tmpV0+1
@@ -15419,93 +15534,95 @@ class KernelWriterAssembly(KernelWriter):
 
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
+      if kernel["VectorWidthA"] > 1:
+        module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(kernel["VectorWidthA"])), src=vgpr(coord0), \
+                  comment="lane coord0 *= VectorWidthA, as in computeStoreVgprs"))
 
-      if self.sgprBpeList:
-        module.add(VAddLShiftLeftU32(
-          dst=vgpr(storeRemapLW), \
-          src0=vgpr(tmpV0), \
-          src1=vgpr(coord0), \
-          shiftHex=sgpr(self.sgprBpeList[1]), \
-          comment="local write C address"))
+      # in the remap block only the final D is stored, so its bpe is known here
+      if reuse:
+        bpeShift = hex(log2(self.states.bpeCexternal))
+      elif self.sgprBpeList:
+        bpeShift = sgpr(self.sgprBpeList[1])
       else:
-        module.add(VAddLShiftLeftU32(
-          dst=vgpr(storeRemapLW), \
-          src0=vgpr(tmpV0), \
-          src1=vgpr(coord0), \
-          shiftHex=log2(self.states.bpeCexternalGSU1), \
-          comment="local write C address"))
+        bpeShift = log2(self.states.bpeCexternalGSU1)
+      module.add(VAddLShiftLeftU32(
+        dst=vgpr(storeRemapLW), \
+        src0=vgpr(tmpV0), \
+        src1=vgpr(coord0), \
+        shiftHex=bpeShift, \
+        comment="local write C address"))
 
       module.addSpaceLine()
-      # calculate local read address : v[vgprLocalReadAddrC]
+      if not reuse:
+        self.storeRemapPhaseVgprs = []
+      if storeRemapMultiColumn(kernel):
+        module.add(self.storeRemapMultiColumnVgprs(kernel, storeRemapLR, tid0, tid1, coord1Offset, waveCoord1, coord0, \
+                                                   ldsStride, ldsPad, tmpS0, wgMT1, bpeShift, reuse))
+      else:
+        # calculate local read address : v[vgprLocalReadAddrC]
 
-      module.addComment0("Store Remap Local Read address")
+        module.addComment0("Store Remap Local Read address")
 
-      module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"], \
-        ContinuousRegister(tmpV0, 2)))
-      module.add(VMulLOU32(dst=vgpr(waveCoord1),
-                src0=hex(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(tid1), comment="coord1 offset of LDS for each Wave"))
+        module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"], \
+          ContinuousRegister(tmpV0, 2)))
+        module.add(VMulLOU32(dst=vgpr(waveCoord1),
+                  src0=hex(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(tid1), comment="coord1 offset of LDS for each Wave"))
 
-      nThreadPerCol = kernel["MacroTile0"] // gwvw
-      nColPerLoad = self.states.kernel["WavefrontSize"] // nThreadPerCol
-      self.storeRemapLrOffset = (kernel["MacroTile0"]+ldsPad) * nColPerLoad
-      self.storeRemapNCPL = nColPerLoad
+        nThreadPerCol = kernel["MacroTile0"] // gwvw
+        nColPerLoad = self.states.kernel["WavefrontSize"] // nThreadPerCol
+        self.storeRemapLrOffset = (kernel["MacroTile0"]+ldsPad) * nColPerLoad
+        self.storeRemapNCPL = nColPerLoad
 
-      module.add(VLShiftRightB32(dst=vgpr(tmpV1),\
-                shiftHex=hex(log2(nThreadPerCol)), src=vgpr(tid0), \
-                comment="tid / nThreadPerCol"))
-      module.add(VAddU32(dst=vgpr(coord1Offset), src0=vgpr(waveCoord1), src1=vgpr(tmpV1), comment="coord1 offset in MacroTile"))
-      module.add(VMulLOU32(dst=vgpr(tmpV0), src0=vgpr(coord1Offset), src1=vgpr(ldsStride), \
-                comment="lds coord1 offset = Col-id* lds stride"))
+        module.add(VLShiftRightB32(dst=vgpr(tmpV1),\
+                  shiftHex=hex(log2(nThreadPerCol)), src=vgpr(tid0), \
+                  comment="tid / nThreadPerCol"))
+        module.add(VAddU32(dst=vgpr(coord1Offset), src0=vgpr(waveCoord1), src1=vgpr(tmpV1), comment="coord1 offset in MacroTile"))
+        module.add(VMulLOU32(dst=vgpr(tmpV0), src0=vgpr(coord1Offset), src1=vgpr(ldsStride), \
+                  comment="lds coord1 offset = Col-id* lds stride"))
 
-      module.add(VAndB32(dst=vgpr(coord0), src0=hex(nThreadPerCol-1), src1=vgpr(tid0),
-                comment="coord0 offset of LDS for each thread"))
-      module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
-                comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
+        module.add(VAndB32(dst=vgpr(coord0), src0=hex(nThreadPerCol-1), src1=vgpr(tid0),
+                  comment="coord0 offset of LDS for each thread"))
+        module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
+                  comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
                   src1=vgpr(coord0), \
-                  shiftHex=sgpr(self.sgprBpeList[1]), \
+                  shiftHex=bpeShift, \
                   comment="local read C address"))
-      else:
-        module.add(VAddLShiftLeftU32(
-                  dst=vgpr(storeRemapLR), \
-                  src0=vgpr(tmpV0), \
-                  src1=vgpr(coord0), \
-                  shiftHex=log2(self.states.bpeCexternalGSU1), \
-                  comment="local read C address"))
-      module.addSpaceLine()
+        module.addSpaceLine()
 
-      # calculate global write coord0 and coord1
-      module.addComment0("Store Remap global write coord0 and coord1")
-      module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"]*kernel["MIWaveGroup"][0], \
-        ContinuousRegister(tmpV0, 2)))
+        # calculate global write coord0 and coord1
+        module.addComment0("Store Remap global write coord0 and coord1")
+        module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"]*kernel["MIWaveGroup"][0], \
+          ContinuousRegister(tmpV0, 2)))
 
-      ColsPerBlockShape = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
+        ColsPerBlockShape = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
 
-      module.add(VMulLOU32(dst=vgpr(waveCoord1), src0=hex(ColsPerBlockShape), src1=vgpr(tid1),
-                comment="coord1 offset of global memory for each Wave"))
+        module.add(VMulLOU32(dst=vgpr(waveCoord1), src0=hex(ColsPerBlockShape), src1=vgpr(tid1),
+                  comment="coord1 offset of global memory for each Wave"))
 
-      module.add(vectorStaticDivideAndRemainder(tid1, tid0, tid0, self.states.kernel["WavefrontSize"], \
-        ContinuousRegister(tmpV0, 2)))
-      module.add(VMadU32U24(dst=vgpr(waveCoord1), src0=(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(tid1), src2=vgpr(waveCoord1), \
-                comment="waveCoord1 += waveCoord0 * MiN / WaveGroupM"))
+        module.add(vectorStaticDivideAndRemainder(tid1, tid0, tid0, self.states.kernel["WavefrontSize"], \
+          ContinuousRegister(tmpV0, 2)))
+        module.add(VMadU32U24(dst=vgpr(waveCoord1), src0=(kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]), src1=vgpr(tid1), src2=vgpr(waveCoord1), \
+                  comment="waveCoord1 += waveCoord0 * MiN / WaveGroupM"))
 
-      module.add(VLShiftRightB32(dst=vgpr(tmpV1), shiftHex=hex(log2(nThreadPerCol)), src=vgpr(tid0), \
-                comment="tid / nThreadPerCol"))
+        module.add(VLShiftRightB32(dst=vgpr(tmpV1), shiftHex=hex(log2(nThreadPerCol)), src=vgpr(tid0), \
+                  comment="tid / nThreadPerCol"))
 
-      module.add(VAddU32(dst=vgpr(coord1Offset), src0=vgpr(waveCoord1), src1=vgpr(tmpV1), comment="coord1 offset in MacroTile"))
+        module.add(VAddU32(dst=vgpr(coord1Offset), src0=vgpr(waveCoord1), src1=vgpr(tmpV1), comment="coord1 offset in MacroTile"))
 
-      module.add(SMulI32(dst=sgpr(tmpS0), src0=hex(kernel["MacroTile0"]), src1=sgpr(wg0), comment="%s = wg0*MT0"%sgpr(tmpS0)))
+        module.add(SMulI32(dst=sgpr(tmpS0), src0=hex(kernel["MacroTile0"]), src1=sgpr(wg0), comment="%s = wg0*MT0"%sgpr(tmpS0)))
 
-      module.add(VAddCOU32(dst=vgpr(tid0), dst1=VCC(), src0=sgpr(tmpS0), src1=vgpr(coord0), comment="coord0 = coord0 + wg0 * MT0"))
+        module.add(VAddCOU32(dst=vgpr(tid0), dst1=VCC(), src0=sgpr(tmpS0), src1=vgpr(coord0), comment="coord0 = coord0 + wg0 * MT0"))
 
-      module.add(SMulI32(dst=sgpr(wgMT1), src0="MT1", src1=sgpr(wg1), comment="<- wg1*MT1"))
-      module.add(VAddCOU32(dst=vgpr(tid1), dst1=VCC(), src0=sgpr(wgMT1), src1=vgpr(coord1Offset), comment="coord1 = tid1*VW + wg1*MT1"))
+        module.add(SMulI32(dst=sgpr(wgMT1), src0="MT1", src1=sgpr(wg1), comment="<- wg1*MT1"))
+        module.add(VAddCOU32(dst=vgpr(tid1), dst1=VCC(), src0=sgpr(wgMT1), src1=vgpr(coord1Offset), comment="coord1 = tid1*VW + wg1*MT1"))
+        # one phase: every store reads its own LDS column group, no per-lane column register
+        self.storeRemapPhases = [(storeRemapLR, tid0, None)]
 
-      module.addSpaceLine()
+        module.addSpaceLine()
 
       module.add(self._syncThreads(kernel, "StoreRemap Start"))
 
@@ -15516,6 +15633,8 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.storeRemapOffsetCoord1 = coord1Offset #offset coord1
 
       self.vgprPool.checkIn(tmpV0)
+      if reuse:
+        return module
 
       nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
       rpe = self.states.bpeCexternal / self.states.bpr
@@ -17437,7 +17556,84 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # globalWriteElementBatch :
   ##############################################################################
-  def globalWriteElementBatch(self, kernel, tPA, tPB, activation, \
+  def globalWriteElementBatch(self, kernel, tPA, tPB, activation, applyAlpha, beta, edge, atomic, \
+                              vectorWidth, element, activationLabelList, \
+                              tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList, \
+                              actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList, \
+                              edgeModule, writeLabel, endLabel, currentInstLength, *args, **kwargs):
+    def batch(module, label, instLength):
+      return self._globalWriteElementBatch(kernel, tPA, tPB, activation, applyAlpha, beta, edge, atomic, \
+                                           vectorWidth, element, activationLabelList, \
+                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList, \
+                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList, \
+                                           module, label, endLabel, instLength, *args, **kwargs)
+
+    # gfx1250 sends only full tiles of the final D through the store remap. Edge tiles would go through it
+    # one element at a time, and the Stream-K / GSU partials are compute type; both keep the direct stores.
+    # With beta the C loads land in front of every column block barrier and that costs more than the
+    # whole-line stores save (MT256x160x64 at beta 1 came out ~10% slower), so beta keeps them as well.
+    srvw = kernel["StoreRemapVectorWidth"]
+    if not srvw or self.states.version[:2] != (12, 5):
+      return batch(edgeModule, writeLabel, currentInstLength)
+    try:
+      if edge or beta or self.states.bpeCexternal != self.states.bpeCexternalGSU1:
+        kernel["StoreRemapVectorWidth"] = 0
+        return self.storeRemapLent(lambda: batch(edgeModule, writeLabel, currentInstLength))
+      wholeLines = self.storeRemapWholeLines(kernel, edge)
+      remapModule = Module("StoreRemap")
+      instLength, activationTypeStr = batch(remapModule, writeLabel, currentInstLength)
+      head = Module("StoreRemap head")
+      setup = self.storeRemapSetup(kernel)
+      plainModule = None
+      if wholeLines:
+        # Whole-line NT stores only pay when every column of the tile starts on a line (ld 368 x 2 B doesnt),
+        # so a full tile checks D at run time and takes the direct stores otherwise.
+        kernel["StoreRemapVectorWidth"] = 0
+        plainLabel = Label(self.labels.getNameInc("GW_NotLineAligned"), "D not on cache lines, direct stores")
+        plainModule = Module("Direct stores, D not line aligned")
+        instLength, activationTypeStr = self.storeRemapLent(lambda: batch(plainModule, plainLabel, instLength))
+        head.add(self.storeRemapLineCheck(kernel, plainLabel, countInstruction(remapModule) + countInstruction(setup)))
+      head.add(setup)
+      remapModule.add(head, pos=1)
+      edgeModule.add(remapModule)
+      if plainModule:
+        edgeModule.add(plainModule)
+      return instLength + countInstruction(head), activationTypeStr
+    finally:
+      kernel["StoreRemapVectorWidth"] = srvw
+
+  def storeRemapLent(self, emit):
+    # A direct-store block never reads the remap registers and every remap block sets them up again (storeRemapSetup),
+    # so the direct batches get them back as temps. Held for the whole epilogue they cost the edge tiles twice the
+    # s_wait_xcnt (MT192x240x32: 75 -> 154) from registers being recycled sooner.
+    regs = [self.vgprs.storeRemapCoord0, self.vgprs.storeRemapCoord1, self.vgprs.storeRemapOffsetCoord1,
+            self.vgprs.storeRemapLW, self.vgprs.storeRemapLR] + self.storeRemapPhaseVgprs + self.vgprs.storeRemapAS
+    for r in regs:
+      self.vgprPool.addFromCheckOut(r)
+    try:
+      return emit()
+    finally:
+      for r in regs:
+        self.vgprPool.removeFromCheckOut(r)
+
+  def storeRemapLineCheck(self, kernel, plainLabel, skipLength):
+    """SCC = some column of this tile starts off a cache line: tile base of D (SrdD, batch and wg1 * MT1 already in)
+    or the column stride in bytes. wg0 * MT0 * bpe is a whole number of lines, storeRemapWholeLines checks that."""
+    module = Module("storeRemapLineCheck")
+    lineBytes = self.states.archCaps["CacheLineBytes"]
+    strideD1 = "StrideD%s" % (self.states.indexChars[kernel["PackedC1IndicesX"][0]])
+    with self.allocTmpSgpr(3, tag="storeRemapLineCheck_tmpSgprInfo") as tmpSgprInfo:
+      tmpS = tmpSgprInfo.idx
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS), shiftHex=log2(self.states.bpeCexternal), src=sgpr(strideD1), comment="column stride of D in bytes"))
+      module.add(SOrB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr("SrdD+0"), comment="| tile base of D"))
+      module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=hex(lineBytes - 1), comment="scc = off a %u B line" % lineBytes))
+      if skipLength >= self.states.asmCaps["ShortBranchMaxLength"]:
+        module.add(self.longBranchScc1(plainLabel, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="direct stores if not line aligned"))
+      else:
+        module.add(SCBranchSCC1(labelName=plainLabel.getLabelName(), comment="direct stores if not line aligned"))
+    return module
+
+  def _globalWriteElementBatch(self, kernel, tPA, tPB, activation, \
                               applyAlpha, beta, edge, atomic, \
                               vectorWidth, element, activationLabelList, \
                               tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList, \
@@ -18728,7 +18924,10 @@ class KernelWriterAssembly(KernelWriter):
       barrier = SBarrier(comment="reuse vector epilogue LDS scratch")
       barrier.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
       module.add(barrier)
-    elif kernel["LdsOffsetBias"] == 0:
+    elif kernel["LdsOffsetBias"] == 0 or (kernel["StoreRemapVectorWidth"] and self.states.version[:2] == (12, 5)):
+      # With StoreRemap the vectors sit after the remap slab, which is still inside the A / B buffers, and on gfx1250
+      # the StoreRemap Start barrier moved into the remap block, so nothing else keeps these writes behind the other
+      # waves' last main-loop reads.
       module.add(SBarrier(comment="wait for all global loads."))
 
     # rearrange them and add waitcnt
