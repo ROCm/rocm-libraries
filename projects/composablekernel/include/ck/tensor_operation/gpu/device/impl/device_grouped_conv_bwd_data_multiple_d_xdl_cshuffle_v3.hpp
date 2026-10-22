@@ -291,14 +291,14 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
             }
 
             const auto a_grid_desc_transform =
-                GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
-                                                     GridwiseGemm::AK0Number,
-                                                     GridwiseGemm::AK1Number>(
+                GridwiseGemm::template TransformGridA<AGridDesc_AK0_M_AK1,
+                                                      GridwiseGemm::AK0Number,
+                                                      GridwiseGemm::AK1Number>(
                     gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_, get_device_arch());
             const auto b_grid_desc_transform =
-                GridwiseGemm::template TransformGrid<BGridDesc_BK0_N_BK1,
-                                                     GridwiseGemm::BK0Number,
-                                                     GridwiseGemm::BK1Number>(
+                GridwiseGemm::template TransformGridB<BGridDesc_BK0_N_BK1,
+                                                      GridwiseGemm::BK0Number,
+                                                      GridwiseGemm::BK1Number>(
                     gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_, get_device_arch());
 
             if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
