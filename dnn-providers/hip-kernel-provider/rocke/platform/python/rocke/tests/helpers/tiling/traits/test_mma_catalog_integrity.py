@@ -203,6 +203,23 @@ def test_index_layout_is_for_sparse_rows_only(tmp_path) -> None:
     )
 
 
+def test_every_sparse_mfma_row_records_its_index_layout() -> None:
+    # The sparse MFMA rows carry the index operand's layout. The sparse WMMA rows do not record it
+    # yet (README: Unverified layouts); a sparse row of any other kind without it fails here.
+    without = {
+        row["op_id"]
+        for row in _document()["operations"]
+        if row["family"] == "sparse" and row["index_layout"] is None
+    }
+    assert without and all(op_id.startswith("swmmac_") for op_id in without)
+    sparse_mfma = [
+        row
+        for row in _document()["operations"]
+        if row["family"] == "sparse" and row["op_id"].startswith("smfmac_")
+    ]
+    assert sparse_mfma and all(row["index_layout"] for row in sparse_mfma)
+
+
 def test_scale_must_be_null_or_a_scale_object(tmp_path) -> None:
     document = _document()
     _row(document, "wmma_scale_f32_32x16x128_f4")["scale"] = {"block_k": 32}

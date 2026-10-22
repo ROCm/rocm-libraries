@@ -71,6 +71,35 @@ def test_shipped_styles_build_a_plan_without_raising() -> None:
             )
 
 
+def test_a_operand_with_several_m_blocks_builds_canonical_and_refuses_interleaved() -> (
+    None
+):
+    # wmma_f32_32x16x128_f4: each lane holds 2 M blocks of A in its registers. The canonical
+    # encoding models that level, so a canonical plan builds; the interleaved construction does not,
+    # so it refuses the atom by name instead of building a wrong layout.
+    from rocke.helpers.tiling.mma.plan import TileMmaPlan
+
+    def plan(style):
+        return TileMmaPlan(
+            (32, 16, 128),
+            a="fp4e2m1",
+            b="fp4e2m1",
+            c="f32",
+            target="gfx1250",
+            style=style,
+            atom_override="wmma_f32_32x16x128_f4",
+        )
+
+    assert plan(CanonicalStyle()).op_id == "wmma_f32_32x16x128_f4"
+    with pytest.raises(NotImplementedError) as excinfo:
+        plan(InterleavedStyle())
+    assert str(excinfo.value) == (
+        "InterleavedStyle cannot lay out 'wmma_f32_32x16x128_f4': each lane holds 2 M blocks of "
+        "A in registers, which the interleaved construction does not model -- TODO: not "
+        "implemented yet; use the canonical style"
+    )
+
+
 def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
     # Force mma_operand_layout_sound to report an error and confirm the PLAN rejects it at build --
     # proving the gate fires at construction (matching the C-oracle), not only at TileMmaDriver.__call__.

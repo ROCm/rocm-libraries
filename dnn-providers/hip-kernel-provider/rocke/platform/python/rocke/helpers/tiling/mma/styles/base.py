@@ -51,6 +51,9 @@ class AtomNumbers:
 
     @classmethod
     def from_traits(cls, traits: MmaTraits) -> "AtomNumbers":
+        """Derive the atom quantities from ``traits``. They describe one M block of A per lane; a
+        style that cannot lay out an atom holding more (``a_m_register_blocks > 1``) refuses it.
+        """
         params = traits.layout_params
         return cls(
             m=traits.m,
