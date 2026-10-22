@@ -17,11 +17,12 @@ Three outputs, each rewritten whole, so the tool is idempotent:
   nondeterministic (LLVM's AMDGPU backend), with the source of each.
 
 The pin set is every ``ok`` row of the ``objects-k3`` and ``objects-t1`` manifests,
-deduplicated by hash (the first manifest in name order wins; ``objects-t1`` last, which fixes the sha and resource row), minus
-the hashes ``objects-t1/superseded.csv`` replaces. A hash in the flaky file came from
-the bimodal list of ``external/build-nondeterminism.md``, from the retried builds of
-``external/rmir-scan.md``, or from a manifest row row (in any manifest) whose
-``attempts`` exceeds 1.
+deduplicated by hash, minus the hashes ``objects-t1/superseded.csv`` replaces. A hash
+that appears in several manifests must carry the same spec, sha256 and resource row in
+all of them; any disagreement aborts the run. A hash in the flaky file came from the
+bimodal list of ``external/build-nondeterminism.md``, from the retried builds of
+``external/rmir-scan.md``, or from a manifest row (of any status, in any manifest)
+whose ``attempts`` exceeds 1, provided the hash is a pin.
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ HEX12 = re.compile(r"`([0-9a-f]{12})`")
 
 
 def read_pins(s0: Path) -> tuple[dict[str, dict], dict[str, int], set[str]]:
-    """({hash: manifest row}, {kernel: count}, {hashes with attempts > 1 in any manifest}) of the pin set."""
+    """({hash: manifest row}, {kernel: count}, {pinned hashes with attempts > 1 in any manifest row}) of the pin set."""
     manifests = sorted(
         glob.glob(str(s0 / "objects-k3" / "*" / "payload" / "manifest.csv"))
     )
@@ -76,6 +77,8 @@ def read_pins(s0: Path) -> tuple[dict[str, dict], dict[str, int], set[str]]:
     for path in manifests:
         with open(path, newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
+                if int(row["attempts"]) > 1:
+                    retried.add(row["hash"])
                 if row["status"] != "ok" or row["hash"] in superseded:
                     continue
                 spec = Spec.parse(row["spec"])
@@ -84,8 +87,6 @@ def read_pins(s0: Path) -> tuple[dict[str, dict], dict[str, int], set[str]]:
                         f"{path}: {row['hash']} is not the hash of {row['spec']!r}"
                     )
                 seen = pins.setdefault(row["hash"], row)
-                if int(row["attempts"]) > 1:
-                    retried.add(row["hash"])
                 for column in ("spec", "sha256", *RESOURCE_COLUMNS):
                     if seen[column] != row[column]:
                         raise SystemExit(
@@ -95,7 +96,7 @@ def read_pins(s0: Path) -> tuple[dict[str, dict], dict[str, int], set[str]]:
     counts = {kernel: 0 for kernel in KERNELS}
     for row in pins.values():
         counts[Spec.parse(row["spec"]).kernel] += 1
-    return pins, counts, retried
+    return pins, counts, retried & pins.keys()
 
 
 def read_flaky(

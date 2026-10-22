@@ -5,8 +5,9 @@
 
 A five-row fixture stands in for a generator run: one row identical to its pin, and four
 that are not (a changed byte, a changed resource row, an object the generator never
-built, a known-flaky ``dual_object``). The compare is report-only for those. Spill
-findings, ``error`` rows and a ``dual_object`` outside the known-flaky set are red.
+built, a known-flaky ``dual_object``). The compare is report-only for those, and for a
+``dual_object`` of the dq causal family. Spill findings, ``error`` rows, any other
+``dual_object`` and a reference op with no manifest are red.
 Pure Python.
 """
 
@@ -167,3 +168,49 @@ def test_red_rows_exit_nonzero(tmp_path, capsys, row, patch, line) -> None:
     assert status == 1
     assert any(l.startswith(line) for l in lines)
     assert lines[-1] == "RED: 1 row(s)"
+
+
+DUAL = {"build_status": "dual_object", "file": "", "detail": "dual"}
+
+
+def test_a_dq_causal_dual_object_outside_the_flaky_list_is_known_t2(
+    tmp_path, capsys
+) -> None:
+    argv = _build_fixture(tmp_path)
+    flaky = tmp_path / "flaky.csv"
+    flaky.write_text("hash,spec,source\n", encoding="utf-8")  # nothing listed
+    spec = Spec.parse(SPECS["flaky"])
+    assert (spec.kernel, spec.cls) == ("dq", "causal")
+    status, lines = _run(argv, capsys)
+    assert status == 0
+    (line,) = [l for l in lines if "dq tile=64 cls=causal" in l]
+    assert line.startswith("known T2 (dq-causal family)") and "flaky=no" in line
+    assert "RED" not in "\n".join(lines)
+
+
+@pytest.mark.parametrize("row", ["byte", "resource"], ids=["dkdv-causal", "dq-plain"])
+def test_a_dual_object_outside_the_dq_causal_family_is_red(
+    tmp_path, capsys, row
+) -> None:
+    status, lines = _run(_build_fixture(tmp_path, **{row: DUAL}), capsys)
+    assert status == 1
+    assert sum(l.startswith("RED missing") for l in lines) == 1
+    assert lines[-1] == "RED: 1 row(s)"
+
+
+def test_an_op_without_a_manifest_is_missing_and_red(tmp_path, capsys) -> None:
+    argv = _build_fixture(tmp_path)
+    (tmp_path / "out" / "sdpa_bwd_merged" / "gfx950" / "manifest.json").unlink()
+    status, lines = _run(argv, capsys)
+    assert status == 1
+    assert any(
+        l.startswith("RED missing: merged tile=64 cls=plain") and "no manifest" in l
+        for l in lines
+    )
+    assert any("no manifest: sdpa_bwd_merged" in l for l in lines)
+    assert lines[1] == "2/5 byte-identical"
+
+    status, lines = _run([*argv, "--only-built"], capsys)
+    assert status == 0
+    assert lines[1] == "2/4 byte-identical"
+    assert any("no manifest: sdpa_bwd_merged" in l for l in lines)
