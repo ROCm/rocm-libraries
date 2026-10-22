@@ -356,3 +356,25 @@ class TestScalarValueGetters:
 
         tensor.clear_value()
         assert tensor.get_value_variant() is None
+
+
+class TestSetCompileTimeConstant:
+    """set_compile_time_constant() is an alias of set_value()."""
+
+    def test_bakes_a_constant_like_set_value(self):
+        tensor = hipdnn.Tensor()
+
+        assert tensor.set_compile_time_constant(2.5, hipdnn.DataType.HALF) is tensor
+        assert tensor.get_data_type() == hipdnn.DataType.HALF
+        assert tensor.get_compile_time_constant() == 2.5
+
+    def test_type_inferred_from_python_value(self):
+        tensor = hipdnn.Tensor().set_compile_time_constant(3)
+
+        assert tensor.get_data_type() == hipdnn.DataType.INT64
+
+    def test_rejects_multi_element_tensor(self):
+        tensor = hipdnn.Tensor.create([2], hipdnn.DataType.FLOAT)
+
+        with pytest.raises(ValueError, match="one element"):
+            tensor.set_compile_time_constant(1.0)
