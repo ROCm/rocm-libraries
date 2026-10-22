@@ -159,6 +159,8 @@ def is_valid_grouped_wgrad_mfma_spec(spec: GroupedWgradMfmaSpec, arch: str = "gf
         return False, "prefetch in 2..4"
     if spec.rows_per_chunk < 1:
         return False, "rows_per_chunk >= 1"
+    if spec.target_blocks < 1:
+        return False, "target_blocks >= 1"
     if spec.n_acc() * 4 > 128:
         return False, "too many accumulators"
     if spec.lds_bytes() > 160 * 1024:

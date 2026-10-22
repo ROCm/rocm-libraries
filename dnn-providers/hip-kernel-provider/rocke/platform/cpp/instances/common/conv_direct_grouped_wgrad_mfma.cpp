@@ -235,6 +235,10 @@ extern "C" bool rocke_grouped_wgrad_mfma_is_valid_spec(const rocke_grouped_wgrad
     {
         why = "rows_per_chunk >= 1";
     }
+    else if(s->target_blocks < 1)
+    {
+        why = "target_blocks >= 1";
+    }
     else if(n_acc(s) * 4 > 128)
     {
         why = "too many accumulators";

@@ -1629,7 +1629,7 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         *kind = KIND_DW_WGRAD_LDS;
     else if(idx <= 33)
         *kind = KIND_WGRAD_GATHER;
-    else if(idx <= 40)
+    else if(idx <= 40 || idx == 45 || idx == 46)
         *kind = KIND_DW_WGRAD_MFMA;
     else
         *kind = KIND_GROUPED_WGRAD_MFMA;
@@ -1948,6 +1948,26 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         gm->problem.groups = 4;
         gm->problem.cpg = 16;
         gm->problem.kpg = 16;
+        return 0;
+    case 45: /* must reject: no blocks */
+        dm->problem = mk_dwp(64);
+        dm->target_blocks = 0;
+        return 0;
+    case 46: /* must reject: a negative block budget */
+        dm->problem = mk_dwp(64);
+        dm->target_blocks = -1;
+        return 0;
+    case 47: /* must reject: no blocks */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        gm->target_blocks = 0;
+        return 0;
+    case 48: /* must reject: a negative block budget */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        gm->target_blocks = -1;
         return 0;
     default:
         return -1;

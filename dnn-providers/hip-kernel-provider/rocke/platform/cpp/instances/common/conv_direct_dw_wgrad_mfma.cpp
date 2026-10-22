@@ -271,6 +271,10 @@ extern "C" bool rocke_dw_wgrad_mfma_is_valid_spec(const rocke_dw_wgrad_mfma_spec
     {
         why = "rows_per_chunk >= 1";
     }
+    else if(s->target_blocks < 1)
+    {
+        why = "target_blocks >= 1";
+    }
     else if(rocke_dw_wgrad_mfma_lds_bytes(s) > 160 * 1024)
     {
         ROCKE_ERR_SNPRINTF(

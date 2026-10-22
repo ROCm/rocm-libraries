@@ -198,6 +198,8 @@ def is_valid_dw_wgrad_mfma_spec(spec: DwWgradMfmaSpec, arch: str = "gfx950"):
         )
     if spec.rows_per_chunk < 1:
         return False, "rows_per_chunk >= 1"
+    if spec.target_blocks < 1:
+        return False, "target_blocks >= 1"
     if spec.lds_bytes() > 160 * 1024:
         return False, f"LDS {spec.lds_bytes()} B > 160 KiB"
     if arch not in ("gfx950",):

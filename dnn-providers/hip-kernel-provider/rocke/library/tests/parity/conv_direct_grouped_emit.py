@@ -130,7 +130,7 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 
 
 # ---------------------------------------------------------------------------
-# The direct wgrad kernels, indices 114..158: DirectWgradTiledSpec (wave tiles,
+# The direct wgrad kernels, indices 114..162: DirectWgradTiledSpec (wave tiles,
 # unfold_n, row_unroll, q_groups with and without pingpong, 1x1 and 5x5), the
 # DwWgradFoldSpec partial-slot fold, DwWgradColsSpec (small C), DwWgradLdsSpec
 # (row rings, strided, cols_per_lane, a partial channel tile), WgradGatherSpec
@@ -142,8 +142,8 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 # (preshifted and plain windows, packed images, 3x3 tap groups, the
 # single-prologue PAD = KH - 1 case, a partial channel tile) and
 # GroupedWgradMfmaSpec (4 and 8 channels per group, wave splits, a partial
-# channel tile), each with a reject. Follows the 11 grouped non-grouped
-# configs.
+# channel tile), each with a reject; then both with no blocks and with a
+# negative block budget. Follows the 11 grouped non-grouped configs.
 # ---------------------------------------------------------------------------
 _WGRAD_DIRECT_CFG_BASE = 114
 
@@ -437,6 +437,17 @@ def _wgrad_direct_spec(idx: int):
         ),
         # Must reject: 16 channels per group.
         44: ("grouped_wgrad_mfma", gm(problem=_wp(groups=4, cpg=16, kpg=16))),
+        # Must reject: no blocks, and a negative block budget.
+        45: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=0)),
+        46: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=-1)),
+        47: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=0),
+        ),
+        48: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=-1),
+        ),
     }
     sel = table.get(idx)
     if sel is None:
