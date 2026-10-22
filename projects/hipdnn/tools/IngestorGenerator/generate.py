@@ -14,6 +14,7 @@ or rendering (and argparse's code for a bad flag).
 """
 
 import argparse
+import json
 import os
 import sys
 from collections import Counter
@@ -83,28 +84,61 @@ def installed_siblings(config) -> list[Path]:
     return prior_ids.discover_siblings(installed.parent, config.engine.name, installed)
 
 
-def earlier_passes(config, output_dir: Path, used: list[Path]) -> list[Path]:
+def _holds_kdp_of(bundle: Path, engine_id: str) -> bool:
+    """Whether a KDP under ``bundle`` names ``engine_id``: the only trace of the
+    engine in a satellite, which holds no UED."""
+    for path in prior_ids.list_docs(bundle, "kdp"):
+        try:
+            if json.loads(path.read_text(encoding="utf-8")).get("engine") == engine_id:
+                return True
+        except (OSError, ValueError, AttributeError):
+            continue
+    return False
+
+
+def holds_previous_version(root: Path) -> bool:
+    """Whether ``root`` holds a previous version of a bundle: a UED or a KDP, or a
+    ``*.dvc`` pointer for an artifact (an unfetched KDP), which reading ``root``
+    then refuses."""
+    return prior_ids.holds_docs(root, "ued", "kdp") or (
+        root.is_dir() and any(True for _ in root.rglob("*.dvc"))
+    )
+
+
+def earlier_passes(
+    config, output_dir: Path, used: list[Path], engine_id: str | None = None
+) -> list[Path]:
     """Directories beside ``output_dir`` that hold an earlier generation of this
     engine's bundle and were not read, newest first. A new output directory per
-    pass reads nothing unless told where the last pass went."""
+    pass reads nothing unless told where the last pass went.
+
+    A bundle is this engine's when its UED has the engine's name or, for a
+    satellite, which has no UED, when a KDP names ``engine_id``. An entry that
+    cannot be read is not an earlier pass."""
     parent = output_dir.parent
-    if not parent.is_dir():
+    try:
+        if not parent.is_dir():
+            return []
+        skipped = {path.resolve() for path in used} | {output_dir.resolve()}
+        found: list[tuple[float, Path]] = []
+        entries = list(parent.iterdir())
+    except OSError:
         return []
-    skipped = {path.resolve() for path in used} | {output_dir.resolve()}
-    found = []
-    for sibling in parent.iterdir():
+    for sibling in entries:
         bundle = sibling / config.descriptor_dir
-        if sibling.resolve() in skipped or bundle.resolve() in skipped:
-            continue
-        if not prior_ids.holds_docs(bundle, "ued", "kdp"):
-            continue
         try:
-            if prior_ids.find_engine(bundle, config.engine.name) is None:
+            if sibling.resolve() in skipped or bundle.resolve() in skipped:
                 continue
-        except ValueError:
+            if not prior_ids.holds_docs(bundle, "ued", "kdp"):
+                continue
+            if prior_ids.find_engine(bundle, config.engine.name) is None and not (
+                engine_id and _holds_kdp_of(bundle, engine_id)
+            ):
+                continue
+            found.append((bundle.stat().st_mtime, bundle))
+        except (OSError, ValueError):
             continue
-        found.append(bundle)
-    return sorted(found, key=lambda path: path.stat().st_mtime, reverse=True)
+    return [path for _, path in sorted(found, key=lambda item: item[0], reverse=True)]
 
 
 def describe_ids(report: IdReport, fresh: bool = False) -> str:
@@ -300,7 +334,7 @@ def main() -> None:
                 )
         if not args.new_ids and ids_from is None:
             installed = installed_descriptor_dir(config)
-            if installed is not None and prior_ids.holds_docs(installed, "ued", "kdp"):
+            if installed is not None and holds_previous_version(installed):
                 ids_from, automatic = installed, True
                 print(f"Reusing ids from the installed bundle {installed}")
                 held = args.output_dir / config.descriptor_dir
@@ -339,7 +373,9 @@ def main() -> None:
             if path is not None
         )
         if resolution.report.minted and not args.new_ids:
-            earlier = earlier_passes(config, args.output_dir, sources)
+            earlier = earlier_passes(
+                config, args.output_dir, sources, resolution.ids.get("ued")
+            )
             if earlier:
                 print(
                     f"Warning: {resolution.report.minted} descriptor(s) got new ids, "

@@ -16,6 +16,7 @@ existing non-empty output directory.
 
 import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -658,6 +659,59 @@ class TestInstalledBundle:
         assert "minted 1" in captured.out
         assert self.EARLIER not in captured.err
 
+    def test_an_unreadable_neighbour_of_the_output_directory_is_skipped(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        """The scratch parent is often shared (a /tmp), and a neighbour the user
+        cannot read is not theirs to be warned about."""
+        import generate
+
+        work = tmp_path / "work"
+        previous = work / "pass1"
+        code, captured = self.run_with(
+            monkeypatch, capsys, self.with_kernels(128), previous
+        )
+        assert code == 0, captured.err
+        (work / "locked").mkdir()
+        read = generate.prior_ids.holds_docs
+
+        def holds_docs(root, *kinds):
+            if "locked" in root.parts:
+                raise PermissionError(13, "Permission denied", str(root))
+            return read(root, *kinds)
+
+        monkeypatch.setattr(generate.prior_ids, "holds_docs", holds_docs)
+
+        code, captured = self.run_with(
+            monkeypatch, capsys, self.with_kernels(128, 512), work / "pass2"
+        )
+
+        assert code == 0, captured.err
+        assert str(previous / "test_descriptors" / "unit" / "scale_add") in captured.err
+
+    def test_the_newest_earlier_pass_is_the_one_named(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        """Passes are named newest first, whatever order the directory lists them
+        in: the newest is the previous pass."""
+        work = tmp_path / "work"
+        bundles = {}
+        for name, age in (("pass1", 300), ("pass2", 100), ("pass3", 200)):
+            code, captured = self.run_with(
+                monkeypatch, capsys, self.with_kernels(128), work / name
+            )
+            assert code == 0, captured.err
+            bundles[name] = work / name / "test_descriptors" / "unit" / "scale_add"
+            stamp = 2_000_000_000 - age
+            os.utime(bundles[name], (stamp, stamp))
+
+        code, captured = self.run_with(
+            monkeypatch, capsys, self.with_kernels(128, 512), work / "pass4"
+        )
+
+        assert code == 0, captured.err
+        assert f"--ids-from {bundles['pass2']}" in captured.err
+
     def test_a_removed_packs_files_are_reported_as_left_behind(
         self, tmp_path, monkeypatch, capsys
     ):
@@ -871,6 +925,46 @@ class TestInstalledSiblings:
             read_docs(installed.satellite_dir)
         )
         assert all_ids(generated).isdisjoint(installed_ids)
+
+    def test_a_satellite_run_names_an_earlier_pass_it_did_not_read(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        """A satellite pass holds a KDP and no UED, so the engine is told by the KDP's
+        engine id; the kernel added since installation is minted again."""
+        config = make_packaged_config("rocKE/b", [128, 256, 512])
+        work = tmp_path / "work"
+        code, captured = self.run_main(monkeypatch, capsys, config, work / "pass1")
+        assert code == 0, captured.err
+        assert "earlier generation" not in captured.err
+
+        code, captured = self.run_main(monkeypatch, capsys, config, work / "pass2")
+
+        assert code == 0, captured.err
+        assert "minted 1" in captured.out
+        assert "earlier generation of this engine" in captured.err
+        assert str(work / "pass1" / config.descriptor_dir) in captured.err
+
+    def test_a_satellite_whose_kdp_is_an_unfetched_dvc_artifact_is_refused(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        """Its kernel ids live in the artifact, so a run that cannot read them would
+        mint every one again."""
+        config = make_packaged_config("rocKE/b", [128, 256])
+        (installed.satellite_dir / "test.kdp.json").unlink()
+        pointer = installed.satellite_dir / "artifacts.dvc"
+        pointer.write_text(
+            "outs:\n- md5: 106ebd4caeba7b508fa33fcd8383c130.dir\n  path: artifacts\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "out"
+
+        code, captured = self.run_main(monkeypatch, capsys, config, out)
+
+        assert code == 2, captured.out
+        assert pointer.name in captured.err
+        assert "dvc pull" in captured.err
+        assert "--new-ids" in captured.err
+        assert not out.exists()
 
 
 class TestRefusedRuns:

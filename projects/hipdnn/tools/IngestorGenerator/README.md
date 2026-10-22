@@ -120,10 +120,11 @@ error; `2` unusable input: a missing or invalid config, a non-existent `--emitte
 a config the renderer rejects, an `--ids-from` or `--engine-ids-from` that does not exist,
 is not a directory or does not yield usable ids (ambiguous, wrong bundle, missing KDP),
 `--new-ids` together with `--ids-from` or `--engine-ids-from`, or a bad flag (argparse).
-`--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. Resolving
-reads the installed bundle, so on a checkout where an installed bundle's DVC KDP has not
-been pulled, `--dry-run` (and `--check-placeholders` when siblings are discovered) exits 2
-with a message naming the `.dvc` pointer: run `dvc pull` first, or pass `--new-ids`.
+`--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. Every run
+(default, `--dry-run` and `--check-placeholders`) reads the previous version, so on a
+checkout where the previous version's KDP is a DVC output that has not been pulled, every
+run exits 2, for a home and a satellite bundle alike. The message names the `.dvc` pointer:
+run `dvc pull` first, or pass `--new-ids`.
 
 ## Descriptor ids
 
@@ -157,10 +158,10 @@ DVC-stored KDP.
 
 | Descriptor | Matched on |
 |---|---|
-| UED, KMD, UHD, UDD, kernel-scoped UMD | present in the previous bundle (UHD only when the config still declares a heuristic) |
+| UED, KMD, UHD, UDD, kernel-scoped UMD | present in the previous bundle (UHD only when the config still declares a heuristic; the UED references it as `sort_kernel_catalog.default`) |
 | KDP (pack) | `<namespace>:<kdp stem>` |
 | Operation UMD (multi-pack) | the matched KDP's operation matcher |
-| Kernel | the kernel's metadata, completed with the **current** KMD defaults, plus its effective arch (`kernel.arch`, else the pack's); the new `kernel_source` must still say what the prior one said |
+| Kernel | the kernel's metadata, completed with the **current** KMD defaults, plus its effective arch (`kernel.arch`, else the pack's); the new `kernel_source` (a multi-launch kernel's `sources`) must still say what the prior one said |
 
 Kernels are matched on the whole key (completed metadata tuple plus effective arch) first.
 A kernel left over then takes a left-over prior id when each side has exactly one kernel
@@ -170,21 +171,32 @@ inserting, reordering, renaming or moving a kernel between packs keeps its id, a
 a priority-only change (only `kernel_source` counts). A metadata (tuple) change or an
 ambiguous tuple gets a new id.
 
-A reused id also requires the new `kernel_source` to still say everything the prior one said,
-at the same values (compared recursively, the spec included). A value the prior stated that
-the new source changes or drops is a **retune**: the same completed tuple built from
-different compiled bytes gets a new id (the old id is retired, so the summary shows the name
-once under retired and once as minted), because RFC 0017 (Identity collisions) leaves open
-whether an id may stay with changed compiled bytes, and a plan that records only which
-kernel was picked would resolve a reused id to different code on replay. An arch move
-combined with such a change also gets a new id. A field only the new source carries is not a
-retune, the convention `catalog_diff.py` uses by default, because it cannot be told from a
-knob newly stated at its default (the enumerated registry states `lds_k_row_pad` where the
-shipped specs omit it). The limitation: a knob newly stated at a **non-default** value under
-an unchanged tuple is not detected and keeps the id. To force new ids for a deliberate
-retune, change the metadata tuple or use `--new-ids`. Retuning retained kernels is therefore
-not reliably id-stable, and `tools/splice_additions.py` refuses it as a changed retained
-kernel.
+A reused id also requires the new source to still say everything the prior one said, at the
+same values (compared recursively, the spec included). A multi-launch kernel (one carrying
+`sources`, a map of launch name to `kernel_source`) is compared launch by launch, and the
+two sources must name the same launches. A value the prior stated that the new source
+changes or drops is a **retune**: the same completed tuple built from different compiled
+bytes gets a new id (the old id is retired, so the summary shows the name once under
+retired and once as minted), because RFC 0017 (Identity collisions) leaves open whether an
+id may stay with changed compiled bytes, and a plan that records only which kernel was
+picked would resolve a reused id to different code on replay. An arch move combined with
+such a change also gets a new id. A field only the new source carries is tolerated only
+inside `spec` (inside each launch's `spec` for a multi-launch kernel), the convention
+`catalog_diff.py` uses by default but applied per kernel: the spec is keyed on the previous
+kernel's own fields, not on every field the shipped KDP states. A new spec field is
+tolerated because it cannot be told from a knob newly stated at its default (the enumerated
+registry states `lds_k_row_pad` where the shipped specs omit
+it). Any other field the new source adds or changes, such as a newly stated `target`,
+changes the compiled bytes and is a retune. The limitation: a spec knob newly stated at a
+**non-default** value under an unchanged tuple is not detected and keeps the id. To force
+new ids for a deliberate retune, change the metadata tuple or use `--new-ids`. Retuning
+retained kernels is therefore not reliably detected, and `tools/splice_additions.py`
+refuses it as a changed retained kernel.
+
+A retuned kernel keeps the id minted for its new source across reruns: when the
+scratch pass already holds the kernel's key with the new source, its id is used even though
+the installed bundle holds that key with the old source. The installed id still wins
+whenever the installed source covers the new one.
 
 An id that is no longer used (a removed or changed kernel, a dropped pack) is not given to
 an unrelated descriptor. One case follows the tuple instead: a kernel removed and a
@@ -633,8 +645,8 @@ Because generation reused the installed bundle's ids, every id that stays is unc
 `catalog_diff.py --expect-ids` against the pre-splice KDP proves it. The gates above keep
 `--ignore-ids`, which is harmless with reused ids and still required for a scratch made
 with `--new-ids` or with nothing installed to reuse, which carries new ids. A metadata
-change or a retune (a changed or dropped value in
-`kernel_source`) gives that kernel a new id; a rename or an arch change alone keeps it. A
+change or a retune (a changed or dropped value in `kernel_source` or `sources`, or a field
+added outside the spec) gives that kernel a new id; a rename or an arch change alone keeps it. A
 hand-edited splice still keeps the UUID of every kernel that stays and is
 checked the same way. Ship
 any manifest change with it (raise `max_kernels` only deliberately), then rerun the gates.

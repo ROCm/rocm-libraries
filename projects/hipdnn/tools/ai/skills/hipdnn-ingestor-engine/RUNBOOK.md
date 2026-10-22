@@ -286,9 +286,9 @@ the *Descriptor ids* section of `$GEN/README.md`.
 ```
 
 `--dry-run` resolves ids too, so run it first as the preflight: it exits 2 on an unusable
-previous bundle, and so does an installed bundle whose DVC KDP has not been pulled (the
-message names the `.dvc` pointer: run `dvc pull` first, or pass `--new-ids`). A scripted
-invocation must do one or the other.
+previous bundle. So does every run, `--dry-run` or not, when a bundle's previous KDP is a
+DVC output that has not been pulled (the message names the `.dvc` pointer: run `dvc pull`
+first, or pass `--new-ids`). A scripted invocation must do one or the other.
 
 Read the `Ids:` line the real run prints:
 `Ids: reused T from <src> (engine E, packs P[, operation UMDs O], kernels K), minted M,

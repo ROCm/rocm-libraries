@@ -6,6 +6,7 @@ UUID cross-reference threading, allow-listed JSON keys, the UMD policy and the s
 of the gtest cases the emitted C++ stubs carry."""
 
 import copy
+import dataclasses
 import json
 import os
 import re
@@ -2005,6 +2006,88 @@ class TestStableIds:
         )
         assert (now == kept) is keeps
 
+    def test_a_source_field_outside_spec_is_a_retune(self, generator, tmp_path):
+        """A newly stated ``target`` changes what is compiled; only ``spec`` may grow
+        without changing the kernel."""
+        before = make_packaged_config("rocKE/a", [64])
+        after = copy.deepcopy(before)
+        after.packs[0].kernels[0].kernel_source.target = "generic"
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert now != kept
+
+    def test_a_retuned_kernel_keeps_the_id_minted_for_it_across_reruns(
+        self, generator, tmp_path
+    ):
+        """The installed bundle holds the kernel at its old source; each rerun into
+        the scratch directory must hand the retune the id the first run minted."""
+        before = make_packaged_config("rocKE/a", [64, 128])
+        generator.render(before, tmp_path / "installed")
+        installed = tmp_path / "installed" / before.descriptor_dir
+        retuned = copy.deepcopy(before)
+        retuned.packs[0].kernels[0].kernel_source.spec = {"block": 99}
+        scratch = tmp_path / "scratch"
+        runs = []
+        for _ in range(3):
+            render_resolved(
+                generator,
+                retuned,
+                scratch,
+                ids_from=installed,
+                also_from=scratch / retuned.descriptor_dir,
+            )
+            runs.append(_kernel_ids(read_docs(scratch / retuned.descriptor_dir)))
+
+        first, other = (k.name for k in retuned.packs[0].kernels)
+        installed_ids = _kernel_ids(read_docs(installed))
+        assert runs[0] == runs[1] == runs[2]
+        assert runs[0][first] not in installed_ids.values()
+        assert runs[0][other] == installed_ids[other]
+
+    def test_the_installed_id_wins_over_a_scratch_pass_of_the_same_source(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        generator.render(before, tmp_path / "installed")
+        installed = tmp_path / "installed" / before.descriptor_dir
+        scratch_dir = tmp_path / "scratch" / before.descriptor_dir
+        shutil.copytree(installed, scratch_dir)
+        scratch_kdp = next(scratch_dir.glob("*.kdp.json"))
+        scratch_id = str(uuid.uuid4())
+        _edit_json(
+            scratch_kdp,
+            kernelDescriptors=[
+                {**entry, "id": scratch_id}
+                for entry in read_docs(scratch_dir)[scratch_kdp.name][
+                    "kernelDescriptors"
+                ]
+            ],
+        )
+        (installed_id,) = _kernel_ids(read_docs(installed)).values()
+
+        resolution = resolve_ids(
+            before, tmp_path / "again", ids_from=installed, also_from=scratch_dir
+        )
+
+        assert resolution.ids[("kernel", 0, 0)] == installed_id
+
+    def test_a_duplicate_the_deduplication_drops_does_not_make_an_arch_move_ambiguous(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        after = copy.deepcopy(before)
+        after.packs[0].arch = ["gfx950", "gfx942"]
+        twin = copy.deepcopy(after.packs[0].kernels[0])
+        twin.name = "a.twin"
+        after.packs[0].kernels.append(twin)
+        docs_before, docs_after = _regenerated(generator, before, after, tmp_path)
+        assert [
+            e["name"] for k in kdps(docs_after) for e in k["kernelDescriptors"]
+        ] == [before.packs[0].kernels[0].name]
+        assert _kernel_ids(docs_after) == _kernel_ids(docs_before)
+
     def test_a_kernel_moved_to_another_pack_keeps_its_id(
         self, generator, binary_ops_config, tmp_path
     ):
@@ -3194,3 +3277,153 @@ class TestSupplementAndReport:
         assert resolution.report.reused["operation_umds"] == len(
             binary_ops_config.packs
         )
+
+    def test_a_retired_kernel_is_counted_once_across_both_previous_versions(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The installed bundle and a scratch pass of it hold the same kernel; it is
+        one retired kernel, not two."""
+        generator.render(scale_add_config, tmp_path / "before")
+        directory = scale_add_config.descriptor_dir
+        shutil.copytree(
+            tmp_path / "before" / directory, tmp_path / "scratch" / directory
+        )
+        after = copy.deepcopy(scale_add_config)
+        removed = after.packs[0].kernels.pop()
+
+        resolution = resolve_ids(
+            after,
+            tmp_path / "after",
+            ids_from=tmp_path / "before" / directory,
+            also_from=tmp_path / "scratch" / directory,
+        )
+
+        assert resolution.report.retired == (removed.name,)
+
+
+def _two_launches(config) -> None:
+    """Give every kernel of ``config`` a ``segment`` and a ``reduce`` launch."""
+    for kernel in config.packs[0].kernels:
+        source = kernel.kernel_source
+        kernel.kernel_source = dataclasses.replace(
+            source,
+            launches={
+                "segment": source,
+                "reduce": dataclasses.replace(source, role="reduce"),
+            },
+        )
+
+
+class TestMultiLaunchIds:
+    """A kernel with ``launches`` is written as ``sources``; its ids follow the same
+    rules as a single-source kernel, launch by launch."""
+
+    @staticmethod
+    def _config(blocks=(64, 128), subpath="rocKE/a"):
+        config = make_packaged_config(subpath, list(blocks))
+        _two_launches(config)
+        return config
+
+    def test_regenerating_an_unchanged_multi_launch_bundle_keeps_every_id(
+        self, generator, tmp_path
+    ):
+        config = self._config()
+        generator.render(config, tmp_path)
+        first = json_bytes(tmp_path / config.descriptor_dir)
+
+        resolution = resolve_ids(config, tmp_path)
+        generator.render(config, tmp_path, resolution=resolution)
+
+        assert (
+            "sources"
+            in kdps(read_docs(tmp_path / config.descriptor_dir))[0][
+                "kernelDescriptors"
+            ][0]
+        )
+        assert resolution.report.minted == 0
+        assert json_bytes(tmp_path / config.descriptor_dir) == first
+
+    @pytest.mark.parametrize(
+        "change, keeps",
+        [
+            (lambda launches: None, True),
+            (lambda launches: launches["reduce"].spec.update(stage=2), True),
+            (lambda launches: setattr(launches["reduce"], "role", "other"), False),
+            (lambda launches: setattr(launches["reduce"], "target", "generic"), False),
+            (lambda launches: launches["reduce"].spec.update(block=7), False),
+            (lambda launches: launches.pop("reduce"), False),
+            (lambda launches: launches.update(extra=launches["segment"]), False),
+        ],
+        ids=[
+            "unchanged",
+            "launch-spec-gains-a-field",
+            "launch-role-changed",
+            "launch-gains-a-target",
+            "launch-spec-value-changed",
+            "launch-dropped",
+            "launch-added",
+        ],
+    )
+    def test_each_launch_is_judged_alone(self, generator, tmp_path, change, keeps):
+        before = self._config(blocks=(64,))
+        after = self._config(blocks=(64,))
+        source = after.packs[0].kernels[0].kernel_source
+        source.launches = {
+            name: dataclasses.replace(launch, spec=dict(launch.spec))
+            for name, launch in source.launches.items()
+        }
+        change(source.launches)
+        if len(source.launches) < 2:
+            source.launches["other"] = dataclasses.replace(
+                source.launches["segment"], role="other"
+            )
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert (now == kept) is keeps
+
+    def test_a_single_source_kernel_that_gains_launches_is_a_retune(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        after = self._config(blocks=(64,))
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert now != kept
+
+    def test_a_satellite_deduplicates_against_a_multi_launch_home(
+        self, generator, tmp_path
+    ):
+        home = self._config(blocks=(64, 128), subpath="rocKE/a")
+        home_root = tmp_path / "a"
+        render_resolved(generator, home, home_root)
+        home_dir = home_root / home.descriptor_dir
+        satellite = self._config(blocks=(128, 256), subpath="rocKE/b")
+
+        resolution, _written = render_resolved(
+            generator, satellite, tmp_path / "b", engine_ids_from=[home_dir]
+        )
+
+        (document,) = (kdp for _pack, kdp in resolution.kdp_documents)
+        names = [e["name"] for e in document["kernelDescriptors"]]
+        assert names == [satellite.packs[0].kernels[1].name]
+
+    def test_a_sibling_kernel_naming_neither_source_key_is_refused(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        kdp_path = next(bundles.satellite_dir.glob("*.kdp.json"))
+        document = json.loads(kdp_path.read_text(encoding="utf-8"))
+        del document["kernelDescriptors"][0]["kernel_source"]
+        kdp_path.write_text(json.dumps(document), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="kernel_source"):
+            resolve_ids(
+                bundles.home,
+                tmp_path / "a",
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir],
+            )

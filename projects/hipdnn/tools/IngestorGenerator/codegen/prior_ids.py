@@ -187,8 +187,16 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
     ued_path, ued = ueds[0]
     kmd = tree.resolve("kmd", ued.get("metadata"), "metadata", ued_path)
     uhd = None
-    if "heuristic" in ued:
-        uhd = tree.resolve("uhd", ued["heuristic"], "heuristic", ued_path)
+    catalog = ued.get("sort_kernel_catalog")
+    if catalog is not None:
+        if not isinstance(catalog, dict) or "default" not in catalog:
+            raise ValueError(
+                f"{ued_path}: 'sort_kernel_catalog' must be an object with a "
+                f"'default' UHD reference"
+            )
+        uhd = tree.resolve(
+            "uhd", catalog["default"], "sort_kernel_catalog.default", ued_path
+        )
     kdps = tree.kdps_of(ued["id"])
     if not kdps:
         raise tree.no_kdp_error(ued["id"])

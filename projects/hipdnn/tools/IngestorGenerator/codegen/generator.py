@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -84,27 +85,57 @@ def kernel_key(
     `mint_ids` matches on the whole key first and falls back to the tuple alone,
     so widening or narrowing a kernel's arch, or renaming it, keeps its id
     while a metadata fix or a different tuple gets a new one. A match is reused
-    only if the kernel's ``kernel_source`` is unchanged: the same tuple built from
-    different compiled bytes is a retune and gets a new id (see `mint_ids`)."""
+    only if the kernel's source fields are unchanged outside ``spec``: the same
+    tuple built from different compiled bytes is a retune and gets a new id (see
+    `mint_ids`)."""
     return (_dedup_key(metadata, config), tuple(sorted(arch or [])))
 
 
-def _source_covers(prior, new) -> bool:
-    """Whether ``new`` still says everything ``prior`` said, at the same values.
+class _Held(NamedTuple):
+    """A kernel of a previous version, as `mint_ids` matches it."""
 
-    Fields only ``new`` carries are not a difference, a rule similar to the one
-    `catalog_diff` applies by default: a registry that starts stating a builder
-    knob at its default would otherwise read as a retune of every kernel. The
-    two differ in scope: this tolerates a new-only field per kernel at every
-    depth, `catalog_diff` keys ``kernel_source.spec`` on the union of the field
-    names any shipped kernel carries. A field ``prior`` had that ``new`` drops or
-    changes is a difference."""
-    if isinstance(prior, dict) and isinstance(new, dict):
-        return all(
-            key in new and _source_covers(value, new[key])
-            for key, value in prior.items()
-        )
-    return prior == new
+    key: tuple
+    id: str
+    source: dict  # `_entry_source_fields` of the entry
+    supplied: bool  # read from the supplement rather than the primary prior
+
+
+def _launch_covers(prior: dict, new: dict) -> bool:
+    """Whether one ``kernel_source`` object still names the binary ``prior`` did.
+
+    Only ``spec`` may grow: a spec field only ``new`` carries is a builder knob
+    stated at its default, which the loader hydrates the same way, so it is no
+    difference. Every other key must be equal in both directions, because a key
+    the source gains outside ``spec`` (say a stated ``target``) changes what is
+    compiled. A spec field ``prior`` had that ``new`` drops or changes is a
+    difference."""
+    if not isinstance(prior, dict):
+        return False
+    prior_spec, new_spec = prior.get("spec") or {}, new.get("spec") or {}
+    return {k: v for k, v in prior.items() if k != "spec"} == {
+        k: v for k, v in new.items() if k != "spec"
+    } and all(k in new_spec and new_spec[k] == v for k, v in prior_spec.items())
+
+
+def _source_covers(prior: dict, new: dict) -> bool:
+    """Whether ``new`` source fields still name what ``prior`` named.
+
+    Both are source fields as emitted (`KernelSource.descriptor_fields`): a
+    ``kernel_source`` object, or a ``sources`` map of launch name to such an
+    object. A kernel changing between the two, or a multi-launch kernel gaining
+    or losing a launch, is a difference. Each launch is compared by
+    `_launch_covers`, so the rule is the one `tools/catalog_diff.py` applies per
+    kernel, with the spec keyed on the previous kernel's own fields."""
+    if prior.keys() != new.keys():
+        return False
+    if "kernel_source" in prior:
+        return _launch_covers(prior["kernel_source"], new["kernel_source"])
+    before, after = prior["sources"], new["sources"]
+    if not isinstance(before, dict):
+        return False
+    return before.keys() == after.keys() and all(
+        _launch_covers(before[name], after[name]) for name in before
+    )
 
 
 def _prior_key(kdp, entry: dict, config: IngestorConfig) -> tuple:
@@ -137,16 +168,20 @@ def mint_ids(
       kernel with the same metadata tuple at a different arch, but only when each
       side has exactly one such candidate: a tuple shipped at several arch tiers
       is told apart by arch alone.
-    * A kernel whose ``kernel_source`` changes or drops something the prior
-      kernel's said (see `_source_covers`) is a retune, the same tuple built from
-      different compiled bytes, and gets a new id. RFC 0017 leaves open whether an
-      id may stay with changed bytes, and a plan that records only which kernel was
-      picked would resolve a reused id to different code on replay. A field only
-      the new source carries is not a retune: it cannot be told from a knob stated
-      at its default.
-    * ``supplement`` is a second previous version that only fills gaps: a pack or
-      kernel ``prior`` has no match for may take its id from there. ``prior`` wins
-      wherever both have an answer, so ids already shipped never change.
+    * A kernel whose source changes or drops something the prior kernel's said (see
+      `_source_covers`) is a retune, the same tuple built from different compiled
+      bytes, and gets a new id. RFC 0017 leaves open whether an id may stay with
+      changed bytes, and a plan that records only which kernel was picked would
+      resolve a reused id to different code on replay. A ``spec`` field only the
+      new source carries is not a retune: it cannot be told from a knob stated at
+      its default. Any other added or changed field is, and for a multi-launch
+      kernel each launch is judged alone.
+    * ``supplement`` is a second previous version, a scratch pass of this bundle.
+      It fills gaps: a pack or kernel ``prior`` has no match for may take its id
+      from there. ``prior`` wins wherever its kernel of the key still covers the
+      new source, so ids already shipped never change; where it does not (a
+      retune), the supplement's kernel of that key and source keeps the id minted
+      for the retune across reruns.
     * Each prior id is assigned at most once, in config order, so no id reaches
       two descriptors. A tuple's id follows it across an arch change (the second
       pass above), so a removed kernel's id can reach a different kernel that
@@ -178,27 +213,50 @@ def mint_ids(
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
 
-    # Prior kernels as (key, id, source), in file order.
-    prior_entries = []
+    # Prior kernels in file order, then the supplement's that the prior's ids do
+    # not already hold.
+    held: list[_Held] = []
     for kdp in prior.kdps if prior else ():
         for entry in kdp.entries:
-            key = _prior_key(kdp, entry, config)
-            prior_entries.append((key, entry["id"], entry.get("kernel_source")))
+            held.append(
+                _Held(
+                    _prior_key(kdp, entry, config),
+                    entry["id"],
+                    _entry_source_fields(entry),
+                    False,
+                )
+            )
+    primary_keys = {h.key for h in held}
     supplement_packs = {}
     if supplement is not None:
         supplement_packs = {kdp.name: kdp for kdp in supplement.kdps}
-        held_ids = {identity for _key, identity, _source in prior_entries}
-        held_keys = {key for key, _identity, _source in prior_entries}
+        primary_ids = {h.id for h in held}
         for kdp in supplement.kdps:
             for entry in kdp.entries:
-                key = _prior_key(kdp, entry, config)
-                if key not in held_keys and entry["id"] not in held_ids:
-                    prior_entries.append((key, entry["id"], entry.get("kernel_source")))
-    by_key: dict[tuple, list[tuple[str, dict]]] = {}
-    for key, identity, source in prior_entries:
-        by_key.setdefault(key, []).append((identity, source))
+                if entry["id"] not in primary_ids:
+                    held.append(
+                        _Held(
+                            _prior_key(kdp, entry, config),
+                            entry["id"],
+                            _entry_source_fields(entry),
+                            True,
+                        )
+                    )
+    by_key: dict[tuple, list[_Held]] = {}
+    for h in held:
+        by_key.setdefault(h.key, []).append(h)
 
+    # A kernel the de-duplication will drop is not a candidate for an id: it
+    # would count as a second claimant of its tuple and read an arch move as
+    # ambiguous.
+    seen_candidates = {
+        (_prior_key(kdp, entry, config), _entry_identity(entry))
+        for bundle in siblings
+        for kdp in bundle.kdps
+        for entry in kdp.entries
+    }
     wanted: list[tuple[tuple, tuple, dict]] = []  # (slot, key, source) per kernel
+    dropped: list[tuple] = []
     for pack_index, pack in enumerate(config.packs):
         name = f"{config.engine.namespace}:{config.kdp_stem(pack)}"
         matched = prior_packs.get(name) or supplement_packs.get(name)
@@ -210,48 +268,64 @@ def mint_ids(
         for kernel_index, kernel in enumerate(pack.kernels):
             slot = ("kernel", pack_index, kernel_index)
             key = source = None
-            if prior_entries:
+            if held:
                 key = kernel_key(
                     _resolved_metadata(kernel, config),
                     kernel.arch or pack.arch,
                     config,
                 )
-                source = kernel.kernel_source.as_document()
+                source = kernel.kernel_source.descriptor_fields()
+                candidate = (key, _candidate_identity(kernel))
+                if candidate in seen_candidates:
+                    dropped.append(slot)
+                    continue
+                seen_candidates.add(candidate)
             wanted.append((slot, key, source))
 
+    def pick(group: list[_Held], source: dict) -> str | None:
+        """The id of the one kernel of ``group`` that still covers ``source``."""
+        if len(group) == 1 and group[0].id not in claimed:
+            if _source_covers(group[0].source, source):
+                return group[0].id
+        return None
+
     # Pass 1: the whole key, unambiguous on the prior side, built from the same
-    # kernel_source.
+    # source. The primary prior answers first; the supplement answers only where
+    # it does not (a retune whose id an earlier scratch pass already minted).
     left_over = []
     for slot, key, source in wanted:
-        held = by_key.get(key, ())
-        if (
-            len(held) == 1
-            and held[0][0] not in claimed
-            and _source_covers(held[0][1], source)
-        ):
-            ids[slot] = take(held[0][0])
+        held_here = by_key.get(key, ())
+        found = None
+        for supplied in (False, True):
+            group = [h for h in held_here if h.supplied == supplied]
+            if len(group) > 1:
+                break
+            found = pick(group, source)
+            if found is not None:
+                break
+        if found is not None:
+            ids[slot] = take(found)
         else:
             left_over.append((slot, key, source))
     # Pass 2: the tuple alone, for kernels whose arch moved. Each side must offer
-    # exactly one candidate, or the pairing would be a guess.
-    unclaimed: dict[str, list[tuple[str, dict]]] = {}
-    for key, identity, source in prior_entries:
-        if identity not in claimed:
-            unclaimed.setdefault(key[0], []).append((identity, source))
+    # exactly one candidate, or the pairing would be a guess. A supplement kernel
+    # at a key the prior also holds is no candidate: it is that key's scratch pass.
+    unclaimed: dict[str, list[_Held]] = {}
+    for h in held:
+        if h.id not in claimed and (not h.supplied or h.key not in primary_keys):
+            unclaimed.setdefault(h.key[0], []).append(h)
     leftovers: dict[str, int] = {}
     for _slot, key, _source in left_over:
         if key is not None:
             leftovers[key[0]] = leftovers.get(key[0], 0) + 1
     for slot, key, source in left_over:
         candidates = unclaimed.get(key[0], ()) if key is not None else ()
-        if (
-            len(candidates) == 1
-            and leftovers[key[0]] == 1
-            and _source_covers(candidates[0][1], source)
-        ):
-            ids[slot] = take(candidates[0][0])
+        if len(candidates) == 1 and leftovers[key[0]] == 1:
+            ids[slot] = take(pick(candidates, source))
         else:
             ids[slot] = take(None)
+    for slot in dropped:
+        ids[slot] = take(None)
     assert len(set(ids.values())) == len(ids), "mint_ids assigned an id twice"
     return ids
 
@@ -521,6 +595,13 @@ def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
 def _entry_source_fields(entry: dict) -> dict:
     """The source fields of a UKD read from disk: ``kernel_source`` or ``sources``."""
     return {key: entry[key] for key in ("kernel_source", "sources") if key in entry}
+
+
+def _entry_identity(entry: dict) -> str:
+    """`_candidate_identity_doc` of a UKD read from disk."""
+    return _candidate_identity_doc(
+        _entry_source_fields(entry), entry.get("priority", 0)
+    )
 
 
 def _candidate_identity_doc(source_fields: dict, priority: int) -> str:
@@ -799,7 +880,6 @@ def build_kdp_documents(
 class IdReport:
     own_prior: Path | None  # where this bundle's ids came from; None = nothing reused
     home: Path | None  # the root holding the engine-level files, if any
-    siblings: tuple[Path, ...]
     reused: dict[str, int]  # engine / packs / operation_umds / kernels
     minted: int
     retired: tuple[str, ...]  # prior kernels and KDPs whose ids were not reused
@@ -810,7 +890,6 @@ class IdReport:
 @dataclass(frozen=True)
 class IdResolution:
     ids: dict
-    seed: dict | None  # de-duplication state pre-filled from the siblings' kernels
     satellite: bool  # the engine-level files live in a sibling; emit the KDP only
     kdp_documents: list  # build_kdp_documents(config, ids, seed), built once here
     report: (
@@ -849,10 +928,20 @@ def _check_seed_entry(path: Path, entry: dict) -> None:
     """A sibling KDP's kernel entry must carry what the de-duplication reads."""
     if not isinstance(entry.get("name"), str):
         raise ValueError(f"{path}: kernel {entry.get('id')!r} has no string 'name'")
-    if not isinstance(entry.get("kernel_source"), dict):
-        raise ValueError(
-            f"{path}: kernel {entry['name']!r} has no 'kernel_source' object"
+    source = entry.get("sources") if "sources" in entry else entry.get("kernel_source")
+    if "sources" in entry:
+        valid = (
+            "kernel_source" not in entry
+            and isinstance(source, dict)
+            and bool(source)
+            and all(isinstance(launch, dict) for launch in source.values())
         )
+        wanted = "a 'sources' object of launch name to kernel_source object"
+    else:
+        valid = isinstance(source, dict)
+        wanted = "a 'kernel_source' object"
+    if not valid:
+        raise ValueError(f"{path}: kernel {entry['name']!r} has no {wanted}")
     if not isinstance(entry.get("metadata") or {}, dict):
         raise ValueError(
             f"{path}: kernel {entry['name']!r} has a non-object 'metadata'"
@@ -920,10 +1009,9 @@ def resolve_ids(
             )
         ids = mint_ids(config)
         kdp_documents = build_kdp_documents(config, ids)
-        report = _report(config, ids, kdp_documents, None, None, None, None, [])
+        report = _report(config, ids, kdp_documents, None, None, None, None)
         return IdResolution(
             ids=ids,
-            seed=None,
             satellite=False,
             kdp_documents=kdp_documents,
             report=report,
@@ -1104,6 +1192,23 @@ def resolve_ids(
                     f"competing with one of them drops the whole engine at load."
                 )
 
+    seed = None
+    if siblings:
+        seed = {}
+        for bundle in siblings:
+            for kdp in bundle.kdps:
+                for entry in kdp.entries:
+                    _check_seed_entry(kdp.path, entry)
+                    metadata = entry.get("metadata") or {}
+                    seed.setdefault(_dedup_key(metadata, config), []).append(
+                        {
+                            "name": entry["name"],
+                            "pack": kdp.name,
+                            "arch": list(kdp.effective_arch(entry) or []),
+                            "identity": _entry_identity(entry),
+                        }
+                    )
+
     ids = mint_ids(config, own, siblings, supplement)
 
     if satellite:
@@ -1126,25 +1231,6 @@ def resolve_ids(
                     f"through completion and through specialization_contract.kmd_id."
                 )
 
-    seed = None
-    if siblings:
-        seed = {}
-        for bundle in siblings:
-            for kdp in bundle.kdps:
-                for entry in kdp.entries:
-                    _check_seed_entry(kdp.path, entry)
-                    metadata = entry.get("metadata") or {}
-                    seed.setdefault(_dedup_key(metadata, config), []).append(
-                        {
-                            "name": entry["name"],
-                            "pack": kdp.name,
-                            "arch": list(kdp.effective_arch(entry) or []),
-                            "identity": _candidate_identity_doc(
-                                _entry_source_fields(entry), entry.get("priority", 0)
-                            ),
-                        }
-                    )
-
     kdp_documents = build_kdp_documents(config, ids, seed)
     report = _report(
         config,
@@ -1154,13 +1240,11 @@ def resolve_ids(
         engine,
         own_root,
         home_root,
-        sibling_roots,
         supplement,
     )
     report = replace(report, warnings=tuple(warnings))
     return IdResolution(
         ids=ids,
-        seed=seed,
         satellite=satellite,
         kdp_documents=kdp_documents,
         report=report,
@@ -1175,7 +1259,6 @@ def _report(
     engine,
     own_root,
     home_root,
-    sibling_roots,
     supplement=None,
 ):
     """Count what was reused from what is actually emitted."""
@@ -1224,15 +1307,19 @@ def _report(
             if entry["id"] in previous_arch and previous_arch[entry["id"]] != now:
                 arch_moved.append(entry["name"])
     retired = []
+    seen: set[str] = set()
     for bundle in previous:
         for kdp in bundle.kdps:
-            if kdp.id not in emitted:
+            if kdp.id not in emitted and kdp.id not in seen:
                 retired.append(kdp.name)
-            retired.extend(e["name"] for e in kdp.entries if e["id"] not in emitted)
+            seen.add(kdp.id)
+            for e in kdp.entries:
+                if e["id"] not in emitted and e["id"] not in seen:
+                    retired.append(e["name"])
+                seen.add(e["id"])
     return IdReport(
         own_prior=own_root if own else None,
         home=home_root,
-        siblings=tuple(sibling_roots),
         reused=reused,
         minted=total - sum(reused.values()),
         retired=tuple(retired),

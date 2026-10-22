@@ -50,9 +50,9 @@ The full account (lookup order, how kernels are matched, the retune rule, the `I
 summary line, warnings, refusals, iterating in scratch) is the *Descriptor ids* section of
 `projects/hipdnn/tools/IngestorGenerator/README.md`. The steps:
 
-- Generate into scratch, never in place. Fetch a DVC-stored KDP first (`dvc pull`); a
-  `--dry-run` first exits 2 on an unusable previous bundle. Use `--new-ids` only for an
-  engine being replaced or renamed.
+- Generate into scratch, never in place. Fetch a DVC-stored KDP first (`dvc pull`): a run
+  on an unfetched one exits 2, `--dry-run` included, as does an unusable previous bundle.
+  Use `--new-ids` only for an engine being replaced or renamed.
 - Read the `Ids:` line. For an extension, `minted` is the added kernels. Investigate any
   retired name you did not remove, and any arch clause.
 - Read the stderr warnings and delete the stale descriptor files they name.

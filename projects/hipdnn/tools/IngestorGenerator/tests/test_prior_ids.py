@@ -162,3 +162,36 @@ class TestDvcMismatches:
         (tree / "a" / "b.txt").write_bytes(b"changed\n")
         [message] = dvc_mismatches(tmp_path)
         assert "tree" in message and "stale or edited" in message
+
+
+class TestEngineHeuristicReference:
+    """The UED references its UHD as ``sort_kernel_catalog.default``."""
+
+    def test_a_regeneration_keeps_the_heuristic_descriptors_id(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        (ued_path,) = bundles.home_dir.glob("*.ued.json")
+        (uhd_path,) = bundles.home_dir.glob("*.uhd.json")
+        ued = json.loads(ued_path.read_text(encoding="utf-8"))
+        assert ued["sort_kernel_catalog"] == {"default": _id_of(uhd_path)}
+
+        resolution = resolve_ids(
+            bundles.home, tmp_path / "out", ids_from=bundles.home_dir
+        )
+
+        assert resolution.ids["uhd"] == _id_of(uhd_path)
+        assert resolution.report.minted == 0
+
+    def test_a_default_that_is_not_a_uhd_is_refused(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        (ued_path,) = bundles.home_dir.glob("*.ued.json")
+        _edit(
+            ued_path,
+            lambda ued: ued.__setitem__(
+                "sort_kernel_catalog", {"default": ued["metadata"]}
+            ),
+        )
+
+        with pytest.raises(ValueError, match="sort_kernel_catalog.default"):
+            resolve_ids(bundles.home, tmp_path / "out", ids_from=bundles.home_dir)
