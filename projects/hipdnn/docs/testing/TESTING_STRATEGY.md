@@ -27,7 +27,7 @@ Unit tests check the internal behavior of one hipDNN component.
 | FlatBuffers SDK | `flatbuffers_sdk/tests/` | Test serialization and generated data helpers | Usually none | Windows and Linux |
 | Plugin SDK | `plugin_sdk/tests/` | Test Plugin SDK helpers and base classes | Usually none | Windows and Linux |
 | Test SDK | `test_sdk/tests/` | Test reference code and shared test tools | Usually none | Windows and Linux |
-| Provider | `dnn-providers/<name>/tests/` | Test one provider's internal behavior | Minimal and fast | Windows and Linux |
+| Provider | `dnn-providers/<name>/tests/` (`src/tests/` for `hip-kernel-provider`) | Test one provider's internal behavior | Minimal and fast | Windows and Linux |
 
 Unit tests should avoid GPU use when practical, but they may use a GPU when the behavior cannot be tested otherwise. Every GPU-dependent unit test must call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
 
@@ -99,7 +99,9 @@ These tests cover descriptor APIs, handles, execution, plugin management, graph 
 | Test type | Location | Purpose | GPU use |
 |---|---|---|---|
 | Frontend-to-backend | `tests/frontend/` | Check graph creation, descriptor conversion, routing, and execution flow | Optional; GPU paths must skip without a device |
-| Provider integration | `dnn-providers/<name>/integration_tests/` | Check behavior specific to one provider | Required for GPU behavior |
+| Backend logging shutdown | `tests/backend_logging/` | Check that the backend shuts down safely while threads with log callbacks still run (`hipdnn_backend_logging_shutdown_tests`; not built under ASAN) | None |
+| cuDNN samples corpus | `tests/cudnn_samples/` | Compile NVIDIA's cudnn-frontend samples against the installed cuDNN compatibility shim and run the samples that compile | Required to run samples |
+| Provider integration | `dnn-providers/<name>/integration_tests/` (`src/integration_tests/` for `hip-kernel-provider`) | Check behavior specific to one provider | Required for GPU behavior |
 | Shared provider integration | `dnn-providers/integration-tests/` | Run shared graphs through one provider and compare results with a reference | Required for numerical validation |
 
 #### Frontend-to-Backend Tests
@@ -124,6 +126,8 @@ Use the shared suite for graph execution and numerical comparison against the CP
 ### Graph Validation
 
 The CPU Graph Executor provides expected results for integration tests. A provider must first accept the graph, choose an engine, and run it. The test then compares the provider result with the reference result. See [CPU Graph Executor Design](../rfcs/0001_CpuGraphExecutorDesign.md).
+
+Bundle tests can also compare with golden data or with the GPU reference executor. The default `auto` verification mode tries golden data, then the GPU reference, then the CPU reference. See [Verification modes](../../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes).
 
 ## Validation Responsibilities and GPU Coverage
 
@@ -152,7 +156,7 @@ A green hipDNN core job proves that its selected routing and API tests passed. I
 
 ### Test Categories
 
-The public test categories are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. Provider categories may differ; see [Test tiers](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers).
+The public test tiers are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. [`test_categories.yaml`](../../test_categories.yaml) also defines the `ffm-quick` tier (also labelled `ffm-full`) and the non-tier categories `unit` and `integration`. Each category creates `hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` build targets. Provider categories may differ; see [Test tiers](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers).
 
 ### Code Coverage
 
