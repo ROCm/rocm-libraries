@@ -34,9 +34,9 @@
  * @file IntegrationGpuAttentionPagedUnified.cpp
  * @brief End-to-end runs of hipkernel:AttentionPagedUnified through the hipDNN frontend:
  *        paged uniform decode (dense Q), ragged Q over paged K/V (mixed decode and
- *        chunked prefill), sliding windows, and HIP-graph capture/replay with changed
- *        sequence lengths, block ids and data. Every output is compared with a host
- *        gather-then-dense fp32 reference over the same page table.
+ *        chunked prefill), sliding windows, attention sinks, and HIP-graph capture/replay
+ *        with changed sequence lengths, block ids and data. Every output is compared with a
+ *        host gather-then-dense fp32 reference over the same page table.
  *
  * Set HIPDNN_TEST_EXPECTED_ARCH=gfx942 (or gfx950) on required runs so a missing or
  * different device fails instead of skipping.
@@ -100,6 +100,7 @@ struct Problem
     bool withSeqLenQ = false;
     int64_t leftBound = -1;
     int64_t qTokenHeads = 0; ///< Q token stride in heads; 0 = queryHeads
+    bool sinks = false; ///< a sink_token `[1, Hq, 1, 1]` in the I/O dtype
     uint32_t seed = 1;
 
     int64_t batch() const
@@ -148,6 +149,7 @@ struct HostState
     std::vector<int32_t> queryLengths;
     std::vector<int32_t> offsets; ///< ragged token offsets [B+1]
     int64_t qTokens = 0; ///< tokens addressed in the Q/O storage
+    std::vector<uint16_t> sinks; ///< [Hq] sink logits (p.sinks only)
 };
 
 int64_t queryRowsFor(const Problem& p, const HostState& s, int64_t b)
@@ -214,11 +216,23 @@ HostState makeState(const Problem& p, uint32_t seed)
                 = blocks.at(next++ % blocks.size());
         }
     }
+    if(p.sinks)
+    {
+        // From negligible to row-dominating, so a head that loses its sink, or reads
+        // another head's, fails the comparison.
+        std::uniform_real_distribution<float> logit(-4.0F, 6.0F);
+        s.sinks.resize(static_cast<size_t>(p.queryHeads));
+        for(auto& x : s.sinks)
+        {
+            x = toBits(logit(rng), p.type);
+        }
+    }
     return s;
 }
 
 /// fp32 gather-then-dense reference: for each sequence, gather its K/V through the page
-/// table into dense rows, then bottom-right causal (plus window) softmax attention.
+/// table into dense rows, then bottom-right causal (plus window) softmax attention. A
+/// sink joins the row max and the denominator; a row with no visible key stays zero.
 std::vector<float> reference(const Problem& p, const HostState& s, float scale)
 {
     const int64_t d = p.headSize;
@@ -269,8 +283,14 @@ std::vector<float> reference(const Problem& p, const HostState& s, float scale)
                 {
                     continue; // no visible key: zeros
                 }
-                const float maximum = *std::max_element(scores.begin(), scores.end());
-                float sum = 0.0F;
+                float maximum = *std::max_element(scores.begin(), scores.end());
+                const float sink
+                    = p.sinks ? fromBits(s.sinks[static_cast<size_t>(h)], p.type) : 0.0F;
+                if(p.sinks)
+                {
+                    maximum = std::max(maximum, sink);
+                }
+                float sum = p.sinks ? std::exp(sink - maximum) : 0.0F;
                 for(auto& x : scores)
                 {
                     x = std::exp(x - maximum);
@@ -462,7 +482,8 @@ protected:
         PAGE_TABLE = 5,
         SEQ_LEN_KV = 6,
         SEQ_LEN_Q = 7,
-        OFFSETS = 8
+        OFFSETS = 8,
+        SINK = 9
     };
 
     /// Builds the graph for @p p, planned on this engine only.
@@ -522,6 +543,11 @@ protected:
             attributes.set_seq_len_q(
                 make(SEQ_LEN_Q, DataType::INT32, {batch, 1, 1, 1}, {1, 1, 1, 1}));
         }
+        if(p.sinks)
+        {
+            attributes.set_sink_token(
+                make(SINK, p.type, {1, p.queryHeads, 1, 1}, {p.queryHeads, 1, 1, 1}));
+        }
         auto o = graph.sdpa(q, k, v, attributes)[0];
         o->set_uid(O)
             .set_output(true)
@@ -562,6 +588,10 @@ protected:
         {
             built.buffers[OFFSETS] = built.memory.allocate(static_cast<size_t>((batch + 1) * 4));
         }
+        if(p.sinks)
+        {
+            built.buffers[SINK] = built.memory.allocate(static_cast<size_t>(p.queryHeads * 2));
+        }
     }
 
     /// Uploads @p s and poisons O with SENTINEL (stream-ordered).
@@ -582,6 +612,10 @@ protected:
         {
             copy(built.buffers[OFFSETS], s.offsets.data(), s.offsets.size() * 4);
         }
+        if(p.sinks)
+        {
+            copy(built.buffers[SINK], s.sinks.data(), s.sinks.size() * 2);
+        }
         std::vector<uint16_t> poison(built.oBytes / 2, SENTINEL);
         copy(built.buffers[O], poison.data(), built.oBytes);
     }
@@ -598,8 +632,9 @@ protected:
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
         const auto expected = reference(p, s, built.scale);
         // The hipDNN paged reference (CpuFpReferenceSdpaRagged::forwardPaged) on the same
-        // inputs: the test's own gather-then-dense reference must agree with it.
-        const auto contract = hipdnnReference(p, s, built.scale);
+        // inputs: the test's own gather-then-dense reference must agree with it. It takes
+        // no sink, so sink problems are checked against the gather-then-dense one only.
+        const auto contract = p.sinks ? expected : hipdnnReference(p, s, built.scale);
         const int64_t d = p.headSize;
         std::vector<bool> written(built.oBytes / 2 / static_cast<size_t>(p.queryHeads * d), false);
         for(int64_t b = 0; b < p.batch(); ++b)
@@ -764,6 +799,23 @@ TEST_F(IntegrationGpuAttentionPagedUnified, RaggedQueryWithTotalTokensBeyondSmax
     p.queryLengths = {64, 64, 64, 64, 64};
     p.kvLengths = {64, 100, 128, 200, 64};
     p.gapsAfter = {};
+    run(p);
+}
+
+/// gpt-oss style sinks with GQA (8 KV heads): every query head's sink, including those
+/// of KV heads past the first, must reach the softmax; keyless rows stay zero.
+TEST_F(IntegrationGpuAttentionPagedUnified, DecodeWithAttentionSinksBf16)
+{
+    Problem p = decodeProblem(DataType::BFLOAT16);
+    p.sinks = true;
+    run(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnified, RaggedQueryWithAttentionSinksAndWindowFp16)
+{
+    Problem p = mixedProblem(DataType::HALF);
+    p.sinks = true;
+    p.leftBound = 31;
     run(p);
 }
 

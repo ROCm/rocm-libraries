@@ -58,6 +58,7 @@ constexpr int64_t SEQ_LEN_KV_UID = 6;
 constexpr int64_t SEQ_LEN_Q_UID = 7;
 constexpr int64_t RAGGED_OFFSET_UID = 8;
 constexpr int64_t EXTRA_UID = 9;
+constexpr int64_t SINK_UID = 10;
 
 constexpr int64_t BATCH = 4;
 constexpr int64_t QUERY_HEADS = 32;
@@ -160,6 +161,17 @@ d::GraphT raggedGraph()
     return g;
 }
 
+/// The decode graph with a gpt-oss attention sink: one BF16 logit per query head,
+/// `[1, Hq, 1, 1]` packed.
+d::GraphT sinkGraph()
+{
+    auto g = decodeGraph();
+    g.tensors.push_back(tensor(
+        SINK_UID, d::DataType::BFLOAT16, {1, QUERY_HEADS, 1, 1}, packed({1, QUERY_HEADS, 1, 1})));
+    g.nodes[0]->attributes.AsSdpaAttributes()->sink_token_tensor_uid = SINK_UID;
+    return g;
+}
+
 DeviceProperties deviceProperties()
 {
     DeviceProperties properties;
@@ -250,6 +262,15 @@ KernelDefinition kernel(const std::string& dtype,
         {std::string("num_warps"), numWarps},
         {std::string("block_m_per_warp"), int64_t{16}},
     };
+    return k;
+}
+
+/// A candidate built with use_sinks.
+KernelDefinition
+    sinkKernel(const std::string& dtype, int64_t headSize, int64_t blockSize, int64_t queriesPerKv)
+{
+    auto k = kernel(dtype, headSize, blockSize, queriesPerKv);
+    k.metadata[std::string("use_sinks")] = int64_t{1};
     return k;
 }
 
@@ -391,6 +412,48 @@ TEST(TestAttentionPagedUnifiedMatchers, MatchesOnlyTheCandidateBuiltForTheGraph)
     KernelDefinition incomplete = kernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4);
     incomplete.metadata.erase("num_warps");
     EXPECT_FALSE(kernelMatches(decodeGraph(), incomplete));
+}
+
+TEST(TestAttentionPagedUnifiedMatchers, ServesAnAttentionSinkInTheIoDataType)
+{
+    const auto bound = match(sinkGraph());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_paged_unified.sink.uid"), SINK_UID);
+    EXPECT_EQ(tryGetBoundInt(*match(decodeGraph()), "attention_paged_unified.sink.uid"), -1);
+    // FP16 graph with an FP16 sink; a ragged Q with a sink.
+    EXPECT_TRUE(match(decodeGraph(d::DataType::HALF), [](d::GraphT& g) {
+                    g.tensors.push_back(tensor(SINK_UID,
+                                               d::DataType::HALF,
+                                               {1, QUERY_HEADS, 1, 1},
+                                               packed({1, QUERY_HEADS, 1, 1})));
+                    attrs(g).sink_token_tensor_uid = SINK_UID;
+                }).has_value());
+    EXPECT_TRUE(match(raggedGraph(), [](d::GraphT& g) {
+                    g.tensors.push_back(tensor(SINK_UID,
+                                               d::DataType::BFLOAT16,
+                                               {1, QUERY_HEADS, 1, 1},
+                                               packed({1, QUERY_HEADS, 1, 1})));
+                    attrs(g).sink_token_tensor_uid = SINK_UID;
+                }).has_value());
+    // Only the head stride matters: the other axes have unit extent.
+    EXPECT_TRUE(match(sinkGraph(), [](d::GraphT& g) {
+                    find(g, SINK_UID).strides = {7, 1, 5, 3};
+                }).has_value());
+}
+
+TEST(TestAttentionPagedUnifiedMatchers, SelectsTheSinkObjectExactlyWhenTheGraphHasASink)
+{
+    EXPECT_TRUE(kernelMatches(sinkGraph(), sinkKernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4)));
+    EXPECT_FALSE(kernelMatches(sinkGraph(), kernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4)));
+    EXPECT_FALSE(kernelMatches(decodeGraph(), sinkKernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4)));
+    // An explicit use_sinks = 0 is the plain object.
+    KernelDefinition plain = kernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4);
+    plain.metadata[std::string("use_sinks")] = int64_t{0};
+    EXPECT_TRUE(kernelMatches(decodeGraph(), plain));
+    EXPECT_FALSE(kernelMatches(sinkGraph(), plain));
+    // The sink object still matches only its own dtype, head size, block size and ratio.
+    EXPECT_FALSE(kernelMatches(sinkGraph(), sinkKernel("FP16", HEAD_SIZE, BLOCK_SIZE, 4)));
+    EXPECT_FALSE(kernelMatches(sinkGraph(), sinkKernel("BF16", HEAD_SIZE, BLOCK_SIZE, 8)));
 }
 
 struct DeclineCase
@@ -550,7 +613,33 @@ TEST(TestAttentionPagedUnifiedMatchers, DeclinesWithALoggedCause)
          [](d::GraphT& g) { attrs(g).right_bound = flatbuffers::nullopt; },
          "mask"},
         {"right bound 2", decode, [](d::GraphT& g) { attrs(g).right_bound = 2; }, "mask"},
-        {"sinks",
+        {"float sink",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::FLOAT; },
+         "sinks"},
+        {"fp16 sink on a bf16 graph",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::HALF; },
+         "sinks"},
+        {"sink per key-value head",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) {
+             find(g, SINK_UID).dims = {1, KV_HEADS, 1, 1};
+             find(g, SINK_UID).strides = packed({1, KV_HEADS, 1, 1});
+         },
+         "sinks"},
+        {"sink with a sequence axis",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) {
+             find(g, SINK_UID).dims = {1, QUERY_HEADS, 2, 1};
+             find(g, SINK_UID).strides = packed({1, QUERY_HEADS, 2, 1});
+         },
+         "sinks"},
+        {"sink with a non-unit head stride",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) { find(g, SINK_UID).strides = {2 * QUERY_HEADS, 2, 1, 1}; },
+         "sinks"},
+        {"sink tensor missing",
          decode,
          [](d::GraphT& g) { attrs(g).sink_token_tensor_uid = EXTRA_UID; },
          "sinks"},
@@ -598,6 +687,7 @@ TEST(TestAttentionPagedUnifiedMatchers, LogsNoDeclineForAGraphItServes)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     EXPECT_TRUE(match(decodeGraph()).has_value());
     EXPECT_TRUE(match(raggedGraph()).has_value());
+    EXPECT_TRUE(match(sinkGraph()).has_value());
     EXPECT_FALSE(recorder.hasLogContaining(std::string(ATTENTION_PAGED_UNIFIED_ENGINE_NAME)
                                            + " declined the graph"));
 }

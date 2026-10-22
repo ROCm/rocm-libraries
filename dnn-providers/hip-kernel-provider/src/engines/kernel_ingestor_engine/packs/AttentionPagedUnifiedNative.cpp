@@ -68,7 +68,9 @@
  *    strides, including the interleaved K|V view of one cache allocation;
  *  - one INT32 page table `[B, 1, M, 1]` used for both K and V;
  *  - INT32 `seq_len_kv` (required) and `seq_len_q` (optional) `[B,1,1,1]`;
- *  - bottom-right causal masking with an optional left bound (sliding window).
+ *  - bottom-right causal masking with an optional left bound (sliding window);
+ *  - an optional attention sink `sink_token` `[1, Hq, 1, 1]` in the Q/K/V/O data type
+ *    with a unit head stride, served by the use_sinks objects.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -95,6 +97,8 @@ constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
 constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
+/// 1 for an object built with use_sinks (it reads sink_ptr), 0 (the KMD default) otherwise.
+constexpr std::string_view USE_SINKS_FIELD = "use_sinks";
 
 // Bound tokens.
 constexpr std::string_view Q_TOKEN = "attention_paged_unified.q.uid";
@@ -107,6 +111,8 @@ constexpr std::string_view SEQ_LEN_KV_TOKEN = "attention_paged_unified.seq_len_k
 constexpr std::string_view SEQ_LEN_Q_TOKEN = "attention_paged_unified.seq_len_q.uid";
 /// UID of the ragged offset table Q and O share, or NO_UID for a dense Q.
 constexpr std::string_view RAGGED_OFFSET_TOKEN = "attention_paged_unified.ragged_offset.uid";
+/// UID of the sink_token tensor, or NO_UID.
+constexpr std::string_view SINK_TOKEN = "attention_paged_unified.sink.uid";
 constexpr std::string_view SCALE_BITS_TOKEN = "attention_paged_unified.scale_bits";
 /// The kernel's sliding_window argument: `d - k < window` keeps key k for diagonal d.
 constexpr std::string_view WINDOW_TOKEN = "attention_paged_unified.window";
@@ -724,12 +730,46 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     {
         return decline("block_mask", reason("a block mask is not supported"));
     }
+    // A sink is one logit per query head, which the use_sinks kernels load from sink_ptr
+    // at index `query head` in the I/O dtype.
+    int64_t sinkUid = NO_UID;
     if(attributes.sink_token_tensor_uid().has_value())
     {
-        return decline("sinks",
-                       reason("attention sinks are not supported until hipDNN defines "
-                              "sink_token semantics (per-head logit in the softmax "
-                              "denominator, as gpt-oss uses)"));
+        sinkUid = *attributes.sink_token_tensor_uid();
+        const auto* sink = findTensor(context, sinkUid);
+        if(sink == nullptr || !isWellFormedRank4(*sink))
+        {
+            return decline("sinks",
+                           reason("sink_token is missing, virtual, pass-by-value, not rank 4, or "
+                                  "has a non-positive extent or negative stride"));
+        }
+        if(sink->ragged_offset_tensor_uid().has_value() || dim(*sink, BATCH_AXIS) != 1
+           || dim(*sink, HEAD_AXIS) != numQueryHeads || dim(*sink, SEQ_AXIS) != 1
+           || dim(*sink, HEAD_SIZE_AXIS) != 1)
+        {
+            return decline("sinks",
+                           reason(describeOperand("sink_token", *sink),
+                                  " must be [1, ",
+                                  numQueryHeads,
+                                  ", 1, 1] (one logit per query head)"));
+        }
+        if(sink->data_type() != q->data_type())
+        {
+            return decline("sinks",
+                           reason("sink_token data type ",
+                                  sink->data_type(),
+                                  " differs from Q's ",
+                                  q->data_type(),
+                                  ": the kernels load the sink in the I/O data type, so FLOAT "
+                                  "sinks are not served"));
+        }
+        if(numQueryHeads > 1 && sink->strides()->Get(HEAD_AXIS) != 1)
+        {
+            return decline("sinks",
+                           reason(describeOperand("sink_token", *sink),
+                                  " needs a unit head stride; the kernels index the sink by "
+                                  "query head"));
+        }
     }
     if(attributes.descale_q_tensor_uid().has_value()
        || attributes.descale_k_tensor_uid().has_value()
@@ -795,6 +835,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     bound[std::string(SEQ_LEN_KV_TOKEN)] = *seqLenKvUid;
     bound[std::string(SEQ_LEN_Q_TOKEN)] = seqLenQUid;
     bound[std::string(RAGGED_OFFSET_TOKEN)] = raggedOffsetUid;
+    bound[std::string(SINK_TOKEN)] = sinkUid;
     int32_t scaleBits = 0;
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
@@ -898,7 +939,8 @@ std::optional<CandidateGeometry> candidateGeometry(const KernelDefinition& kerne
 
 /**
  * @brief Kernel-scoped applicability: the candidate was built for this graph's dtype,
- *        head size, block size and GQA ratio, with one KV head (runtime head counts).
+ *        head size, block size and GQA ratio, with one KV head (runtime head counts), and
+ *        with use_sinks exactly when the graph has a sink_token.
  */
 bool kernelMatches(const MatchContext& /*context*/,
                    const BoundTokens& bound,
@@ -908,15 +950,21 @@ bool kernelMatches(const MatchContext& /*context*/,
     const auto headSize = tryGetBoundInt(bound, HEAD_SIZE_TOKEN);
     const auto blockSize = tryGetBoundInt(bound, BLOCK_SIZE_TOKEN);
     const auto queriesPerKv = tryGetBoundInt(bound, QUERIES_PER_KV_TOKEN);
+    const auto sinkUid = tryGetBoundInt(bound, SINK_TOKEN);
     if(!dtype.has_value() || !headSize.has_value() || !blockSize.has_value()
-       || !queriesPerKv.has_value() || !candidateGeometry(kernel).has_value())
+       || !queriesPerKv.has_value() || !sinkUid.has_value()
+       || !candidateGeometry(kernel).has_value())
     {
         return false;
     }
+    // An absent use_sinks is the KMD default 0. A sink object without a sink would read
+    // a null sink_ptr; a plain object with a sink would drop it.
+    const int64_t wantSinks = *sinkUid != NO_UID ? 1 : 0;
     return stringMetadata(kernel, DTYPE_FIELD) == std::string(dataTypeName(*dtype))
            && integerMetadata(kernel, HEAD_SIZE_FIELD) == *headSize
            && integerMetadata(kernel, BLOCK_SIZE_FIELD) == *blockSize
-           && integerMetadata(kernel, NUM_QUERY_HEADS_FIELD) == *queriesPerKv;
+           && integerMetadata(kernel, NUM_QUERY_HEADS_FIELD) == *queriesPerKv
+           && integerMetadata(kernel, USE_SINKS_FIELD).value_or(0) == wantSinks;
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1058,7 @@ struct BoundUids
     int64_t seqLenKv = 0;
     int64_t seqLenQ = NO_UID;
     int64_t raggedOffset = NO_UID;
+    int64_t sink = NO_UID;
 };
 
 class PreparedAttentionPagedUnified : public PreparedDispatch
@@ -1108,6 +1157,7 @@ public:
         uids.seqLenKv = readBound(bound, SEQ_LEN_KV_TOKEN);
         uids.seqLenQ = readBound(bound, SEQ_LEN_Q_TOKEN);
         uids.raggedOffset = readBound(bound, RAGGED_OFFSET_TOKEN);
+        uids.sink = readBound(bound, SINK_TOKEN);
         const bool ragged = uids.raggedOffset != NO_UID;
 
         const auto& q = requireTensor(context, uids.q);
@@ -1195,6 +1245,9 @@ public:
         void* seqLenQ = u.seqLenQ != NO_UID ? ptr(u.seqLenQ, false) : seqLenKv;
         void* raggedOffset = u.raggedOffset != NO_UID ? ptr(u.raggedOffset, false) : seqLenKv;
         const void* unused = nullptr;
+        // sink_ptr is declared 16-byte aligned (attention_tiled_2d), like the Q/K/V/O
+        // pointers; only the use_sinks objects read it.
+        const void* sink = u.sink != NO_UID ? ptr(u.sink, true) : unused;
 
         p.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
@@ -1202,7 +1255,7 @@ public:
                     q,
                     k,
                     v,
-                    unused, // sink_ptr
+                    sink,
                     pageTable,
                     seqLenKv,
                     unused, // alibi_slopes_ptr
