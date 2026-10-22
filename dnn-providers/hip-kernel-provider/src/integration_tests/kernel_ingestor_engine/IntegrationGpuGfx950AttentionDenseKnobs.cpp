@@ -46,7 +46,9 @@ using namespace hip_kernel_provider::test_utilities;
  * expectedKernelId(). Every forced tile except the 256/64 baseline is paired with a shape
  * whose no-knob winner is a different tile, so a knob that failed to reach the plugin would
  * select that winner and fail the id check. The baseline always wins where it fits, so its
- * two cases select the no-knob winner by design.
+ * two cases select the no-knob winner by design. Those no-knob winners are the native
+ * scorer's; where a shipped UHD model ranks the engine, a cold case accepts the model's
+ * winner as long as it serves the shape, and a forced case still filters to one kernel.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -431,6 +433,48 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
     return detail::onlyServedKernelCarrying(ENGINE, key);
 }
 
+/// The ids of every kernel this engine's gfx950 packs carry for @p shape's semantic fields,
+/// at any tile: the kernels that can serve the shape.
+std::set<std::string> servingKernelIds(const GraphShape& shape)
+{
+    const detail::MetadataKey key{
+        {"dtype", detail::catalogDtypeName(shape.dataType)},
+        {"head_size", shape.headSize},
+        {"num_query_heads", shape.queryHeads},
+        {"num_kv_heads", shape.kvHeads},
+        {"causal", detail::catalogCausal(shape.mask)},
+        {"ragged", int64_t{0}},
+        {"sliding_window", int64_t{0}},
+    };
+
+    std::set<std::string> ids;
+    detail::forEachServedKernel(
+        ENGINE, [&key, &ids](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+            if(detail::carriesKey(kernel, key))
+            {
+                ids.insert(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
+            }
+        });
+    return ids;
+}
+
+/// Whether a shipped UHD model ranked this engine's candidates, as UhdKernelHeuristic's
+/// selection trace reports it. Without one the engine keeps its native-scored order.
+bool rankedByModel(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    const std::string engine = std::string("engine '") + ENGINE.name + "'";
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        if(log.message.find("uhd trace: ") != std::string::npos
+           && log.message.find(engine) != std::string::npos
+           && log.message.find(" decided_by=model ") != std::string::npos)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 template <typename TestCaseType>
@@ -579,7 +623,9 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
 /// The selected kernel is read from the plugin's own selection line, so a knob dropped
 /// anywhere between the frontend and the plugin's filter reads as the cold winner; the
 /// output is then checked against the CPU reference, which catches a kernel launched
-/// with any geometry but its own.
+/// with any geometry but its own. A cold case expects the native scorer's tile only when
+/// the engine ranks natively: with a shipped UHD model ranking, the model picks the cold
+/// winner, and the case checks that winner can serve the shape instead.
 TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatchesTheCpuReference)
 {
     const auto& testCase = GetParam();
@@ -608,15 +654,32 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
         << "no selection line from " << ENGINE.name << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    // Resolved after the plan is built, so a lookup failure still leaves the selected
-    // kernel in the KNOB_SELECTED line.
-    const auto expectedId = expectedKernelId(testCase.shape, testCase.tile);
-    ASSERT_TRUE(expectedId.has_value());
-    EXPECT_EQ(*selected, *expectedId) << "Captured logs:\n" << recorder.getRecordedLogsAsString();
+    std::string expectedId;
+    if(!testCase.forced && rankedByModel(recorder))
+    {
+        // A model's choice is any kernel that serves this shape; pinning its id would tie
+        // the test to one training run.
+        const auto serving = servingKernelIds(testCase.shape);
+        EXPECT_EQ(serving.count(*selected), 1U)
+            << "the model selected " << *selected << ", which does not serve this shape. "
+            << "Captured logs:\n"
+            << recorder.getRecordedLogsAsString();
+        expectedId = *selected;
+    }
+    else
+    {
+        // Resolved after the plan is built, so a lookup failure still leaves the selected
+        // kernel in the KNOB_SELECTED line.
+        const auto tileKernelId = expectedKernelId(testCase.shape, testCase.tile);
+        ASSERT_TRUE(tileKernelId.has_value());
+        EXPECT_EQ(*selected, *tileKernelId) << "Captured logs:\n"
+                                            << recorder.getRecordedLogsAsString();
+        expectedId = *tileKernelId;
+    }
 
     // Rank 0: a cold case serves the heuristic's front rather than a fallback past a
     // kernel that failed to load, and a forced case filters to its one kernel.
-    auto selectionLine = std::string(detail::SELECTED_KERNEL_LOG) + *expectedId + " at rank 0";
+    auto selectionLine = std::string(detail::SELECTED_KERNEL_LOG) + expectedId + " at rank 0";
     if(testCase.forced)
     {
         selectionLine += " from 1 candidate(s)";
