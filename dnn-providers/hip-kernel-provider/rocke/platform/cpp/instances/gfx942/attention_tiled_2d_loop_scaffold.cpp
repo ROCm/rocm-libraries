@@ -107,9 +107,17 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
      * const) emitted before the outer divisor const, matching Python. */
     rocke_value_t* nt_inner = rocke_b_add(B, max_seq_prefix_len, rocke_b_const_i32(B, T - 1));
     rocke_value_t* num_tiles = rocke_b_div(B, nt_inner, rocke_b_const_i32(B, T));
+    if(ctx->RTL)
+    {
+        /* A q-block of padding rows only reads no key: its rows store zeros. */
+        rocke_value_t* has_live = rocke_b_cmp_lt(B, ctx->qb_start_pos, ctx->cur_batch_q_len);
+        rocke_value_t* c0 = rocke_b_const_i32(B, 0);
+        num_tiles = rocke_b_select(B, has_live, num_tiles, c0);
+    }
 
-    /* tile_start / tile_end (1987-2005). */
-    if(SLIDING_WINDOW > 0)
+    /* tile_start / tile_end (1987-2005). runtime_layout always compiles the
+     * window bounds (the window is a kernel argument). */
+    if(SLIDING_WINDOW > 0 || ctx->RTL)
     {
         /* Reuse the cached sw_const (line 1910), do NOT create a fresh const
          * here -- Python references the same SSA value. */

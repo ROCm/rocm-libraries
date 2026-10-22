@@ -368,6 +368,95 @@ bool rocke_gfx950_attention_tiled_2d_supports(
     return true;
 }
 
+/* Python ``if RTL:`` seq lookup. DENSE (q_uniform_len = L > 0): bps =
+ * ceil(L / BLOCK_Q) q-blocks per sequence, seq = qb / bps, base token seq.
+ * RAGGED (L == 0): query_start_len_ptr holds token offsets (non-decreasing,
+ * off[b+1] - off[b] >= seq_lens_q[b], off[B] the end of the last block); seq
+ * comes from the q-block binary search, base token off[seq]. A q-block before
+ * the first origin (search result -1) reads sequence 0 and writes no row.
+ * Enters the grid-stride q-block loop (closed by the epilogue). One builder
+ * call per statement, in Python order. */
+static void rocke_g950_rtl_seq_lookup(rocke_gfx950_attn2d_build_ctx_t* ctx, int BLOCK_Q)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* const* p = ctx->rtl_p;
+    rocke_value_t* num_seqs = ctx->num_seqs_p;
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* one = rocke_b_const_i32(b, 1);
+    rocke_value_t* bq = rocke_b_const_i32(b, BLOCK_Q);
+    rocke_value_t* q_len_u = p[ROCKE_ATTN2D_RTL_Q_UNIFORM_LEN];
+    rocke_value_t* dense = rocke_b_cmp_gt(b, q_len_u, zero);
+    rocke_value_t* ragged = rocke_b_cmp_le(b, q_len_u, zero);
+    rocke_value_t* has_slq = rocke_b_cmp_ne(b, p[ROCKE_ATTN2D_RTL_HAS_SEQ_LENS_Q], zero);
+    rocke_value_t* bq_m1 = rocke_b_const_i32(b, BLOCK_Q - 1);
+    rocke_value_t* len_up = rocke_b_add(b, q_len_u, bq_m1);
+    rocke_value_t* bps_dense = rocke_b_div(b, len_up, bq);
+    rocke_value_t* bps = rocke_b_select(b, dense, bps_dense, one);
+    rocke_value_t* off_total
+        = rocke_b_masked_global_load(b, ctx->cu_q, num_seqs, ragged, zero, rocke_i32(), 4);
+    rocke_value_t* total_dense = rocke_b_mul(b, num_seqs, bps);
+    rocke_value_t* off_total_blocks = rocke_b_div(b, off_total, bq);
+    rocke_value_t* total_ragged = rocke_b_add(b, off_total_blocks, num_seqs);
+    rocke_value_t* total = rocke_b_select(b, dense, total_dense, total_ragged);
+
+    ctx->rtl_qb_loop = rocke_b_scf_for(
+        b, ctx->q_block_global_idx, total, p[ROCKE_ATTN2D_RTL_Q_BLOCK_GRID], "rtl_qb");
+    rocke_b_region_enter(b, ctx->rtl_qb_loop.body);
+    rocke_value_t* qb = ctx->rtl_qb_loop.iv;
+    ctx->q_block_global_idx = qb;
+
+    /* DENSE maps q-blocks arithmetically: its search runs no iteration. */
+    rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, num_seqs);
+    rocke_value_t* iters = rocke_b_select(b, dense, zero, trip);
+    rocke_value_t* seq_ragged
+        = rocke_binary_search_seq_idx_dyn(b, ctx->cu_q, qb, num_seqs, BLOCK_Q, iters, false);
+    rocke_value_t* seq_dense = rocke_b_div(b, qb, bps);
+    rocke_value_t* seq_found = rocke_b_select(b, dense, seq_dense, seq_ragged);
+    /* A q-block before the first origin finds no sequence (-1). */
+    rocke_value_t* seq_ok = rocke_b_cmp_ge(b, seq_found, zero);
+    ctx->seq_idx = rocke_b_smax(b, seq_found, zero);
+    rocke_value_t* seq_idx = ctx->seq_idx;
+    rocke_value_t* off_start
+        = rocke_b_masked_global_load(b, ctx->cu_q, seq_idx, ragged, zero, rocke_i32(), 4);
+    rocke_value_t* seq_p1 = rocke_b_add(b, seq_idx, one);
+    rocke_value_t* off_stop
+        = rocke_b_masked_global_load(b, ctx->cu_q, seq_p1, ragged, zero, rocke_i32(), 4);
+    rocke_value_t* slq = rocke_b_masked_global_load(
+        b, p[ROCKE_ATTN2D_RTL_SEQ_LENS_Q], seq_idx, has_slq, zero, rocke_i32(), 4);
+
+    /* owned: the rows the sequence's block spans; a ragged Q writes only its live
+     * rows (rows of the block past seq_lens_q belong to no sequence). */
+    rocke_value_t* rows_ragged = rocke_b_sub(b, off_stop, off_start);
+    rocke_value_t* owned = rocke_b_select(b, dense, q_len_u, rows_ragged);
+    rocke_value_t* live = rocke_b_smin(b, owned, slq);
+    ctx->cur_batch_q_len = rocke_b_select(b, has_slq, live, owned);
+    rocke_value_t* q_rows = rocke_b_select(b, dense, q_len_u, ctx->cur_batch_q_len);
+    /* Below the (negative) start position of a q-block with no sequence. */
+    rocke_value_t* no_rows = rocke_b_const_i32(b, -2147483647 - 1);
+    ctx->rtl_q_rows = rocke_b_select(b, seq_ok, q_rows, no_rows);
+    rocke_value_t* qbs_dense = rocke_b_mul(b, seq_idx, bps);
+    rocke_value_t* off_start_blocks = rocke_b_div(b, off_start, bq);
+    rocke_value_t* qbs_ragged = rocke_b_add(b, off_start_blocks, seq_idx);
+    ctx->q_block_start_idx = rocke_b_select(b, dense, qbs_dense, qbs_ragged);
+    ctx->q_block_local_idx = rocke_b_sub(b, qb, ctx->q_block_start_idx);
+    ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, seq_idx, 0);
+    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
+
+    /* Per-sequence Q/O base terms in i64 (ragged offsets times the multiplier
+     * can pass 2^31 elements); within-sequence terms stay i32. */
+    rocke_value_t* sb = rocke_b_select(b, dense, seq_idx, off_start);
+    rocke_value_t* sb64 = rocke_b_zext(b, sb, rocke_i64());
+    rocke_value_t* elem_bytes = rocke_b_const_i64(b, 2);
+    rocke_value_t* q_seq64 = rocke_b_zext(b, p[ROCKE_ATTN2D_RTL_Q_SEQ_STRIDE], rocke_i64());
+    rocke_value_t* q_elems = rocke_b_mul(b, sb64, q_seq64);
+    rocke_value_t* q_bytes = rocke_b_mul(b, q_elems, elem_bytes);
+    ctx->rtl_q_ptr = rocke_b_global_ptr_add(b, ctx->query, q_bytes);
+    rocke_value_t* o_seq64 = rocke_b_zext(b, p[ROCKE_ATTN2D_RTL_O_SEQ_STRIDE], rocke_i64());
+    rocke_value_t* o_elems = rocke_b_mul(b, sb64, o_seq64);
+    rocke_value_t* o_bytes = rocke_b_mul(b, o_elems, elem_bytes);
+    ctx->rtl_o_ptr = rocke_b_global_ptr_add(b, ctx->output, o_bytes);
+}
+
 /* ===================================================================== *
  *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
@@ -390,6 +479,14 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+
+    /* ---- runtime_layout spec checks (__post_init__ raises them first) ---- */
+    {
+        char rtl_reason[ROCKE_ERR_MSG_CAP];
+        if(rocke_gfx950_attention_tiled_2d_runtime_layout_reject_reason(
+               spec, rtl_reason, sizeof(rtl_reason)))
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, rtl_reason);
+    }
 
     /* ---- require_tiled_attention_arch(arch) (Py748) ---- */
     if(!rocke_g950_require_tiled_attention_arch(b, arch))
@@ -755,6 +852,12 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
+        /* runtime_layout: the 17 appended arguments (_RTL_PARAMS). */
+        if(spec->runtime_layout)
+        {
+            ctx->RTL = true;
+            rocke_attn2d_rtl_declare_params(b, ctx->rtl_p);
+        }
     }
 
     /* ---- grid ids + wave decomposition (Py891-904) ---- */
@@ -787,22 +890,36 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     }
 
     /* ---- seq lookup + Q-block geometry (Py906-925) ---- */
+    if(ctx->RTL)
+    {
+        rocke_g950_rtl_seq_lookup(ctx, BLOCK_Q);
+    }
+    else
     {
         rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
         ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
             b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+        ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
+        ctx->cu_q_stop = rocke_b_global_load_i32(
+            b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
+        ctx->cur_batch_q_len = rocke_b_sub(b, ctx->cu_q_stop, ctx->cu_q_start);
+        ctx->q_block_start_idx = rocke_b_add(
+            b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
+        ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
+        ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
+        ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
     }
-    ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
-    ctx->cu_q_stop = rocke_b_global_load_i32(
-        b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
-    ctx->cur_batch_q_len = rocke_b_sub(b, ctx->cu_q_stop, ctx->cu_q_start);
-    ctx->q_block_start_idx = rocke_b_add(
-        b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
-    ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
-    ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
 
     ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, rocke_b_const_i32(b, BLOCK_Q));
+    if(ctx->RTL)
+    {
+        /* Inside the grid-stride loop a q-block past the owned rows skips its
+         * body instead of returning; closed after the epilogue. */
+        rocke_value_t* has_rows = rocke_b_cmp_lt(b, ctx->qb_start_pos, ctx->rtl_q_rows);
+        ctx->rtl_live_block = rocke_b_scf_if(b, has_rows);
+        rocke_b_region_enter(b, ctx->rtl_live_block.then_region);
+    }
+    else
     {
         rocke_if_t f
             = rocke_b_scf_if(b, rocke_b_cmp_ge(b, ctx->qb_start_pos, ctx->cur_batch_q_len));
@@ -1149,6 +1266,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
             s->emit_lse ? "lse" : "",
+            s->runtime_layout ? "rtl" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

@@ -375,11 +375,15 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     rocke_value_t* op_pos
         = rocke_b_add(b, qb_start_pos, rocke_b_div(b, OUT_ROW_BASE, rocke_b_const_i32(b, NQK)));
     /* op_qh = kv_head*NQK + OUT_ROW_BASE%NQK (mul before mod); op_mask = (op_pos
-     * < q_len) && (op_qh < NUM_QH) (pos cmp before qh cmp). Sequence via temps. */
+     * < q_len) && (op_qh < NUM_QH) (pos cmp before qh cmp). Sequence via temps.
+     * runtime_layout stores every row it owns (rtl_q_rows): live rows get their
+     * attention, and a dense Q's padding rows past seq_lens_q were masked like
+     * keyless rows, so they store zeros. A ragged Q owns only its live rows. */
     rocke_value_t* op_qh_mul = rocke_b_mul(b, kv_head_idx, rocke_b_const_i32(b, NQK));
     rocke_value_t* op_qh_mod = rocke_b_mod(b, OUT_ROW_BASE, rocke_b_const_i32(b, NQK));
     rocke_value_t* op_qh = rocke_b_add(b, op_qh_mul, op_qh_mod);
-    rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos, cur_batch_q_len);
+    rocke_value_t* op_mask_pos
+        = rocke_b_cmp_lt(b, op_pos, ctx->RTL ? ctx->rtl_q_rows : cur_batch_q_len);
     rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh, ctx->num_qh_p);
     rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
     /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
@@ -396,10 +400,27 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     }
     /* Python evaluates token=add(cu_q_start, op_pos) BEFORE dim=const(0)
      * (kwargs left-to-right). Bind them in that order so C's arg-eval order
-     * does not allocate the dim const ahead of the token add and shift it. */
-    rocke_value_t* out_token = rocke_b_add(b, cu_q_start, op_pos);
-    rocke_value_t* out_dim0 = rocke_b_const_i32(b, 0);
-    rocke_value_t* out_base = epilogue_q_desc_offset(ctx, out_token, op_qh, out_dim0);
+     * does not allocate the dim const ahead of the token add and shift it.
+     * runtime_layout: rtl_o_desc.offset(token=op_pos, head=op_qh, dim=0) from
+     * the per-sequence base rtl_o_dst. */
+    rocke_value_t* out_base = NULL;
+    if(ctx->RTL)
+    {
+        static const char* const o_names[3] = {"token", "head", "dim"};
+        rocke_value_t* o_vals[3];
+        o_vals[0] = op_pos;
+        o_vals[1] = op_qh;
+        o_vals[2] = rocke_b_const_i32(b, 0);
+        (void)rocke_dynamic_tensor_descriptor_offset(
+            b, ctx->rtl_o_desc, o_names, o_vals, 3, &out_base, NULL);
+        output = ctx->rtl_o_dst;
+    }
+    else
+    {
+        rocke_value_t* out_token = rocke_b_add(b, cu_q_start, op_pos);
+        rocke_value_t* out_dim0 = rocke_b_const_i32(b, 0);
+        out_base = epilogue_q_desc_offset(ctx, out_token, op_qh, out_dim0);
+    }
 
     for(stripe = 0; stripe < OUT_STRIPES; ++stripe)
     {
@@ -468,6 +489,16 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
             rocke_value_t* lse_row = rocke_b_add(b, wave_row_base, iw_row);
             epilogue_store_row_lse(ctx, lse_row, m_final[r], ctx->l_final[r], writer16);
         }
+    }
+
+    if(ctx->RTL)
+    {
+        /* Close the "block has rows" branch, then fence LDS reuse before the
+         * next grid-stride q-block (its Q staging and K/V DMA rewrite the slabs
+         * this q-block's epilogue just read), then close the q-block loop. */
+        rocke_b_region_leave(b);
+        rocke_b_sync(b);
+        rocke_b_region_leave(b);
     }
 
     return rocke_ir_builder_kernel(b);

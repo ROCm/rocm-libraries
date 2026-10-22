@@ -10,6 +10,36 @@ first index N past the table, and a row that drifts from the emitter shows up
 as a DIFF.
 """
 
+
+def _rtl(
+    head_size,
+    block_size,
+    num_query_heads,
+    dtype,
+    *,
+    num_kv_heads=1,
+    use_sinks=False,
+    num_warps=4,
+    tile_size=None,
+):
+    """A runtime_layout row, as the emitters' ``_rtl`` builds it."""
+    cfg = {
+        "head_size": head_size,
+        "block_size": block_size,
+        "num_query_heads": num_query_heads,
+        "num_kv_heads": num_kv_heads,
+        "dtype": dtype,
+        "use_sinks": use_sinks,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": num_warps,
+        "runtime_layout": True,
+    }
+    if tile_size is not None:
+        cfg["tile_size"] = tile_size
+    return cfg
+
+
 GFX942_ATTENTION_TILED_2D = [
     {
         "head_size": 64,
@@ -264,6 +294,53 @@ GFX942_ATTENTION_TILED_2D = [
         "use_q_major_grid": True,
         "emit_lse": True,
     },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32x8": True,
+        "use_transposed_qk_32x32": True,
+        "use_conflict_free_v_store": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32x8": True,
+        "use_transposed_qk_32x32": True,
+        "use_conflict_free_v_store": True,
+        "use_i64_kv_addr": True,
+    },
+]
+
+# idx20-29: runtime_layout (catalog geometry).
+GFX942_ATTENTION_TILED_2D += [
+    _rtl(64, 16, 1, "fp16"),
+    _rtl(64, 32, 4, "bf16"),
+    _rtl(64, 64, 6, "fp16"),
+    _rtl(128, 16, 8, "bf16"),
+    _rtl(128, 32, 1, "fp16"),
+    _rtl(128, 64, 4, "bf16", tile_size=32),
+    _rtl(256, 16, 6, "fp16", num_warps=2),
+    _rtl(256, 32, 8, "bf16", num_warps=2, tile_size=16),
+    _rtl(256, 64, 1, "fp16", num_warps=2, tile_size=16),
+    _rtl(128, 32, 16, "bf16", num_kv_heads=4),
 ]
 
 GFX950_ATTENTION_TILED_2D = [
@@ -1346,6 +1423,20 @@ GFX950_ATTENTION_TILED_2D = [
         "use_register_pv": True,
         "tile_size": 32,
     },
+]
+
+# idx72-81 of the emitters: runtime_layout (catalog geometry).
+GFX950_ATTENTION_TILED_2D += [
+    _rtl(64, 16, 1, "fp16", num_warps=2),
+    _rtl(64, 32, 4, "bf16"),
+    _rtl(64, 64, 6, "fp16"),
+    _rtl(128, 16, 8, "bf16"),
+    _rtl(128, 32, 1, "fp16"),
+    _rtl(128, 64, 4, "bf16"),
+    _rtl(256, 16, 6, "fp16"),
+    _rtl(256, 32, 8, "bf16"),
+    _rtl(256, 64, 1, "fp16"),
+    _rtl(128, 32, 16, "bf16", num_kv_heads=4),
 ]
 
 GFX942_ATTENTION_TILED_3D = [

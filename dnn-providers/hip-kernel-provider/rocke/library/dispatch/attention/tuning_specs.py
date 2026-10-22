@@ -180,6 +180,9 @@ _SEMANTIC_FIELDS = frozenset(
         "causal_top_left",
         "right_bound",
         "emit_lse",
+        # hipDNN's paged engine selects it (kernels/*/attention_tiled_2d.py);
+        # dispatch never does, and a sweep must not vary it.
+        "runtime_layout",
     }
 )
 

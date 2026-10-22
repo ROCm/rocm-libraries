@@ -392,11 +392,13 @@ class UnifiedSpace(WavesPerEuSpace):
             # ``emit_lse`` is an output the problem selects, not a default that
             # knobs are a delta against: keeping it out of both the 2D kernel
             # and the split-KV reduce defaults leaves every config_key, and so
-            # every stored pin, as before the field existed.
+            # every stored pin, as before the field existed. The 2D
+            # ``runtime_layout`` flag (hipDNN's paged engine; never a knob) is
+            # kept out of the kernel defaults for the same reason.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name != "emit_lse"
+                if name not in recorded and name not in ("emit_lse", "runtime_layout")
             },
             "reduce": (
                 None

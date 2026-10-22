@@ -183,6 +183,13 @@ typedef struct rocke_attention_tiled_2d_spec
      * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
      * no new IR; on appends the "lse" kernel-name token. */
     bool emit_lse; /* False (Python kw_only) */
+    /* Runtime-layout mode (hipDNN paged/ragged SDPA): the Q/O/KV strides and a
+     * dense-or-ragged Q become 15 appended kernel arguments (after the runtime
+     * head counts and window),
+     * the page tables and lengths are read on the device and the q-block grid
+     * is walked with a grid-stride loop. Off emits no new IR; on appends the
+     * "rtl" kernel-name token. See the Python spec field for the contract. */
+    bool runtime_layout; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required
@@ -218,6 +225,24 @@ int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tile
  * the spec is accepted. A dead/NULL builder is a false no-op. */
 bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                                             const rocke_attention_tiled_2d_spec_t* s);
+
+/* _runtime_layout_reject_reason, gfx942 (kernels/gfx942/attention_tiled_2d.py)
+ * and gfx950 (kernels/gfx950/attention_tiled_2d.py). Each returns false when
+ * the spec is a valid runtime_layout spec on that arch (or runtime_layout is
+ * off); otherwise it returns true and writes the Python ValueError text into
+ * ``reason`` (capacity ``reason_cap``; ``reason`` may be NULL). Spec fields the
+ * Python spec has and this struct does not (always False here) are skipped. */
+bool rocke_gfx942_attention_tiled_2d_runtime_layout_reject_reason(
+    const rocke_attention_tiled_2d_spec_t* s, char* reason, size_t reason_cap);
+bool rocke_gfx950_attention_tiled_2d_runtime_layout_reject_reason(
+    const rocke_attention_tiled_2d_spec_t* s, char* reason, size_t reason_cap);
+
+/* runtime_layout_lds_bytes, gfx942: static LDS bytes of a runtime_layout
+ * kernel (fp16/bf16). Both builders refuse a runtime_layout spec whose bytes
+ * exceed the target's ArchTarget lds_capacity_bytes. */
+int rocke_gfx942_attention_tiled_2d_runtime_layout_lds_bytes(int head_size,
+                                                             int tile_size,
+                                                             int num_warps);
 
 /* ----------------------------------------------- config-from-spec (build head) *
  *

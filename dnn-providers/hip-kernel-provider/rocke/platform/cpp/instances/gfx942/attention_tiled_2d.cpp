@@ -35,6 +35,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/ir.h"
 
 /* ------------------------------------------------------------- error latch */
@@ -130,7 +131,233 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_q_major_grid = false;
     s.use_qblock_reverse = false;
     s.emit_lse = false;
+    s.runtime_layout = false;
     return s;
+}
+
+/* ------------------------------------------------ runtime_layout spec checks */
+
+static void rocke_attn2d_reason(char* reason, size_t cap, const char* fmt, ...)
+{
+    if(reason == NULL || cap == 0)
+        return;
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(reason, cap, fmt, ap);
+    va_end(ap);
+    reason[cap - 1] = '\0';
+}
+
+typedef struct rocke_attn2d_rtl_flag
+{
+    const char* name;
+    bool on;
+} rocke_attn2d_rtl_flag_t;
+
+/* gfx942 _runtime_layout_reject_reason: every _RTL_INCOMPATIBLE_FLAGS entry
+ * that is set (in Python order), then kv_storage_dtype, a compile-time window
+ * and block_m_per_warp != 16, reported together; then the GQA ratio; then the
+ * sub-block tile_size rule. use_v_hbm_direct, use_k_hbm_direct and
+ * use_causal_mask_phase_split are not fields of the C struct. */
+bool rocke_gfx942_attention_tiled_2d_runtime_layout_reject_reason(
+    const rocke_attention_tiled_2d_spec_t* s, char* reason, size_t reason_cap)
+{
+    if(s == NULL || !s->runtime_layout)
+        return false;
+    const rocke_attn2d_rtl_flag_t flags[] = {
+        {"use_sinks", s->use_sinks},
+        {"has_softcap", s->has_softcap},
+        {"use_alibi", s->use_alibi},
+        {"use_qq_bias", s->use_qq_bias},
+        {"use_fp8_mfma_qk", s->use_fp8_mfma_qk},
+        {"use_fp8_mfma_pv", s->use_fp8_mfma_pv},
+        {"use_register_pv", s->use_register_pv},
+        {"use_mfma_32x32", s->use_mfma_32x32},
+        {"use_mfma_32x32x8", s->use_mfma_32x32x8},
+        {"use_transposed_qk_32x32", s->use_transposed_qk_32x32},
+        {"use_transposed_scalar_state", s->use_transposed_scalar_state},
+        {"use_transposed_invariant_hoist", s->use_transposed_invariant_hoist},
+        {"use_transposed_mask_once", s->use_transposed_mask_once},
+        {"use_transposed_half_local_pv", s->use_transposed_half_local_pv},
+        {"use_mfma32_skip_legacy_qreg", s->use_mfma32_skip_legacy_qreg},
+        {"use_transposed_mask_limit", s->use_transposed_mask_limit},
+        {"use_grouped_kv2_softmax", s->use_grouped_kv2_softmax},
+        {"use_fast_paged_kv_desc", s->use_fast_paged_kv_desc},
+        {"use_i64_kv_addr", s->use_i64_kv_addr},
+        {"use_early_v_schedule", s->use_early_v_schedule},
+        {"use_agpr_alloc_zero", s->use_agpr_alloc_zero},
+        {"use_conflict_free_v", s->use_conflict_free_v},
+        {"use_conflict_free_v_store", s->use_conflict_free_v_store},
+        {"use_k_single_buffer", s->use_k_single_buffer},
+        {"use_k_sliced_ring", s->use_k_sliced_ring},
+        {"use_k_sliced_ldsseq", s->use_k_sliced_ldsseq},
+        {"use_iglp_opt", s->use_iglp_opt},
+        {"use_qk_pv_sched_group_barrier", s->use_qk_pv_sched_group_barrier},
+        {"use_q_direct_global", s->use_q_direct_global},
+        {"use_global_load_lds_k", s->use_global_load_lds_k},
+        {"use_q_major_grid", s->use_q_major_grid},
+        {"emit_lse", s->emit_lse},
+        {"kv_storage_dtype", s->kv_storage_dtype != NULL},
+        {"sliding_window != 0 (the window is a runtime kernarg)", s->sliding_window != 0},
+        {"block_m_per_warp != 16", s->block_m_per_warp != 16},
+    };
+    char bad[ROCKE_ERR_MSG_CAP];
+    size_t used = 0;
+    bad[0] = '\0';
+    for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i)
+    {
+        if(!flags[i].on)
+            continue;
+        int n = snprintf(
+            bad + used, sizeof(bad) - used, "%s%s", used == 0 ? "" : ", ", flags[i].name);
+        if(n > 0)
+            used = (used + (size_t)n < sizeof(bad)) ? used + (size_t)n : sizeof(bad) - 1;
+    }
+    if(used != 0)
+    {
+        rocke_attn2d_reason(reason, reason_cap, "runtime_layout is incompatible with: %s", bad);
+        return true;
+    }
+    if(!rocke_attention_check_head_counts(s->num_query_heads, s->num_kv_heads, reason, reason_cap))
+        return true;
+    if(s->has_tile_size)
+    {
+        const int t = s->tile_size;
+        if(t < 16 || t % 16 != 0 || t > s->block_size || s->block_size % t != 0)
+        {
+            rocke_attn2d_reason(reason,
+                                reason_cap,
+                                "runtime_layout tile_size must be a multiple of 16 that divides "
+                                "block_size (got tile_size=%d, block_size=%d)",
+                                t,
+                                s->block_size);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* gfx950 _runtime_layout_reject_reason: the first failing check, in Python
+ * order. use_additive_bias, causal_top_left, right_bound, use_kq_lds_pad and
+ * use_mask_phase_split are not fields of the C struct. */
+bool rocke_gfx950_attention_tiled_2d_runtime_layout_reject_reason(
+    const rocke_attention_tiled_2d_spec_t* s, char* reason, size_t reason_cap)
+{
+    if(s == NULL || !s->runtime_layout)
+        return false;
+    if(!rocke_attention_check_head_counts(s->num_query_heads, s->num_kv_heads, reason, reason_cap))
+        return true;
+    if(s->sliding_window != 0)
+    {
+        rocke_attn2d_reason(reason,
+                            reason_cap,
+                            "runtime_layout takes the sliding window as a kernarg; "
+                            "spec sliding_window must be 0");
+        return true;
+    }
+    const rocke_attn2d_rtl_flag_t features[] = {
+        {"use_sinks", s->use_sinks},
+        {"has_softcap", s->has_softcap},
+        {"use_alibi", s->use_alibi},
+        {"use_qq_bias", s->use_qq_bias},
+        {"kv_storage_dtype (fp8 KV)", s->kv_storage_dtype != NULL},
+        {"use_fp8_mfma_qk", s->use_fp8_mfma_qk},
+        {"use_fp8_mfma_pv", s->use_fp8_mfma_pv},
+        {"emit_lse", s->emit_lse},
+    };
+    for(size_t i = 0; i < sizeof(features) / sizeof(features[0]); ++i)
+    {
+        if(features[i].on)
+        {
+            rocke_attn2d_reason(
+                reason, reason_cap, "runtime_layout does not support %s", features[i].name);
+            return true;
+        }
+    }
+    const rocke_attn2d_rtl_flag_t pipeline[] = {
+        {"use_mfma_32x32", s->use_mfma_32x32},
+        {"use_transposed_qk_32x32", s->use_transposed_qk_32x32},
+        {"use_fast_paged_kv_desc", s->use_fast_paged_kv_desc},
+        {"use_i64_kv_addr (always 64-bit in runtime_layout)", s->use_i64_kv_addr},
+        {"use_register_pv", s->use_register_pv},
+        {"use_v_double_buffer", s->use_v_double_buffer},
+        {"kv_ring_depth != 2", s->kv_ring_depth != 2},
+        {"use_staggered_iter_wait", s->use_staggered_iter_wait},
+        {"use_early_v_schedule", s->use_early_v_schedule},
+        {"use_k_single_buffer", s->use_k_single_buffer},
+        {"use_grouped_kv2_softmax", s->use_grouped_kv2_softmax},
+        {"use_q_reread", s->use_q_reread},
+        {"use_q_direct_reg", s->use_q_direct_reg},
+        {"use_agpr_alloc_zero", s->use_agpr_alloc_zero},
+        {"use_sched_barrier", s->use_sched_barrier},
+        {"use_softmax_mfma_interleave", s->use_softmax_mfma_interleave},
+        {"use_qblock_reverse", s->use_qblock_reverse},
+    };
+    for(size_t i = 0; i < sizeof(pipeline) / sizeof(pipeline[0]); ++i)
+    {
+        if(pipeline[i].on)
+        {
+            rocke_attn2d_reason(reason,
+                                reason_cap,
+                                "runtime_layout runs the default 16x16x32 pipeline; "
+                                "%s is not supported",
+                                pipeline[i].name);
+            return true;
+        }
+    }
+    if(s->block_m_per_warp != 16)
+    {
+        rocke_attn2d_reason(reason, reason_cap, "runtime_layout requires block_m_per_warp=16");
+        return true;
+    }
+    if(s->has_tile_size && s->tile_size != s->block_size)
+    {
+        rocke_attn2d_reason(reason,
+                            reason_cap,
+                            "runtime_layout requires tile_size == block_size "
+                            "(one paged block per KV tile)");
+        return true;
+    }
+    /* Checked before the DMA divisibility below, which divides by it. */
+    if(!(s->num_warps == 1 || s->num_warps == 2 || s->num_warps == 4 || s->num_warps == 8))
+    {
+        rocke_attn2d_reason(reason,
+                            reason_cap,
+                            "runtime_layout requires num_warps in {1, 2, 4, 8} (got %d)",
+                            s->num_warps);
+        return true;
+    }
+    const int threads = s->num_warps * 64;
+    if((s->block_size * s->head_size) % (threads * 8) != 0)
+    {
+        rocke_attn2d_reason(reason,
+                            reason_cap,
+                            "runtime_layout: block_size*head_size=%d must be a multiple of "
+                            "num_warps*512=%d (whole async-DMA calls per tile)",
+                            s->block_size * s->head_size,
+                            threads * 8);
+        return true;
+    }
+    return false;
+}
+
+/* gfx942 runtime_layout_lds_bytes: every allocation is touched inside the
+ * q-block grid-stride loop, so none alias. K double buffer + V (with the
+ * bank-deconflict row pad, an upper bound) + P_lds + Q_lds (only when Q does
+ * not fit in K_lds) + Acc_lds. */
+int rocke_gfx942_attention_tiled_2d_runtime_layout_lds_bytes(int head_size,
+                                                             int tile_size,
+                                                             int num_warps)
+{
+    const int t = tile_size;
+    const int hd = head_size;
+    const int bm = num_warps * 16;
+    const int k_lds = 2 * t * hd * 2;
+    const int v_lds = t * (hd + 8) * 2;
+    const int p_lds = bm * (t + 8) * 2;
+    const int q_lds = (bm <= 2 * t) ? 0 : bm * hd * 2;
+    const int acc_lds = bm * (hd <= 64 ? 32 : hd) * 2;
+    return k_lds + v_lds + p_lds + q_lds + acc_lds;
 }
 
 /* ------------------------------------------------- derived @property bodies */
@@ -245,6 +472,16 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
         return false;
+    }
+    {
+        /* runtime_layout restrictions first, as in __post_init__. */
+        char rtl_reason[ROCKE_ERR_MSG_CAP];
+        if(rocke_gfx942_attention_tiled_2d_runtime_layout_reject_reason(
+               s, rtl_reason, sizeof(rtl_reason)))
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "%s", rtl_reason);
+            return false;
+        }
     }
 
     /* gfx950-only experimental knobs rejected up front on gfx942.

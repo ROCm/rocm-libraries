@@ -25,6 +25,29 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* A runtime_layout spec on the catalog geometry (Python _rtl, lockstep with
+ * runtime_layout_catalog_spec). */
+static void rtl_spec(rocke_attention_tiled_2d_spec_t* s,
+                     int head_size,
+                     int block_size,
+                     int num_query_heads,
+                     int num_kv_heads,
+                     const char* dtype,
+                     bool use_sinks,
+                     int num_warps)
+{
+    s->head_size = head_size;
+    s->block_size = block_size;
+    s->num_query_heads = num_query_heads;
+    s->num_kv_heads = num_kv_heads;
+    s->dtype = dtype;
+    s->use_sinks = use_sinks;
+    s->sliding_window = 0;
+    s->has_softcap = false;
+    s->num_warps = num_warps;
+    s->runtime_layout = true;
+}
+
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
 static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
 {
@@ -1204,6 +1227,39 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
 
+    /* --- idx72-81: runtime_layout, every catalog (head_size, block_size) cell
+     *     with its catalog num_warps, GQA 1-16 and one num_kv_heads > 1 spec
+     *     (lockstep with the Python _rtl rows). */
+    case 72:
+        rtl_spec(s, 64, 16, 1, 1, "fp16", false, 2);
+        break;
+    case 73:
+        rtl_spec(s, 64, 32, 4, 1, "bf16", false, 4);
+        break;
+    case 74:
+        rtl_spec(s, 64, 64, 6, 1, "fp16", false, 4);
+        break;
+    case 75:
+        rtl_spec(s, 128, 16, 8, 1, "bf16", false, 4);
+        break;
+    case 76:
+        rtl_spec(s, 128, 32, 1, 1, "fp16", false, 4);
+        break;
+    case 77:
+        rtl_spec(s, 128, 64, 4, 1, "bf16", false, 4);
+        break;
+    case 78:
+        rtl_spec(s, 256, 16, 6, 1, "fp16", false, 4);
+        break;
+    case 79:
+        rtl_spec(s, 256, 32, 8, 1, "bf16", false, 4);
+        break;
+    case 80:
+        rtl_spec(s, 256, 64, 1, 1, "fp16", false, 4);
+        break;
+    case 81:
+        rtl_spec(s, 128, 32, 16, 4, "bf16", false, 4);
+        break;
     default:
         return -1;
     }

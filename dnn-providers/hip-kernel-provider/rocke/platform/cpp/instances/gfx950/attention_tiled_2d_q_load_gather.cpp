@@ -185,8 +185,18 @@ void rocke_gfx950_attn2d_emit_q_load(rocke_gfx950_attn2d_build_ctx_t* ctx)
         q_pos_safe = rocke_b_select(b, qmask_t, q_pos_t, rocke_b_const_i32(b, 0));
         qh_safe = rocke_b_select(b, qmask_t, qh_t, rocke_b_const_i32(b, 0));
 
-        /* q_off_base, _ = q_desc.offset(b, token=cu_q_start+q_pos_safe,
-         *                               head=qh_safe, dim=0) */
+        /* q_off_base = _q_row_off(q_pos_safe, qh_safe):
+         *   q_desc.offset(token=cu_q_start+q_pos_safe, head=qh_safe, dim=0), or in
+         *   runtime_layout pos*q_tok_stride + head*q_head_stride from rtl_q_ptr. */
+        if(ctx->RTL)
+        {
+            rocke_value_t* pos_off
+                = rocke_b_mul(b, q_pos_safe, ctx->rtl_p[ROCKE_ATTN2D_RTL_Q_TOK_STRIDE]);
+            rocke_value_t* head_off
+                = rocke_b_mul(b, qh_safe, ctx->rtl_p[ROCKE_ATTN2D_RTL_Q_HEAD_STRIDE]);
+            q_off_base = rocke_b_add(b, pos_off, head_off);
+        }
+        else
         {
             static const char* const in_names[3] = {"token", "head", "dim"};
             rocke_value_t* in_values[3];
@@ -197,8 +207,13 @@ void rocke_gfx950_attn2d_emit_q_load(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 b, ctx->q_desc, in_names, in_values, 3, &q_off_base, NULL);
         }
 
-        /* v8 = b.global_load_vN(query, q_off_base + Q_col, dtype, 8, align=16) */
-        v8 = rocke_b_global_load_vN(b, ctx->query, rocke_b_add(b, q_off_base, Q_col), dtype, 8, 16);
+        /* v8 = b.global_load_vN(q_base_ptr, q_off_base + Q_col, dtype, 8, align=16) */
+        v8 = rocke_b_global_load_vN(b,
+                                    ctx->RTL ? ctx->rtl_q_ptr : ctx->query,
+                                    rocke_b_add(b, q_off_base, Q_col),
+                                    dtype,
+                                    8,
+                                    16);
 
         /* Q store index: K_lds-aliased (buf,row_in_buf,col) or plain (row,col). */
         if(ctx->Q_ALIAS_K)
@@ -264,9 +279,17 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
      * const) emitted before the outer divisor const, matching Python. */
     rocke_value_t* nt_inner = rocke_b_add(B, max_seq_prefix_len, rocke_b_const_i32(B, T - 1));
     rocke_value_t* num_tiles = rocke_b_div(B, nt_inner, rocke_b_const_i32(B, T));
+    if(ctx->RTL)
+    {
+        /* A q-block of padding rows only reads no key: its rows store zeros. */
+        rocke_value_t* has_live = rocke_b_cmp_lt(B, ctx->qb_start_pos, ctx->cur_batch_q_len);
+        rocke_value_t* c0 = rocke_b_const_i32(B, 0);
+        num_tiles = rocke_b_select(B, has_live, num_tiles, c0);
+    }
 
-    /* tile_start / tile_end (1226-1244). */
-    if(SLIDING_WINDOW > 0)
+    /* tile_start / tile_end (1226-1244). SW_ACTIVE: a compile-time window, or
+     * always in runtime_layout mode (window kernel argument). */
+    if(SLIDING_WINDOW > 0 || ctx->RTL)
     {
         /* Reuse the cached sw_const (line 1244 in the prologue), do NOT create a
          * fresh const here -- Python references the same SSA value. */

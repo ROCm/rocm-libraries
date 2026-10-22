@@ -639,6 +639,7 @@ static rocke_status_t
             s->use_iglp_opt ? "iglp1" : "",
             s->use_k_single_buffer ? "k1buf" : "",
             s->emit_lse ? "lse" : "",
+            s->runtime_layout ? "rtl" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

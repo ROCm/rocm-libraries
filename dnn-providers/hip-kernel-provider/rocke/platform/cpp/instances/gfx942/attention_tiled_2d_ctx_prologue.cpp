@@ -99,6 +99,125 @@ static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const 
     return false;
 }
 
+/* Python ``if RTL:`` seq lookup: the dense-or-ragged q-block mapping (ragged:
+ * binary search over non-decreasing offsets; a q-block before the first
+ * origin finds -1, reads sequence 0 and writes no row), the grid-stride
+ * q-block loop (entered here, closed by the epilogue), the per-sequence row
+ * counts and lengths, the "block has rows" branch (also closed by the
+ * epilogue) and the 64-bit Q/O bases + runtime-stride Q/O descriptors. */
+static void rocke_a2d_rtl_seq_lookup(rocke_gfx942_attn2d_build_ctx_t* ctx, int BLOCK_Q)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* const* p = ctx->rtl_p;
+    rocke_value_t* num_seqs = ctx->num_seqs_p;
+    rocke_value_t* q_len_u = p[ROCKE_ATTN2D_RTL_Q_UNIFORM_LEN];
+
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* dense = rocke_b_cmp_gt(b, q_len_u, c0);
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* ragged = rocke_b_cmp_eq(b, q_len_u, c0);
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* has_lq = rocke_b_cmp_ne(b, p[ROCKE_ATTN2D_RTL_HAS_SEQ_LENS_Q], c0);
+    rocke_value_t* bq_m1 = rocke_b_const_i32(b, BLOCK_Q - 1);
+    rocke_value_t* len_up = rocke_b_add(b, q_len_u, bq_m1);
+    rocke_value_t* bq = rocke_b_const_i32(b, BLOCK_Q);
+    rocke_value_t* bps_dense = rocke_b_div(b, len_up, bq);
+    rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* bps = rocke_b_select(b, dense, bps_dense, c1);
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* off_end
+        = rocke_b_masked_global_load(b, ctx->cu_q, num_seqs, ragged, c0, rocke_i32(), 4);
+    rocke_value_t* total_dense = rocke_b_mul(b, num_seqs, bps);
+    bq = rocke_b_const_i32(b, BLOCK_Q);
+    rocke_value_t* off_end_blocks = rocke_b_div(b, off_end, bq);
+    rocke_value_t* total_ragged = rocke_b_add(b, off_end_blocks, num_seqs);
+    rocke_value_t* total = rocke_b_select(b, dense, total_dense, total_ragged);
+
+    ctx->rtl_qb_loop = rocke_b_scf_for(
+        b, ctx->q_block_global_idx, total, p[ROCKE_ATTN2D_RTL_Q_BLOCK_GRID], "rtl_qb");
+    rocke_b_region_enter(b, ctx->rtl_qb_loop.body);
+    rocke_value_t* qb = ctx->rtl_qb_loop.iv;
+    ctx->q_block_global_idx = qb;
+
+    /* DENSE maps q-blocks arithmetically: its search runs no iteration. */
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, num_seqs);
+    rocke_value_t* iters = rocke_b_select(b, dense, c0, trip);
+    rocke_value_t* seq_ragged
+        = rocke_binary_search_seq_idx_dyn(b, ctx->cu_q, qb, num_seqs, BLOCK_Q, iters, false);
+    rocke_value_t* seq_dense = rocke_b_div(b, qb, bps);
+    rocke_value_t* seq_found = rocke_b_select(b, dense, seq_dense, seq_ragged);
+    /* A q-block before the first origin finds no sequence (-1). */
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* seq_ok = rocke_b_cmp_ge(b, seq_found, c0);
+    c0 = rocke_b_const_i32(b, 0);
+    ctx->seq_idx = rocke_b_smax(b, seq_found, c0);
+    rocke_value_t* seq_idx = ctx->seq_idx;
+
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* off_start
+        = rocke_b_masked_global_load(b, ctx->cu_q, seq_idx, ragged, c0, rocke_i32(), 4);
+    c1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* seq_p1 = rocke_b_add(b, seq_idx, c1);
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* off_stop
+        = rocke_b_masked_global_load(b, ctx->cu_q, seq_p1, ragged, c0, rocke_i32(), 4);
+    c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* lq = rocke_b_masked_global_load(
+        b, p[ROCKE_ATTN2D_RTL_SEQ_LENS_Q], seq_idx, has_lq, c0, rocke_i32(), 4);
+
+    /* owned: the rows the sequence's block spans; a ragged Q writes only its live
+     * rows (rows of the block past seq_lens_q belong to no sequence). */
+    rocke_value_t* rows_ragged = rocke_b_sub(b, off_stop, off_start);
+    rocke_value_t* owned = rocke_b_select(b, dense, q_len_u, rows_ragged);
+    rocke_value_t* live = rocke_b_smin(b, owned, lq);
+    ctx->cur_batch_q_len = rocke_b_select(b, has_lq, live, owned);
+    rocke_value_t* q_rows = rocke_b_select(b, dense, q_len_u, ctx->cur_batch_q_len);
+    /* Below the (negative) start position of a q-block with no sequence. */
+    rocke_value_t* no_rows = rocke_b_const_i32(b, -2147483647 - 1);
+    ctx->rtl_q_rows = rocke_b_select(b, seq_ok, q_rows, no_rows);
+    rocke_value_t* seq_base_idx = rocke_b_select(b, dense, seq_idx, off_start);
+    rocke_value_t* qbs_dense = rocke_b_mul(b, seq_idx, bps);
+    bq = rocke_b_const_i32(b, BLOCK_Q);
+    rocke_value_t* off_start_blocks = rocke_b_div(b, off_start, bq);
+    rocke_value_t* qbs_ragged = rocke_b_add(b, off_start_blocks, seq_idx);
+    ctx->q_block_start_idx = rocke_b_select(b, dense, qbs_dense, qbs_ragged);
+    ctx->q_block_local_idx = rocke_b_sub(b, qb, ctx->q_block_start_idx);
+    ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, seq_idx, 0);
+    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
+    bq = rocke_b_const_i32(b, BLOCK_Q);
+    ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, bq);
+
+    rocke_value_t* has_rows = rocke_b_cmp_lt(b, ctx->qb_start_pos, ctx->rtl_q_rows);
+    ctx->rtl_rows_if = rocke_b_scf_if(b, has_rows);
+    rocke_b_region_enter(b, ctx->rtl_rows_if.then_region);
+
+    /* 64-bit per-sequence Q/O bases; within-sequence offsets stay i32. */
+    rocke_value_t* sb64 = rocke_b_zext(b, seq_base_idx, rocke_i64());
+    rocke_value_t* q_seq64 = rocke_b_zext(b, p[ROCKE_ATTN2D_RTL_Q_SEQ_STRIDE], rocke_i64());
+    rocke_value_t* q_elems = rocke_b_mul(b, sb64, q_seq64);
+    rocke_value_t* one64 = rocke_b_const_i64(b, 1);
+    rocke_value_t* q_bytes = rocke_b_shl(b, q_elems, one64);
+    ctx->rtl_q_src = rocke_b_global_ptr_add(b, ctx->query, q_bytes);
+    rocke_value_t* o_seq64 = rocke_b_zext(b, p[ROCKE_ATTN2D_RTL_O_SEQ_STRIDE], rocke_i64());
+    rocke_value_t* o_elems = rocke_b_mul(b, sb64, o_seq64);
+    one64 = rocke_b_const_i64(b, 1);
+    rocke_value_t* o_bytes = rocke_b_shl(b, o_elems, one64);
+    ctx->rtl_o_dst = rocke_b_global_ptr_add(b, ctx->output, o_bytes);
+
+    static const char* const qo_coords[3] = {"token", "head", "dim"};
+    rocke_value_t* q_strides[3];
+    q_strides[0] = p[ROCKE_ATTN2D_RTL_Q_TOK_STRIDE];
+    q_strides[1] = p[ROCKE_ATTN2D_RTL_Q_HEAD_STRIDE];
+    q_strides[2] = rocke_b_const_i32(b, 1);
+    ctx->rtl_q_desc = rocke_tensor_descriptor_naive_dynamic(b, "rtl_q", qo_coords, 3, q_strides);
+    rocke_value_t* o_strides[3];
+    o_strides[0] = p[ROCKE_ATTN2D_RTL_O_TOK_STRIDE];
+    o_strides[1] = p[ROCKE_ATTN2D_RTL_O_HEAD_STRIDE];
+    o_strides[2] = rocke_b_const_i32(b, 1);
+    ctx->rtl_o_desc = rocke_tensor_descriptor_naive_dynamic(b, "rtl_o", qo_coords, 3, o_strides);
+}
+
 /* ===================================================================== *
  *  rocke_gfx942_attn2d_build_ctx_init -- the prologue (lines 1104-1912)
  * ===================================================================== */
@@ -117,6 +236,18 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+
+    /* ---- runtime_layout spec checks (__post_init__ raises them first) ---- */
+    {
+        char rtl_reason[ROCKE_ERR_MSG_CAP];
+        if(rocke_gfx942_attention_tiled_2d_runtime_layout_reject_reason(
+               spec, rtl_reason, sizeof(rtl_reason)))
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err, ROCKE_ERR_MSG_CAP, "%s", rtl_reason);
+            return false;
+        }
+    }
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -153,6 +284,29 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
      * rocke_mma_op_t (the select_largest_k return). Store via cast -- only .k /
      * the op_id are consumed downstream. */
     ctx->qk_atom = (const rocke_mfma_atom_t*)qk_atom;
+
+    /* ---- runtime_layout LDS budget (ArchTarget lds_capacity_bytes) ---- */
+    if(spec->runtime_layout)
+    {
+        const int rtl_t = rocke_attention_tiled_2d_spec_tile_size_eff(spec);
+        const int rtl_lds = rocke_gfx942_attention_tiled_2d_runtime_layout_lds_bytes(
+            spec->head_size, rtl_t, spec->num_warps);
+        if(target == NULL || rtl_lds > target->lds_capacity_bytes)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "runtime_layout: estimated LDS %d B (num_warps=%d, T=%d, HD=%d) "
+                     "exceeds the %s %d B LDS budget",
+                     rtl_lds,
+                     spec->num_warps,
+                     rtl_t,
+                     spec->head_size,
+                     arch,
+                     target == NULL ? 0 : target->lds_capacity_bytes);
+            return false;
+        }
+    }
 
     /* ---- ALL-CAPS geometry constants (lines 1161-1184) ---- */
     const int HD = spec->head_size;
@@ -413,6 +567,12 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
+        /* runtime_layout: the 17 appended arguments (RUNTIME_LAYOUT_EXTRA_ARGS). */
+        if(spec->runtime_layout)
+        {
+            ctx->RTL = true;
+            rocke_attn2d_rtl_declare_params(b, ctx->rtl_p);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
@@ -442,28 +602,33 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
+    if(ctx->RTL)
+    {
+        rocke_a2d_rtl_seq_lookup(ctx, BLOCK_Q);
+    }
+    else
     {
         rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
         ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
             b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
-    }
-    ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
-    ctx->cu_q_stop = rocke_b_global_load_i32(
-        b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
-    ctx->cur_batch_q_len = rocke_b_sub(b, ctx->cu_q_stop, ctx->cu_q_start);
-    ctx->q_block_start_idx = rocke_b_add(
-        b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
-    ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
-    ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
+        ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
+        ctx->cu_q_stop = rocke_b_global_load_i32(
+            b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
+        ctx->cur_batch_q_len = rocke_b_sub(b, ctx->cu_q_stop, ctx->cu_q_start);
+        ctx->q_block_start_idx = rocke_b_add(
+            b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
+        ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
+        ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
+        ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
 
-    ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, rocke_b_const_i32(b, BLOCK_Q));
-    {
-        rocke_if_t f
-            = rocke_b_scf_if(b, rocke_b_cmp_ge(b, ctx->qb_start_pos, ctx->cur_batch_q_len));
-        rocke_b_region_enter(b, f.then_region);
-        rocke_b_ret(b);
-        rocke_b_region_leave(b);
+        ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, rocke_b_const_i32(b, BLOCK_Q));
+        {
+            rocke_if_t f
+                = rocke_b_scf_if(b, rocke_b_cmp_ge(b, ctx->qb_start_pos, ctx->cur_batch_q_len));
+            rocke_b_region_enter(b, f.then_region);
+            rocke_b_ret(b);
+            rocke_b_region_leave(b);
+        }
     }
 
     /* ---- Acc_lds stripe geometry (lines 1436-1443) ---- */

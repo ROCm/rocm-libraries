@@ -840,6 +840,27 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 900)\n")
 
+    # Tiled 2D runtime_layout host checks (no GPU required): catalog predicate and
+    # emit for every shipped cell, the rejection matrix, `_rtl` naming and the
+    # appended kernel arguments, for gfx942 and gfx950. The same files' GPU numerics
+    # are marked `gpu` and run in rocke_library_gpu_pytest, so `-m "not gpu"` keeps
+    # them out of this entry on a GPU runner. Same PYTHONPATH rule as the conv entry.
+    set(_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TEST_RELPATHS
+        "tests/library/tests/test_gfx942_attention_runtime_layout.py"
+        "tests/library/tests/test_attention_tiled_2d_runtime_layout_gfx950.py")
+    set(_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TESTS "")
+    foreach(_t ${_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_runtime_layout_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_RUNTIME_LAYOUT_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_runtime_layout_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 300)\n")
+
     # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
     # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
     # lane. The on-GPU numeric tests are enrolled in the GPU lane below.
@@ -1108,6 +1129,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"
         "tests/library/tests/test_attention_unified_scalar_masked_tile_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
+        "tests/library/tests/test_gfx942_attention_runtime_layout.py"
+        "tests/library/tests/test_attention_tiled_2d_runtime_layout_gfx950.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
