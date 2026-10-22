@@ -49,7 +49,12 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
 
     if(!(sig.family == problem.requested_family && sig.data_type == problem.data_type &&
          sig.is_group_mode == problem.is_group_mode && sig.is_v_rowmajor == problem.is_v_rowmajor &&
-         sig.has_logits_soft_cap == problem.has_logits_soft_cap &&
+         // The combine never reads logits either: the soft cap is applied by the
+         // split stage. The stock instance list generates combines without it,
+         // while the Python JIT path copies the flag from the parent split, so
+         // the combine is exempt here for the same reason as the mask below.
+         (sig.family == FmhaKernelFamily::FwdSplitKvCombine ||
+          sig.has_logits_soft_cap == problem.has_logits_soft_cap) &&
          // The split-K combine kernel merges o_acc/lse_acc and is mask-agnostic,
          // but codegen stamps its key from the parent split (0 from a mask=no
          // build, 1 from a causal one). Without this exemption a combine built
