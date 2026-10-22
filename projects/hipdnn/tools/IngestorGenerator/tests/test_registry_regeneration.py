@@ -396,20 +396,42 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
     assert not failures, failures[:5]
 
 
+#: Per builder, a real spec field and a value its spec class accepts and its support
+#: predicate declines, so g6's positive control reaches the predicate. A new builder
+#: needs an entry here.
+_PREDICATE_DECLINES = {
+    # gfx950 dense ships block_m 128 and 256 only.
+    "build_attention_dense": {"block_m": 64},
+    # The tiled 2D/3D kernels are built for head_size 64, 128 and 256.
+    "build_unified_attention_2d_tiled": {"head_size": 96},
+    "build_unified_attention_3d_tiled": {"head_size": 96},
+}
+
+
 def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_config):
     """The positive control for g6: it fails on each way a spec can be refused, so a
-    green g5 is not a gate that checks nothing."""
+    green g6 is not a gate that checks nothing. The declined spec names only real
+    fields, so it fails in the builder's support predicate, not in hydration."""
     name, source = next(
         (k["name"], k["kernel_source"])
         for pack in registry_config["packs"]
         for k in pack["kernels"]
     )
+    assert manifest["builder"] in _PREDICATE_DECLINES, (
+        f"add a predicate-declined spec for {manifest['builder']} to "
+        f"_PREDICATE_DECLINES"
+    )
     renamed = {**source, "spec": {**source["spec"], "no_such_field": 1}}
-    declined = {**source, "spec": {**source["spec"], "block_m": 17}}
+    declined = {
+        **source,
+        "spec": {**source["spec"], **_PREDICATE_DECLINES[manifest["builder"]]},
+    }
     failures = _hydration_failures(
         manifest, [("renamed", renamed), ("declined", declined)]
     )
     assert [f.split(":")[0] for f in failures] == ["renamed", "declined"], failures
+    assert "unexpected spec field" in failures[0], failures[0]
+    assert "spec rejected by" in failures[1], failures[1]
 
 
 def _observation_failures(manifest: dict, kernels: list) -> list:
