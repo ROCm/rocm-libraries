@@ -1113,6 +1113,15 @@ def _rdna_validate_and_collect(
                 raise ValueError(
                     f"block_table shape must be [{batch}, max_pages], got {table_shape}"
                 )
+            # The kernels bound each sequence's key count by seqlen_k, so a
+            # seqlen_k past the table's pages would read another row's entries.
+            capacity = table_shape[1] * int(view.page_block_size)
+            if int(request.seqlen_k) > capacity:
+                raise ValueError(
+                    f"seqlen_k={int(request.seqlen_k)} exceeds the page table's "
+                    f"capacity of {capacity} keys ({table_shape[1]} pages of "
+                    f"{int(view.page_block_size)})"
+                )
             table_stride = getattr(block_table, "stride", None)
             if not callable(table_stride) or int(table_stride(1)) != 1:
                 raise ValueError("block_table innermost stride must be 1")

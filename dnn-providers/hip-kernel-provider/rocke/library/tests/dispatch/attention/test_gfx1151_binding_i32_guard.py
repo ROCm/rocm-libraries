@@ -325,5 +325,26 @@ class TestRdnaSoftmaxScale(unittest.TestCase):
                 resolve({}, {"softmax_scale": scale})
 
 
+class TestRdnaPagedTableCapacity(unittest.TestCase):
+    """A paged seqlen_k must fit the page table: the kernels bound each
+    sequence's keys by seqlen_k, so a larger one reads past the table row."""
+
+    def test_seqlen_k_up_to_the_table_capacity_is_accepted(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _paged_case(kind, pages=8)
+                _rdna_validate_and_collect(request, spec, tensors)
+
+    def test_seqlen_k_past_the_table_capacity_is_rejected(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _paged_case(kind, pages=8)
+                request = dataclasses.replace(request, seqlen_k=65)
+                with self.assertRaisesRegex(
+                    ValueError, "seqlen_k=65 exceeds the page table's capacity of 64"
+                ):
+                    _rdna_validate_and_collect(request, spec, tensors)
+
+
 if __name__ == "__main__":
     unittest.main()
