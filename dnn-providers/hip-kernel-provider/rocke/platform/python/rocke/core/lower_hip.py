@@ -35,6 +35,7 @@ from .ir import (
     Value,
     VectorType,
     _buffer_op_bytes,
+    _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -2815,6 +2816,33 @@ class _Lowerer:
         self.lower_region(op.regions[0])
         self._pop_indent()
         self._emit("}")
+
+    def _op_scf_if_else(self, op: Op) -> None:
+        # The results are variables declared before the ``if``; the
+        # ``scf.yield`` that ends each branch assigns them.
+        # First: the rule checks the condition and branch counts read below.
+        yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+        (cond,) = op.operands
+        for result in op.results:
+            self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
+        self._emit(f"if({_name(cond)}) {{")
+        self._lower_if_else_branch(op, op.regions[0], yields[0])
+        self._emit("} else {")
+        self._lower_if_else_branch(op, op.regions[1], yields[1])
+        self._emit("}")
+
+    def _lower_if_else_branch(self, op: Op, region: Region, yld: Optional[Op]) -> None:
+        """Lower one branch of the scf.if_else ``op``; its closing ``yld``
+        (None when ``op`` has no results) becomes assignments to the results."""
+        self._push_indent()
+        if yld is None:
+            self.lower_region(region)
+        else:
+            for body_op in region.ops[:-1]:
+                self.lower_op(body_op)
+            for result, value in zip(op.results, yld.operands):
+                self._emit(f"{_name(result)} = {_name(value)};")
+        self._pop_indent()
 
 
 def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:

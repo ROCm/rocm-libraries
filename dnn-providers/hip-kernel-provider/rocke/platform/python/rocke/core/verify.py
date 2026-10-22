@@ -40,6 +40,7 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _assume_range_errors,
     _buffer_op_bytes,
+    _if_else_branch_yield,
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
@@ -428,6 +429,12 @@ class _Verifier:
                     f"{len(op.operands)}",
                     op,
                 )
+        elif name == "scf.if_else":
+            try:
+                for branch in range(2):
+                    _if_else_branch_yield(op, branch)
+            except ValueError as error:
+                self.err(str(error), op)
         elif name in ("tile.buffer_load_vN", "tile.buffer_store_vN"):
             try:
                 _buffer_op_bytes(op)

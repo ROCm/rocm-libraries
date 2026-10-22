@@ -3268,6 +3268,58 @@ void case_global_load_async_to_lds_b8()
     EXPECT_IR(ir, "getelementptr inbounds");
 }
 
+/* An scf.if_else with results, its branches yielding `then_value` and
+ * `else_value`. */
+rocke_if_else_t build_if_else_yielding(rocke_ir_builder_t* b,
+                                       const rocke_type_t* result_type,
+                                       rocke_value_t* then_value,
+                                       rocke_value_t* else_value)
+{
+    const rocke_type_t* result_types[] = {result_type};
+    rocke_value_t* cond = rocke_b_cmp_lt(b, rocke_b_thread_id_x(b), rocke_b_const_i32(b, 4));
+    rocke_if_else_t branch = rocke_b_scf_if_else_results(b, cond, result_types, 1);
+    rocke_b_region_enter(b, branch.then_region);
+    rocke_b_scf_yield(b, &then_value, 1);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, branch.else_region);
+    rocke_b_scf_yield(b, &else_value, 1);
+    rocke_b_region_leave(b);
+    return branch;
+}
+
+/* The verifier refuses an if/else whose branch yields the wrong type or a
+ * buffer descriptor, and one without one condition and two branches, with the
+ * Python engine's texts (tests/core/test_scf_if_else_results.py). */
+void case_scf_if_else_verify()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "if_else_verify");
+    rocke_value_t* X = global_ptr_param(&b, "X", rocke_f32());
+    build_if_else_yielding(&b, rocke_f32(), rocke_b_const_f32(&b, 1.0), rocke_b_const_i32(&b, 1));
+    rocke_if_else_t descriptor
+        = build_if_else_yielding(&b,
+                                 rocke_vector_type(&b, rocke_i32(), 4),
+                                 rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 64)),
+                                 rocke_b_buffer_rsrc(&b, X, rocke_b_const_i32(&b, 32)));
+    rocke_if_else_t short_op = build_if_else_yielding(
+        &b, rocke_i32(), rocke_b_const_i32(&b, 1), rocke_b_const_i32(&b, 2));
+    short_op.op->num_regions = 1;
+    rocke_b_ret(&b);
+    if(descriptor.op->num_results != 1 || descriptor.op->results[0] == nullptr)
+        fail("rocke_b_scf_if_else_results must give the op its result", __LINE__);
+    const std::vector<std::string> messages = verify_messages(&b);
+    if(!has_message(messages, "scf.if_else result 0 is f32, but its else branch yields i32"))
+        fail("verifier must reject a branch that yields the wrong type", __LINE__);
+    if(!has_message(messages,
+                    "scf.if_else result 0: its then branch yields a buffer descriptor, which an "
+                    "if/else cannot carry; yield the values the descriptor is built from and "
+                    "build it after the if/else"))
+        fail("verifier must reject a branch that yields a buffer descriptor", __LINE__);
+    if(!has_message(messages, "scf.if_else: expected 1 condition / 2 branches, got 1 / 1"))
+        fail("verifier must reject an if/else with one branch", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
 /* ---- HIP zero-extension source signedness ---- */
 void case_hip_zext_uses_unsigned_source_cast()
 {
@@ -3634,6 +3686,7 @@ const TestCase k_cases[] = {
     {"buffer_store_vN_generic", case_buffer_store_vN_generic},
     {"buffer_vN_verify", case_buffer_vN_verify},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
+    {"scf_if_else_verify", case_scf_if_else_verify},
     {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
     {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},

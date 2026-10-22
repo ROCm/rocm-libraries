@@ -62,6 +62,7 @@ from .ir import (
     Value,
     VectorType,
     _buffer_op_bytes,
+    _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -7218,7 +7219,18 @@ class _Lowerer:
             br label %if.end
           if.end:
             [continuation]
+
+        An if/else with results takes each result from the ``scf.yield``
+        that ends each branch, through one ``phi`` per result at the head of
+        ``if.end``::
+
+          if.end:
+            %if7 = phi float [ %a, %if.then ], [ %b, %if.else ]
         """
+        # Refuse a malformed if/else, or a branch that does not yield the
+        # results, before reading the op or emitting.
+        for branch in range(2):
+            _if_else_branch_yield(op, branch)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7235,7 +7247,7 @@ class _Lowerer:
         cur.terminated = True
 
         # Lower then branch (then_blk is now _current).
-        self.lower_region(then_region)
+        then_values = self._lower_if_else_branch(op, then_region)
         then_last = self._current()
         # then falls through to join; use another placeholder.
         if not then_last.terminated:
@@ -7246,7 +7258,7 @@ class _Lowerer:
         else_blk = self._new_block("if.else")
 
         # Lower else branch.
-        self.lower_region(else_region)
+        else_values = self._lower_if_else_branch(op, else_region)
         else_last = self._current()
 
         # Create join block (becomes _current for subsequent ops).
@@ -7254,6 +7266,12 @@ class _Lowerer:
         if not else_last.terminated:
             else_last.emit(f"  br label %{end_blk.label}")
             else_last.terminated = True
+        for result, then_value, else_value in zip(op.results, then_values, else_values):
+            end_blk.emit(
+                f"  {result.name} = phi {_llvm_type(result.type)} "
+                f"[ {then_value}, %{then_last.label} ], "
+                f"[ {else_value}, %{else_last.label} ]"
+            )
 
         # Backpatch placeholders in the predecessor and then blocks.
         for blk in (cur, then_last):
@@ -7261,6 +7279,16 @@ class _Lowerer:
                 line = line.replace("%IF_ELSE", f"%{else_blk.label}")
                 line = line.replace("%IF_END", f"%{end_blk.label}")
                 blk.lines[i] = line
+
+    def _lower_if_else_branch(self, op: Op, region: Region) -> List[str]:
+        """Lower one branch of the scf.if_else ``op``; return the operands its
+        closing ``scf.yield`` gives the results (none when ``op`` has none)."""
+        if not op.results:
+            self.lower_region(region)
+            return []
+        self._yield_stack.append([])
+        self.lower_region(region)
+        return self._yield_stack.pop()
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:

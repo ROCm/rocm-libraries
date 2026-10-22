@@ -1354,6 +1354,72 @@ static rocke_status_t rocke_h_op_scf_if(rocke_h_lowerer_t* lw, const rocke_op_t*
     return lw->status;
 }
 
+/* def _lower_if_else_branch(self, op, region, yld):
+ *     push; lower every op but the closing yld, then assign each result its
+ *     yielded value (the whole region when yld is None); pop */
+static void h_lower_if_else_branch(rocke_h_lowerer_t* lw,
+                                   const rocke_op_t* op,
+                                   const rocke_region_t* region,
+                                   const rocke_op_t* yld)
+{
+    int i;
+    rocke_h_push_indent(lw);
+    if(!yld)
+    {
+        rocke_h_lower_region(lw, region);
+    }
+    else
+    {
+        for(i = 0; i < region->num_ops - 1; i++)
+        {
+            rocke_h_lower_op(lw, region->ops[i]);
+        }
+        for(i = 0; i < op->num_results; i++)
+        {
+            rocke_h_emitf(lw,
+                          "%s = %s;",
+                          rocke_h_name(lw, op->results[i]),
+                          rocke_h_name(lw, yld->operands[i]));
+        }
+    }
+    rocke_h_pop_indent(lw);
+}
+
+/* def _op_scf_if_else(self, op):
+ *     yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+ *     for result in op.results:
+ *         self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
+ *     self._emit(f"if({_name(cond)}) {{"); then branch
+ *     self._emit("} else {"); else branch
+ *     self._emit("}")
+ * The results are variables declared before the `if`; the scf.yield that ends
+ * each branch assigns them. */
+static rocke_status_t rocke_h_op_scf_if_else(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_op_t* yields[2] = {NULL, NULL};
+    int branch, i;
+    for(branch = 0; branch < 2; branch++)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        if(!rocke_i_if_else_branch_yield(op, branch, &yields[branch], err, sizeof(err)))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
+        }
+    }
+    for(i = 0; i < op->num_results; i++)
+    {
+        const rocke_value_t* result = op->results[i];
+        rocke_h_emitf(
+            lw, "%s %s;", rocke_h_type_to_hip(lw, result->type), rocke_h_name(lw, result));
+    }
+    rocke_h_emitf(lw, "if(%s) {", rocke_h_name(lw, op->operands[0]));
+    h_lower_if_else_branch(lw, op, op->regions[0], yields[0]);
+    rocke_h_emit(lw, "} else {");
+    h_lower_if_else_branch(lw, op, op->regions[1], yields[1]);
+    rocke_h_emit(lw, "}");
+    return lw->status;
+}
+
 /* Python local `cpp_type_for(type_name)` inside _op_scf_for:
  *     if type_name.startswith("vec<f32x"): return f"f32x{int(inner)}"
  *     if type_name.startswith("vec<f16x"): return f"f16x{int(inner)}"
@@ -1649,6 +1715,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         /* control flow */
         {ROCKE_OP_SCF_FOR, rocke_h_op_scf_for},
         {ROCKE_OP_SCF_IF, rocke_h_op_scf_if},
+        {ROCKE_OP_SCF_IF_ELSE, rocke_h_op_scf_if_else},
         {ROCKE_OP_SCF_YIELD, rocke_h_op_scf_yield},
         {ROCKE_OP_CF_RETURN, rocke_h_op_cf_return},
         {ROCKE_OP_INVALID, NULL}, /* terminator */

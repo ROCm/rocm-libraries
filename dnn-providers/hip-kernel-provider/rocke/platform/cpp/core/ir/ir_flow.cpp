@@ -2435,6 +2435,14 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond)
 
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
 {
+    return rocke_b_scf_if_else_results(b, cond, NULL, 0);
+}
+
+rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
+                                            rocke_value_t* cond,
+                                            const rocke_type_t* const* result_types,
+                                            int num_results)
+{
     rocke_if_else_t out;
     rocke_region_t* then_r;
     rocke_region_t* else_r;
@@ -2449,6 +2457,11 @@ rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL cond");
         return out;
     }
+    if(num_results < 0 || (num_results > 0 && !result_types))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL result types");
+        return out;
+    }
 
     then_r = rocke_i_new_region(b, "then");
     else_r = rocke_i_new_region(b, "else");
@@ -2456,13 +2469,105 @@ rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
         return out;
     regions[0] = then_r;
     regions[1] = else_r;
-    op = rocke_i_op(b, ROCKE_OP_SCF_IF_ELSE, &cond, 1, NULL, 0, NULL, regions, 2, "v", NULL);
+    /* Python names the results self._fresh("if"); an if/else without results
+     * names nothing. */
+    op = rocke_i_op(b,
+                    ROCKE_OP_SCF_IF_ELSE,
+                    &cond,
+                    1,
+                    result_types,
+                    num_results,
+                    NULL,
+                    regions,
+                    2,
+                    num_results > 0 ? "if" : "v",
+                    NULL);
     if(!op)
         return out;
     out.op = op;
     out.then_region = then_r;
     out.else_region = else_r;
     return out;
+}
+
+bool rocke_i_if_else_branch_yield(
+    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
+{
+    static const char* const branch_names[2] = {"then", "else"};
+    const char* name = branch_names[branch];
+    const rocke_region_t* region;
+    const rocke_op_t* yld;
+    int count = op->num_results;
+    int i;
+
+    *out_yield = NULL;
+    /* The counts first: serialized IR reaches the verifier and the lowerings
+     * without passing the builder. */
+    if(op->num_operands != 1 || op->num_regions != 2)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else: expected 1 condition / 2 branches, got %d / %d",
+                 op->num_operands,
+                 op->num_regions);
+        return false;
+    }
+    if(count == 0)
+        return true;
+    region = op->regions[branch];
+    if(region->num_ops == 0 || region->ops[region->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else has %d results, so its %s branch must end in scf.yield of %d values",
+                 count,
+                 name,
+                 count);
+        return false;
+    }
+    yld = region->ops[region->num_ops - 1];
+    if(yld->num_operands != count)
+    {
+        snprintf(err,
+                 err_cap,
+                 "scf.if_else has %d results, but its %s branch yields %d values",
+                 count,
+                 name,
+                 yld->num_operands);
+        return false;
+    }
+    for(i = 0; i < count; i++)
+    {
+        const rocke_type_t* result_type = op->results[i]->type;
+        const rocke_value_t* value = yld->operands[i];
+        const rocke_type_t* value_type = value->type;
+        /* A descriptor is <4 x i32> in the IR but an opaque ptr addrspace(8)
+         * (HIP rsrc_t) once lowered: neither a phi nor a variable carries it. */
+        if(value->op && value->op->opcode == ROCKE_OP_TILE_BUFFER_RSRC)
+        {
+            snprintf(err,
+                     err_cap,
+                     "scf.if_else result %d: its %s branch yields a buffer descriptor, which an "
+                     "if/else cannot carry; yield the values the descriptor is built from and "
+                     "build it after the if/else",
+                     i,
+                     name);
+            return false;
+        }
+        if(!rocke_type_eq(value_type, result_type))
+        {
+            snprintf(err,
+                     err_cap,
+                     "scf.if_else result %d is %s, but its %s branch yields %s",
+                     i,
+                     result_type->name,
+                     name,
+                     value_type->name);
+            return false;
+        }
+    }
+    *out_yield = yld;
+    return true;
 }
 
 void rocke_b_ret(rocke_ir_builder_t* b)

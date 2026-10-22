@@ -631,6 +631,19 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    op->num_operands);
         }
     }
+    else if(o == ROCKE_OP_SCF_IF_ELSE)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        const rocke_op_t* yld = NULL;
+        for(int branch = 0; branch < 2; ++branch)
+        {
+            if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof err))
+            {
+                v_errf(v, op, "%s", err);
+                break;
+            }
+        }
+    }
     else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)
     {
         char err[256];

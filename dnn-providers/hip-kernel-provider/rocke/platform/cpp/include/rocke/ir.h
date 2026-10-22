@@ -594,7 +594,8 @@ typedef struct rocke_if
     rocke_region_t* then_region;
 } rocke_if_t;
 
-/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
+/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). The values
+ * the branch that ran yields (rocke_b_scf_if_else_results) are op->results. */
 typedef struct rocke_if_else
 {
     rocke_op_t* op;
@@ -1737,6 +1738,15 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
  * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
+/* scf.if_else that yields one value per type in `result_types` (Python
+ * scf_if_else(cond, result_types)): each region ends in rocke_b_scf_yield of
+ * values of those types, and the op's results (handle.op->results) are the
+ * values of the branch that ran. The verifier and the lowerings refuse a region
+ * that does not end that way. */
+rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
+                                            rocke_value_t* cond,
+                                            const rocke_type_t* const* result_types,
+                                            int num_results);
 void rocke_b_ret(rocke_ir_builder_t* b);
 
 /* ---- tile.exec_* (wavelet exec-mask split, MFMA path) ----

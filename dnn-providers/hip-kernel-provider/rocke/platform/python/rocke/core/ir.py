@@ -831,6 +831,61 @@ def _buffer_op_bytes(op: Op) -> int:
     return _buffer_vector_bytes(op.name, role, access_type)
 
 
+# The two branches of an scf.if_else, in region order.
+_IF_ELSE_BRANCHES = ("then", "else")
+
+
+def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
+    """The ``scf.yield`` that gives ``op``'s results their values on branch
+    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
+    results.
+
+    Every ``scf.if_else`` has one condition and two branches. One with results
+    ends each branch in an ``scf.yield`` of one value per result, of the
+    result's type, and never a buffer descriptor: a descriptor is a
+    ``<4 x i32>`` in the IR but an opaque ``ptr addrspace(8)`` (HIP
+    ``rsrc_t``) once lowered, so neither a phi nor a variable can carry it.
+    The builder, the verifier and every lowering refuse anything else with
+    these texts, in both engines (``rocke_i_if_else_branch_yield``); the
+    counts are checked first, as serialized IR reaches the verifier and the
+    lowerings without passing the builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    if not op.results:
+        return None
+    name = _IF_ELSE_BRANCHES[branch]
+    count = len(op.results)
+    region = op.regions[branch]
+    if not region.ops or region.ops[-1].name != "scf.yield":
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must end in "
+            f"scf.yield of {count} values"
+        )
+    yld = region.ops[-1]
+    if len(yld.operands) != count:
+        raise ValueError(
+            f"scf.if_else has {count} results, but its {name} branch yields "
+            f"{len(yld.operands)} values"
+        )
+    for index, (result, value) in enumerate(zip(op.results, yld.operands)):
+        if value.op is not None and value.op.name == "tile.buffer_rsrc":
+            raise ValueError(
+                f"scf.if_else result {index}: its {name} branch yields a buffer "
+                "descriptor, which an if/else cannot carry; yield the values the "
+                "descriptor is built from and build it after the if/else"
+            )
+        if value.type != result.type:
+            raise ValueError(
+                f"scf.if_else result {index} is {result.type.name}, but its {name} "
+                f"branch yields {value.type.name}"
+            )
+    return yld
+
+
 # ----------------------------- Values / Ops ------------------------------
 
 
@@ -5952,7 +6007,7 @@ class IRBuilder:
         self._emit(op)
         return _IfBuilder(self, op, then_r)
 
-    def scf_if_else(self, cond: Value):
+    def scf_if_else(self, cond: Value, result_types: Sequence[Type] = ()):
         """Runtime if/else branch (converging control flow).
 
         Both the ``then`` and ``else`` regions converge at the same join
@@ -5970,10 +6025,36 @@ class IRBuilder:
                 with else_ctx:
                     # code executed when cond is false
                     b.sync()
+
+        With ``result_types`` the if/else yields one value per type: each
+        branch ends in ``scf_yield`` of values of those types, and the
+        returned builder's ``results`` are the values of the branch that ran
+        (an LLVM ``phi``; in HIP, variables declared before the ``if`` and
+        assigned in both branches)::
+
+            branch = b.scf_if_else(ok, result_types=[VectorType(F16, 8)])
+            with branch as (then_ctx, else_ctx):
+                with then_ctx:
+                    b.scf_yield(b.buffer_load_vN(rsrc, voffset, soffset, F16, 8))
+                with else_ctx:
+                    b.scf_yield(b.zero_vec_f16(8))
+            (value,) = branch.results
+
+        Leaving the ``with`` refuses a branch that does not end that way.
         """
+        for t in result_types:
+            _refuse_packed_only_value("scf.if_else", t)
+        results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
-        op = Op(name="scf.if_else", operands=[cond], regions=[then_r, else_r])
+        op = Op(
+            name="scf.if_else",
+            operands=[cond],
+            results=results,
+            regions=[then_r, else_r],
+        )
+        for r in results:
+            r.op = op
         self._emit(op)
         return _IfElseBuilder(self, op, then_r, else_r)
 
@@ -6198,4 +6279,13 @@ class _IfElseBuilder:
         return self._then_ctx, self._else_ctx
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        pass  # regions were already popped by their own context managers
+        # The regions were already popped by their own context managers. Once
+        # both branches are built, refuse one that does not yield the results.
+        if exc_type is None:
+            for branch in range(len(_IF_ELSE_BRANCHES)):
+                _if_else_branch_yield(self.op, branch)
+
+    @property
+    def results(self) -> List[Value]:
+        """The values the branch that ran yields, one per result type."""
+        return list(self.op.results)

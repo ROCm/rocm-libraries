@@ -213,6 +213,16 @@ int rocke_i_buffer_vector_bytes(
  * the Python engine's refusal into `err`. */
 int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap);
 
+/* The scf.yield that gives the scf.if_else `op`'s results their values on
+ * branch `branch` (0 then, 1 else), in `*out_yield`; NULL when `op` has no
+ * results (Python core/ir.py::_if_else_branch_yield). Every if/else has one
+ * condition and two branches, checked first; a branch of an if/else with
+ * results ends in an scf.yield of one value per result, of the result's type,
+ * and never a buffer descriptor. Otherwise returns false and writes the Python
+ * engine's refusal into `err`. */
+bool rocke_i_if_else_branch_yield(
+    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap);
+
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
  * the builder ("bitcast", "vec_bitcast") and `hint` says what to do instead of
