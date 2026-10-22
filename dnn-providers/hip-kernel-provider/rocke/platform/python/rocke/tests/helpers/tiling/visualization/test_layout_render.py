@@ -78,6 +78,20 @@ def test_mma_tee_renders(tmp_path):
     assert os.path.getsize(p) > 0
 
 
+def test_from_mma_labels_and_widths_follow_the_rows_operand_dtypes():
+    # A mixed-format f8f6f4 instruction takes 8-bit A and 4-bit B: the tee labels the inputs with both
+    # IR type names and draws each operand at its own width; C/D is drawn at the result's width.
+    mma = TileMma(
+        target="gfx1250", atom_override="wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
+    )
+    tee = lr.MmaTee.from_mma(mma)
+    assert (tee.in_dtype, tee.out_dtype) == ("fp8e4m3/fp4e2m1", "f32")
+    assert (tee.a_dtype_bits, tee.b_dtype_bits, tee.c_dtype_bits) == (8, 4, 32)
+    # Equal A and B dtypes keep the single IR type name (the label used before the per-operand rows).
+    tee = lr.MmaTee.from_mma(_mma())
+    assert (tee.in_dtype, tee.out_dtype) == ("f16", "f32")
+
+
 def test_from_mma_default_renders_canonical_not_the_configured_style():
     # Plan-3 guard: the viz default stays CANONICAL even for a STYLED mma. from_mma must source its
     # operand pictures from the canonical machine, NOT the style-faithful a_layout (which now returns the

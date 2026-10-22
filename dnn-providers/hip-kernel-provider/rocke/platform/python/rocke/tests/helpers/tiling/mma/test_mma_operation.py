@@ -173,5 +173,40 @@ def test_mma_mismatched_ab_dtype_fails_fast() -> None:
 def test_mma_unsupported_shape_fails_fast_with_candidates() -> None:
     with pytest.raises(ValueError) as excinfo:
         TileMma((13, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
-    assert "no MMA intrinsic" in str(excinfo.value)
-    assert "available on 'gfx90a'" in str(excinfo.value)
+    assert "no MMA instruction" in str(excinfo.value)
+    assert "selectable on 'gfx90a'" in str(excinfo.value)
+
+
+# The gfx1250 'wmma_bf16f32_16x16x32_bf16' instruction accumulates in fp32 but returns bf16. The
+# TileMma driver keeps the result in the accumulator dtype, so it must never pick that instruction,
+# and naming it must fail rather than silently issue the fp32-result instruction of the same shape.
+_RESULT_DTYPE_CHANGE_MESSAGE = (
+    "MMA instruction 'wmma_bf16f32_16x16x32_bf16' accumulates in fp32 but returns bf16 -- the "
+    "TileMma driver does not drive an instruction whose result dtype differs from its accumulator "
+    "dtype; choose one whose result dtype is fp32"
+)
+
+
+def test_selection_by_intent_never_picks_a_result_dtype_change() -> None:
+    mma_op = TileMma((16, 16, 32), a="bf16", b="bf16", c="fp32", target="gfx1250")
+    assert mma_op.op_id == "wmma_f32_16x16x32_bf16"
+    assert mma_op.traits.d_dtype == mma_op.traits.c_dtype
+
+
+def test_atom_override_refuses_a_result_dtype_change() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        TileMma(target="gfx1250", atom_override="wmma_bf16f32_16x16x32_bf16")
+    assert str(excinfo.value) == _RESULT_DTYPE_CHANGE_MESSAGE
+
+
+def test_atom_name_refuses_a_result_dtype_change() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        TileMma(
+            (16, 16, 32),
+            a="bf16",
+            b="bf16",
+            c="fp32",
+            target="gfx1250",
+            tiling=Tiling(atom_shape="wmma_bf16f32_16x16x32_bf16"),
+        )
+    assert str(excinfo.value) == _RESULT_DTYPE_CHANGE_MESSAGE
