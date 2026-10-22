@@ -63,6 +63,7 @@ extern "C" size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
                                                          const void* B,
                                                          const void* C,
                                                          void*       D,
+                                                         float       beta,
                                                          size_t      workspaceBytes,
                                                          size_t      rotatingBytes,
                                                          size_t      capBytes,
@@ -1957,10 +1958,15 @@ namespace
         int64_t strideA = -1, strideB = -1, strideC = -1, strideD = -1;
 
         bool                inPlace    = false;
+        float               beta       = 0.0f;
         hipblasLtEpilogue_t epilogue   = HIPBLASLT_EPILOGUE_DEFAULT;
         int32_t             biasStride = 0;
         int64_t             auxStride  = -1;
         int64_t             auxLD      = 0;
+
+        // A scaled by an M vector and B by an N vector, and alpha a vector.
+        bool vectorScales = false;
+        bool alphaVector  = false;
 
         size_t  workspaceBytes = 0;
         size_t  rotatingBytes  = 0;
@@ -1974,7 +1980,8 @@ namespace
         bool     usable = false;
         uint64_t blocks = 0, total = 0;
         uint64_t bytesA = 0, bytesB = 0, bytesC = 0, bytesD = 0, bytesInPlaceC = 0, bytesE = 0,
-                 bytesBias = 0;
+                 bytesBias = 0, bytesBiasIn = 0, copyBiasIn = 0, bytesScaleA = 0, bytesScaleB = 0,
+                 bytesScaleAlphaVec = 0;
     };
 
     bool planFor(const PlanCase& c, Plan* plan)
@@ -2007,13 +2014,15 @@ namespace
         };
 
         // Only compared, never dereferenced, so any distinct addresses do.
-        static char    buffers[6];
-        const void*    A    = &buffers[0];
-        const void*    B    = &buffers[1];
-        const void*    C    = &buffers[2];
-        void*          D    = c.inPlace ? &buffers[2] : &buffers[3];
-        void*          bias = &buffers[4];
-        void*          aux  = &buffers[5];
+        static char    buffers[8];
+        const void*    A      = &buffers[0];
+        const void*    B      = &buffers[1];
+        const void*    C      = &buffers[2];
+        void*          D      = c.inPlace ? &buffers[2] : &buffers[3];
+        void*          bias   = &buffers[4];
+        void*          aux    = &buffers[5];
+        void*          scaleA = &buffers[6];
+        void*          scaleB = &buffers[7];
         const bool     nA   = c.opA == HIPBLAS_OP_N;
         const bool     nB   = c.opB == HIPBLAS_OP_N;
         const int32_t  opA = c.opA, opB = c.opB;
@@ -2066,7 +2075,32 @@ namespace
                         == HIPBLAS_STATUS_SUCCESS;
         }
 
-        uint64_t v[10] = {};
+        if(ok && c.vectorScales)
+        {
+            const int32_t vector = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+            ok                   = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &vector, sizeof(vector))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &vector, sizeof(vector))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        if(ok && c.alphaVector)
+        {
+            const int32_t mode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
+            ok                 = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &mode, sizeof(mode))
+                 == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        uint64_t v[15] = {};
         ok             = ok
              && hipblaslt_tuning_scratch_plan_for_test(handle,
                                                        desc,
@@ -2078,16 +2112,31 @@ namespace
                                                        B,
                                                        C,
                                                        D,
+                                                       c.beta,
                                                        c.workspaceBytes,
                                                        c.rotatingBytes,
                                                        c.cap,
                                                        c.coldIters,
                                                        c.hotIters,
                                                        v,
-                                                       10)
-                    >= 10;
+                                                       15)
+                    >= 15;
         if(ok)
-            *plan = {v[0] != 0, v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]};
+            *plan = {v[0] != 0,
+                     v[1],
+                     v[2],
+                     v[3],
+                     v[4],
+                     v[5],
+                     v[6],
+                     v[7],
+                     v[8],
+                     v[9],
+                     v[10],
+                     v[11],
+                     v[12],
+                     v[13],
+                     v[14]};
 
         if(desc)
             hipblasLtMatmulDescDestroy(desc);
@@ -2217,13 +2266,12 @@ namespace
         ASSERT_TRUE(full.usable);
         ASSERT_GE(full.blocks, 4u);
 
-        // Every tensor rotates in step, each aligned as the layout aligns it.
-        auto           aligned  = [](uint64_t v) { return (v + 255) / 256 * 256; };
-        const uint64_t perBlock = aligned(full.bytesA) + aligned(full.bytesB) + aligned(full.bytesC)
-                                  + aligned(full.bytesD);
+        // hipblaslt-bench's footprint for this dense problem: A, B and D, as a
+        // zero beta leaves C unread.
+        const uint64_t footprint = full.bytesA + full.bytesB + full.bytesD;
 
         PlanCase threeBlocks      = c;
-        threeBlocks.rotatingBytes = 3 * perBlock;
+        threeBlocks.rotatingBytes = 3 * footprint;
         Plan three;
         ASSERT_TRUE(planFor(threeBlocks, &three));
         ASSERT_EQ(three.blocks, 3u);
@@ -2246,6 +2294,66 @@ namespace
         EXPECT_TRUE(plan.usable);
         EXPECT_EQ(plan.blocks, 1u);
         EXPECT_GT(plan.total, capped.cap);
+    }
+
+    // The block count is hipblaslt-bench's for the same problem. A zero beta
+    // leaves C unread, so with C and D apart, fp16 1024^3 and a 512 MiB budget
+    // the bench plans 86 blocks of A, B and D, and 64 once beta reads C.
+    TEST_F(TuningScratchPlan_pre_checkin, BlockCountFollowsTheBenchFootprint)
+    {
+        PlanCase c;
+        c.m = c.n = c.k = 1024;
+        c.rotatingBytes = size_t(512) << 20;
+
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 86u) << "512 MiB over 6 MiB, rounded up";
+
+        c.beta = 1.0f;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 64u) << "512 MiB over 8 MiB";
+    }
+
+    // A bias the epilogue reads, vector scales and the alpha vector rotate with
+    // the tensors and count toward the block count, as hipblaslt-bench's do.
+    // Only the caller's extent of the bias is copied into its block.
+    TEST_F(TuningScratchPlan_pre_checkin, ReadVectorsRotateWithTheTensors)
+    {
+        PlanCase c;
+        c.epilogue     = HIPBLASLT_EPILOGUE_BIAS;
+        c.vectorScales = true;
+        c.alphaVector  = true;
+
+        Plan bare;
+        ASSERT_TRUE(planFor(c, &bare));
+        ASSERT_TRUE(bare.usable);
+        EXPECT_EQ(bare.bytesBias, 0u) << "a read bias took a written one's block";
+        EXPECT_EQ(bare.bytesBiasIn, std::max(c.m, c.n) * sizeof(float));
+        EXPECT_EQ(bare.copyBiasIn, c.m * sizeof(float)) << "a bias added along D is M long";
+        EXPECT_EQ(bare.bytesScaleA, c.m * sizeof(float));
+        EXPECT_EQ(bare.bytesScaleB, c.n * sizeof(float));
+        EXPECT_EQ(bare.bytesScaleAlphaVec, c.m * sizeof(float));
+
+        // A, B and D, then the bias, the two scales and the alpha vector.
+        const uint64_t footprint
+            = bare.bytesA + bare.bytesB + bare.bytesD + (3 * c.m + c.n) * sizeof(float);
+        c.rotatingBytes = 20 * footprint;
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 20u);
+
+        // Once per batch at its stride, or a single vector when that is zero.
+        c.batch = 2;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.copyBiasIn, c.m * sizeof(float));
+        c.biasStride = 80;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.copyBiasIn, (80 + c.m) * sizeof(float));
     }
 
     // Every block shares one workspace, so however large the caller's limit,

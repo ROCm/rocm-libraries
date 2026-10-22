@@ -3450,12 +3450,15 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_tensor_span_for_test(size_t 
     return span;
 }
 
-// The scratch tuning would lay out to measure this matmul, with the rotating
-// budget, the cap and the cold and timed launch counts given rather than read
-// from the environment. The descriptors are the public ones; the pointers are
-// only compared, never dereferenced. Writes up to count values, in this order:
+// The scratch tuning would lay out to measure this matmul, with beta, the
+// rotating budget, the cap and the cold and timed launch counts given rather
+// than read from the environment. The descriptors are the public ones, with an
+// f32 compute type; the pointers are only compared, never dereferenced. Writes
+// up to count values, in this order:
 //   0 usable, 1 rotation blocks, 2 total bytes
-//   3 A, 4 B, 5 C, 6 D, 7 in-place C, 8 E, 9 bias
+//   3 A, 4 B, 5 C, 6 D, 7 in-place C, 8 E, 9 bias, 10 read bias,
+//   11 the caller's extent of the read bias, 12 scale A, 13 scale B,
+//   14 alpha vector
 //       Each tensor's span in bytes, 0 when the layout has none.
 // Returns how many values there are.
 extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
@@ -3468,6 +3471,7 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
                                                                           const void* B,
                                                                           const void* C,
                                                                           void*       D,
+                                                                          float       beta,
                                                                           size_t    workspaceBytes,
                                                                           size_t    rotatingBytes,
                                                                           size_t    capBytes,
@@ -3477,7 +3481,6 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
                                                                           size_t    count)
 {
     const float alpha = 1.0f;
-    const float beta  = 0.0f;
     auto        prob  = construct_rocblaslt_problem(static_cast<rocblaslt_handle>(handle),
                                             static_cast<rocblaslt_matmul_desc>(matmulDesc),
                                             static_cast<rocblaslt_matrix_layout>(matA),

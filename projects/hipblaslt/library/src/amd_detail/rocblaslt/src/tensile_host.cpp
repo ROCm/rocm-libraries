@@ -4164,10 +4164,8 @@ namespace
         // caller's data and the rest are broadcast from it. blockCount is always
         // at least 1, so the unrotated case is just the degenerate one.
         //
-        // C is rotated whenever it is a distinct buffer, not only when beta is
-        // non-zero: at beta zero the kernel never reads it so the copies are
-        // merely unused, and testing beta here would mean decoding the scalar
-        // through its storage type for no benefit beyond a few blocks of space.
+        // C is rotated whenever it is a distinct buffer, as hipblaslt-bench
+        // rotates it, though at beta zero the kernel never reads the copies.
         // When C aliases D it is covered by D's rotation instead.
         size_t blockCount      = 1;
         size_t offsetA         = 0;
@@ -4182,6 +4180,25 @@ namespace
         size_t strideD         = 0;
         size_t strideE         = 0;
         size_t strideBias      = 0;
+
+        // The vectors a candidate only reads rotate with A, B and C, as
+        // hipblaslt-bench's do: a bias the epilogue reads, scalar or vector
+        // scales, and the alpha vector. A read bias's block is sized like a
+        // gradient's, but each block copies only the caller's extent of it,
+        // copyBiasIn.
+        size_t offsetBiasIn        = 0;
+        size_t bytesBiasIn         = 0;
+        size_t copyBiasIn          = 0;
+        size_t strideBiasIn        = 0;
+        size_t offsetScaleA        = 0;
+        size_t bytesScaleA         = 0;
+        size_t strideScaleA        = 0;
+        size_t offsetScaleB        = 0;
+        size_t bytesScaleB         = 0;
+        size_t strideScaleB        = 0;
+        size_t offsetScaleAlphaVec = 0;
+        size_t bytesScaleAlphaVec  = 0;
+        size_t strideScaleAlphaVec = 0;
     };
 
     // Saturating, so an overflowing layout ends up obviously too large rather
@@ -4196,6 +4213,29 @@ namespace
         if(a == 0 || b == 0)
             return 0;
         return (a > SIZE_MAX / b) ? SIZE_MAX : a * b;
+    }
+
+    int64_t toInt64(size_t v)
+    {
+        return static_cast<int64_t>(std::min<size_t>(v, std::numeric_limits<int64_t>::max()));
+    }
+
+    // Whether a launch reads C. hipBLASLt's beta is a host scalar, decoded here
+    // as updateTensileProblem decodes it, and a zero one leaves C unread.
+    bool readsC(const RocblasltContractionProblem& prob)
+    {
+        if(prob.C == nullptr)
+            return false;
+        if(prob.alpha == nullptr || prob.beta == nullptr)
+            return true;
+        double alpha = 0, beta = 0;
+        assignAlphaBeta(roc2TensileType(prob.compute_type, false),
+                        hipDataType_to_tensile_type(prob.a_type),
+                        prob.alpha,
+                        prob.beta,
+                        &alpha,
+                        &beta);
+        return beta != 0;
     }
 
     size_t alignUp(size_t v, size_t a = 256)
@@ -4304,6 +4344,57 @@ namespace
                 return layout;
         }
 
+        // A bias the epilogue only reads. Its block is sized as conservatively
+        // as a gradient's, but the copy into it is the caller's actual extent:
+        // the source tensor's length once per batch at the bias batch stride,
+        // a single vector when that stride is zero. Left in place when either
+        // cannot be sized.
+        const size_t biasLength
+            = getBiasSrc(prob.epilogue) == TensileLite::ContractionProblemGemm::TENSOR::B ? prob.n
+                                                                                          : prob.m;
+        if(is_bias_enabled(prob.epilogue) && !is_grad_enabled(prob.epilogue)
+           && prob.bias != nullptr)
+        {
+            const size_t elementSize  = elementSizeOf(prob.bias_type);
+            const size_t biasElements = std::max(prob.m, prob.n);
+            const size_t biasStride   = prob.bias_stride > 0 ? size_t(prob.bias_stride) : 0;
+            const size_t span         = tensorSpanBytes(
+                elementSize, biasElements, 1, biasElements, prob.batch_count, biasStride);
+            const size_t batches = std::max<size_t>(prob.batch_count, 1);
+            const size_t extent
+                = mulSat(addSat(mulSat(batches - 1, biasStride), biasLength), elementSize);
+            if(span != 0 && extent <= span)
+            {
+                layout.bytesBiasIn = span;
+                layout.copyBiasIn  = extent;
+            }
+        }
+
+        // Scalar and vector scales and the alpha vector are of the compute
+        // type, f32 for an f16 one. A block-scaled or w4a16 scale is left in
+        // place: its length depends on a layout only the caller knows.
+        const size_t scaleElementSize
+            = TensileLite::DataTypeInfo::Get(roc2TensileType(prob.compute_type)).elementSize;
+        auto scaleBytes = [&](const void*                                scale,
+                              RocblasltContractionProblem::ScalingFormat format,
+                              size_t                                     length) -> size_t {
+            if(scale == nullptr)
+                return 0;
+            switch(format)
+            {
+            case RocblasltContractionProblem::ScalingFormat::Scalar:
+                return scaleElementSize;
+            case RocblasltContractionProblem::ScalingFormat::Vector:
+                return mulSat(length, scaleElementSize);
+            default:
+                return 0;
+            }
+        };
+        layout.bytesScaleA = scaleBytes(prob.scaleA, prob.scaleAType, prob.m);
+        layout.bytesScaleB = scaleBytes(prob.scaleB, prob.scaleBType, prob.n);
+        if(prob.scaleAlphaVec != nullptr)
+            layout.bytesScaleAlphaVec = mulSat(prob.m, scaleElementSize);
+
         if(prob.amaxD != nullptr)
             layout.bytesAmaxD = 256;
 
@@ -4346,12 +4437,16 @@ namespace
                                             &expandedC);
         }
 
-        layout.strideD         = alignUp(layout.bytesD);
-        layout.strideA         = alignUp(layout.bytesA);
-        layout.strideB         = alignUp(layout.bytesB);
-        layout.strideC         = alignUp(layout.bytesC);
-        layout.strideE         = alignUp(layout.bytesE);
-        layout.strideBias      = alignUp(layout.bytesBias);
+        layout.strideD             = alignUp(layout.bytesD);
+        layout.strideA             = alignUp(layout.bytesA);
+        layout.strideB             = alignUp(layout.bytesB);
+        layout.strideC             = alignUp(layout.bytesC);
+        layout.strideE             = alignUp(layout.bytesE);
+        layout.strideBias          = alignUp(layout.bytesBias);
+        layout.strideBiasIn        = alignUp(layout.bytesBiasIn);
+        layout.strideScaleA        = alignUp(layout.bytesScaleA);
+        layout.strideScaleB        = alignUp(layout.bytesScaleB);
+        layout.strideScaleAlphaVec = alignUp(layout.bytesScaleAlphaVec);
 
         // Rotation needs a readable source for A and B, and spans it can size.
         // C is optional: a problem with no separate C still rotates the rest.
@@ -4368,39 +4463,66 @@ namespace
               && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
               && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
 
-        // The tensors a candidate reads or writes, so no iteration finds any of
-        // them already resident. The scale vectors are deliberately left out:
-        // they are O(m) or O(n) against O(mk), O(kn) and O(mn) for the tensors,
-        // so their cache footprint is negligible, and sizing them safely means
-        // handling every block-scaling variant.
-        //
-        // The workspace is not rotated either: every block shares one, as
-        // hipblaslt-bench's blocks do. It is sized to the caller's whole limit,
-        // often far larger than the tensors, so a copy per block would leave a
-        // small problem only a few blocks and measure its inputs cache-hot.
+        // What one block adds to the layout. The workspace is not rotated:
+        // every block shares one, as hipblaslt-bench's blocks do. It is sized to
+        // the caller's whole limit, often far larger than the tensors, so a copy
+        // per block would leave a small problem only a few blocks and measure
+        // its inputs cache-hot.
         size_t perBlock = 0;
         for(size_t stride : {layout.strideA,
                              layout.strideB,
                              layout.strideC,
                              layout.strideD,
                              layout.strideE,
-                             layout.strideBias})
+                             layout.strideBias,
+                             layout.strideBiasIn,
+                             layout.strideScaleA,
+                             layout.strideScaleB,
+                             layout.strideScaleAlphaVec})
             perBlock = addSat(perBlock, stride);
 
-        // hipblaslt-bench's sizing: enough blocks to cover the rotating budget,
-        // but no more than the launches that will cycle through them. Each
-        // block costs a solve() per candidate, so the iteration count is also
-        // what keeps a tiny problem from asking for hundreds of thousands.
+        // The block count is hipblaslt-bench's, from its footprint rather than
+        // the spans above, so the two plan the same rotation for one problem:
+        // C only when beta reads it, and every tensor in whole columns and
+        // batches. A block-scaled scale is in neither, as it is not rotated.
+        const auto elements = [&](size_t ld, size_t cols, size_t batchStride) {
+            return hipblaslt_bench::rotating_tensor_elements(
+                toInt64(ld), toInt64(cols), toInt64(prob.batch_count), toInt64(batchStride));
+        };
+        const auto bytesOf = [](int64_t elements, hipDataType type) {
+            return hipblaslt_bench::size_mul(elements, toInt64(elementSizeOf(type)));
+        };
+        hipblaslt_bench::RotatingTensors tensors;
+        tensors.a = bytesOf(elements(prob.col_stride_a, colsA, prob.batch_stride_a), prob.a_type);
+        tensors.b = bytesOf(elements(prob.col_stride_b, colsB, prob.batch_stride_b), prob.b_type);
+        if(prob.C != nullptr)
+            tensors.c
+                = bytesOf(elements(prob.col_stride_c, prob.n, prob.batch_stride_c), prob.c_type);
+        tensors.d = bytesOf(elements(prob.col_stride_d, prob.n, prob.batch_stride_d), prob.d_type);
+        if(is_e_enabled(prob.epilogue))
+            tensors.e
+                = bytesOf(elements(prob.col_stride_e, prob.n, prob.batch_stride_e), prob.aux_type);
+        if(is_bias_enabled(prob.epilogue) && prob.bias != nullptr)
+            tensors.bias
+                = bytesOf(hipblaslt_bench::rotating_bias_elements(
+                              toInt64(biasLength), prob.bias_stride, toInt64(prob.batch_count)),
+                          prob.bias_type);
+        tensors.scale_alpha_vec = toInt64(layout.bytesScaleAlphaVec);
+        tensors.scale_a         = toInt64(layout.bytesScaleA);
+        tensors.scale_b         = toInt64(layout.bytesScaleB);
+        tensors.reads_c         = readsC(prob);
+        const int64_t footprint = hipblaslt_bench::rotating_block_bytes(tensors);
+
+        // Enough blocks to cover the rotating budget, but no more than the
+        // launches that will cycle through them. Each block costs a solve() per
+        // candidate, so the iteration count is also what keeps a tiny problem
+        // from asking for hundreds of thousands.
         size_t blocks = 1;
-        if(rotatable && perBlock != 0 && perBlock != SIZE_MAX)
+        if(rotatable && perBlock != 0 && perBlock != SIZE_MAX && footprint > 0
+           && footprint != std::numeric_limits<int64_t>::max())
         {
             const auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
-                false,
-                0,
-                coldIters,
-                hotIters,
-                static_cast<int64_t>(std::min<size_t>(rotatingBytes, INT64_MAX)),
-                static_cast<int64_t>(std::min<size_t>(perBlock, INT64_MAX)));
+                false, 0, coldIters, hotIters, toInt64(rotatingBytes), footprint);
             blocks = static_cast<size_t>(plan.block_count);
         }
 
@@ -4413,7 +4535,7 @@ namespace
         auto place = [&](size_t n) {
             layout.blockCount = n;
 
-            // A single block never has its A, B or C pointer redirected into
+            // A single block never has an input's pointer redirected into
             // scratch, so reserving room for them would be dead space that can
             // push an otherwise fine shape over the cap.
             const bool rotating = n > 1;
@@ -4434,6 +4556,10 @@ namespace
             reserve(layout.offsetA, layout.strideA, rotating ? n : 0);
             reserve(layout.offsetB, layout.strideB, rotating ? n : 0);
             reserve(layout.offsetC, layout.strideC, rotating ? n : 0);
+            reserve(layout.offsetBiasIn, layout.strideBiasIn, rotating ? n : 0);
+            reserve(layout.offsetScaleA, layout.strideScaleA, rotating ? n : 0);
+            reserve(layout.offsetScaleB, layout.strideScaleB, rotating ? n : 0);
+            reserve(layout.offsetScaleAlphaVec, layout.strideScaleAlphaVec, rotating ? n : 0);
 
             return cursor;
         };
@@ -4762,8 +4888,8 @@ namespace
                                                 prob.stream))
             return TuningAttempt::FallbackSetup;
 
-        // Seed the rotation inputs over the zeros. Block 0 takes the caller's A
-        // and B so the data is representative of what the kernel will really
+        // Seed the rotation inputs over the zeros. Block 0 takes the caller's
+        // inputs so the data is representative of what the kernel will really
         // see, and the rest are broadcast from it.
         size_t blocks = layout.blockCount;
         if(blocks > 1)
@@ -4783,10 +4909,29 @@ namespace
                 return true;
             };
 
-            const bool seeded = seed(layout.offsetA, layout.strideA, prob.A, layout.bytesA)
-                                && seed(layout.offsetB, layout.strideB, prob.B, layout.bytesB)
-                                && (layout.bytesC == 0
-                                    || seed(layout.offsetC, layout.strideC, prob.C, layout.bytesC));
+            const bool seeded
+                = seed(layout.offsetA, layout.strideA, prob.A, layout.bytesA)
+                  && seed(layout.offsetB, layout.strideB, prob.B, layout.bytesB)
+                  && (layout.bytesC == 0
+                      || seed(layout.offsetC, layout.strideC, prob.C, layout.bytesC))
+                  && (layout.bytesBiasIn == 0
+                      || seed(
+                          layout.offsetBiasIn, layout.strideBiasIn, prob.bias, layout.copyBiasIn))
+                  && (layout.bytesScaleA == 0
+                      || seed(layout.offsetScaleA,
+                              layout.strideScaleA,
+                              prob.scaleA,
+                              layout.bytesScaleA))
+                  && (layout.bytesScaleB == 0
+                      || seed(layout.offsetScaleB,
+                              layout.strideScaleB,
+                              prob.scaleB,
+                              layout.bytesScaleB))
+                  && (layout.bytesScaleAlphaVec == 0
+                      || seed(layout.offsetScaleAlphaVec,
+                              layout.strideScaleAlphaVec,
+                              prob.scaleAlphaVec,
+                              layout.bytesScaleAlphaVec));
 
             if(!seeded || hipStreamSynchronize(prob.stream) != hipSuccess)
             {
@@ -4978,6 +5123,18 @@ namespace
                             blockProb.B = bytes + layout.offsetB + b * layout.strideB;
                             if(!inPlace && layout.bytesC != 0)
                                 blockProb.C = bytes + layout.offsetC + b * layout.strideC;
+                            if(layout.bytesBiasIn)
+                                blockProb.bias
+                                    = bytes + layout.offsetBiasIn + b * layout.strideBiasIn;
+                            if(layout.bytesScaleA)
+                                blockProb.scaleA
+                                    = bytes + layout.offsetScaleA + b * layout.strideScaleA;
+                            if(layout.bytesScaleB)
+                                blockProb.scaleB
+                                    = bytes + layout.offsetScaleB + b * layout.strideScaleB;
+                            if(layout.bytesScaleAlphaVec)
+                                blockProb.scaleAlphaVec = bytes + layout.offsetScaleAlphaVec
+                                                          + b * layout.strideScaleAlphaVec;
                         }
 
                         auto inputs = GetTensileInputs(blockProb);
@@ -5146,7 +5303,12 @@ size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
                                    layout.bytesD,
                                    layout.bytesInPlaceC,
                                    layout.bytesE,
-                                   layout.bytesBias};
+                                   layout.bytesBias,
+                                   layout.bytesBiasIn,
+                                   layout.copyBiasIn,
+                                   layout.bytesScaleA,
+                                   layout.bytesScaleB,
+                                   layout.bytesScaleAlphaVec};
     for(size_t i = 0; i < count && i < std::size(known); i++)
         values[i] = known[i];
     return std::size(known);
