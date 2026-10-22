@@ -4490,6 +4490,7 @@ namespace
         Enumeration        = 2,
         MidSearch          = 3,
         TruncateAfterFirst = 4,
+        BudgetSpent        = 5,
     };
 
     std::atomic<int> g_injectedTuningFailure{0};
@@ -4560,7 +4561,11 @@ namespace
                                                              - started)
                 .count();
         };
-        auto outOfBudget = [&] { return budgetUs > 0.0 && elapsedUs() > budgetUs; };
+        auto outOfBudget = [&] {
+            return budgetUs > 0.0
+                   && (tuningFailureInjected(TuningFailureStage::BudgetSpent)
+                       || elapsedUs() > budgetUs);
+        };
 
         const bool inPlace = (prob.C == prob.D);
         if(inPlace)

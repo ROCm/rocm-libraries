@@ -289,8 +289,8 @@ int tuningLastLaunchedIndexForTest();
 /**
  * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
  * enumeration, 3 throws after the first measured candidate, 4 stops the search
- * after the first measured candidate the way an expiring budget does; 0
- * restores normal behaviour.
+ * after the first measured candidate the way an expiring budget does, 5 makes
+ * a configured budget read as already spent; 0 restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 
