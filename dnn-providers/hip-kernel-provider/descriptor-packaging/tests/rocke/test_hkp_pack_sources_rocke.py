@@ -710,7 +710,7 @@ def test_a_failed_claim_leaves_no_shipped_descriptor(
                     "k1": {"kind": "hsaco", "file": "x.co", "symbol": "s"},
                 }
             },
-            "'k1' has kind 'hsaco'",
+            "mix kernel kinds",
         ),
         (
             lambda s: {
@@ -722,7 +722,7 @@ def test_a_failed_claim_leaves_no_shipped_descriptor(
             "invalid role",
         ),
     ],
-    ids=["neither", "both", "single", "bad-name", "hsaco-entry", "bad-role"],
+    ids=["neither", "both", "single", "bad-name", "mixed-kinds", "bad-role"],
 )
 def test_malformed_authored_sources_fail_the_pack(
     tmp_path, monkeypatch, rocke_importable, rocm_kpack_dir, kernel, diagnostic

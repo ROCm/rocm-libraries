@@ -108,6 +108,7 @@ def shipped(launches=ONE_MODULE, version="1.0"):
             compile_target=ARCH,
             observations=observed[vk],
             role=role,
+            origin_kind="rocke",
         )
     record = pipeline.InlineUKD(
         id="ukd-demo",
@@ -753,7 +754,19 @@ class TestLaunchOrderCarriesNoMeaning:
             compiled.clear()
             ukd = {"id": "ukd-demo", "sources": {n: dict(authored[n]) for n in order}}
             _vk, _symbol, fields = pipeline._compile_sources_ukd(
-                ukd, "UKD 'ukd-demo'", ARCH, "dir", {}, {}, {}, {}, {}, None
+                ukd,
+                "UKD 'ukd-demo'",
+                ".",
+                ".",
+                ARCH,
+                "hipcc",
+                "dir",
+                {},
+                {},
+                {},
+                {},
+                {},
+                None,
             )
             launches = {
                 name: (launch.variant_key, launch.symbol, launch.role)
@@ -816,6 +829,22 @@ class TestClaimCheck:
         sources.check_claims("W", "b", ["a"], [None], {"symbol": PRIMARY})
         with pytest.raises(HkpPackError, match=r"produced \['\(primary\)'\]"):
             sources.check_claims("W", "b", ["a"], ["merge"], {"symbol": PRIMARY})
+
+
+def _hip_entry(**overrides):
+    ks = {"kind": "hip", "source": "k.cpp", "entry": "e", "build": {}}
+    ks.update(overrides)
+    return ks
+
+
+def _hsaco_entry(symbol="s", **overrides):
+    ks = {"kind": "hsaco", "file": "k.co", "symbol": symbol}
+    ks.update(overrides)
+    return ks
+
+
+def _without(entry, field):
+    return {k: v for k, v in entry.items() if k != field}
 
 
 def _rocke_entry(**overrides):
@@ -905,21 +934,6 @@ class TestAuthoredValidation:
             _sources_ukd({name: _rocke_entry(), "other": _rocke_entry()}), "UKD 'k'"
         )
 
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            {"kind": "hip", "source": "k.cpp", "entry": "e", "build": {}},
-            {"kind": "hsaco", "file": "k.hsaco", "symbol": "s"},
-            {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "e"},
-        ],
-        ids=["hip", "hsaco", "embedded_source"],
-    )
-    def test_only_rocke_entries_may_be_authored(self, entry):
-        doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
-        with pytest.raises(HkpPackError) as info:
-            _validate_ukd_fields(doc, "UKD 'k'")
-        assert f"'k1' has kind '{entry['kind']}'" in str(info.value)
-
     def test_an_embedded_source_entry_is_refused_at_validation(self):
         entry = {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "e"}
         doc = _sources_ukd({"k0": _rocke_entry(), "k1": entry}, arch=["gfx942"])
@@ -929,15 +943,81 @@ class TestAuthoredValidation:
     @pytest.mark.parametrize(
         "kind, says",
         [
-            ("hip", "not yet supported"),
-            ("hsaco", "not yet supported"),
             ("embedded_source", "not packed into a code object"),
             ("kpack", "not pack input"),
+            ("flydsl", "expected 'rocke', 'hip' or 'hsaco'"),
         ],
     )
     def test_each_refused_kind_says_why(self, kind, says):
         message = str(sources.refuse_authored_kind("W", "k1", kind))
         assert f"'k1' has kind '{kind}'" in message and says in message
+
+    def test_hip_and_hsaco_entries_may_be_authored(self):
+        _validate_ukd_fields(
+            _sources_ukd({"k0": _hip_entry(), "k1": _hip_entry()}), "U"
+        )
+        _validate_ukd_fields(
+            _sources_ukd(
+                {"k0": _hsaco_entry(), "k1": _hsaco_entry("s2")}, arch=["gfx942"]
+            ),
+            "U",
+        )
+
+    @pytest.mark.parametrize("make", [_hip_entry, _hsaco_entry], ids=["hip", "hsaco"])
+    def test_role_is_refused_on_a_hip_or_hsaco_entry(self, make):
+        doc = _sources_ukd({"k0": make(), "k1": make(role="merge")}, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match="'k1' carries 'role'"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize(
+        "entry, match",
+        [
+            (_hip_entry(build={"flags": [1]}), "invalid build"),
+            (_hip_entry(build={"flags": ["-fuse-cuid=hash"]}), "-fuse-cuid"),
+            (_without(_hip_entry(), "build"), "invalid build \\(absent\\)"),
+            (_without(_hip_entry(), "entry"), "missing required field 'entry'"),
+            (_without(_hsaco_entry(), "file"), "missing required field 'file'"),
+            (_hsaco_entry(symbol=""), "'symbol' must be a non-empty string"),
+            (_hsaco_entry(symbol="s\u00ff"), "must be ASCII"),
+        ],
+        ids=[
+            "flags-not-strings",
+            "reserved-flag",
+            "build-absent",
+            "entry-absent",
+            "file-absent",
+            "symbol-empty",
+            "symbol-non-ascii",
+        ],
+    )
+    def test_a_hip_or_hsaco_entry_is_checked_like_a_single_launch(self, entry, match):
+        other = _hip_entry() if entry["kind"] == "hip" else _hsaco_entry("s2")
+        doc = _sources_ukd({"k0": other, "k1": entry}, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match=match) as info:
+            _validate_ukd_fields(doc, "UKD 'k'")
+        assert "sources 'k1'" in str(info.value)
+
+    @pytest.mark.parametrize("arch", [None, []], ids=["absent", "empty"])
+    def test_hsaco_entries_need_a_non_empty_ukd_arch(self, arch):
+        doc = _sources_ukd({"k0": _hsaco_entry(), "k1": _hsaco_entry("s2")})
+        if arch is not None:
+            doc["arch"] = arch
+        with pytest.raises(HkpPackError, match="hsaco requires a non-empty 'arch'"):
+            _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            {"k0": _hip_entry(), "k1": _hsaco_entry()},
+            {"k0": _rocke_entry(), "k1": _hip_entry()},
+            {"k0": _rocke_entry(), "k1": _hsaco_entry()},
+        ],
+        ids=["hip-hsaco", "rocke-hip", "rocke-hsaco"],
+    )
+    def test_entries_of_two_kinds_cannot_mix(self, entries):
+        doc = _sources_ukd(entries, arch=["gfx942"])
+        with pytest.raises(HkpPackError, match="mix kernel kinds"):
+            _validate_ukd_fields(doc, "UKD 'k'")
 
     def test_an_unknown_kind_and_a_missing_kind_are_refused(self):
         with pytest.raises(HkpPackError, match="unsupported kind 'flydsl'"):
