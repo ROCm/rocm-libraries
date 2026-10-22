@@ -515,7 +515,9 @@ template <index_t NDimSpatial,
           typename BComputeType                       = AComputeType,
           bool DirectLoad                             = false,
           bool LargeTensors                           = false,
-          index_t LoadBlockSize                       = 0>
+          index_t LoadBlockSize                       = 0,
+          bool UseTdmB                                = false,
+          bool UseNamedBarrier                        = false>
 struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     : public DeviceGroupedConvBwdDataMultipleD<NDimSpatial,
                                                ALayout,    // output image
@@ -653,7 +655,12 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     {
         const auto a_grid_desc_ak0_m_ak1 = conv_to_gemm_transform.MakeADescriptor_AK0_M_AK1();
 
-        const auto b_grid_desc_bk0_n_bk1 = conv_to_gemm_transform.MakeBDescriptor_BK0_N_BK1();
+        const auto b_grid_desc_bk0_n_bk1 = [&]() {
+            if constexpr(!UseTdmB)
+                return conv_to_gemm_transform.MakeBDescriptor_BK0_N_BK1();
+            else
+                return conv_to_gemm_transform.MakeBDescriptor_N_K_TDM();
+        }();
 
         const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
             GridwiseGemm::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -779,8 +786,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         AComputeType,
         BComputeType,
         DirectLoad,
-        false, // UseTdmB
-        false, // UseNamedBarrier
+        UseTdmB,
+        UseNamedBarrier,
         UseLdsTranspose>;
 
     template <index_t MNRepeat_, index_t MPerXdl_, index_t NPerXdl_>
@@ -821,7 +828,16 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     using EGridDesc_MPerBlock_NBlock_NPerBlock = remove_cvref_t<tuple_element_t<2, ABDsEGridDesc>>;
 
     using AGridDesc_M_K = decltype(transform_k0_m_k1_to_m_k(AGridDesc_AK0_M_AK1{}));
-    using BGridDesc_N_K = decltype(transform_k0_m_k1_to_m_k(BGridDesc_BK0_N_BK1{}));
+
+    static auto MakeBGridDesc_N_K(const BGridDesc_BK0_N_BK1& desc)
+    {
+        if constexpr(UseTdmB)
+            return desc;
+        else
+            return transform_k0_m_k1_to_m_k(desc);
+    }
+
+    using BGridDesc_N_K = decltype(MakeBGridDesc_N_K(BGridDesc_BK0_N_BK1{}));
 
     struct GemmArgs
     {
@@ -1018,14 +1034,21 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                         }();
 
                         const auto b_grid_desc_bk0_n_bk1 = [&]() {
-                            return conv_to_gemm_transform_.MakeBDescriptor_BK0_N_BK1();
+                            if constexpr(!UseTdmB)
+                                return conv_to_gemm_transform_.MakeBDescriptor_BK0_N_BK1();
+                            else
+                                return conv_to_gemm_transform_.MakeBDescriptor_N_K_TDM();
                         }();
 
                         // desc for problem definition
                         const auto a_grid_desc_m_k =
                             transform_k0_m_k1_to_m_k(a_grid_desc_ak0_m_ak1);
-                        const auto b_grid_desc_n_k =
-                            transform_k0_m_k1_to_m_k(b_grid_desc_bk0_n_bk1);
+                        const auto b_grid_desc_n_k = [&]() {
+                            if constexpr(!UseTdmB)
+                                return transform_k0_m_k1_to_m_k(b_grid_desc_bk0_n_bk1);
+                            else
+                                return b_grid_desc_bk0_n_bk1;
+                        }();
 
                         const IndexType GemmM = a_grid_desc_m_k.GetLength(I0);
                         const IndexType GemmN = b_grid_desc_n_k.GetLength(I0);
@@ -1430,6 +1453,19 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             }
         }
 
+        if constexpr(UseNamedBarrier || UseTdmB)
+        {
+            if(!is_gfx125_supported())
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Unsupported! arch doesn't support named barrier or TDM"
+                              << std::endl;
+                }
+                return false;
+            }
+        }
+
         if constexpr(!IsSplitKSupported)
         {
             if(arg.k_batch_ > 1)
@@ -1459,6 +1495,27 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         const index_t ConvK = static_cast<index_t>(arg.b_g_k_c_xs_lengths_[1]);
         const index_t ConvC = static_cast<index_t>(arg.b_g_k_c_xs_lengths_[2]);
+
+        if constexpr(UseTdmB)
+        {
+            // When loading from VMEM to LDS there is a permutation:
+            // GemmK dimension is KYX and in VMEM ConvK is the slowest dimension but
+            // in GemmK is the fastest, so TDM is using stride C*Y*X. This works
+            // only if each wave loads a complete set of rows from ConvK.
+            // This allows to have similar implementation as fwd convolution with only
+            // a different stride. However, bwd data has this additional limitation.
+            constexpr index_t b_rows_per_wave = KPerBlock / (LoadBlockSize / 32);
+            if(ConvK % b_rows_per_wave != 0)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "TDM implementation requires ConvK divisible by rows per wave!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+        }
 
         // Specialization
         if constexpr(ConvBackwardDataSpecialization ==
@@ -2090,6 +2147,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             << (WaveletEnabled ? "_Wavelet" : "")
             << (get_warp_size() != 64 ? "_WmmaPorted" : "")
             << (DirectLoad ? "_DirectLoad" : "")
+            << (UseTdmB ? "_Tdm" : "")
+            << (UseNamedBarrier ? "_PingPong" : "")
             << (LargeTensors ? "_Large_Tensor" : "")
             << "<"
             << BlockSize << ", "
@@ -2189,7 +2248,9 @@ template <index_t NDimSpatial,
           typename CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
           index_t CShuffleBlockTransferScalarPerVector,
           typename AComputeType                       = ADataType,
-          typename BComputeType                       = AComputeType>
+          typename BComputeType                       = AComputeType,
+          bool UseTdmB                                = false,
+          bool UseNamedBarrier                        = false>
 using DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3 =
 DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<
         NDimSpatial,
@@ -2243,7 +2304,9 @@ DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<
         BComputeType,
         true,  // DirectLoad
         false, // LargeTensors
-        LoadBlockSize>;
+        LoadBlockSize,
+        UseTdmB,
+        UseNamedBarrier>;
 
 } // namespace device
 } // namespace tensor_operation
