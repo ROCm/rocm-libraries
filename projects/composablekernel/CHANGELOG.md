@@ -15,6 +15,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added measured gfx1250 FP16 packed-forward configurations with group packing factors four and eight, including wider packed-channel tiles; expanded poisoned-workspace correctness coverage through sixteen channels per group.
 * Added a gfx1250 BF16 group-local depthwise backward-weight candidate for resource-safe packed 2D channels-last convolutions with runtime filter, stride, dilation, and padding.
 * Added gfx1250 BF16 depthwise backward-weight row-strip candidates with square-filter specializations and runtime convolution geometry, sharing an FP32 partial finalizer.
+* Added gfx1250 FP16/BF16/exact-FP32 grouped forward candidates with channels-last operands and native NCHW/NCDHW output stores, avoiding an output-layout conversion when selected.
 
 ### Optimized
 

@@ -5,6 +5,10 @@ include(ShardInstantiation)
 
 # NDHWGC layout instances for grouped_conv3d_fwd
 set(GROUPED_CONV3D_FWD_NDHWGC
+   # gfx1250 mixed-layout CTranspose native output candidates
+   wmma/device_grouped_conv3d_fwd_wmma_native_output_ndhwgc_gkzyxc_ngkdhw_f16_instance.cpp
+   wmma/device_grouped_conv3d_fwd_wmma_native_output_ndhwgc_gkzyxc_ngkdhw_bf16_instance.cpp
+   xdl/device_grouped_conv3d_fwd_xdl_native_output_ndhwgc_gkzyxc_ngkdhw_f32_instance.cpp
    # wmma
    wmma/device_grouped_conv3d_fwd_wmma_cshufflev3_ndhwgc_gkzyxc_ndhwgk_bf16_instance_part1.cpp
    wmma/device_grouped_conv3d_fwd_wmma_cshufflev3_ndhwgc_gkzyxc_ndhwgk_bf16_instance_part2.cpp
@@ -60,6 +64,15 @@ set(GROUPED_CONV3D_FWD_NDHWGC
    xdl/wavelet/device_grouped_conv3d_fwd_xdl_wavelet_ndhwgc_gkzyxc_ndhwgk_bf16_instance.cpp
    xdl/wavelet/device_grouped_conv3d_fwd_xdl_wavelet_ndhwgc_gkzyxc_ndhwgk_f32_instance.cpp
 )
+
+# Match the proven native-output compiler configuration without changing existing instances.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+  set_property(SOURCE
+    wmma/device_grouped_conv3d_fwd_wmma_native_output_ndhwgc_gkzyxc_ngkdhw_f16_instance.cpp
+    wmma/device_grouped_conv3d_fwd_wmma_native_output_ndhwgc_gkzyxc_ngkdhw_bf16_instance.cpp
+    xdl/device_grouped_conv3d_fwd_xdl_native_output_ndhwgc_gkzyxc_ngkdhw_f32_instance.cpp
+    APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-enable-post-misched=1")
+endif()
 
 if((DTYPES MATCHES "fp8" AND DTYPES MATCHES "fp16") OR NOT DEFINED DTYPES)
     list(APPEND GROUPED_CONV3D_FWD_NDHWGC

@@ -5,6 +5,10 @@ include(ShardInstantiation)
 
 # NHWGC layout instances for grouped_conv2d_fwd
 set(GROUPED_CONV2D_FWD_NHWGC
+   # gfx1250 mixed-layout CTranspose native output candidates
+   wmma/device_grouped_conv2d_fwd_wmma_native_output_nhwgc_gkyxc_ngkhw_f16_instance.cpp
+   wmma/device_grouped_conv2d_fwd_wmma_native_output_nhwgc_gkyxc_ngkhw_bf16_instance.cpp
+   xdl/device_grouped_conv2d_fwd_xdl_native_output_nhwgc_gkyxc_ngkhw_f32_instance.cpp
    # dl
    dl/device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    dl/device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_f32_instance.cpp
@@ -79,6 +83,15 @@ set(GROUPED_CONV2D_FWD_NHWGC
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    xdl/wavelet/device_grouped_conv2d_fwd_xdl_wavelet_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
 )
+
+# Match the proven native-output compiler configuration without changing existing instances.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+  set_property(SOURCE
+    wmma/device_grouped_conv2d_fwd_wmma_native_output_nhwgc_gkyxc_ngkhw_f16_instance.cpp
+    wmma/device_grouped_conv2d_fwd_wmma_native_output_nhwgc_gkyxc_ngkhw_bf16_instance.cpp
+    xdl/device_grouped_conv2d_fwd_xdl_native_output_nhwgc_gkyxc_ngkhw_f32_instance.cpp
+    APPEND PROPERTY COMPILE_OPTIONS "-mllvm" "-enable-post-misched=1")
+endif()
 
 if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
 set_source_files_properties(wmma/device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
