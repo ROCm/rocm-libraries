@@ -21,8 +21,8 @@ namespace ck_tile {
 // the QR M128/N128 compute layout.
 //
 // Experimental, gfx1250 only: BF16, group mode, linear [page, token, kv_head, dim] K/V pools,
-// D64/V64 or D128/V128, dense or bottom-right causal (no sliding window), no LSE, sink,
-// dropout or bias. Build each instance in its own translation unit with the scheduled-TDM
+// D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window), no LSE,
+// sink, dropout or bias. Build each instance in its own translation unit with the scheduled-TDM
 // FMHA flags (-mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the
 // launch contract below rests on measurements of that generated code, and the generated code
 // was observed to change when several instances share a translation unit.
@@ -191,10 +191,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                 "K/V token stride not a multiple of the vector alignment");
         if constexpr(FmhaMask::IsMasking)
         {
-            // The device builds the mask bottom-right (is_top_left = false); only the causal
-            // window (left unbounded, right 0) is tested.
-            require(kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT,
-                    "only bottom-right masks are supported");
+            // Causal aligned to either corner; only the causal window (left unbounded, right 0)
+            // is supported.
+            require(kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT ||
+                        kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
+                    "only top-left or bottom-right causal masks are supported");
             require(kargs.window_size_left < 0 && kargs.window_size_right == 0,
                     "only the causal window (left < 0, right == 0) is supported");
         }
@@ -348,11 +349,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         const FmhaMask mask = [&]() {
             if constexpr(FmhaMask::IsMasking)
             {
-                return make_generic_attention_mask_from_lr_window<FmhaMask>(kargs.window_size_left,
-                                                                            kargs.window_size_right,
-                                                                            kargs.seqlen_q,
-                                                                            kargs.seqlen_k,
-                                                                            false);
+                return make_generic_attention_mask_from_lr_window<FmhaMask>(
+                    kargs.window_size_left,
+                    kargs.window_size_right,
+                    kargs.seqlen_q,
+                    kargs.seqlen_k,
+                    kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
             }
             else
             {

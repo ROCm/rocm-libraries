@@ -169,8 +169,9 @@ struct Layout
     int q_length(int b) const { return seqstart_q[b + 1] - seqstart_q[b]; }
 };
 
+// top_left selects the top-left aligned causal mask (causal models only); bottom-right otherwise.
 template <typename M>
-fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d)
+fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, bool top_left = false)
 {
     int max_q = 0, max_k = 0;
     for(int b = 0; b < l.batch(); ++b)
@@ -215,7 +216,9 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d)
     a.batch_stride_v           = kPage * l.kv_heads * D;
     a.window_size_left         = -1;
     a.window_size_right        = M::kCausal ? 0 : -1;
-    a.mask_type = static_cast<int>(M::kCausal ? mask_enum::mask_bottom_right : mask_enum::no_mask);
+    a.mask_type                = static_cast<int>(
+        !M::kCausal ? mask_enum::no_mask
+                    : (top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
     return a;
 }
 
@@ -353,7 +356,10 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     });
     if constexpr(TypeParam::kCausal)
     {
-        expect_refused("only bottom-right masks", need, [](Kargs& k) { SetTopLeft(k); });
+        EXPECT_EQ(refusal(need, [](Kargs& k) { SetTopLeft(k); }), "");
+        expect_refused("only top-left or bottom-right causal masks", need, [](Kargs& k) {
+            k.mask_type = ck_tile::GenericAttentionMaskEnum::MASK_GENERIC;
+        });
         expect_refused("only the causal window", need, [](Kargs& k) { k.window_size_left = 64; });
         expect_refused("only the causal window", need, [](Kargs& k) { k.window_size_right = 1; });
     }
@@ -608,14 +614,14 @@ struct DeviceProblem
 
 // Runs one checked launch on a NaN-filled output and returns the output.
 template <typename M>
-std::vector<Data> Run(const HostProblem& h, DeviceProblem& d)
+std::vector<Data> Run(const HostProblem& h, DeviceProblem& d, bool top_left = false)
 {
     using Kernel = typename M::Kernel;
     std::vector<Data> o(h.q.size(),
                         ck_tile::type_convert<Data>(std::numeric_limits<float>::quiet_NaN()));
     d.o.ToDevice(o.data());
-    const auto [kargs, grids] =
-        fmha_batch_prefill_create_kargs_and_grids<Kernel>(MakeArgs<M>(h.layout, d.pointers()));
+    const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(
+        MakeArgs<M>(h.layout, d.pointers(), top_left));
     ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
                            Kernel::MakeCheckedKernel(kargs, grids));
     EXPECT_EQ(hipGetLastError(), hipSuccess);
@@ -629,7 +635,8 @@ std::vector<Data> Run(const HostProblem& h, DeviceProblem& d)
 reference::Metrics CompareWithReference(const HostProblem& h,
                                         const std::vector<Data>& o,
                                         bool causal,
-                                        const std::vector<std::size_t>& sampled_rows = {})
+                                        const std::vector<std::size_t>& sampled_rows = {},
+                                        bool top_left                                = false)
 {
     const auto& l          = h.layout;
     const std::size_t D    = h.head_dim;
@@ -671,7 +678,8 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         s.score_scale     = 1.0f / std::sqrt(static_cast<float>(D));
         if(causal)
         {
-            const int alignment = k_len - q_len;
+            // Key k is visible to query q when k <= q + alignment.
+            const int alignment = top_left ? 0 : k_len - q_len;
             s.is_masked         = [alignment](std::size_t query, std::size_t key) {
                 return static_cast<int64_t>(key) > static_cast<int64_t>(query) + alignment;
             };
@@ -754,6 +762,56 @@ TYPED_TEST(PageTileForward, MatchesReference)
             }
             ++seed;
         }
+}
+
+// Top-left aligned causal mask (causal binaries only): query q sees keys 0..q. Query lengths are
+// not clipped, so sequences with more queries than keys (rows past the keys see every key) and
+// fewer queries than keys both occur; the bitwise identity/permuted check applies as above.
+TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
+{
+    if constexpr(!TypeParam::kCausal)
+        GTEST_SKIP() << "top-left alignment only applies to the causal mask";
+    else
+    {
+        const std::vector<Case> shapes = {
+            {"gqa2", 4, 2, {300, 13, 129, 64}, {2 * kPage + 37, kPage - 3, 129, 384}},
+            {"tiny", 4, 2, {1, 130, 128, 200}, {1, 100, 128, 100}},
+        };
+        std::uint32_t seed = 51;
+        for(const auto& shape : shapes)
+        {
+            std::vector<Data> identity_output;
+            for(auto mapping : {Mapping::Identity, Mapping::Permuted})
+            {
+                const std::string name =
+                    std::string(shape.name) + " top-left " + MappingName(mapping);
+                SCOPED_TRACE(name);
+                const auto h = MakeProblem(shape, mapping, TypeParam::kHeadDim, false, seed);
+                DeviceProblem d(h);
+                const auto o       = Run<TypeParam>(h, d, true);
+                const auto metrics = CompareWithReference(h, o, true, {}, true);
+                std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " causal "
+                          << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
+                          << " max_abs=" << metrics.max_abs_error
+                          << " min_cos=" << metrics.min_row_cosine
+                          << " nonfinite=" << metrics.nonfinite_output_count
+                          << " passed=" << metrics.passed << '\n';
+                EXPECT_EQ(metrics.checked_rows, LogicalRows(h.layout));
+                EXPECT_EQ(metrics.nonfinite_output_count, 0u);
+                EXPECT_TRUE(metrics.passed);
+                if(mapping == Mapping::Identity)
+                    identity_output = o;
+                else
+                {
+                    ASSERT_EQ(o.size(), identity_output.size());
+                    EXPECT_EQ(
+                        std::memcmp(o.data(), identity_output.data(), o.size() * sizeof(Data)), 0)
+                        << "the permuted table changed the output of the same logical problem";
+                }
+            }
+            ++seed;
+        }
+    }
 }
 
 // The kernel must not read block-table entries past a sequence's last page. Poisoned spare
