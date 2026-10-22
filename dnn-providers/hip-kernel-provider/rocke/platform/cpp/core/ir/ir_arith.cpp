@@ -146,6 +146,48 @@ rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
     return rocke_i_binop(b, ROCKE_OP_ARITH_ADD, a, c, "add");
 }
 
+/* Python _check_unsigned_int_operands: both lowerings read the operands as
+ * uint32_t / uint64_t by width, so they are two i32 or two i64 values. Returns
+ * false (with the builder error set) when they are not. */
+static bool check_unsigned_int_operands(rocke_ir_builder_t* b,
+                                        const char* op_name,
+                                        const rocke_value_t* a,
+                                        const rocke_value_t* c)
+{
+    if(!a || !c)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
+        return false;
+    }
+    if(!rocke_type_eq(a->type, c->type)
+       || (!rocke_i_type_is(a->type, "i32") && !rocke_i_type_is(a->type, "i64")))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s expects two i32 or two i64 operands, got %s / %s",
+                        op_name,
+                        a->type->name,
+                        c->type->name);
+        return false;
+    }
+    return true;
+}
+
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    rocke_value_t* operands[2];
+    rocke_attr_map_t at;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!check_unsigned_int_operands(b, "add_nuw", a, c))
+        return NULL;
+    operands[0] = a;
+    operands[1] = c;
+    at = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &at, "wrap", "nuw");
+    return rocke_i_op1(b, ROCKE_OP_ARITH_ADD, operands, 2, a->type, &at, "add");
+}
+
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return rocke_i_binop(b, ROCKE_OP_ARITH_SUB, a, c, "sub");
@@ -434,6 +476,15 @@ rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return cmp_impl(b, a, c, "ne", "ne");
+}
+
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!check_unsigned_int_operands(b, "cmp_ult", a, c))
+        return NULL;
+    return cmp_impl(b, a, c, "ult", "ult");
 }
 
 rocke_value_t*
