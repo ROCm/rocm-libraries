@@ -18,7 +18,9 @@ different things (see the generator's own split: only ``packs[].kernels`` comes
 from the dispatcher):
 
   * the CATALOG -- ``kernelDescriptors`` -- as a multiset of ``(name, kernel_source
-    (every key; the spec filtered as below), arch, metadata, priority, version)``. Order is not meaningful,
+    (every key; the spec filtered as below), arch, companions (each companion's
+    kernel_source, its spec filtered the same way), metadata, priority, version)``.
+    Order is not meaningful,
     but multiplicity is: two entries that differ only by id are two compiled
     kernels, and dropping one silently halves what ships.
   * the ENGINE-LEVEL blocks -- ``engine``/``dispatch``/``matchers`` reference
@@ -112,6 +114,17 @@ def _load(path: str, label: str) -> dict:
             raise CatalogDiffError(f"{where} 'kernel_source' must be an object")
         if not isinstance(source.get("spec", {}), dict):
             raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
+        companions = entry.get("companions", [])
+        if not isinstance(companions, list):
+            raise CatalogDiffError(f"{where} 'companions' must be an array")
+        for position, companion in enumerate(companions):
+            if not isinstance(companion, dict) or not isinstance(
+                companion.get("spec", {}), dict
+            ):
+                raise CatalogDiffError(
+                    f"{where} 'companions[{position}]' must be an object whose "
+                    f"'spec' is an object"
+                )
         if "name" in entry and not isinstance(entry["name"], str):
             raise CatalogDiffError(f"{where} 'name' must be a string")
         for scalar in ("priority", "version"):
@@ -160,42 +173,89 @@ def _spec_fields(kdp: dict) -> frozenset:
     )
 
 
+def _companion_spec_fields(kdp: dict) -> frozenset:
+    """Every ``companions[].spec`` field name any entry of ``kdp`` carries. A companion
+    is built from its own spec class, so its fields are filtered by their own set."""
+    return frozenset().union(
+        *(
+            (companion.get("spec") or {}).keys()
+            for e in kdp["kernelDescriptors"]
+            for companion in e.get("companions") or []
+        )
+    )
+
+
 def _entry_counters(
     shipped: dict, regenerated: dict, spec_keys: frozenset | None
 ) -> tuple[collections.Counter, collections.Counter]:
-    """The shipped and regenerated entries as multisets over ``entry_key``."""
+    """The shipped and regenerated entries as multisets over ``entry_key``. Companion
+    specs are filtered by the SHIPPED companions' fields when ``spec_keys`` filters the
+    primary spec, and compared in full when it does not."""
+    companion_keys = None if spec_keys is None else _companion_spec_fields(shipped)
     return (
         collections.Counter(
-            entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
+            entry_key(e, spec_keys, companion_keys)
+            for e in shipped["kernelDescriptors"]
         ),
         collections.Counter(
-            entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
+            entry_key(e, spec_keys, companion_keys)
+            for e in regenerated["kernelDescriptors"]
         ),
     )
+
+
+def _filtered_source(source: dict, spec_keys: frozenset | None) -> dict:
+    """``source`` (a kernel_source object) with its spec reduced to ``spec_keys``
+    (``None``: the full spec)."""
+    source = dict(source or {})
+    spec = source.get("spec") or {}
+    if spec_keys is not None:
+        spec = {k: v for k, v in spec.items() if k in spec_keys}
+    source["spec"] = spec
+    return source
 
 
 def binary_identity(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What names the kernel an entry ships: its whole ``kernel_source`` (every key,
     whatever the kind) with the spec reduced to ``spec_keys`` (``None``: the full
-    spec), and the entry's ``arch``."""
-    source = dict(entry.get("kernel_source") or {})
-    spec = source.get("spec") or {}
-    if spec_keys is not None:
-        spec = {k: v for k, v in spec.items() if k in spec_keys}
-    source["spec"] = spec
+    spec), and the entry's ``arch``. Companions are not part of it: two entries naming
+    one primary binary are a duplicate whatever they launch after it (see
+    ``find_duplicate_specs``); ``entry_key`` compares them."""
+    source = _filtered_source(entry.get("kernel_source"), spec_keys)
     return (_canonical(source), _canonical(entry.get("arch")))
 
 
-def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
-    """What makes two catalog entries the same kernel. Deliberately excludes
-    ``id`` (minted per run) and includes ``priority`` (it orders selection).
+def companion_identity(
+    entry: dict, companion_spec_keys: frozenset | None = None
+) -> str:
+    """The code objects the entry launches after its own, in launch order: each
+    companion's whole kernel_source with its spec reduced to ``companion_spec_keys``
+    (``None``: the full spec). An absent ``companions`` and an empty one are equal."""
+    return _canonical(
+        [
+            _filtered_source(companion, companion_spec_keys)
+            for companion in entry.get("companions") or []
+        ]
+    )
 
-    ``spec_keys``: when given, only those spec fields are compared. ``None``
-    compares the FULL spec (the ``--strict-spec`` mode, see ``compare_catalog``).
+
+def entry_key(
+    entry: dict,
+    spec_keys: frozenset | None = None,
+    companion_spec_keys: frozenset | None = None,
+) -> tuple:
+    """What makes two catalog entries the same kernel. Deliberately excludes
+    ``id`` (minted per run) and includes ``priority`` (it orders selection) and the
+    companions (a stale or missing reduce kernel ships a different launch).
+
+    ``spec_keys`` / ``companion_spec_keys``: when given, only those spec fields of the
+    kernel / of each companion are compared. ``None`` compares the FULL spec (the
+    ``--strict-spec`` mode, see ``compare_catalog``).
     """
     return (
         entry.get("name"),
         *binary_identity(entry, spec_keys),
+        companion_identity(entry, companion_spec_keys),
         _canonical(entry.get("metadata")),
         entry.get("priority"),
         entry.get("version"),
@@ -551,7 +611,11 @@ def _spec_mode(shipped: dict, regenerated: dict, strict_spec: bool) -> str:
     """
     if strict_spec:
         return "strict (full spec)"
-    uncompared = sorted(_spec_fields(regenerated) - _spec_fields(shipped))
+    uncompared = sorted(_spec_fields(regenerated) - _spec_fields(shipped)) + sorted(
+        f"companions.{name}"
+        for name in _companion_spec_fields(regenerated)
+        - _companion_spec_fields(shipped)
+    )
     if not uncompared:
         return "shipped fields (the regenerated catalog adds no spec field)"
     shown = ", ".join(uncompared[:10]) + (" ..." if len(uncompared) > 10 else "")

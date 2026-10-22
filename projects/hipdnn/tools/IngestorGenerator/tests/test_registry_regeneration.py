@@ -12,6 +12,7 @@ changed default (or builder) recompiles shipped kernels with every gate here gre
 from __future__ import annotations
 
 import collections
+import copy
 import dataclasses
 import importlib
 import inspect
@@ -23,7 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from codegen.config_loader import load_config
+from codegen.config_loader import _companion_derivations, load_config
 from codegen.generator import IngestorGenerator
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -107,9 +108,13 @@ def _selection_kernels(selection) -> list:
     return [k for pack in selection.packs for k in pack.kernels]
 
 
-def _shipped_spec_fields(selection) -> frozenset:
-    return frozenset().union(
-        *(k.kernel_source.spec.keys() for k in _selection_kernels(selection))
+def _shipped_spec_fields(selection) -> tuple:
+    """(kernel spec fields, companion spec fields) the selection's kernels carry. A
+    companion is built from its own spec class, so its fields are a set of their own."""
+    kernels = _selection_kernels(selection)
+    return (
+        frozenset().union(*(k.kernel_source.spec.keys() for k in kernels)),
+        frozenset().union(*(c.spec.keys() for k in kernels for c in k.companions)),
     )
 
 
@@ -119,35 +124,69 @@ def _key(
     spec: dict,
     metadata: dict,
     default: bool,
-    fields: frozenset,
+    companions: list,
+    fields: tuple,
 ):
     """`source` is the kernel_source (kind, source, builder); `default` the kernel's
-    `default` marker, which reduction keeps as the cell's floor."""
+    `default` marker, which reduction keeps as the cell's floor; `companions` the
+    kernel_source documents it launches after its own, each spec filtered like the
+    kernel's."""
+    kernel_fields, companion_fields = fields
     return (
         name,
         source,
         default,
-        _canonical({k: v for k, v in spec.items() if k in fields}),
+        _canonical({k: v for k, v in spec.items() if k in kernel_fields}),
         _canonical(metadata),
+        _canonical(
+            [
+                {
+                    **c,
+                    "spec": {
+                        k: v for k, v in c["spec"].items() if k in companion_fields
+                    },
+                }
+                for c in companions
+            ]
+        ),
+    )
+
+
+def _selection_key(kernel, fields: tuple) -> tuple:
+    return _key(
+        kernel.name,
+        (
+            kernel.kernel_source.kind,
+            kernel.kernel_source.source,
+            kernel.kernel_source.builder,
+        ),
+        kernel.kernel_source.spec,
+        kernel.metadata,
+        kernel.default,
+        [c.as_document() for c in kernel.companions],
+        fields,
     )
 
 
 def _selection_keys(selection) -> collections.Counter:
     fields = _shipped_spec_fields(selection)
     return collections.Counter(
-        _key(
-            k.name,
-            (k.kernel_source.kind, k.kernel_source.source, k.kernel_source.builder),
-            k.kernel_source.spec,
-            k.metadata,
-            k.default,
-            fields,
-        )
-        for k in _selection_kernels(selection)
+        _selection_key(k, fields) for k in _selection_kernels(selection)
     )
 
 
-def _registry_key(kernel: dict, fields: frozenset) -> tuple:
+def _registry_companions(pack: dict, kernel: dict) -> list:
+    """The companions the manifest's pack-level rule derives for a registry kernel, as
+    load_config derives them for a selection kernel."""
+    return [
+        derivation.derive(kernel["kernel_source"]["spec"]).as_document()
+        for derivation in _companion_derivations(
+            pack.get("companions"), f"registry pack {pack.get('name')!r} companions"
+        )
+    ]
+
+
+def _registry_key(pack: dict, kernel: dict, fields: tuple) -> tuple:
     source = kernel["kernel_source"]
     return _key(
         kernel["name"],
@@ -155,13 +194,14 @@ def _registry_key(kernel: dict, fields: frozenset) -> tuple:
         source["spec"],
         kernel["metadata"],
         kernel.get("default", False),
+        _registry_companions(pack, kernel),
         fields,
     )
 
 
-def _registry_keys(registry_config: dict, fields: frozenset) -> collections.Counter:
+def _registry_keys(registry_config: dict, fields: tuple) -> collections.Counter:
     return collections.Counter(
-        _registry_key(k, fields)
+        _registry_key(pack, k, fields)
         for pack in registry_config["packs"]
         for k in pack["kernels"]
     )
@@ -186,11 +226,11 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
     assert not missing, sorted(key[0] for key in missing)[:10]
     shipped = set(_selection_keys(selection))
     enumeration = enumerator.enumerate_space(manifest, registry)
-    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    kernels = [(pack, k) for pack in registry_config["packs"] for k in pack["kernels"]]
     assert len(kernels) == len(enumeration.rows)
     off_default = []
-    for (_, ks, _), kernel in zip(enumeration.rows, kernels):
-        if _registry_key(kernel, fields) not in shipped:
+    for (_, ks, _), (pack, kernel) in zip(enumeration.rows, kernels):
+        if _registry_key(pack, kernel, fields) not in shipped:
             continue
         # A kernel's own spec keys, not the selection's union: a field only some kernels
         # carry (a section's codegen knobs) must still sit at its default on the rest.
@@ -202,6 +242,34 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
             if default is dataclasses.MISSING or getattr(ks, f.name) != default:
                 off_default.append((f.name, getattr(ks, f.name), default))
     assert not off_default, sorted({repr(o) for o in off_default})[:10]
+
+
+def test_g1_and_g4_catch_a_stale_companion(selection, registry_config):
+    """The positive control for companions: a selection kernel whose reduce companion
+    no longer matches the manifest's derivation is not a registry kernel, and a pack
+    rule that drifted from the manifest's fails g4's comparison."""
+    kernels = [k for k in _selection_kernels(selection) if k.companions]
+    if not kernels:
+        pytest.skip("this engine's kernels carry no companions")
+    fields = _shipped_spec_fields(selection)
+    registry_keys = _registry_keys(registry_config, fields)
+    kernel = kernels[0]
+    assert _selection_key(kernel, fields) in registry_keys
+    stale = copy.deepcopy(kernel)
+    companion = stale.companions[0]
+    field = next(iter(companion.spec))
+    companion.spec[field] = "stale"
+    assert _selection_key(stale, fields) not in registry_keys
+    dropped = copy.deepcopy(kernel)
+    dropped.companions = []
+    assert _selection_key(dropped, fields) not in registry_keys
+
+    pack = next(p for p in selection.packs if p.companions)
+    drifted = copy.deepcopy(pack.companions)
+    drifted[0].builder = "build_something_else"
+    built = {p["name"]: p.get("companions") for p in registry_config["packs"]}
+    assert built[pack.name] is not None
+    assert drifted != _companion_derivations(built[pack.name], "registry")
 
 
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
@@ -293,6 +361,10 @@ def test_g4_the_selection_header_equals_the_manifest(
     assert selection.kernel_source_kind == built.kernel_source_kind
     assert selection.workspace_policy == built.workspace_policy
     assert selection.authored_subpath == built.authored_subpath
+    # The pack-level companion rule each kernel's companions are derived from.
+    assert [(p.name, p.companions) for p in selection.packs] == [
+        (p.name, p.companions) for p in built.packs
+    ]
 
 
 #: The graph dtypes the C++ matcher translates, as ``return std::string("<spelling>")``.

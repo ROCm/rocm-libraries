@@ -504,6 +504,70 @@ class TestShippedFieldKeying:
         assert run(shipped, regenerated, "--ignore-ids") == 1
 
 
+def _with_reduce(entry: dict, **spec) -> dict:
+    """``entry`` carrying one split-KV reduce companion, as a Unified3D kernel does."""
+    entry = json.loads(json.dumps(entry))
+    entry["companions"] = [
+        {
+            "kind": "rocke",
+            "source": "kernels/gfx950/attention_tiled_3d.py",
+            "builder": "build_unified_attention_reduce_tiled",
+            "spec": {"dtype": "bf16", "head_size": 128, "num_segments": 16, **spec},
+        }
+    ]
+    return entry
+
+
+_ALL_MODES = [(), ("--subset",), ("--strict-spec",)]
+
+
+class TestCompanionsArePartOfTheKey:
+    """A companion is a code object the kernel launches after its own; a stale or
+    missing one ships a different launch however equal the primary kernels are."""
+
+    @pytest.mark.parametrize("flags", _ALL_MODES)
+    def test_identical_companions_are_not_a_difference(self, run, flags):
+        kdp = _kdp([_with_reduce(_entry("k0"))])
+        assert run(kdp, json.loads(json.dumps(kdp)), "--ignore-ids", *flags) == 0
+
+    @pytest.mark.parametrize("flags", _ALL_MODES)
+    def test_a_companion_differing_only_in_its_spec_is_caught(self, run, capsys, flags):
+        shipped = _kdp([_with_reduce(_entry("k0"), num_segments=16)])
+        regenerated = _kdp([_with_reduce(_entry("k0"), num_segments=8)])
+        assert run(shipped, regenerated, "--ignore-ids", *flags) == 1
+        assert "only in shipped" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("flags", _ALL_MODES)
+    @pytest.mark.parametrize("missing_on", ["shipped", "regenerated"])
+    def test_companions_on_one_side_only_are_caught(self, run, flags, missing_on):
+        with_reduce = _kdp([_with_reduce(_entry("k0"))])
+        without = _kdp([_entry("k0")])
+        pair = (
+            (without, with_reduce)
+            if missing_on == "shipped"
+            else (with_reduce, without)
+        )
+        assert run(*pair, "--ignore-ids", *flags) == 1
+
+    def test_a_changed_companion_builder_is_caught(self, run):
+        shipped = _kdp([_with_reduce(_entry("k0"))])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"][0]["companions"][0]["builder"] = "other"
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+
+    def test_a_regenerated_only_companion_field_is_filtered_and_named(
+        self, run, capsys
+    ):
+        """The primary spec's rule applies to each companion's spec: a field only the
+        regenerated companions carry is not compared by default, the header says so,
+        and --strict-spec makes it a difference."""
+        shipped = _kdp([_with_reduce(_entry("k0"))])
+        regenerated = _kdp([_with_reduce(_entry("k0"), new_knob=0)])
+        assert run(shipped, regenerated, "--ignore-ids") == 0
+        assert "companions.new_knob" in capsys.readouterr().out
+        assert run(shipped, regenerated, "--ignore-ids", "--strict-spec") == 1
+
+
 class TestUsageErrorsAreNotDifferences:
     def test_a_missing_file_exits_2(self, tmp_path, capsys):
         """Exit 1 means 'the catalogs differ'. An unreadable input has compared
@@ -541,6 +605,8 @@ def _write(path: Path, document) -> str:
         {"name": None, "kernel_source": {"spec": {}}},
         {"name": "k0", "priority": [1]},
         {"name": "k0", "version": {"major": 1}},
+        {"name": "k0", "companions": {"spec": {}}},
+        {"name": "k0", "companions": [{"spec": ["num_segments", 16]}]},
     ],
     ids=[
         "string-entry",
@@ -550,6 +616,8 @@ def _write(path: Path, document) -> str:
         "null-name",
         "list-priority",
         "object-version",
+        "object-companions",
+        "list-companion-spec",
     ],
 )
 def test_a_malformed_catalog_entry_exits_2(tmp_path, capsys, entry):
