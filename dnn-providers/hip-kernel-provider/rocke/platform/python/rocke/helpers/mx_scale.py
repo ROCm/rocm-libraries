@@ -28,6 +28,9 @@ What v1 ships:
 
 * :func:`decode_mx_scale_e8m0`: ``i8 e8m0 -> f32 multiplier`` via
  ``exp2(code - 127)``, NaN for code 255.
+* :func:`fma_with_mx_scale_pair`: ``value * 2^(ea + eb) + addend`` for an
+ A and a B scale byte, without forming the product of the two scales
+ (which can overflow or flush to zero in f32).
 * :func:`apply_mx_scale`: scalar ``fmul`` with a dequantised value.
 * :func:`load_and_decode_mx_scale_byte`: convenience wrapper that
  reads one byte from a scale buffer and decodes it.
@@ -40,15 +43,32 @@ from __future__ import annotations
 
 import math
 
-from ..core.ir import I8, I32, IRBuilder, PtrType, Value
+from ..core.ir import I8, I32, IRBuilder, PtrType, Value, VectorType
 
 
 __all__ = [
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
+    "fma_with_mx_scale_pair",
     "load_and_decode_mx_scale_byte",
     "load_and_decode_mx_scales_wave",
 ]
+
+
+_E8M0_BIAS = 127
+_E8M0_NAN_CODE = 255
+
+
+def _read_e8m0_code(caller: str, b: IRBuilder, e8m0: Value):
+    """Read an E8M0 scale byte as ``(code, is_nan)``.
+
+    The byte is an unsigned biased exponent, so it is zero-extended to an
+    i32 code 0..255; ``is_nan`` is true for the NaN code 255.
+    """
+    if e8m0.type.name != "i8":
+        raise ValueError(f"{caller} expects i8 input, got {e8m0.type.name}")
+    code = b.zext(e8m0, I32)
+    return code, b.cmp_eq(code, b.const_i32(_E8M0_NAN_CODE))
 
 
 def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
@@ -70,13 +90,68 @@ def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
     integer exponents -127..127, including the subnormal for code 0; the
     decoder test checks all 256 codes on the GPU.
     """
-    if e8m0.type.name != "i8":
-        raise ValueError(f"decode_mx_scale_e8m0 expects i8 input, got {e8m0.type.name}")
-    code = b.zext(e8m0, I32)
-    is_nan_code = b.cmp_eq(code, b.const_i32(255))
+    code, is_nan_code = _read_e8m0_code("decode_mx_scale_e8m0", b, e8m0)
     exponent = b.fsub(b.sitofp_f32(code), b.const_f32(127.0))
     scale = b.exp2(exponent)
     return b.select(is_nan_code, b.const_f32(math.nan), scale)
+
+
+def fma_with_mx_scale_pair(
+    b: IRBuilder,
+    value: Value,
+    a_e8m0: Value,
+    b_e8m0: Value,
+    addend: Value,
+) -> Value:
+    """``value * 2^(ea + eb) + addend`` for two E8M0 scale bytes, as one fma.
+
+    ``ea`` and ``eb`` are the unbiased exponents of the scale codes ``a_e8m0``
+    and ``b_e8m0`` (i8 each), so the product of the two decoded scales is
+    ``2^(ea + eb)``. ``value`` and ``addend`` are matching ``<n x f32>``
+    vectors; the result has the same type. If either code is the NaN code
+    255 the result is NaN.
+
+    Why not multiply the two decoded scales: ``ea + eb`` spans -254..254 and
+    an f32 holds only 2^-149..2^127, so the product of two decoded scales
+    overflows to Inf for large codes (and a zero ``value`` then gives
+    ``0 * Inf = NaN``) and flushes to zero for small ones, even when the
+    true result is an ordinary f32.
+
+    Instead the exponents are added as integers and split as
+    ``ea + eb = pre + fused`` with ``fused`` clamped to -127..127 (so both
+    ``2^pre`` and ``2^fused`` are f32 values the decoder's ``exp2`` gives
+    exactly), and the result is ``fma(value * 2^pre, 2^fused, addend)``:
+
+    * ``-127 <= ea + eb <= 127``: ``pre`` is 0, ``value * 1`` is exact, and
+      the fma rounds the exact result once.
+    * ``ea + eb > 127``: ``pre`` is positive, so ``value * 2^pre`` is exact
+      unless it overflows, in which case the true result overflows too.
+    * ``ea + eb < -127``: ``pre`` is negative. ``value * 2^pre`` is exact
+      unless it falls below the f32 normals, and then the true result is
+      below 2^-253, which rounds to zero either way.
+    """
+    if not isinstance(value.type, VectorType) or value.type.elem.name != "f32":
+        raise ValueError(
+            f"fma_with_mx_scale_pair expects an f32 vector value, got {value.type.name}"
+        )
+    if addend.type != value.type:
+        raise ValueError(
+            f"fma_with_mx_scale_pair expects the addend type to match the value "
+            f"type {value.type.name}, got {addend.type.name}"
+        )
+    a_code, a_is_nan = _read_e8m0_code("fma_with_mx_scale_pair", b, a_e8m0)
+    b_code, b_is_nan = _read_e8m0_code("fma_with_mx_scale_pair", b, b_e8m0)
+    exponent = b.sub(b.add(a_code, b_code), b.const_i32(2 * _E8M0_BIAS))
+    fused = b.smin(b.smax(exponent, b.const_i32(-_E8M0_BIAS)), b.const_i32(_E8M0_BIAS))
+    pre_scale = b.exp2(b.sitofp_f32(b.sub(exponent, fused)))
+    fused_scale = b.select(
+        b.lor(a_is_nan, b_is_nan),
+        b.const_f32(math.nan),
+        b.exp2(b.sitofp_f32(fused)),
+    )
+    lanes = value.type.count
+    pre_scaled = b.vector_mul(value, b.vector_splat(pre_scale, lanes))
+    return b.vector_fma(pre_scaled, b.vector_splat(fused_scale, lanes), addend)
 
 
 def apply_mx_scale(b: IRBuilder, value_f32: Value, scale_f32: Value) -> Value:

@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * test_mx_scale_decode.cpp -- C++ engine coverage for the E8M0 scale decoder.
+ * test_mx_scale_decode.cpp -- C++ engine coverage for the E8M0 scale decoder
+ * and the scale-pair fma helper.
  *
  * Builds the same one-thread-per-code kernel as tests/core/test_mx_scale_decode.py
  * (load one scale byte, decode it, store the f32 multiplier) through the C++
@@ -131,12 +132,58 @@ static int test_non_byte_input_is_rejected()
     return 0;
 }
 
+/* fma_with_mx_scale_pair refuses a non-vector value, a mismatched addend and a
+ * non-byte scale code with the Python engine's messages
+ * (tests/core/test_mx_scale_decode.py::test_scale_pair_fma_refuses_wrong_types). */
+static int scale_pair_refusal(int which_case, const char* expected)
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "mx_scale_pair_refusal") == ROCKE_OK);
+    std::string err;
+    try
+    {
+        rocke_value_t* value = rocke_b_vector_splat(&b, rocke_b_const_f32(&b, 1.0), 4);
+        rocke_value_t* addend = value;
+        rocke_value_t* codes
+            = rocke_b_param(&b, "Codes", rocke_ptr_type(&b, rocke_i8(), "global"), NULL);
+        rocke_value_t* a_code = rocke_b_global_load_i8(&b, codes, rocke_b_const_i32(&b, 0), 0);
+        rocke_value_t* b_code = a_code;
+        if(which_case == 0)
+            value = rocke_b_const_f32(&b, 1.0);
+        else if(which_case == 1)
+            addend = rocke_b_vector_splat(&b, rocke_b_const_f32(&b, 1.0), 2);
+        else
+            b_code = rocke_b_const_i32(&b, 0);
+        CHECK(rocke_fma_with_mx_scale_pair(&b, value, a_code, b_code, addend) == NULL);
+        const char* msg = rocke_ir_builder_error(&b);
+        err = msg ? msg : "";
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    if(err.find(expected) == std::string::npos)
+        std::fprintf(stderr, "got: %s\nwant: %s\n", err.c_str(), expected);
+    CHECK(err.find(expected) != std::string::npos);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+static int test_scale_pair_fma_refuses_wrong_types()
+{
+    return scale_pair_refusal(0, "fma_with_mx_scale_pair expects an f32 vector value, got f32")
+           || scale_pair_refusal(1,
+                                 "fma_with_mx_scale_pair expects the addend type to match the "
+                                 "value type vec<f32x4>, got vec<f32x2>")
+           || scale_pair_refusal(2, "fma_with_mx_scale_pair expects i8 input, got i32");
+}
+
 int main()
 {
     if(test_llvm_reads_the_byte_unsigned() || test_hip_reads_the_byte_unsigned()
-       || test_non_byte_input_is_rejected())
+       || test_non_byte_input_is_rejected() || test_scale_pair_fma_refuses_wrong_types())
     {
-        std::fprintf(stderr, "E8M0 scale decoder contract failed\n");
+        std::fprintf(stderr, "E8M0 scale helper contract failed\n");
         return 1;
     }
     return 0;

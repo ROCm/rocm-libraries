@@ -454,6 +454,9 @@ dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 # (code 0 is the f32 subnormal ``2^-127``) and code 255 gives NaN.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
+# value * 2^(ea + eb) + addend for an A and a B scale byte, as one fma,
+# without forming the product of the two scales (it can leave f32 range).
+fma_with_mx_scale_pair(b, value_f32xN, a_e8m0, b_e8m0, addend_f32xN)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses

@@ -14,10 +14,9 @@ element math is::
 
 Same for B. The kernel does an A * B^T contraction in f32 (the MX
 intrinsic family ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``
-applies the scale in-instruction; v1 uses the explicit
-:func:`rocke.helpers.mx_scale.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.mx_scale.apply_mx_scale` chain instead so the
-scalar inner GEMM stays interpretable).
+applies the scale in-instruction; v1 applies it explicitly after each
+group's MFMA with :func:`rocke.helpers.mx_scale.fma_with_mx_scale_pair`
+so the inner GEMM stays interpretable).
 
 What v1 ships:
 
@@ -65,7 +64,7 @@ from ...helpers.mfma_gemm_inner import (
     validate_arch_and_block_size,
     validate_mfma_atom_in_catalog,
 )
-from ...helpers.mx_scale import decode_mx_scale_e8m0
+from ...helpers.mx_scale import fma_with_mx_scale_pair
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
@@ -245,7 +244,7 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
     # Single-level K iteration over MX shared-exponent groups (one E8M0
     # byte per group, decoded once per iter). Each group's
     # ``atoms_per_group`` MFMA invocations are Python-unrolled into a
-    # fresh per-group acc, then scaled by ``a_scale * b_scale`` and folded
+    # fresh per-group acc, then scaled by ``2^(ea + eb)`` and folded
     # into the outer accumulator with one fused ``v_pk_fma_f32`` per lane
     # element. The MX ``mfma_f32_16x16x128_f8f6f4`` intrinsic does the
     # scale in-instruction; the v1 chain replicates it explicitly so
@@ -258,26 +257,15 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
         iv_name="kg",
     )
     with outer as (kg, (outer_acc,)):
-        # Per-group E8M0 scale loads + decode. Only the ``kg``-dependent
+        # Per-group E8M0 scale byte loads. Only the ``kg``-dependent
         # term is added here; the per-lane (row, col) bases are hoisted.
         a_scale_off = b.add(a_scale_row_base, kg)
         b_scale_off = b.add(
             b.mul(kg, b.const_i32(spec.N)),
             n_global_col,
         )
-        a_scale = decode_mx_scale_e8m0(
-            b,
-            b.global_load_i8(AScale, a_scale_off),
-        )
-        b_scale = decode_mx_scale_e8m0(
-            b,
-            b.global_load_i8(BScale, b_scale_off),
-        )
-        # The MX-spec apply is ``elem * 2^(scale_code - 127)``;
-        # mathematically equivalent to ``elem * 2^scale_code / 2^127``
-        # and since a_scale / b_scale are already the post-decode f32
-        # multipliers, the combined scale is just their product.
-        ab_scale = b.fmul(a_scale, b_scale)
+        a_scale_code = b.global_load_i8(AScale, a_scale_off)
+        b_scale_code = b.global_load_i8(BScale, b_scale_off)
 
         k_group_base = b.mul(kg, b.const_i32(spec.group_k))
 
@@ -312,14 +300,16 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
             )
             group_acc = atom.emit(b, a_vec, b_vec, group_acc)
 
-        # Tile-level scale-and-accumulate the group's MFMA result.
-        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
-        # per-lane vectors; broadcast the scalar ``ab_scale`` to that
-        # width and fold with a single fused multiply-add per lane element
-        # (``new = outer + group * ab_scale``), which lowers to packed
-        # ``v_pk_fma_f32`` on AMDGPU instead of a separate mul + add.
-        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
-        new_outer = b.vector_fma(group_acc, ab_scale_vec, outer_acc)
+        # Scale the group's MFMA result by ``2^(ea + eb)`` (``ea``, ``eb``:
+        # the unbiased exponents of the two scale codes) and fold it into
+        # the outer accumulator with one fused multiply-add per lane element
+        # (``new = outer + group * scale``, packed ``v_pk_fma_f32`` on
+        # AMDGPU). The helper adds the two scale exponents as integers: the
+        # product of the two decoded scales can overflow or flush to zero in
+        # f32 even when the result is an ordinary f32.
+        new_outer = fma_with_mx_scale_pair(
+            b, group_acc, a_scale_code, b_scale_code, outer_acc
+        )
         b.scf_yield(new_outer)
 
     acc_final = outer.results[0]
