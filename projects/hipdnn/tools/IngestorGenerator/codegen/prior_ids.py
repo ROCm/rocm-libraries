@@ -30,6 +30,11 @@ import yaml
 _KINDS = ("ued", "kmd", "uhd", "udd", "umd", "kdp")
 
 
+class NotOverridable(ValueError):
+    """A refusal that naming another id source cannot cure: the tree read is
+    itself unusable, or the config cannot take part in sibling mode."""
+
+
 @dataclass(frozen=True)
 class PriorKdp:
     path: Path
@@ -39,6 +44,10 @@ class PriorKdp:
     arch: list[str] | None  # KDP-level arch, None if absent
     operation_umd_id: str | None  # the graph-scope matcher; multi-pack only
     entries: list[dict]  # kernelDescriptors[] as parsed
+
+    def effective_arch(self, entry: dict) -> list[str] | None:
+        """The arch ``entry`` is emitted for: its own, else the KDP's."""
+        return entry.get("arch") or self.arch
 
 
 @dataclass(frozen=True)
@@ -77,10 +86,11 @@ class _Root:
             if not isinstance(identity, str) or not identity:
                 raise ValueError(f"{path}: a descriptor or kernel has no string 'id'")
             if identity in owner:
-                raise ValueError(
+                raise NotOverridable(
                     f"id {identity} appears twice under {root}: in {owner[identity]} "
                     f"and in {path}. A prior tree with a repeated id cannot say which "
-                    f"descriptor owns it."
+                    f"descriptor owns it: delete the stale file of the two (a removed "
+                    f"or renamed pack's KDP is the usual one)."
                 )
             owner[identity] = path
 
@@ -144,6 +154,16 @@ def _umd_kinds(root: _Root, kdp_path: Path, kdp: dict) -> dict[str, dict]:
     return by_scope
 
 
+def _check_dispatch(kdps: list[tuple[Path, dict]], engine: str, root: Path) -> None:
+    """Every KDP of one engine names the same UDD."""
+    dispatch = {d.get("dispatch") for _, d in kdps}
+    if len(dispatch) != 1 or not all(isinstance(d, str) for d in dispatch):
+        raise ValueError(
+            f"KDPs of engine {engine} under {root} disagree on dispatch: "
+            f"{sorted(map(str, dispatch))}"
+        )
+
+
 def find_engine(root: Path, engine_name: str) -> EngineDocs | None:
     """The engine-level documents of the UED named ``engine_name`` under ``root``,
     or None when no UED there has that name.
@@ -172,12 +192,7 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
     kdps = tree.kdps_of(ued["id"])
     if not kdps:
         raise tree.no_kdp_error(ued["id"])
-    dispatch = {d.get("dispatch") for _, d in kdps}
-    if len(dispatch) != 1 or not all(isinstance(d, str) for d in dispatch):
-        raise ValueError(
-            f"KDPs of engine {engine_name!r} under {root} disagree on dispatch: "
-            f"{sorted(map(str, dispatch))}"
-        )
+    _check_dispatch(kdps, repr(engine_name), root)
     kdp_path, kdp = kdps[0]
     udd = tree.resolve("udd", kdp.get("dispatch"), "dispatch", kdp_path)
     kernel_match = _umd_kinds(tree, kdp_path, kdp).get("kernel")
@@ -197,12 +212,7 @@ def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> Prior
     kdps = tree.kdps_of(engine_id)
     if not kdps:
         raise tree.no_kdp_error(engine_id)
-    dispatch = {d.get("dispatch") for _, d in kdps}
-    if len(dispatch) != 1 or not all(isinstance(d, str) for d in dispatch):
-        raise ValueError(
-            f"KDPs of engine {engine_id} under {root} disagree on dispatch: "
-            f"{sorted(map(str, dispatch))}"
-        )
+    _check_dispatch(kdps, engine_id, root)
     prior: list[PriorKdp] = []
     names: dict[str, Path] = {}
     for path, kdp in kdps:
@@ -262,6 +272,23 @@ def list_docs(root: Path, *kinds: str) -> list[Path]:
     return sorted(p for kind in kinds for p in root.rglob(f"*.{kind}.json"))
 
 
+def holds_docs(root: Path, *kinds: str) -> bool:
+    """Whether ``root`` holds a descriptor of any of the given kinds."""
+    return root.is_dir() and any(
+        True for kind in kinds for _ in root.rglob(f"*.{kind}.json")
+    )
+
+
+def _dvc_outs(pointer: Path) -> list[dict]:
+    """The ``outs`` entries of a ``*.dvc`` pointer; empty when it cannot be read."""
+    try:
+        return (yaml.safe_load(pointer.read_text(encoding="utf-8")) or {}).get(
+            "outs"
+        ) or []
+    except (OSError, yaml.YAMLError):
+        return []
+
+
 def _dvc_md5(path: Path) -> str:
     """The md5 DVC records for a file: text is hashed with CRLF read as LF, so a
     Windows checkout hashes like the object in the remote."""
@@ -281,13 +308,7 @@ def dvc_mismatches(root: Path) -> list[str]:
     """
     messages = []
     for pointer in sorted(root.rglob("*.dvc")):
-        try:
-            outs = (yaml.safe_load(pointer.read_text(encoding="utf-8")) or {}).get(
-                "outs"
-            ) or []
-        except (OSError, yaml.YAMLError):
-            continue
-        for out in outs:
+        for out in _dvc_outs(pointer):
             recorded, rel = str(out.get("md5", "")), out.get("path")
             target = pointer.parent / rel if rel else None
             if not recorded or target is None or not target.exists():
@@ -401,16 +422,10 @@ def unfetched_dvc(parent: Path, skip: Sequence[Path]) -> list[str]:
     for child in sorted(parent.iterdir()):
         if not child.is_dir() or child.resolve() in skipped:
             continue
-        if any(child.rglob("*.ued.json")) or any(child.rglob("*.kdp.json")):
+        if holds_docs(child, "ued", "kdp"):
             continue
         for pointer in sorted(child.rglob("*.dvc")):
-            try:
-                outs = (yaml.safe_load(pointer.read_text(encoding="utf-8")) or {}).get(
-                    "outs"
-                ) or []
-            except (OSError, yaml.YAMLError):
-                continue
-            for out in outs:
+            for out in _dvc_outs(pointer):
                 rel = out.get("path")
                 if rel and not (pointer.parent / rel).exists():
                     messages.append(

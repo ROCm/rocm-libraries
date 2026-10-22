@@ -128,7 +128,8 @@ bundle (a UED or a KDP):
 2. the bundle installed in the provider tree,
    `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/<descriptor-dir>`
    (the generator prints `Reusing ids from the installed bundle <path>`);
-3. `<output-dir>/<descriptor-dir>`, when it already holds a bundle.
+3. `<output-dir>/<descriptor-dir>`, when it already holds a bundle. When a bundle is
+   installed, this one is also read as a second, gap-filling source (below).
 
 `--new-ids` reads nothing and gives every descriptor a new id; use it for an engine that is
 being replaced or renamed. It contradicts `--ids-from` and `--engine-ids-from`, and it
@@ -176,27 +177,47 @@ retune, change the metadata tuple or use `--new-ids`. Retuning retained kernels 
 not reliably id-stable, and `tools/splice_additions.py` refuses it as a changed retained
 kernel.
 
-An id that is no longer used (a removed or changed kernel, a dropped pack) is never given to
-another descriptor. Prior kernels that share one tuple under the current KMD are all dropped
-from reuse rather than guessed.
+An id that is no longer used (a removed or changed kernel, a dropped pack) is not given to
+an unrelated descriptor. One case follows the tuple instead: a kernel removed and a
+different kernel added with the same tuple at another arch are paired by the second pass,
+because an arch move cannot be told from a removal plus an addition, so the new kernel
+takes the old id (the summary's arch clause, below, names it). Prior kernels that share one
+tuple and one effective arch are all dropped from reuse rather than guessed.
 
-The command prints the outcome after generation, e.g.
-`Ids: reused N from <dir> (engine a, packs b, kernels c), minted M, retired R: <names>`.
-`--dry-run` prints the same account as `Ids (would be): ...` after its file list. A first run
-for a brand-new engine prints `Ids: none found to reuse; minted N (new bundle)`.
+The command prints the outcome after generation:
+`Ids: reused T from <src> (engine E, packs P[, operation UMDs O], kernels K), minted M,
+retired R[: name, name (+N more)][; engine ids from <dir>][; X kept an id across an arch
+change: a, b (+N more)]`. The retired names follow `retired R` directly; `; engine ids
+from <dir>` appears when the engine-level ids came from a different bundle than `<src>`
+(a satellite reading its home); the arch clause is always last. `--dry-run` prints the same
+account as `Ids (would be): ...` after its file list. A first run for a brand-new engine
+prints `Ids: none found to reuse; minted N (new bundle)`, and `--new-ids` prints
+`Ids: --new-ids; every id is new (minted N)`.
 
 - A directory with a UED but no KDP is an error, not an empty history. The shipped gfx950
   KDP is stored with DVC (`artifacts.dvc` in its descriptor directory): fetch it into
   `artifacts/` before regenerating, or generation refuses rather than give every kernel a
   new id.
+- A document id that appears twice under the previous bundle is an error (exit 2), usually
+  a stale KDP left beside a renamed pack's new one. The message names both files: delete
+  the stale one.
+- A kernel id held by both this bundle's previous KDP and a sibling's KDP is an error
+  (exit 2) that names both KDP paths (`also in`): ids must be unique across the engine's
+  bundles, so remove the duplicate from the one that should not own it.
+- A run that would write a top-level KDP for a pack whose KDP the target bundle already
+  holds as a DVC artifact under `artifacts/` is refused (exit 2) before anything is
+  written: the next run would find the pack id twice. Generate into scratch and splice
+  (see [Extending a live engine](#extending-a-live-engine)).
 - `--ids-from` must be this bundle's own directory (its path, taken as given and not
   resolved through symlinks, ends with the config's descriptor directory); a sibling
   bundle is found automatically when installed, and otherwise goes to `--engine-ids-from`.
 - Anything in a live KDP that is not in the config (a hand-appended kernel) is reported as
-  retired and dropped, as before.
+  retired and dropped.
 - Warnings on stderr, none fatal: a DVC pointer whose tracked output does not hash to the
   recorded md5 (a stale or edited local artifact: `dvc pull` to restore it, `dvc add` to
-  record it); a directory beside the bundle that holds no UED and no KDP but does hold a
+  record it); a previous KDP that holds no kernels while the config has some (`Warning: ...
+  holds no kernels`: a truncated or placeholder artifact would remint every kernel); a
+  directory beside the bundle that holds no UED and no KDP but does hold a
   `*.dvc` pointer whose artifact is absent (an unpulled satellite KDP is invisible to
   sibling discovery and to the duplicate check: `dvc pull`; a directory already identified
   by a UED or KDP is not repeated, and a home whose KDP is unfetched is an error when read);
@@ -253,9 +274,10 @@ tree such as scratch directories. Naming any turns discovery off, so name **ever
 bundle of the engine, the home included; a bundle left out drops out of the duplicate check,
 and a stderr warning names an unnamed sibling in the same family folder. `--new-ids` turns
 discovery off as well. If discovered siblings sit beside a config that cannot be a satellite
-(not packaged, or multi-pack), the error says the installed bundles were picked up
-automatically. `--check-placeholders` resolves ids when siblings are found, so a
-satellite's placeholder check expects its KDP only.
+(multi-pack), the error says the installed bundles were picked up
+automatically. `--check-placeholders` resolves ids when siblings are found, and a
+satellite's placeholder check expects its KDP alone (`Located 1 of this engine's 1
+shippable files`).
 
 - Sibling mode is for **packaged**, **single-pack** bundles whose descriptor directories
   share the home's first component under `descriptors/`.
@@ -271,7 +293,8 @@ A scratch render also holds the engine-level files and hand-fillable stubs, so n
 scratch descriptor directory over a live one: that replaces shared objects and hand-filled
 bodies, which [extend.md](../ai/skills/hipdnn-ingestor-engine/extend.md) forbids. Ids are
 reused by default (see [Descriptor ids](#descriptor-ids)), so the render already carries
-the retained ids. Render the edited config into an empty scratch directory, then splice
+the retained ids. Render the edited config into an empty scratch directory (generating in
+place over a bundle whose KDP is a DVC artifact is refused), then splice
 only the additions:
 
 ```bash
@@ -287,6 +310,12 @@ from scratch, or if any retained document or kernel differs beyond that UUID map
 kernel entries are appended after the live ones with their new ids; a scratch-only file
 (for example a new pack's KDP) is written whole with its references remapped. Retained
 bytes and line endings are kept, so the KDP change is a pure insertion.
+
+A KDP stored with DVC (gfx950: `<bundle>/artifacts/`) is not in the bundle directory, so
+`--live <bundle>` does not see it and would write a second whole KDP beside `artifacts/`.
+Splice that KDP by hand, or with the tool on the KDP alone: copy the scratch KDP into an
+otherwise empty directory, pass that as `--scratch`, and pass `--live <bundle>/artifacts`.
+Then record the new bytes with `dvc add artifacts` there, not `git add`.
 
 The generated census test (`tests/Test<Name>Packs.cpp`) carries no UUIDs and is emitted in
 the provider's clang-format form, so copy it over the live one. The native and matcher
@@ -577,23 +606,27 @@ D="descriptors/rocKE/$SLUG/$SLUG"
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
-To splice the reviewed change into `$SHIPPED`, copy the regenerated descriptors across.
+To splice the reviewed change into `$SHIPPED`, follow [Extending a live
+engine](#extending-a-live-engine): the gfx950 KDP is a DVC artifact, so splice it into
+`$SHIPPED/artifacts/$SLUG.kdp.json` and run `dvc add artifacts`; copy nothing else over.
 Because generation reused the installed bundle's ids, every id that stays is unchanged;
 `catalog_diff.py --expect-ids` against the pre-splice KDP proves it. The gates above keep
-`--ignore-ids`, which is harmless with reused ids and still required for output generated
-with `--new-ids`. A metadata change or a retune (a changed or dropped value in
-`kernel_source`) gives that kernel a new id; a rename or an arch change alone keeps it. A hand-edited splice still keeps the UUID of every kernel that stays and is
+`--ignore-ids`, which is harmless with reused ids and still required for a scratch made
+with `--new-ids` or with nothing installed to reuse, which carries new ids. A metadata
+change or a retune (a changed or dropped value in
+`kernel_source`) gives that kernel a new id; a rename or an arch change alone keeps it. A
+hand-edited splice still keeps the UUID of every kernel that stays and is
 checked the same way. Ship
 any manifest change with it (raise `max_kernels` only deliberately), then rerun the gates.
 Adding, removing or renaming kernels is also a heuristic-retraining decision.

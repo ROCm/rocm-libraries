@@ -92,16 +92,24 @@ def kernel_key(
 def _source_covers(prior, new) -> bool:
     """Whether ``new`` still says everything ``prior`` said, at the same values.
 
-    Fields only ``new`` carries are not a difference, the rule `catalog_diff`
-    applies by default: a registry that starts stating a builder knob at its
-    default would otherwise read as a retune of every kernel. A field ``prior``
-    had that ``new`` drops or changes is one."""
+    Fields only ``new`` carries are not a difference, a rule similar to the one
+    `catalog_diff` applies by default: a registry that starts stating a builder
+    knob at its default would otherwise read as a retune of every kernel. The
+    two differ in scope: this tolerates a new-only field per kernel at every
+    depth, `catalog_diff` keys ``kernel_source.spec`` on the union of the field
+    names any shipped kernel carries. A field ``prior`` had that ``new`` drops or
+    changes is a difference."""
     if isinstance(prior, dict) and isinstance(new, dict):
         return all(
             key in new and _source_covers(value, new[key])
             for key, value in prior.items()
         )
     return prior == new
+
+
+def _prior_key(kdp, entry: dict, config: IngestorConfig) -> tuple:
+    """`kernel_key` of a kernel entry read from a previous KDP."""
+    return kernel_key(entry.get("metadata") or {}, kdp.effective_arch(entry), config)
 
 
 def mint_ids(
@@ -139,8 +147,10 @@ def mint_ids(
     * ``supplement`` is a second previous version that only fills gaps: a pack or
       kernel ``prior`` has no match for may take its id from there. ``prior`` wins
       wherever both have an answer, so ids already shipped never change.
-    * Each prior id is assigned at most once, in config order, so a freed id never
-      reaches a different descriptor.
+    * Each prior id is assigned at most once, in config order, so no id reaches
+      two descriptors. A tuple's id follows it across an arch change (the second
+      pass above), so a removed kernel's id can reach a different kernel that
+      carries the same tuple at another arch.
     """
     engine = next(
         (
@@ -172,9 +182,7 @@ def mint_ids(
     prior_entries = []
     for kdp in prior.kdps if prior else ():
         for entry in kdp.entries:
-            key = kernel_key(
-                entry.get("metadata") or {}, entry.get("arch") or kdp.arch, config
-            )
+            key = _prior_key(kdp, entry, config)
             prior_entries.append((key, entry["id"], entry.get("kernel_source")))
     supplement_packs = {}
     if supplement is not None:
@@ -183,9 +191,7 @@ def mint_ids(
         held_keys = {key for key, _identity, _source in prior_entries}
         for kdp in supplement.kdps:
             for entry in kdp.entries:
-                key = kernel_key(
-                    entry.get("metadata") or {}, entry.get("arch") or kdp.arch, config
-                )
+                key = _prior_key(kdp, entry, config)
                 if key not in held_keys and entry["id"] not in held_ids:
                     prior_entries.append((key, entry["id"], entry.get("kernel_source")))
     by_key: dict[tuple, list[tuple[str, dict]]] = {}
@@ -813,7 +819,8 @@ def _ends_with(path: Path, relative: str) -> bool:
 def _family_of(path: Path) -> str:
     """The folder under ``descriptors/`` that ``path`` sits in: ``hkp_pack``
     excludes a disabled family whole, so every bundle of one engine must share it."""
-    parts = path.resolve().parts
+    # Not resolve(), for the reason given in `_ends_with`.
+    parts = Path(os.path.abspath(path)).parts
     for index in range(len(parts) - 2, -1, -1):
         if parts[index] == "descriptors":
             return os.path.normcase(parts[index + 1])
@@ -824,18 +831,33 @@ def _family_of(path: Path) -> str:
     )
 
 
+def _check_seed_entry(path: Path, entry: dict) -> None:
+    """A sibling KDP's kernel entry must carry what the de-duplication reads."""
+    if not isinstance(entry.get("name"), str):
+        raise ValueError(f"{path}: kernel {entry.get('id')!r} has no string 'name'")
+    if not isinstance(entry.get("kernel_source"), dict):
+        raise ValueError(
+            f"{path}: kernel {entry['name']!r} has no 'kernel_source' object"
+        )
+    if not isinstance(entry.get("metadata") or {}, dict):
+        raise ValueError(
+            f"{path}: kernel {entry['name']!r} has a non-object 'metadata'"
+        )
+
+
 def _check_sibling_mode(config: IngestorConfig) -> None:
     if not config.is_packaged:
-        raise ValueError(
+        raise prior_ids.NotOverridable(
             "--engine-ids-from needs a packaged bundle: each test_descriptors/<set> "
             "is its own pack root, so a satellite's engine, dispatch and matcher "
             "references could not resolve there."
         )
     if config.is_multi_pack:
-        raise ValueError(
-            "--engine-ids-from needs a single-pack bundle: a multi-pack engine's "
+        raise prior_ids.NotOverridable(
+            "sibling bundles need a single-pack bundle: a multi-pack engine's "
             "operation matcher names a symbol only that bundle's own Native.cpp "
-            "registers."
+            "registers. Another bundle of this engine, named to the run or found "
+            "beside this one in the provider tree, puts the config in sibling mode."
         )
 
 
@@ -860,7 +882,8 @@ def resolve_ids(
     satellites holding only their KDP. The engine-level ids are taken from the
     home, and the siblings' kernels seed the engine-wide de-duplication. A
     sibling's KDP and kernel ids are never reused, since a repeated id with
-    different content is a conflict at load.
+    different content is a conflict at load; a KDP id or kernel id held by two of
+    the bundles read is refused.
 
     ``also_from`` is a second, lenient source: a previous run of this bundle (say
     the scratch directory being iterated in) whose ids fill in what ``ids_from``
@@ -916,9 +939,7 @@ def resolve_ids(
                 f"folder."
             )
 
-    use_own = strict or (
-        own_root.is_dir() and bool(prior_ids.list_docs(own_root, "ued", "kdp"))
-    )
+    use_own = strict or prior_ids.holds_docs(own_root, "ued", "kdp")
     roots = ([own_root] if use_own else []) + sibling_roots
     homes = []
     for root in roots:
@@ -932,6 +953,7 @@ def resolve_ids(
             f"holds the engine-level files, and hkp_pack rejects a repeated id."
         )
 
+    warnings = []
     own = None
     siblings: list = []
     home_root = None
@@ -948,6 +970,7 @@ def resolve_ids(
         ]
         bundles = [bundle for bundle in (own, *siblings) if bundle is not None]
         owner: dict[str, Path] = {}
+        kernel_owner: dict[str, Path] = {}
         for bundle in bundles:
             for kdp in bundle.kdps:
                 if kdp.id in owner:
@@ -956,6 +979,15 @@ def resolve_ids(
                         f"{bundle.root}: the sibling is this bundle, or a copy of it."
                     )
                 owner[kdp.id] = bundle.root
+                for entry in kdp.entries:
+                    if entry["id"] in kernel_owner:
+                        raise ValueError(
+                            f"kernel id {entry['id']} is in {kernel_owner[entry['id']]} "
+                            f"and also in {kdp.path}: two bundles of one engine "
+                            f"cannot share a kernel id, and hkp_pack rejects it. "
+                            f"Remove the kernel from one of the two files."
+                        )
+                    kernel_owner[entry["id"]] = kdp.path
                 if kdp.dispatch != engine.udd["id"]:
                     raise ValueError(
                         f"{kdp.path}: dispatch {kdp.dispatch} is not the home's UDD "
@@ -967,6 +999,20 @@ def resolve_ids(
                         f"names a symbol only its own bundle's Native.cpp registers: "
                         f"sibling mode is for single-pack bundles."
                     )
+        if own is not None and any(pack.kernels for pack in config.packs):
+            packs = {
+                f"{config.engine.namespace}:{config.kdp_stem(pack)}"
+                for pack in config.packs
+                if pack.kernels
+            }
+            warnings.extend(
+                f"{kdp.path} holds no kernels, so every kernel id of the pack "
+                f"{kdp.name!r} would be minted new. A truncated or placeholder "
+                f"KDP is the usual cause: restore it (dvc pull, or the last "
+                f"shipped copy) to keep the ids."
+                for kdp in own.kdps
+                if not kdp.entries and kdp.name in packs
+            )
     elif sibling_roots:
         raise ValueError(
             f"none of the siblings {[str(root) for root in sibling_roots]} holds a "
@@ -989,7 +1035,6 @@ def resolve_ids(
             f"pass --new-ids to start its ids over, or clear that directory."
         )
 
-    warnings = []
     supplement = None
     if (
         also_from is not None
@@ -1073,12 +1118,13 @@ def resolve_ids(
         for bundle in siblings:
             for kdp in bundle.kdps:
                 for entry in kdp.entries:
+                    _check_seed_entry(kdp.path, entry)
                     metadata = entry.get("metadata") or {}
                     seed.setdefault(_dedup_key(metadata, config), []).append(
                         {
                             "name": entry["name"],
                             "pack": kdp.name,
-                            "arch": list(entry.get("arch") or kdp.arch or []),
+                            "arch": list(kdp.effective_arch(entry) or []),
                             "identity": _candidate_identity_doc(
                                 entry["kernel_source"], entry.get("priority", 0)
                             ),
@@ -1135,7 +1181,7 @@ def _report(
         )
     # What each previous kernel's effective arch was, to see which reuse moved it.
     previous_arch = {
-        entry["id"]: sorted(entry.get("arch") or kdp.arch or [])
+        entry["id"]: sorted(kdp.effective_arch(entry) or [])
         for bundle in previous
         for kdp in bundle.kdps
         for entry in kdp.entries
@@ -1280,22 +1326,22 @@ class IngestorGenerator:
     def preview_files(
         self, config: IngestorConfig, *, resolution: IdResolution | None = None
     ) -> list[str]:
-        """The file list :meth:`render` would write, without writing anything.
-        ``resolution=None`` previews the home layout; a satellite resolution
-        lists only its KDP among the descriptors."""
+        """The shippable file list :meth:`render` would write, without writing
+        anything. ``resolution=None`` previews the home layout; a satellite
+        resolution lists its KDP alone, since the C++ stubs and fragments it also
+        writes are discarded."""
         slug = config.engine.slug
         ddir = config.descriptor_dir
-        satellite = resolution is not None and resolution.satellite
-        files = []
-        if not satellite:
-            files = [
-                f"{ddir}/{slug}.kmd.json",
-                f"{ddir}/{slug}.ued.json",
-                f"{ddir}/{slug}.udd.json",
-            ]
-            if config.engine.has_heuristic:
-                files.append(f"{ddir}/{slug}.uhd.json")
-            files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
+        if resolution is not None and resolution.satellite:
+            return [f"{ddir}/{config.kdp_stem(pack)}.kdp.json" for pack in config.packs]
+        files = [
+            f"{ddir}/{slug}.kmd.json",
+            f"{ddir}/{slug}.ued.json",
+            f"{ddir}/{slug}.udd.json",
+        ]
+        if config.engine.has_heuristic:
+            files.append(f"{ddir}/{slug}.uhd.json")
+        files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.is_multi_pack:
@@ -1306,6 +1352,26 @@ class IngestorGenerator:
         for fragment in FRAGMENT_FILENAMES:
             files.append(f"fragments/{fragment}")
         return files
+
+    @staticmethod
+    def refuse_second_kdp(config: IngestorConfig, output_dir: Path) -> None:
+        """Raises ValueError when this run would write the top-level KDP of a pack
+        whose KDP ``output_dir`` already holds under ``artifacts/`` (a DVC output).
+
+        Both files would then carry the pack's id, and every later run would
+        refuse the tree for the repeated id."""
+        bundle = Path(output_dir) / config.descriptor_dir
+        for pack in config.packs:
+            stem = config.kdp_stem(pack)
+            existing = bundle / "artifacts" / f"{stem}.kdp.json"
+            if existing.is_file():
+                raise ValueError(
+                    f"{existing.as_posix()} already holds the KDP of pack "
+                    f"{pack.name!r} as a DVC artifact: writing {stem}.kdp.json "
+                    f"beside it would leave two KDPs with one id. Generate into a "
+                    f"scratch directory instead and splice the additions into the "
+                    f"artifact, then dvc add it."
+                )
 
     def render(
         self,
@@ -1327,6 +1393,7 @@ class IngestorGenerator:
         emitted inventory and that view needs the engine-wide de-duplication.
         """
         output_dir = Path(output_dir)
+        self.refuse_second_kdp(config, output_dir)
         if resolution is None:
             resolution = resolve_ids(config, output_dir)
         ids = resolution.ids

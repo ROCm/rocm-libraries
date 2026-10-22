@@ -169,7 +169,7 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     selection, tmp_path_factory, capsys
 ):
     """Generated with the shipped ids reused, the six descriptors are the shipped ones
-    byte for byte: the ALMIOPEN-2836 "modulo UUIDs" caveat no longer applies."""
+    byte for byte."""
     if not _SHIPPED_KDP.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {_SHIPPED_KDP}")
     out = tmp_path_factory.mktemp("g2")

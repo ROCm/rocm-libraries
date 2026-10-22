@@ -29,10 +29,15 @@ import yaml
 from codegen.config_loader import load_config
 from codegen.generator import IngestorGenerator, resolve_ids
 from tests.helpers import (
+    all_ids,
+    home_and_satellite,
+    json_bytes,
     make_engine,
     make_minimal_config,
+    make_pack,
     make_packaged_config,
     make_rocke_kernel,
+    read_docs,
 )
 
 TOOL_ROOT = Path(__file__).parent.parent
@@ -142,6 +147,39 @@ class TestIdSummary:
         assert "none found" not in second.stdout
 
 
+class TestInstalledEngineDir:
+    """``INSTALLED_ENGINE_DIR`` is found by walking up from the script: the first
+    ancestor that holds it, whatever the depth of the checkout."""
+
+    def test_the_shipped_constant_resolves_to_this_checkouts_provider(self):
+        import generate
+
+        config = load_config(TOOL_ROOT / "configs" / "gfx1151_wmma_attention.yaml")
+
+        installed = generate.installed_descriptor_dir(config)
+
+        assert installed is not None
+        assert installed.is_dir(), installed
+
+    def test_a_relative_engine_dir_is_found_from_a_deeply_nested_script(
+        self, tmp_path, monkeypatch
+    ):
+        import generate
+
+        repo = tmp_path / "repo"
+        engine_dir = repo / "providers" / "engine"
+        config = make_packaged_config("rocKE/a", [64])
+        (engine_dir / config.descriptor_dir).mkdir(parents=True)
+        script = repo / "tools" / "deep" / "er" / "generate.py"
+        script.parent.mkdir(parents=True)
+        monkeypatch.setattr(generate, "__file__", str(script))
+        monkeypatch.setattr(generate, "INSTALLED_ENGINE_DIR", "providers/engine")
+
+        assert generate.installed_descriptor_dir(config) == (
+            engine_dir / config.descriptor_dir
+        )
+
+
 class TestDryRun:
     def test_dry_run_does_not_create_output_dir(self, tmp_path):
         output_dir = tmp_path / "out"
@@ -249,6 +287,32 @@ class TestLineEndings:
             assert with_cr == []
 
 
+class TestNewIds:
+    def test_new_ids_over_a_populated_output_directory_replaces_every_id(
+        self, tmp_path
+    ):
+        out = tmp_path / "out"
+        first = run_cli("--config", str(SCALE_ADD_CONFIG), "--output-dir", str(out))
+        assert first.returncode == 0, first.stderr
+        held = out / "test_descriptors" / "unit" / "scale_add"
+        before = all_ids(read_docs(held))
+
+        second = run_cli(
+            "--config",
+            str(SCALE_ADD_CONFIG),
+            "--output-dir",
+            str(out),
+            "--force",
+            "--new-ids",
+        )
+
+        assert second.returncode == 0, second.stderr
+        assert "every id is new" in second.stdout
+        after = all_ids(read_docs(held))
+        assert len(after) == len(before)
+        assert after.isdisjoint(before)
+
+
 class TestInstalledBundle:
     """The bundle installed in the provider tree is where an engine's ids live, so a
     plain run reuses them. Driven in-process, with the provider tree pointed at a
@@ -284,19 +348,6 @@ class TestInstalledBundle:
         captured = capsys.readouterr()
         return code, captured
 
-    @staticmethod
-    def descriptors(directory: Path) -> dict:
-        return {p.name: p.read_bytes() for p in sorted(directory.glob("*.json"))}
-
-    @staticmethod
-    def ids_of(directory: Path) -> set:
-        ids = set()
-        for path in directory.glob("*.json"):
-            doc = json.loads(path.read_text(encoding="utf-8"))
-            ids.add(doc["id"])
-            ids.update(k["id"] for k in doc.get("kernelDescriptors", []))
-        return ids
-
     def test_an_installed_bundle_is_reused_without_a_flag(
         self, installed, tmp_path, monkeypatch, capsys
     ):
@@ -308,7 +359,7 @@ class TestInstalledBundle:
         assert code == 0, captured.err
         assert "Reusing ids from the installed bundle" in captured.out
         generated = out / "test_descriptors" / "unit" / "scale_add"
-        assert self.descriptors(generated) == self.descriptors(descriptor_dir)
+        assert json_bytes(generated) == json_bytes(descriptor_dir)
 
     def test_new_ids_ignores_the_installed_bundle(
         self, installed, tmp_path, monkeypatch, capsys
@@ -323,7 +374,9 @@ class TestInstalledBundle:
         assert code == 0, captured.err
         assert "Reusing ids" not in captured.out
         generated = out / "test_descriptors" / "unit" / "scale_add"
-        assert self.ids_of(generated).isdisjoint(self.ids_of(descriptor_dir))
+        assert all_ids(read_docs(generated)).isdisjoint(
+            all_ids(read_docs(descriptor_dir))
+        )
 
     def test_new_ids_contradicts_ids_from(
         self, installed, tmp_path, monkeypatch, capsys
@@ -367,7 +420,7 @@ class TestInstalledBundle:
             load_config(SCALE_ADD_CONFIG), out
         )
         held = out / "test_descriptors" / "unit" / "scale_add"
-        assert self.ids_of(held).isdisjoint(self.ids_of(descriptor_dir))
+        assert all_ids(read_docs(held)).isdisjoint(all_ids(read_docs(descriptor_dir)))
 
         code, captured = self.run_main(
             monkeypatch, capsys, "--output-dir", str(out), "--force"
@@ -376,7 +429,7 @@ class TestInstalledBundle:
         assert code == 0, captured.err
         assert "Also reading" in captured.out
         assert "Warning" in captured.err and "it is ignored" in captured.err
-        assert self.descriptors(held) == self.descriptors(descriptor_dir)
+        assert json_bytes(held) == json_bytes(descriptor_dir)
 
     @staticmethod
     def with_kernels(*blocks):
@@ -444,6 +497,7 @@ class TestInstalledBundle:
         assert code == 0, captured.err
         kdp_path = scratch / "scale_add.kdp.json"
         kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
+        kdp["id"] = str(uuid.uuid4())
         kdp["kernelDescriptors"][0]["id"] = str(uuid.uuid4())
         kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
         kept = self.kernel_ids(scratch)["scale_add.f32_block128"]
@@ -457,6 +511,11 @@ class TestInstalledBundle:
         shipped = self.kernel_ids(descriptor_dir)
         assert {name: ids[name] for name in shipped} == shipped
         assert ids["scale_add.f32_block128"] == kept
+        installed_kdp = json.loads(
+            (descriptor_dir / "scale_add.kdp.json").read_text(encoding="utf-8")
+        )
+        regenerated = json.loads(kdp_path.read_text(encoding="utf-8"))
+        assert regenerated["id"] == installed_kdp["id"]
 
     def test_an_unreadable_scratch_is_ignored_with_a_warning(
         self, installed, tmp_path, monkeypatch, capsys
@@ -657,23 +716,11 @@ class TestInstalledSiblings:
         256) installed under one scratch provider tree."""
         import generate
 
-        generator = IngestorGenerator(TOOL_ROOT / "templates")
-        root = tmp_path / "engine"
-        home = make_packaged_config("rocKE/a", [64, 128])
-        generator.render(home, root, resolution=resolve_ids(home, root))
-        satellite = make_packaged_config("rocKE/b", [128, 256])
-        generator.render(
-            satellite,
-            root,
-            resolution=resolve_ids(
-                satellite, root, engine_ids_from=[root / home.descriptor_dir]
-            ),
+        installed = home_and_satellite(
+            IngestorGenerator(TOOL_ROOT / "templates"), tmp_path, same_tree=True
         )
-        monkeypatch.setattr(generate, "INSTALLED_ENGINE_DIR", str(root))
-        return SimpleNamespace(
-            home_dir=root / home.descriptor_dir,
-            satellite_dir=root / satellite.descriptor_dir,
-        )
+        monkeypatch.setattr(generate, "INSTALLED_ENGINE_DIR", str(installed.home_root))
+        return installed
 
     @staticmethod
     def run_main(monkeypatch, capsys, config, out, *flags):
@@ -683,13 +730,6 @@ class TestInstalledSiblings:
         return TestInstalledBundle.run_main(
             monkeypatch, capsys, "--output-dir", str(out), *flags
         )
-
-    @staticmethod
-    def docs(directory: Path) -> dict:
-        return {
-            p.name: json.loads(p.read_text(encoding="utf-8"))
-            for p in sorted(directory.glob("*.json"))
-        }
 
     def test_a_satellite_regenerates_against_its_home_without_a_flag(
         self, installed, tmp_path, monkeypatch, capsys
@@ -702,12 +742,12 @@ class TestInstalledSiblings:
         assert code == 0, captured.err
         assert self.ENGINE_LINE in captured.out
         assert str(installed.home_dir) in captured.out
-        written = self.docs(out / config.descriptor_dir)
+        written = read_docs(out / config.descriptor_dir)
         assert sorted(written) == ["test.kdp.json"]
         assert written == {
-            "test.kdp.json": self.docs(installed.satellite_dir)["test.kdp.json"]
+            "test.kdp.json": read_docs(installed.satellite_dir)["test.kdp.json"]
         }
-        home_ued = self.docs(installed.home_dir)["test.ued.json"]["id"]
+        home_ued = read_docs(installed.home_dir)["test.ued.json"]["id"]
         assert written["test.kdp.json"]["engine"] == home_ued
 
     def test_a_home_regenerates_with_its_satellites_kernels_in_the_duplicate_check(
@@ -723,9 +763,17 @@ class TestInstalledSiblings:
         assert str(installed.satellite_dir) in captured.out
         assert "not named" not in captured.err
         (kdp,) = [
-            d for n, d in self.docs(out / config.descriptor_dir).items() if "kdp" in n
+            d for n, d in read_docs(out / config.descriptor_dir).items() if "kdp" in n
         ]
         assert [k["name"] for k in kdp["kernelDescriptors"]] == ["a.b64", "a.b128"]
+        assert sorted(read_docs(out / config.descriptor_dir)) == [
+            "kernel_dtype_matches_graph.umd.json",
+            "test.kdp.json",
+            "test.kmd.json",
+            "test.udd.json",
+            "test.ued.json",
+            "test.uhd.json",
+        ]
 
     def test_a_new_satellite_takes_its_engine_ids_from_the_installed_home(
         self, installed, tmp_path, monkeypatch, capsys
@@ -739,10 +787,10 @@ class TestInstalledSiblings:
 
         assert code == 0, captured.err
         assert self.ENGINE_LINE in captured.out
-        written = self.docs(out / config.descriptor_dir)
+        written = read_docs(out / config.descriptor_dir)
         assert sorted(written) == ["test.kdp.json"]
         kdp = written["test.kdp.json"]
-        assert kdp["engine"] == self.docs(installed.home_dir)["test.ued.json"]["id"]
+        assert kdp["engine"] == read_docs(installed.home_dir)["test.ued.json"]["id"]
         assert [k["name"] for k in kdp["kernelDescriptors"]] == ["c.b512"]
 
     def test_naming_a_sibling_replaces_the_discovered_ones(
@@ -765,11 +813,47 @@ class TestInstalledSiblings:
         assert code == 0, captured.err
         assert self.ENGINE_LINE not in captured.out
         (kdp,) = [
-            d for n, d in self.docs(out / config.descriptor_dir).items() if "kdp" in n
+            d for n, d in read_docs(out / config.descriptor_dir).items() if "kdp" in n
         ]
         assert [k["name"] for k in kdp["kernelDescriptors"]] == ["c.b256", "c.b512"]
         assert "not named" in captured.err
         assert str(installed.satellite_dir) in captured.err
+
+    def test_a_satellite_passes_check_placeholders_on_its_own_kdp(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        config = make_packaged_config("rocKE/b", [128, 256])
+        out = tmp_path / "out"
+        code, captured = self.run_main(monkeypatch, capsys, config, out)
+        assert code == 0, captured.err
+
+        code, captured = self.run_main(
+            monkeypatch, capsys, config, out, "--check-placeholders"
+        )
+
+        assert code == 0, captured.err + captured.out
+        assert "Located 1 of this engine's 1 shippable files" in captured.out
+        assert "not found" not in captured.out
+
+    def test_a_multi_pack_config_beside_a_sibling_is_refused_without_a_flag_hint(
+        self, installed, tmp_path, monkeypatch, capsys
+    ):
+        config = make_packaged_config("rocKE/c", [64])
+        config.packs.append(
+            make_pack(
+                name="second",
+                kernels=[make_rocke_kernel("c.b32", 32)],
+                arch=["gfx950"],
+            )
+        )
+        out = tmp_path / "out"
+
+        code, captured = self.run_main(monkeypatch, capsys, config, out)
+
+        assert code == 2
+        assert "single-pack" in captured.err
+        assert "--engine-ids-from" not in captured.err
+        assert not out.exists()
 
     def test_new_ids_ignores_the_installed_siblings(
         self, installed, tmp_path, monkeypatch, capsys
@@ -781,15 +865,101 @@ class TestInstalledSiblings:
 
         assert code == 0, captured.err
         assert "Reusing" not in captured.out
-        generated = self.docs(out / config.descriptor_dir)
+        generated = read_docs(out / config.descriptor_dir)
         assert "test.ued.json" in generated, "a fresh bundle is its own home"
-        installed_ids = set()
-        for directory in (installed.home_dir, installed.satellite_dir):
-            for doc in self.docs(directory).values():
-                installed_ids.add(doc["id"])
-                installed_ids.update(k["id"] for k in doc.get("kernelDescriptors", []))
-        ids = set()
-        for doc in generated.values():
-            ids.add(doc["id"])
-            ids.update(k["id"] for k in doc.get("kernelDescriptors", []))
-        assert ids.isdisjoint(installed_ids)
+        installed_ids = all_ids(read_docs(installed.home_dir)) | all_ids(
+            read_docs(installed.satellite_dir)
+        )
+        assert all_ids(generated).isdisjoint(installed_ids)
+
+
+class TestRefusedRuns:
+    """Runs the generator stops before writing, driven in-process with no installed
+    provider tree: the output directory is the only previous bundle."""
+
+    @pytest.fixture(autouse=True)
+    def no_installed_tree(self, tmp_path, monkeypatch):
+        import generate
+
+        monkeypatch.setattr(generate, "INSTALLED_ENGINE_DIR", str(tmp_path / "none"))
+
+    @staticmethod
+    def run(monkeypatch, capsys, config, out, *flags):
+        return TestInstalledSiblings.run_main(monkeypatch, capsys, config, out, *flags)
+
+    @staticmethod
+    def snapshot(root: Path) -> dict:
+        return {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        }
+
+    @pytest.mark.parametrize("flag", ["--force", "--dry-run"])
+    def test_a_pack_whose_kdp_is_a_dvc_artifact_is_not_given_a_second_kdp(
+        self, flag, tmp_path, monkeypatch, capsys
+    ):
+        config = make_packaged_config("rocKE/a", [64, 128])
+        out = tmp_path / "out"
+        IngestorGenerator(TOOL_ROOT / "templates").render(config, out)
+        held = out / config.descriptor_dir
+        (held / "artifacts").mkdir()
+        (held / "test.kdp.json").rename(held / "artifacts" / "test.kdp.json")
+        before = self.snapshot(out)
+
+        code, captured = self.run(monkeypatch, capsys, config, out, "--force", flag)
+
+        assert code == 2, captured.out
+        assert "artifacts/test.kdp.json" in captured.err
+        assert "splice" in captured.err
+        assert self.snapshot(out) == before
+
+    def test_a_stale_kdp_beside_a_renamed_packs_is_named_for_deletion(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        config = load_config(TOOL_ROOT / "configs" / "binary_ops.yaml")
+        out = tmp_path / "out"
+        code, captured = self.run(monkeypatch, capsys, config, out)
+        assert code == 0, captured.err
+        renamed = copy.deepcopy(config)
+        renamed.packs[1].name += "_x"
+        code, captured = self.run(monkeypatch, capsys, renamed, out, "--force")
+        assert code == 0, captured.err
+
+        code, captured = self.run(monkeypatch, capsys, renamed, out, "--force")
+
+        assert code == 2
+        assert "appears twice under" in captured.err
+        assert "delete the stale file" in captured.err
+        assert "override them" not in captured.err
+
+    def test_the_id_summary_names_retired_kernels_before_the_arch_clause(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        def kernel(name, block, arch):
+            made = make_rocke_kernel(name, block)
+            made.arch = arch
+            return made
+
+        config = make_packaged_config("rocKE/a", [64])
+        config.packs[0].arch = ["gfx1100", "gfx1201"]
+        config.packs[0].kernels = [
+            kernel("k64", 64, []),
+            kernel("k256", 256, ["gfx1100"]),
+            kernel("k512", 512, []),
+        ]
+        out = tmp_path / "out"
+        IngestorGenerator(TOOL_ROOT / "templates").render(config, out)
+        moved = copy.deepcopy(config)
+        moved.packs[0].kernels = [
+            kernel("k64", 64, []),
+            kernel("k256", 256, ["gfx1201"]),
+        ]
+
+        code, captured = self.run(monkeypatch, capsys, moved, out, "--force")
+
+        assert code == 0, captured.err
+        (line,) = [l for l in captured.out.splitlines() if l.startswith("Ids:")]
+        assert line.endswith(
+            "minted 0, retired 1: k512; 1 kept an id across an arch change: k256"
+        ), line

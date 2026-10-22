@@ -96,7 +96,7 @@ def earlier_passes(config, output_dir: Path, used: list[Path]) -> list[Path]:
         bundle = sibling / config.descriptor_dir
         if sibling.resolve() in skipped or bundle.resolve() in skipped:
             continue
-        if not bundle.is_dir() or not prior_ids.list_docs(bundle, "ued", "kdp"):
+        if not prior_ids.holds_docs(bundle, "ued", "kdp"):
             continue
         try:
             if prior_ids.find_engine(bundle, config.engine.name) is None:
@@ -124,6 +124,12 @@ def describe_ids(report: IdReport, fresh: bool = False) -> str:
         f"Ids: reused {total} from {source} ({', '.join(parts)}), "
         f"minted {report.minted}, retired {len(report.retired)}"
     )
+    if report.retired:
+        shown = ", ".join(report.retired[:10])
+        more = (
+            f" (+{len(report.retired) - 10} more)" if len(report.retired) > 10 else ""
+        )
+        line += f": {shown}{more}"
     if report.home is not None and report.home != source:
         line += f"; engine ids from {report.home}"
     if report.arch_moved:
@@ -134,12 +140,6 @@ def describe_ids(report: IdReport, fresh: bool = False) -> str:
             else ""
         )
         line += f"; {len(report.arch_moved)} kept an id across an arch change: {shown}{more}"
-    if report.retired:
-        shown = ", ".join(report.retired[:10])
-        more = (
-            f" (+{len(report.retired) - 10} more)" if len(report.retired) > 10 else ""
-        )
-        line += f": {shown}{more}"
     return line
 
 
@@ -164,7 +164,8 @@ def main() -> None:
         "--dry-run",
         action="store_true",
         help="Preview which files would be generated without writing them or "
-        "creating the output directory.",
+        "creating the output directory. It resolves the ids like a real run, so "
+        "it exits 2 on a previous bundle it cannot use.",
     )
     parser.add_argument(
         "--force",
@@ -173,8 +174,9 @@ def main() -> None:
         "Without it, an existing non-empty output directory is an error -- "
         "regenerating over a live tree would silently clobber hand-filled "
         "content (e.g. a completed graph_match body). Descriptor ids are kept "
-        "across a regeneration either way (see --ids-from), so ids are no "
-        "longer a reason to generate into scratch.",
+        "across a regeneration either way (see --ids-from). A run that would "
+        "write a KDP beside the same pack's DVC artifact under artifacts/ is "
+        "refused even with --force.",
     )
     parser.add_argument(
         "--ids-from",
@@ -184,8 +186,10 @@ def main() -> None:
         "stable key matches keeps its id; only new ones get a fresh id. Without "
         "it, the bundle already installed in the provider tree "
         "(dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/"
-        "<descriptor dir>) is used when it exists, else the descriptor directory "
-        "under --output-dir when that already holds a bundle.",
+        "<descriptor dir>) is used when it exists. The descriptor directory "
+        "under --output-dir is read as well when it holds a bundle: it is the "
+        "only source when nothing is installed, and otherwise it fills in the "
+        "ids of descriptors added since installation, installed ids winning.",
     )
     parser.add_argument(
         "--new-ids",
@@ -296,11 +300,11 @@ def main() -> None:
                 )
         if not args.new_ids and ids_from is None:
             installed = installed_descriptor_dir(config)
-            if installed is not None and prior_ids.list_docs(installed, "ued", "kdp"):
+            if installed is not None and prior_ids.holds_docs(installed, "ued", "kdp"):
                 ids_from, automatic = installed, True
                 print(f"Reusing ids from the installed bundle {installed}")
                 held = args.output_dir / config.descriptor_dir
-                if prior_ids.list_docs(held, "ued", "kdp") and held.resolve() != (
+                if prior_ids.holds_docs(held, "ued", "kdp") and held.resolve() != (
                     installed.resolve()
                 ):
                     also_from = held
@@ -318,10 +322,11 @@ def main() -> None:
                 also_from=also_from,
             )
         except ValueError as e:
+            # Naming another source cannot cure a refusal about the tree read.
             hint = (
                 "\n(Installed bundles were picked up automatically; --new-ids "
                 "ignores them, and --ids-from / --engine-ids-from override them.)"
-                if automatic
+                if automatic and not isinstance(e, prior_ids.NotOverridable)
                 else ""
             )
             print(f"Error: {e}{hint}", file=sys.stderr)
@@ -345,9 +350,18 @@ def main() -> None:
                 )
         return resolution
 
+    def refuse_second_kdp() -> None:
+        """Exit 2 when this run would shadow a pack's DVC artifact."""
+        try:
+            generator.refuse_second_kdp(config, args.output_dir)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(EXIT_BAD_INPUT)
+
     resolution = None
     if args.dry_run:
         resolution = resolve()
+        refuse_second_kdp()
         files = generator.preview_files(config, resolution=resolution)
         print(
             f"\nDry run -- would generate {len(files)} files (output dir not created):"
@@ -449,6 +463,7 @@ def main() -> None:
     # Resolved before anything is written: the output directory is itself a
     # source of ids.
     resolution = resolve()
+    refuse_second_kdp()
 
     # Said before anything is written, while the files can still be dealt with.
     expected = set(generator.preview_files(config, resolution=resolution))
