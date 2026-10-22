@@ -539,10 +539,93 @@ def test_an_also_section_must_cross_the_same_cell_fields(probe):
     assert _run_probe(probe, manifest) == 2
 
 
-def test_also_is_slice_only(probe):
-    manifest = _with_also(probe)
+def _full(manifest: dict) -> dict:
+    """``manifest`` as a full space: ``tile_n`` a performance knob, ``order`` resolved
+    by its accessor, every other varying field held."""
+    manifest = copy.deepcopy(manifest)
     manifest["enumerate"]["space"] = "full"
+    manifest["enumerate"].pop("free_fields", None)
+    manifest["reduction"] = {
+        "fields": {
+            "feature": ["dtype", "causal", "tile_m"],
+            "performance": [
+                {"name": "tile_n"},
+                {"name": "order", "unset_resolves_by": "resolved_order"},
+            ],
+            "ignored": [],
+        }
+    }
+    return manifest
+
+
+def test_full_also_sections_each_project_their_knobs(probe):
+    """A full primary section and a full ``also`` section: each keeps every
+    performance variant of its own cells, and the catalog's projected knobs are the
+    union, carried by every kernel."""
+    manifest = _full(_with_also(probe))
+    manifest["enumerate"]["also"][0].pop("free_fields")
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    extra = [k for k in kernels if k["provenance"]["rocke_spec_id"] == "a"]
+    # 3 tile_n x 2 resolved orders (an unset order is the "row" binary) for one cell.
+    assert len(extra) == 6
+    assert {k["metadata"]["tile_n"] for k in extra} == {32, 64, 128}
+    assert {k["metadata"]["order"] for k in kernels} == {"row", "col"}
+    assert sum(k.get("default", False) for k in extra) == 1
+
+
+def test_a_full_primary_may_carry_a_slice_also_section(probe):
+    """``space`` is inherited from ``enumerate`` unless a section sets its own."""
+    manifest = _full(_with_also(probe, free_fields=[], space="slice"))
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len([k for k in kernels if k["provenance"]["rocke_spec_id"] == "a"]) == 1
+
+
+def test_plan_space_counts_every_section(probe, capsys):
+    """--plan-space's instance count is the catalog --out writes, ``also`` included."""
+    manifest = _full(_with_also(probe))
+    manifest["enumerate"]["also"][0].pop("free_fields")
+    path = synth.write_manifest(probe.tmp / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 0
+    shown = capsys.readouterr().out
+    assert _run_probe(probe, manifest) == 0
+    count = len(yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"])
+    assert f"instances (current classification): {count} " in shown
+    assert "section a (space: full)" in shown
+
+
+_LAUNCHES = {"main": {}, "reduce": {"role": "reduce"}}
+
+
+def test_launches_are_copied_onto_every_kernel(probe):
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["launches"] = _LAUNCHES
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels and all(k["kernel_source"]["launches"] == _LAUNCHES for k in kernels)
+
+
+@pytest.mark.parametrize(
+    "launches",
+    [{"main": {}}, {"Main": {}, "reduce": {"role": "reduce"}}, {"main": {}, "r": 1}],
+    ids=["one-launch", "bad-name", "non-mapping"],
+)
+def test_a_malformed_launches_block_is_refused(probe, launches):
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["launches"] = launches
     assert _run_probe(probe, manifest) == 2
+
+
+def test_a_paired_reduce_without_launches_is_refused(probe, capsys):
+    """The registry hands back a kernel paired with a reduce; a catalog that does not
+    launch it would ship the kernel alone."""
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["pin"] = {"algorithm": "split", "spec_id": "s"}
+    assert _run_probe(probe, manifest) == 2
+    assert "declares no 'launches'" in capsys.readouterr().err
+    manifest["launches"] = _LAUNCHES
+    assert _run_probe(probe, manifest) == 0
 
 
 def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
