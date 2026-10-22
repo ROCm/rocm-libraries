@@ -168,11 +168,20 @@ static bool hasStatsOutput(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttri
     return attrs.generate_stats().value_or(false);
 }
 
-// Byte sizes the forward kernargs scale element strides by. Q/K/V/O are checked
-// at the BF16 size, which is conservative for fp8 inputs (1 byte at run time);
-// the stats/LSE tensor is FP32.
+// Byte sizes the forward kernargs scale element strides by. The output stays
+// BF16 and the stats/LSE tensor is FP32. Q/K/V take the size of the resolved
+// input type, which is one byte for fp8 and two for bf16.
 constexpr int64_t K_BF16_BYTES = 2;
 constexpr int64_t K_FP32_BYTES = 4;
+constexpr int64_t K_FP8_BYTES = 1;
+
+// Bytes per Q/K/V element for a resolved forward data-type id. One definition
+// so the stride bounds isApplicable applies and the inBytesPerElement buildPlan
+// hands the kernarg builder cannot drift apart.
+static int64_t fwdInputBytesPerElement(const std::string& dataTypeId)
+{
+    return (dataTypeId == "fp8bf16") ? K_FP8_BYTES : K_BF16_BYTES;
+}
 
 // Validate that every forward dimension fits the 32-bit field that carries it.
 // Batch and the head counts reach the kernel through a uint32 kernarg field or
@@ -200,13 +209,16 @@ static bool
 // Validate that every forward-pass byte stride fits in uint32_t.  The ASM
 // kernarg struct stores strides as uint32 so values that overflow silently
 // truncate, producing wrong results.  Checked early in isApplicable so the
-// engine declines rather than dispatching with bad strides.
+// engine declines rather than dispatching with bad strides. `inputBytes` is
+// the resolved Q/K/V element size, so an fp8 descriptor is bounded at the one
+// byte the kernarg builder actually scales by; O stays BF16.
 static bool wouldFwdByteStridesFitUint32(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
+    int64_t inputBytes)
 {
     auto checkTensor = [](const char* prefix,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
@@ -223,9 +235,9 @@ static bool wouldFwdByteStridesFitUint32(
     };
 
     bool ok = true;
-    ok &= checkTensor("q", q, K_BF16_BYTES);
-    ok &= checkTensor("k", k, K_BF16_BYTES);
-    ok &= checkTensor("v", v, K_BF16_BYTES);
+    ok &= checkTensor("q", q, inputBytes);
+    ok &= checkTensor("k", k, inputBytes);
+    ok &= checkTensor("v", v, inputBytes);
     ok &= checkTensor("o", o, K_BF16_BYTES);
 
     if(stats != nullptr)
@@ -509,9 +521,13 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
                                "Could not find matching kernel for parameter combination");
 
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
-        "Forward byte strides overflow uint32_t kernarg fields");
+    // Q/K/V byte strides and the Ts product are scaled by the resolved input
+    // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
+    const int64_t inputBytes = fwdInputBytesPerElement(dataTypeId);
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdByteStridesFitUint32(
+                                   *qTensor, *kTensor, *vTensor, *oTensor, statsTensor, inputBytes),
+                               "Forward byte strides overflow uint32_t kernarg fields");
 
     // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
     // the one forward kernarg that is a product rather than a single stride, and
@@ -522,7 +538,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
                                        qTensor->strides()->Get(2),
-                                       K_BF16_BYTES * cfg_fmha_fwd.at(key).ts_qo),
+                                       inputBytes * cfg_fmha_fwd.at(key).ts_qo),
         "Forward Ts product overflows the uint32_t s_Ts kernarg field");
 
     return true;
@@ -705,7 +721,7 @@ void SdpaFwdPlanBuilder::buildPlan(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
 
     // FP8 inputs are 1 byte; bf16 inputs are 2 bytes. Output stays 2-byte BF16.
-    params.inBytesPerElement = (dataTypeId == "fp8bf16") ? 1U : 2U;
+    params.inBytesPerElement = static_cast<unsigned int>(fwdInputBytesPerElement(dataTypeId));
 
     // FP8 requires q/k/v descales (guaranteed present by isApplicable). They are set as
     // a unit — the SdpaFwdParams::DescaleUids optional encodes the all-or-none invariant.

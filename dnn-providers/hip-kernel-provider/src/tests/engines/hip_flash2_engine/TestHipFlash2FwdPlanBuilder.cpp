@@ -324,6 +324,8 @@ TEST_P(TestHipFlash2DimRange, IsApplicableMatchesTheDimensionRange)
 
 // INT32_MAX itself is not reachable for seq_len_q (the engine also requires a
 // multiple of 64), so its case sits on the largest multiple of 64 below it.
+// seq_len_kv stops one KV tile lower still: K_FLASH2_MAX_SEQ_LEN_KV is the
+// largest length whose tile count the kernels can form without overflowing int.
 constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
 constexpr int64_t K_MAX_SEQ_MULTIPLE_OF_64 = (K_I32_DIM_LIMIT / 64) * 64;
 constexpr int64_t K_WRAPS_TO_4096 = (int64_t{1} << 32) + 4096;
@@ -361,8 +363,14 @@ INSTANTIATE_TEST_SUITE_P(
                            true},
         Flash2DimRangeCase{
             "seq_len_q wraps to 4096", {1, 32, K_WRAPS_TO_4096, 128}, {1, 32, 4096, 128}, false},
-        Flash2DimRangeCase{
-            "seq_len_kv at INT32_MAX", {1, 32, 4096, 128}, {1, 32, K_I32_DIM_LIMIT, 128}, true},
+        Flash2DimRangeCase{"seq_len_kv at its largest accepted value",
+                           {1, 32, 4096, 128},
+                           {1, 32, K_FLASH2_MAX_SEQ_LEN_KV, 128},
+                           true},
+        Flash2DimRangeCase{"seq_len_kv one past its largest accepted value",
+                           {1, 32, 4096, 128},
+                           {1, 32, K_FLASH2_MAX_SEQ_LEN_KV + 1, 128},
+                           false},
         Flash2DimRangeCase{"seq_len_kv one past INT32_MAX",
                            {1, 32, 4096, 128},
                            {1, 32, K_I32_DIM_LIMIT + 1, 128},

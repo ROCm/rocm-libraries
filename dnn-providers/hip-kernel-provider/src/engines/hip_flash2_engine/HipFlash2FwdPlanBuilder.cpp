@@ -106,6 +106,14 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                    "Tensor dimensions overflow the 32-bit fields that carry them");
     }
 
+    // The int gate above only proves seq_len_kv survives the narrowing. The KV
+    // tile count the kernels form from it needs one more tile of headroom.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(2) > K_FLASH2_MAX_SEQ_LEN_KV,
+        "seq_len_kv exceeds " + std::to_string(K_FLASH2_MAX_SEQ_LEN_KV)
+            + ", the largest value whose KV tile count does not overflow int (actual: "
+            + std::to_string(kTensor->dims()->Get(2)) + ")");
+
     // K2: reject mask types the kernel does not implement
     {
         auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;

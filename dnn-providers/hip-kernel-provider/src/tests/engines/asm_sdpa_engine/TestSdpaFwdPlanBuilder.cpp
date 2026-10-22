@@ -377,9 +377,12 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
 // Build an fp8-in / bf16-out forward SDPA graph, optionally with q/k/v descale
 // tensors, to exercise the fp8 applicability policy. descaleDims defaults to a
 // per-tensor scalar ([1,1,1,1]); pass a larger shape (e.g. [B,H_kv,1,1]) to build
-// the non-scalar descales the engine must reject.
-flatbuffers::FlatBufferBuilder
-    createSdpaFwdFp8Graph(bool withDescale, const std::vector<int64_t>& descaleDims = {1, 1, 1, 1})
+// the non-scalar descales the engine must reject. qStrides overrides the
+// contiguous Q strides, which is what the fp8 Ts boundary cases need.
+flatbuffers::FlatBufferBuilder createSdpaFwdFp8Graph(bool withDescale,
+                                                     const std::vector<int64_t>& descaleDims
+                                                     = {1, 1, 1, 1},
+                                                     const std::vector<int64_t>& qStrides = {})
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -388,14 +391,15 @@ flatbuffers::FlatBufferBuilder
 
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t>& qStridesUsed = qStrides.empty() ? strides : qStrides;
     const std::vector<int64_t>& scalarDims = descaleDims;
     const std::vector<int64_t> scalarStrides
         = hipdnn_data_sdk::utilities::generateStrides(scalarDims);
 
     int64_t uid = 1;
     const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &qStridesUsed, &dims));
     const auto kUid = uid++;
     tensorAttributes.push_back(
         CreateTensorAttributesDirect(builder, kUid, "k", DataType::FP8_E4M3_FNUZ, &strides, &dims));
@@ -1246,7 +1250,7 @@ TEST(TestSdpaKernargRanges, ByteStrideFitsU32DeclinesAnElementCountThatOverflows
 // accepted element range by that factor.
 TEST(TestSdpaKernargRanges, ByteStrideFitsU32FoldsInATileFactor)
 {
-    constexpr int64_t K_TILE_BYTES = 2 * 192;
+    constexpr int64_t K_TILE_BYTES = int64_t{2} * 192;
     EXPECT_TRUE(plan_utils::byteStrideFitsU32(
         "Ts", static_cast<int64_t>(UINT32_MAX) / K_TILE_BYTES, K_TILE_BYTES));
     EXPECT_FALSE(plan_utils::byteStrideFitsU32(
@@ -1418,15 +1422,19 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASuppor
     }
 }
 
-// ts_qo of the row isApplicable resolves for a bf16 hd128 no-mask batch graph,
-// selected by the same rule getKernelNameKey applies.
-std::optional<int> resolveFwdTileSizeQo(const std::string& archId)
+// ts_qo of the row isApplicable resolves for an hd128 no-mask batch graph of
+// `dtype`, selected by the same rule getKernelNameKey applies. gfx942 also
+// matches bf16_cvt, which getBf16ConvertMode sets to RTNE (0) for bf16 and
+// RTNA (1) for fp8.
+std::optional<int> resolveFwdTileSizeQo(const std::string& archId, const std::string& dtype)
 {
+    const int expectedBf16Cvt = (dtype == "fp8bf16") ? 1 : 0;
     for(const auto& entry : cfg_fmha_fwd)
     {
         const auto& cfg = entry.second;
-        if(cfg.arch == archId && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
-           && cfg.mask == 0 && cfg.mode == 0 && (archId == "gfx950" || cfg.bf16_cvt == 0))
+        if(cfg.arch == archId && cfg.dtype == dtype && cfg.hdim_q == 128 && cfg.hdim_v == 128
+           && cfg.mask == 0 && cfg.mode == 0
+           && (archId == "gfx950" || cfg.bf16_cvt == expectedBf16Cvt))
         {
             return cfg.ts_qo;
         }
@@ -1435,8 +1443,10 @@ std::optional<int> resolveFwdTileSizeQo(const std::string& archId)
 }
 
 // s_Ts is tileSizeQo * stride_q * bytes-per-element, computed in unsigned int.
-// The per-field stride guard only bounds stride_q * 2, so the tile factor is
-// what this guard adds: the accepted stride shrinks by ts_qo.
+// The per-field stride guard only bounds stride_q * bytes-per-element, so the
+// tile factor is what this guard adds: the accepted stride shrinks by ts_qo.
+// The element size is the resolved input size, two bytes for bf16 and one for
+// fp8, so the fp8 boundary sits at twice the bf16 one for the same ts_qo.
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSize)
 {
     SKIP_IF_NO_DEVICES();
@@ -1448,7 +1458,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
         GTEST_SKIP();
     }
 
-    const auto tileSizeQo = resolveFwdTileSizeQo(deviceString);
+    const auto tileSizeQo = resolveFwdTileSizeQo(deviceString, "bf16");
     ASSERT_TRUE(tileSizeQo.has_value()) << "no bf16 hd128 no-mask row for " << deviceString;
 
     constexpr int64_t K_BF16_BYTES = 2;
@@ -1473,6 +1483,38 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
         builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
+
+    // fp8 forward kernels ship for gfx942 only. Their kernarg builder scales the
+    // strides by one byte, so bounding the fp8 Ts at the bf16 size would decline
+    // descriptors the kernel runs.
+    if(deviceString != "gfx942")
+    {
+        return;
+    }
+
+    const auto fp8TileSizeQo = resolveFwdTileSizeQo(deviceString, "fp8bf16");
+    ASSERT_TRUE(fp8TileSizeQo.has_value()) << "no fp8bf16 hd128 no-mask row for " << deviceString;
+
+    constexpr int64_t K_FP8_BYTES = 1;
+    const int64_t fp8Limit = static_cast<int64_t>(UINT32_MAX) / (K_FP8_BYTES * *fp8TileSizeQo);
+    ASSERT_LE((fp8Limit + 1) * K_FP8_BYTES, static_cast<int64_t>(UINT32_MAX));
+    // The bf16 element size would have cut this in half, which is the reach the
+    // resolved element size restores.
+    ASSERT_GT(fp8Limit, static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *fp8TileSizeQo));
+
+    const std::vector<int64_t> fp8AtLimit = {fp8Limit, fp8Limit, fp8Limit, 1};
+    auto fp8BuilderAtLimit
+        = createSdpaFwdFp8Graph(/*withDescale=*/true, /*descaleDims=*/{1, 1, 1, 1}, fp8AtLimit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwFp8AtLimit(
+        fp8BuilderAtLimit.GetBufferPointer(), fp8BuilderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwFp8AtLimit));
+
+    const std::vector<int64_t> fp8PastLimit = {fp8Limit + 1, fp8Limit + 1, fp8Limit + 1, 1};
+    auto fp8BuilderPastLimit
+        = createSdpaFwdFp8Graph(/*withDescale=*/true, /*descaleDims=*/{1, 1, 1, 1}, fp8PastLimit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwFp8PastLimit(
+        fp8BuilderPastLimit.GetBufferPointer(), fp8BuilderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwFp8PastLimit));
 }
 
 // =============================================================================
