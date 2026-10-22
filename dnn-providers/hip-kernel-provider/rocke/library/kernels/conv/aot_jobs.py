@@ -206,6 +206,30 @@ CACHE_GROUPED: Tuple[bool, ...] = (True,)
 # search runs only as many steps as a problem's records need, so the bound
 # costs the common stride-1 / stride-2 problems nothing.
 CACHE_DGRAD_MAX_SUB_GEMMS = 1024
+# The patch-embedding dgrad (DgradConvSpec.patch): one GEMM over the filter's
+# (y, x, c) for stride >= filter and no padding. Built on these ungrouped
+# cshuffle geometries only -- (tile_m, tile_n, tile_k, warp_m, warp_n, warp
+# tile, pipeline), the ones that led a sweep of ViT/SigLIP/ConvNeXt stems --
+# at every B/D width, since the X*C run of a stem is often odd or 2 mod 4.
+CACHE_DGRAD_PATCH_GEOMETRIES: frozenset = frozenset(
+    (tm, tn, tk, wm, wn, wt, pipe)
+    for (tm, tn, tk, wm, wn, wt), pipes in (
+        ((128, 256, 64, 1, 4, 16), ("compv3", "compv4")),
+        ((128, 256, 64, 2, 4, 16), ("mem", "compv3", "compv4")),
+        ((128, 256, 64, 2, 2, 16), ("compv3", "compv4")),
+        ((256, 128, 64, 2, 2, 16), ("compv3", "compv4")),
+        ((256, 128, 64, 4, 1, 16), ("compv3", "compv4")),
+        ((256, 128, 32, 4, 2, 16), ("mem", "compv3")),
+        ((128, 128, 64, 2, 2, 16), ("mem", "compv3", "compv4")),
+        ((128, 128, 64, 2, 4, 16), ("mem",)),
+        ((128, 128, 64, 1, 4, 32), ("mem",)),
+        ((128, 128, 64, 2, 2, 32), ("mem", "compv3", "compv4")),
+        ((128, 64, 64, 4, 1, 32), ("mem", "compv3", "compv4")),
+        ((128, 64, 64, 4, 2, 32), ("compv4",)),
+        ((64, 64, 64, 2, 2, 16), ("mem", "compv3", "compv4")),
+    )
+    for pipe in pipes
+)
 # wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
 # one workgroup. The degree is baked in and the binary serves depthwise
 # problems only (groups divisible by Gm, Y*X*Gm within the tile). Mirrors
@@ -417,6 +441,20 @@ def _layout_caps() -> List[dict]:
 def _dgrad_caps() -> List[dict]:
     """dgrad's capability variants: grouped, always the tilde kernel."""
     return [dict(grouped=g, tilde=True) for g in _GROUPED]
+
+
+def _is_patch_geometry(geometry: tuple) -> bool:
+    """Is ``geometry`` (a :func:`_geometries` entry) one the patch dgrad builds?
+
+    MFMA only: the patch store is not implemented for WMMA.
+    """
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    return (
+        atom.family == "mma"
+        and epilogue == "cshuffle"
+        and (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
+        in CACHE_DGRAD_PATCH_GEOMETRIES
+    )
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -1022,6 +1060,60 @@ def _dgrad_jobs(
                 caps=caps,
             )
 
+        # The patch-embedding GEMM (ungrouped, on the tilde record path) on its
+        # geometries only, at every B/D width; A (dY) runs along K.
+        if not _is_patch_geometry(
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom)
+        ):
+            continue
+        caps = dict(grouped=False, tilde=True, patch=True)
+        for vec_bc in _VECS:
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=8,
+                vector_size_b=vec_bc,
+                vector_size_c=vec_bc,
+                lds_k_outer=DgradConvSpec.default_lds_k_outer(
+                    arch=arch,
+                    dtype_b=db,
+                    warp_tile_n=wt,
+                    cpg=vec_bc,
+                    wave_size=wave_size,
+                    pipeline=pipeline,
+                ),
+                max_sub_gemms=max_sub_gemms,
+                uniform_k_decode=DgradConvSpec.default_uniform_k_decode(
+                    arch=arch, wave_size=wave_size, pipeline=pipeline
+                ),
+                patch=True,
+            )
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="dgrad",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=False,
+                    **cfg,
+                ),
+                direction="dgrad",
+                spec_kwargs=cfg,
+                caps=caps,
+            )
+
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
     """The job ``--compile-all`` builds ``identity`` from.
@@ -1198,6 +1290,8 @@ def count_jobs(
                 )
             elif direction == "dgrad":
                 total += vecs * dgrad_caps
+                if _is_patch_geometry(geo):
+                    total += len(_VECS)
     return total
 
 
@@ -1265,6 +1359,9 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     from kernels.common._conv_implicit_gemm_common import ConvProblem
 
     caps = caps or {}
+    if caps.get("patch"):
+        # The patch dgrad's record is the patch embedding's own.
+        return ConvProblem(N=1, Hi=16, Wi=16, C=64, K=64, Y=2, X=2, sH=2, sW=2)
     groups = 2 if caps.get("grouped") else 1
     # The tilde dgrad kernel is the strided one: any stride > 1 selects its
     # code path, and the binary then serves every stride at run time.

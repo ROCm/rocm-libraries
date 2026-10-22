@@ -51,6 +51,7 @@
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
+    "fabs.f64": "llvm.fabs.f64",
     "flat.prefetch": "llvm.amdgcn.flat.prefetch",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
@@ -483,11 +484,13 @@
         "verified_on": "llvm23"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx950": {
@@ -522,11 +525,13 @@
         "verified_on": "llvm23"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx950": {
@@ -2031,6 +2036,40 @@
       }
     },
     "fabs.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "fabs.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm23"
