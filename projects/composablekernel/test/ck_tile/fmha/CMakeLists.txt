@@ -272,6 +272,22 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             endforeach()
         endforeach()
     endforeach()
+
+    # SGLang 1D page list: the page-size boundary (P16 fragments vs one id per tile) at both head
+    # dimensions, causal only (the table lookup does not depend on the mask).
+    foreach(page IN ITEMS 16 128)
+        foreach(head_dim IN ITEMS 64 128)
+            set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_causal_sglang)
+            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+            target_compile_definitions(${target} PRIVATE
+                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=1
+                CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG=1)
+            target_compile_options(${target} PRIVATE -Wno-float-equal
+                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        endforeach()
+    endforeach()
 endif()
 
 # The independent arithmetic reference is a host test on every FMHA architecture.
