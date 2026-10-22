@@ -21,7 +21,9 @@ One pack may draw kernels from more than one registry candidate: ``enumerate.als
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
 ``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
 space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
-are emitted primary section first, then each ``also`` section in order. A ``space: full``
+are emitted primary section first, then each ``also`` section in order; a cell listed by
+more than one section keeps the first section's default as its one ``default: true``
+floor. A ``space: full``
 section projects its own varying performance knobs; the catalog's projected knobs are the
 union over sections, in ``reduction.fields.performance`` order.
 
@@ -881,8 +883,16 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
         required=any(s.space_kind == "full" for s in registry.sections()),
     )
     rows, sections, varied, held_notes = [], [], set(), OrderedDict()
+    floors: set = set()
     for section in registry.sections():
         extra, section_projected, section_held = _section_rows(section, classification)
+        # One floor per cell: a later section listing a cell an earlier one already
+        # has keeps its kernels, but not a second `default: true`.
+        extra = [
+            (cell, ks, is_default and registry.cell_key(cell) not in floors)
+            for cell, ks, is_default in extra
+        ]
+        floors.update(registry.cell_key(cell) for cell, _, d in extra if d)
         rows.extend(extra)
         sections.extend([section] * len(extra))
         varied.update(section_projected)
