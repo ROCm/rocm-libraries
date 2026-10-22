@@ -21,12 +21,40 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
                 set -ex
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
+                ${pullMatricesCommand()}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${auxiliary.gfxTargetParser()}
                 CXX=/opt/rocm/bin/${compiler} ${project.paths.build_command} ${hipClangArgs} ${staticArgs}
             """
 
     platform.runCommand(this, command)
+}
+
+// Fetches the DVC-tracked SuiteSparse archives in clients/matrices, which the client tests require
+def pullMatricesCommand()
+{
+    // The sparse checkout may omit the .dvc directory at the repository root.
+    // Jenkins runs the container as a UID without a passwd entry, so dvc needs LOGNAME
+    // (https://docs.python.org/3/library/getpass.html#getpass.getuser).
+    return """
+                (
+                    set -e
+                    repo_root=\$(git rev-parse --show-toplevel)
+                    if [ ! -f "\${repo_root}/.dvc/config" ]; then
+                        mkdir -p "\${repo_root}/.dvc"
+                        git -C "\${repo_root}" show HEAD:.dvc/config > "\${repo_root}/.dvc/config"
+                    fi
+                    dvc_cmd=dvc
+                    if ! command -v dvc > /dev/null; then
+                        dvc_venv="\${PWD}/build/dvc-venv"
+                        python3 -m venv "\${dvc_venv}"
+                        "\${dvc_venv}/bin/python" -m pip install --quiet 'dvc[s3]'
+                        dvc_cmd="\${dvc_venv}/bin/dvc"
+                    fi
+                    cd "\${repo_root}"
+                    LOGNAME=jenkins DVC_NO_ANALYTICS=1 \${dvc_cmd} pull -R projects/rocsparse/clients/matrices
+                ) || exit 1
+            """
 }
 
 
