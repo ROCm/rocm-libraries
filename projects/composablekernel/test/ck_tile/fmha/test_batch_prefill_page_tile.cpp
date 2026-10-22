@@ -597,10 +597,19 @@ struct DeviceProblem
         return kSglang ? l.kv_page_indices : l.block_table;
     }
 
-    explicit DeviceProblem(const HostProblem& h)
+    // page_shift > 0 places every page page_shift pages further into a larger pool (and shifts the
+    // page ids to match), so the same logical problem is addressed through large page offsets.
+    static std::size_t PoolBytes(const HostProblem& h, std::int64_t page_shift)
+    {
+        const std::size_t page_bytes =
+            static_cast<std::size_t>(kPage) * h.layout.kv_heads * h.head_dim * sizeof(Data);
+        return h.k.size() * sizeof(Data) + static_cast<std::size_t>(page_shift) * page_bytes;
+    }
+
+    explicit DeviceProblem(const HostProblem& h, std::int64_t page_shift = 0)
         : q(h.q.size() * sizeof(Data)),
-          k(h.k.size() * sizeof(Data)),
-          v(h.v.size() * sizeof(Data)),
+          k(PoolBytes(h, page_shift)),
+          v(PoolBytes(h, page_shift)),
           o(h.q.size() * sizeof(Data)),
           seqstart_q(h.layout.seqstart_q.size() * sizeof(int32_t)),
           seqlen_k(h.layout.seqlen_k.size() * sizeof(int32_t)),
@@ -613,12 +622,22 @@ struct DeviceProblem
               sizeof(float))
     {
         q.ToDevice(h.q.data());
-        k.ToDevice(h.k.data());
-        v.ToDevice(h.v.data());
+        const std::size_t shift_bytes = PoolBytes(h, page_shift) - h.k.size() * sizeof(Data);
+        for(auto [pool, host] : {std::pair{&k, &h.k}, std::pair{&v, &h.v}})
+            EXPECT_EQ(hipMemcpy(static_cast<char*>(pool->GetDeviceBuffer()) + shift_bytes,
+                                host->data(),
+                                host->size() * sizeof(Data),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
         seqstart_q.ToDevice(h.layout.seqstart_q.data());
         seqlen_k.ToDevice(h.layout.seqlen_k.data());
-        if(!Pages(h.layout).empty())
-            block_table.ToDevice(Pages(h.layout).data());
+        // Valid ids move with the pages; out-of-range (poisoned) ids stay out of range.
+        std::vector<int32_t> pages = Pages(h.layout);
+        for(auto& id : pages)
+            if(id >= 0)
+                id = static_cast<int32_t>(id + page_shift);
+        if(!pages.empty())
+            block_table.ToDevice(pages.data());
         kv_indptr.ToDevice(h.layout.kv_indptr.data());
         if(!h.layout.kv_last_page_lens.empty())
             kv_last_page_lens.ToDevice(h.layout.kv_last_page_lens.data());
@@ -645,7 +664,8 @@ template <typename M>
 std::vector<Data> Run(const HostProblem& h,
                       DeviceProblem& d,
                       bool top_left               = false,
-                      std::vector<float>* lse_out = nullptr)
+                      std::vector<float>* lse_out = nullptr,
+                      std::int64_t page_shift     = 0)
 {
     using Kernel = typename M::Kernel;
     std::vector<Data> o(h.q.size(),
@@ -655,8 +675,10 @@ std::vector<Data> Run(const HostProblem& h,
                            std::numeric_limits<float>::quiet_NaN());
     if(kLse && !lse.empty())
         d.lse.ToDevice(lse.data());
+    Layout layout = h.layout;
+    layout.num_total_pages += static_cast<int>(page_shift);
     const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(
-        MakeArgs<M>(h.layout, d.pointers(), top_left));
+        MakeArgs<M>(layout, d.pointers(), top_left));
     ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
                            Kernel::MakeCheckedKernel(kargs, grids));
     EXPECT_EQ(hipGetLastError(), hipSuccess);
@@ -913,6 +935,28 @@ TYPED_TEST(PageTileForward, SpareTableEntries)
                 << "changing only the spare table entries changed the output";
         }
     }
+}
+
+// The same logical problem in a pool whose pages start past 5 GiB (page offsets beyond the 32-bit
+// byte range) must give a bitwise equal output: page addressing is 64-bit end to end.
+TYPED_TEST(PageTileForward, LargePool)
+{
+    const Case shape{"large", 4, 2, {130, 64}, {2 * kPage + 37, 384}};
+    const auto h =
+        MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, TypeParam::kCausal, 77);
+    DeviceProblem small(h);
+    const auto base = Run<TypeParam>(h, small);
+    const std::size_t page_bytes =
+        static_cast<std::size_t>(kPage) * h.layout.kv_heads * TypeParam::kHeadDim * sizeof(Data);
+    const std::int64_t shift = static_cast<std::int64_t>((std::size_t{5} << 30) / page_bytes) + 1;
+    DeviceProblem large(h, shift);
+    const auto o = Run<TypeParam>(h, large, false, nullptr, shift);
+    std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
+              << (TypeParam::kCausal ? " causal" : " dense") << " large pool: page shift " << shift
+              << " (" << static_cast<double>(shift) * page_bytes / (1u << 30) << " GiB)\n";
+    ASSERT_EQ(o.size(), base.size());
+    EXPECT_EQ(std::memcmp(o.data(), base.data(), o.size() * sizeof(Data)), 0)
+        << "pages past 5 GiB changed the output of the same logical problem";
 }
 
 // Repeated launches of a device-filling grid must give bitwise equal outputs, and equal to the
