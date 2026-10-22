@@ -9,7 +9,7 @@
  *   1. the segment kernel via
  *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (paged K/V)
  *      or rocke_build_unified_attention_3d_tiled_strided_gfx942 (configs
- *      18-26: strided K/V, the Python kv_layout="strided"), then
+ *      18-27: strided K/V, the Python kv_layout="strided"), then
  *   2. the reduce kernel via
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
@@ -335,7 +335,8 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
-    /* 18-26: the hipDNN split-KV decode catalog (D64/128/256 x block 16/32/64). */
+    /* 18-26: representative strided decode specs spanning the catalog's D x block
+     * axes (D64/128/256 x block 16/32/64); 27 is 22 with waves_per_eu=2. */
     case 18:
         strided_decode(s, 64, 16, 0, "fp16", 64, 32, 8);
         break;
@@ -362,6 +363,11 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         break;
     case 26:
         strided_decode(s, 256, 64, 32, "fp16", 8, 32, 8);
+        break;
+    case 27:
+        strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
         break;
     default:
         return -1;

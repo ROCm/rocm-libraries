@@ -221,10 +221,13 @@ def _lower(kernel):
 @pytest.mark.parametrize("head_size, block_size", [(64, 16), (128, 32), (256, 64)])
 def test_num_seqs_is_ir_neutral_on_the_decode_grid(head_size, block_size):
     """The catalog drops ``num_seqs`` (batch) from the kernel axes: on the decode
-    grid the segment and reduce IR must not depend on it. Off the decode grid
-    ``num_seqs`` sizes the sequence binary search, so the segment IR differs
-    there -- the control that shows this comparison can see a change."""
+    grid the segment IR must not depend on it. The reduce comparison is
+    structural only -- the reduce spec has no ``num_seqs`` -- so the segment half
+    and the off-grid control carry the test. Off the decode grid ``num_seqs``
+    sizes the sequence binary search, so the segment IR differs there -- the
+    control that shows this comparison can see a change."""
     seg_1, _ = _runtime_specs(head_size, block_size, batch=1)
+    # Pin num_segments: the runtime picks it from batch, which this test varies.
     seg_1 = replace(seg_1, num_segments=16)
     seg_64 = replace(seg_1, num_seqs=64)
     assert seg_1.use_decode_grid and seg_64.num_seqs == 64

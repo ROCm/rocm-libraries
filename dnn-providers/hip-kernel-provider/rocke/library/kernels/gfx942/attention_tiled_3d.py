@@ -1530,22 +1530,17 @@ def supports_unified_attention_3d_module(
     fitting LDS (the same bound the strided runtime enforces), and the reduce
     kernel derived by :func:`reduce_spec_for_segment`.
     """
-    from ..common.attention_arch import attention_lds_capacity_bytes
-    from ..common.attention_unified import _tiled_3d_segment_lds_bytes
+    from ..common.attention_unified import _strided_3d_lds_reason
 
     ok, reason = supports_tiled_3d_spec(spec, arch=arch)
     if not ok:
         return False, reason
-    used = _tiled_3d_segment_lds_bytes(spec)
-    cap = attention_lds_capacity_bytes(arch)
-    if used > cap:
-        return False, (
-            f"segment needs {used} B of LDS, over the {cap} B limit "
-            f"(head_size={spec.head_size}, tile_size={spec.tile_size})"
-        )
-    return supports_unified_attention_reduce_tiled(
-        reduce_spec_for_segment(spec), arch=arch
-    )
+    reduce = reduce_spec_for_segment(spec)
+    ok, reason = supports_unified_attention_reduce_tiled(reduce, arch=arch)
+    if not ok:
+        return False, reason
+    reason = _strided_3d_lds_reason(spec, reduce, arch=arch)
+    return (False, reason) if reason is not None else (True, "supported")
 
 
 def build_unified_attention_3d_module(

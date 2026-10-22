@@ -329,7 +329,8 @@ def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32,
     )
 
 
-# 18-26: the hipDNN split-KV decode catalog (D64/128/256 x block 16/32/64).
+# 18-26: representative strided decode specs spanning the catalog's D x block
+# axes (D64/128/256 x block 16/32/64); 27 is 22 with waves_per_eu=2.
 _CONFIGS.update(
     {
         18: _strided_decode(64, 16, None, "fp16", 64),
@@ -341,6 +342,7 @@ _CONFIGS.update(
         24: _strided_decode(256, 16, None, "fp16", 22),
         25: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
         26: _strided_decode(256, 64, 32, "fp16", 8),
+        27: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
 )
 
