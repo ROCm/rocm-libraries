@@ -277,7 +277,7 @@ Steps
 
 2. Implement the plugin API functions.
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``engine_plugin_api.h``. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``EnginePluginApi.h``. However, the common architectural pattern consists of:
 
    - **Engine manager**: Manages available engines and their capabilities.
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique ``int64_t`` ID).
@@ -492,9 +492,9 @@ After creating a hipDNN handle, you can query which engine plugins were successf
 
   hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(
       hipdnnHandle_t handle,
-      size_t* num_plugin_paths,
-      char** plugin_paths,
-      size_t* max_string_len
+      size_t* numPluginPaths,
+      char** pluginPaths,
+      size_t* maxStringLen
   );
 
 This function uses a two-call pattern:
@@ -584,11 +584,11 @@ The internal integration tests are typically simple tests to ensure that the plu
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
     - **Full**: These tests can contain regression shapes, large shapes, or slow shapes.
 
-External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md>`_ in the hipDNN repo.
+External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/docs/README.md>`_ in the hipDNN repo.
 
 .. note::
 
-  See `general testing principles <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md#principles>`_.
+  See `general testing principles <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md#methodology>`_.
 
 Example: MIOpen provider plugin
 ================================
