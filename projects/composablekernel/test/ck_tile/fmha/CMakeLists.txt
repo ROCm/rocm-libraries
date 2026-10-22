@@ -401,6 +401,17 @@ add_test(
 set_tests_properties(test_ck_tile_fmha_bf16_rounding_codegen PROPERTIES
     LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS")
 
+# Codegen tests for the per-target batch prefill kernels: gfx9 keeps the async pipeline,
+# gfx125x takes the page-tile kernel, mixed builds guard the gfx9 kernels, and the rendered
+# dispatch only admits what the page-tile kernel supports. Pure Python, no GPU required.
+add_test(
+    NAME test_ck_tile_fmha_batch_prefill_codegen
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_batch_prefill_codegen.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(test_ck_tile_fmha_batch_prefill_codegen PROPERTIES
+    LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS")
+
 # Codegen and compiled host-dispatch regression tests require no GPU.
 add_test(
     NAME test_ck_tile_fmha_fwd_codegen

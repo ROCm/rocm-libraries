@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # generate kernel instances to speed up compilation
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import fnmatch
 import itertools
 from pathlib import Path
@@ -13,7 +13,8 @@ from codegen.cpp_symbol_map import (
     MODE_MAP,
     LAYOUT_MAP,
     BIAS_CHECK_MAP,
-    get_mask_check_map,
+    get_mask_cpp_check_expr,
+    get_mask_cpp_type,
     get_mask_map,
     BIAS_MAP,
     FWD_DTYPE_MAP,
@@ -40,6 +41,13 @@ GFX942_ARCH = ArchTrait(
     preprocessor_check="defined(__gfx942__)",
 )
 
+# Guards the gfx9 kernels when gfx125x targets are generated in the same build.
+GFX9_ARCH = ArchTrait("gfx9")
+
+# gfx125x uses the TDM page-tile kernel (FmhaBatchPrefillQrTdmPageTileKernel) instead of the
+# gfx9 async pipeline. Later TDM-capable gfx12 parts are added only after their own validation.
+GFX125_ARCH = ArchTrait("gfx125")
+
 DTYPE_BITS = {
     "fp32": 32,
     "fp16": 16,
@@ -56,6 +64,7 @@ DTYPE_BYTES = {k: v // 8 for k, v in DTYPE_BITS.items()}
 K0_MAX_SUBMAX_MAP = {32: 32, 64: 64, 96: 128, 128: 128, 256: 256}
 
 SUPPORTED_PAGE_SIZE = [1, 16, 1024]
+PAGE_TILE_SUPPORTED_PAGE_SIZE = [16, 128, 256, 1024]
 SUPPORTED_KV_MEMORY_LAYOUT = ["vectorized", "linear"]
 SUPPORTED_KV_LOOKUP_TABLE = ["vllm", "sglang"]
 KV_MEMORY_LAYOUT_ENUM_MAP = {
@@ -74,7 +83,24 @@ KV_LOAD_MODE_ENUM_MAP = {
 
 FMHA_BATCH_PREFILL_PIPELINE_MAP = {
     "qr_async": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSAsync",
+    "qr_tdm_sched": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile",
 }
+
+FMHA_BATCH_PREFILL_KERNEL_MAP = {
+    "qr_async": "ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel",
+    "qr_tdm_sched": "ck_tile::FmhaBatchPrefillQrTdmPageTileKernel",
+}
+
+FMHA_BATCH_PREFILL_LAUNCH = """    const dim3 blocks                      = k_::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{}, grids, blocks, 0, kargs));"""
+
+# MakeCheckedKernel owns the dynamic LDS request (residency limit) and checks the launch contract.
+FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH = (
+    """    return ck_tile::launch_kernel(s, k_::MakeCheckedKernel(kargs, grids));"""
+)
+
+FMHA_BATCH_PREFILL_PAGE_TILE_INCLUDE = '#include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"\n'
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.\n
@@ -148,7 +174,7 @@ using fmha_epilogue_{F_idx} =
                                            {F_spad}, {F_dvpad}>>;
 
 using fmha_kernel_{F_idx} =
-    ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
+    {F_kernel}<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
 
 using trait_{F_idx} = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
                         {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
@@ -162,9 +188,7 @@ float fmha_batch_prefill_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_b
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
+{F_launch}
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch_check})
@@ -233,13 +257,18 @@ FMHA_FWD_API_PER_DTYPE = """    {F_if}(t.data_type.compare(\"{F_dtype}\") == 0){
 {F_hdim_case}
     }}
 """
+# Page-tile arms address the pool with 64-bit offsets and need no kv_load_mode selection.
+FMHA_BATCH_PREFILL_PAGE_TILE_API_PER_DTYPE = """    {F_if}(t.data_type.compare(\"{F_dtype}\") == 0){{
+{F_hdim_case}
+    }}
+"""
 FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hdim_v}) {{
 {F_inner_dispatch}
         }}
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {F_bn0}, a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr) == {F_kv_load_mode})) {{
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ({F_kv_load_mode_check})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
@@ -306,6 +335,16 @@ class FmhaFwdApiTrait:
         )
 
     @property
+    def kv_load_mode_check(self) -> str:
+        if self.pipeline_tag == "qr_tdm_sched":
+            return "true"
+        return (
+            f"fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {self.bn0}, a.num_total_pages, "
+            + "a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr) == "
+            + KV_LOAD_MODE_ENUM_MAP[self.use_global_load]
+        )
+
+    @property
     def scheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode spad always true*/"  # group mode only generate spad/skpad == true
@@ -353,6 +392,9 @@ class FmhaFwdApiTrait:
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"a.hdim_q % {bk0submax} == 0"
+        elif self.pipeline_tag == "qr_tdm_sched":
+            assert self.dpad == "f"
+            return f"a.hdim_q == {self.bk0max}"
         else:
             assert False
 
@@ -370,6 +412,9 @@ class FmhaFwdApiTrait:
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"a.hdim_v % {bk0submax} == 0"
+        elif self.pipeline_tag == "qr_tdm_sched":
+            assert self.dvpad == "f"
+            return f"a.hdim_v == {self.bn1}"
         else:
             assert False
 
@@ -481,7 +526,9 @@ class FmhaFwdApiPool:
         per_dtypes = str()
         for i, dtype in enumerate(self.pool.keys()):
             per_hdim_case = str()
-            for j, hdim in enumerate(self.pool[dtype].keys()):
+            # Ascending head dims: each case accepts t.hdim_q <= hdim.
+            hdims = sorted(self.pool[dtype].keys(), key=int)
+            for j, hdim in enumerate(hdims):
                 traits = self.pool[dtype][hdim]
                 inners = str()
                 for k, trait in enumerate(traits):
@@ -492,8 +539,8 @@ class FmhaFwdApiPool:
                         F_vlayout=LAYOUT_MAP[trait.vlayout],
                         F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
                         F_logits=BOOL_MAP[trait.logits],
-                        F_mask=get_mask_map(self.mask_impl)[trait.mask],
-                        F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
+                        F_mask=get_mask_cpp_type(trait.mask),
+                        F_mask_check=get_mask_cpp_check_expr(trait.mask),
                         F_bias_check=BIAS_CHECK_MAP[trait.bias],
                         F_bias=BIAS_MAP[trait.bias],
                         F_lse=BOOL_MAP[trait.lse],
@@ -528,13 +575,24 @@ class FmhaFwdApiPool:
                         F_page_size=trait.page_size,
                         F_sink=BOOL_MAP[trait.sink],
                         F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[trait.use_global_load],
+                        F_kv_load_mode_check=trait.kv_load_mode_check,
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
                     F_if=if_j, F_hdim=hdim, F_hdim_v=trait.bn1, F_inner_dispatch=inners
                 )
             if_i = "if" if i == 0 else "else if"
-            per_dtypes = per_dtypes + FMHA_FWD_API_PER_DTYPE.format(
+            uses_kv_load_mode = any(
+                trait.pipeline_tag != "qr_tdm_sched"
+                for traits in self.pool[dtype].values()
+                for trait in traits
+            )
+            per_dtype = (
+                FMHA_FWD_API_PER_DTYPE
+                if uses_kv_load_mode
+                else FMHA_BATCH_PREFILL_PAGE_TILE_API_PER_DTYPE
+            )
+            per_dtypes = per_dtypes + per_dtype.format(
                 F_if=if_i,
                 F_dtype=dtype,
                 F_element_bytes=DTYPE_BYTES[dtype],
@@ -598,7 +656,11 @@ class FmhaFwdKernel:
 
     @property
     def template(self) -> str:
-        return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_KERNEL_BODY.format(
+        page_tile = self.F_pipeline.tag == "qr_tdm_sched"
+        header = FMHA_FWD_KERNEL_HEADER + (
+            FMHA_BATCH_PREFILL_PAGE_TILE_INCLUDE if page_tile else ""
+        )
+        return header + FMHA_FWD_KERNEL_BODY.format(
             F_kname=self.name,
             F_idx=self.F_idx,
             F_hdim=self.F_hdim,
@@ -639,9 +701,15 @@ class FmhaFwdKernel:
                 self.F_pipeline.F_kv_lookup_table
             ],
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
-            F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
+            F_mask=get_mask_cpp_type(self.F_pipeline.F_mask),
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
+            F_kernel=FMHA_BATCH_PREFILL_KERNEL_MAP[self.F_pipeline.tag],
+            F_launch=(
+                FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH
+                if page_tile
+                else FMHA_BATCH_PREFILL_LAUNCH
+            ),
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
@@ -857,6 +925,39 @@ def receipt_accepts(receipt, dtype: str, mode: str, pipeline: FmhaFwdPipeline) -
     return True
 
 
+class PageTileFactoryGfx125:
+    """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear K/V pool, vLLM 2D or SGLang 1D page
+    table, group mode, no mask or causal aligned to either corner, optional LSE."""
+
+    arch = GFX125_ARCH
+
+    @staticmethod
+    def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        if dtype in ["fp16", "bf16"]:
+            return {
+                64  : [FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
+                128 : [FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
+            }  # fmt: skip
+        else:
+            return None
+
+    @staticmethod
+    def get_pipelines(dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
+        # Simplified masks whatever mask_impl is: the kernel's stored-row mask predicate needs
+        # them. The masked arm takes only the causal window, from either corner.
+        causal = CppConstraint(
+            "(t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
+            " && a.window_size_left < 0 && a.window_size_right == 0"
+        )
+        pipelines = []
+        for mask, lse, kv_lookup_table in itertools.product(
+            ["s_no", "s_mask"], ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
+        ):
+            constraint = causal if mask == "s_mask" else CppConstraint()
+            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "no", mask, "f", "linear", kv_lookup_table, constraint))  # fmt: skip
+        return pipelines
+
+
 def get_fwd_blobs(
     kernel_filter: Optional[str],
     receipt,
@@ -864,12 +965,17 @@ def get_fwd_blobs(
     mask_impl,
     targets: Optional[List[str]] = None,
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
-    # batch_prefill pipeline uses gfx9-specific async scatter-gather buffer addressing
+    # The gfx9 batch_prefill pipeline uses gfx9-specific async scatter-gather buffer addressing
     # (amd_buffer_addressing.hpp raw buffer loads) that is not compatible with
     # non-gfx9 architectures (gfx11/gfx12/gfx10 are wave32 and use different
-    # buffer instruction formats).  Skip all batch_prefill kernels for non-gfx9 targets.
-    has_non_gfx9 = targets is not None and any(
-        not t.startswith("gfx9") for t in targets
+    # buffer instruction formats). gfx125x uses the TDM page-tile kernel instead; any other
+    # target gets no batch_prefill kernels.
+    target_list = targets if targets is not None else ["gfx9"]
+    has_gfx9 = any(t.startswith("gfx9") for t in target_list)
+    has_page_tile = any(t.startswith(GFX125_ARCH.name) for t in target_list)
+    has_unsupported = any(
+        not (t.startswith("gfx9") or t.startswith(GFX125_ARCH.name))
+        for t in target_list
     )
     # TODO: we don't support tuning yet, so pick up one value for vlayout/pipeline/pad
     #       support this in future
@@ -877,10 +983,10 @@ def get_fwd_blobs(
     gen = list()
     api_pool = FmhaFwdApiPool(mask_impl)
 
-    if has_non_gfx9:
+    if has_unsupported:
         return api_pool, gen
 
-    for dtype in FWD_DTYPE_MAP.keys():
+    for dtype in FWD_DTYPE_MAP.keys() if has_gfx9 else []:
         d = CustomFactory.get_hdim_tile_size_dict(dtype)
         if d is None:
             continue
@@ -889,6 +995,12 @@ def get_fwd_blobs(
             # batch_prefill pipeline requires group mode (static_assert in pipeline problem)
             if mode != "group":
                 continue
+            if has_page_tile:
+                # Keep the gfx9 kernels out of the gfx125x device pass and host dispatch.
+                tiles = [
+                    tile if tile.F_arch is not None else replace(tile, F_arch=GFX9_ARCH)
+                    for tile in tiles
+                ]
             for tile, pipeline in itertools.product(
                 tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):
@@ -959,6 +1071,38 @@ def get_fwd_blobs(
                         )
                         api_pool.register_traits(k_global_load.api_trait())
                         gen.append(k_global_load)
+
+    for dtype in FWD_DTYPE_MAP.keys() if has_page_tile else []:
+        d = PageTileFactoryGfx125.get_hdim_tile_size_dict(dtype)
+        if d is None:
+            continue
+        for hdim, tiles in d.items():
+            pipelines = PageTileFactoryGfx125.get_pipelines(
+                dtype, hdim, receipt, mask_impl
+            )
+            for tile, pipeline, page_size in itertools.product(
+                tiles, pipelines, PAGE_TILE_SUPPORTED_PAGE_SIZE
+            ):
+                k = FmhaFwdKernel(
+                    F_idx=0,
+                    F_hdim=hdim,
+                    F_dtype=dtype,
+                    F_mode="group",
+                    F_tile=tile,
+                    F_pipeline=pipeline,
+                    mask_impl=mask_impl,
+                    F_page_size=page_size,
+                )
+                if kernel_filter != "":
+                    if not fnmatch.fnmatch(k.name, kernel_filter):
+                        continue
+                if optdim_list != [-1]:
+                    if hdim not in optdim_list:
+                        continue
+                if not receipt_accepts(receipt, dtype, "group", pipeline):
+                    continue
+                api_pool.register_traits(k.api_trait())
+                gen.append(k)
 
     return (api_pool, gen)
 
