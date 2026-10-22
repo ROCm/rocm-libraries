@@ -501,6 +501,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
+    "fabs.f64": "declare double @llvm.fabs.f64(double)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
@@ -2194,8 +2195,9 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
-        otherwise.  The pool itself is rounded up to 16-byte alignment.
+        Each allocation's offset is aligned to 16 bytes for byte-element
+        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
+        The pool itself is rounded up to 16-byte alignment.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
@@ -2545,11 +2547,17 @@ class _Lowerer:
         """Lower ``arith.fabs`` to ``llvm.fabs.<ty>`` so the AMDGPU
         backend can fold the absolute-value modifier into the
         consumer (free) instead of materialising ``-a`` and a
-        ``v_max_f32(a, -a)`` pair (the historical idiom).
+        ``v_max_f32(a, -a)`` pair (the historical idiom). For f64 it is a
+        sign-bit clear on the high dword.
         """
         (v,) = op.operands
         ty_name = v.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         if llvm_ty is None:
             raise NotImplementedError(f"fabs: unsupported FP type {ty_name!r}")
         self._need(f"fabs.{ty_name}")
