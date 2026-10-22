@@ -808,6 +808,55 @@ class CustomFactory(KernelComponentFactory):
         return result
 
 
+def receipt_accepts(receipt, dtype: str, mode: str, pipeline: FmhaFwdPipeline) -> bool:
+    # 2 - Flash attention integration
+    if receipt in (2, 3):
+        cond = dtype in ["fp16", "bf16"]
+        cond &= pipeline.F_vlayout == "row"
+        cond &= pipeline.F_bias in ["no", "alibi"]
+        cond &= pipeline.F_qscale == "no"
+        if not cond:
+            return False
+    # PyTorch integration
+    elif receipt == 4:
+        cond = dtype in ["fp16", "bf16"]
+        cond &= pipeline.F_vlayout == "row"
+        cond &= pipeline.F_bias in ["no", "bias"]
+        cond &= pipeline.F_qscale == "no"
+        if not cond:
+            return False
+    # Aiter(mha_fwd) integration
+    elif receipt == 100:
+        cond = dtype in ["fp16", "bf16"]
+        cond &= mode == "batch"
+        cond &= pipeline.F_vlayout == "row"
+        cond &= pipeline.F_qscale == "no"
+        if not cond:
+            return False
+    # Aiter(mha_batch_prefill) integration
+    elif receipt == 200:
+        cond = dtype in ["fp16", "bf16", "fp8bf16"]
+        cond &= mode == "group"
+        cond &= pipeline.F_vlayout == "row"
+        if not cond:
+            return False
+    # aiter::mha_batch_prefill C++ api integration
+    elif receipt == 600:
+        cond = dtype in ["fp16", "bf16", "fp8bf16"]
+        cond &= mode == "group"
+        cond &= pipeline.F_vlayout == "row"
+        cond &= pipeline.F_qscale == "no"
+        if not cond:
+            return False
+    elif receipt == 700:
+        return False  # TE does not use this API
+
+    # fp32 only
+    if receipt == 800 or receipt == 801:
+        return dtype == "fp32"
+    return True
+
+
 def get_fwd_blobs(
     kernel_filter: Optional[str],
     receipt,
@@ -886,53 +935,8 @@ def get_fwd_blobs(
                     if optdim_list != [-1]:
                         if hdim not in optdim_list:
                             continue
-                    # 2 - Flash attention integration
-                    if receipt in (2, 3):
-                        cond = dtype in ["fp16", "bf16"]
-                        cond &= pipeline.F_vlayout == "row"
-                        cond &= pipeline.F_bias in ["no", "alibi"]
-                        cond &= pipeline.F_qscale == "no"
-                        if not cond:
-                            continue
-                    # PyTorch integration
-                    elif receipt == 4:
-                        cond = dtype in ["fp16", "bf16"]
-                        cond &= pipeline.F_vlayout == "row"
-                        cond &= pipeline.F_bias in ["no", "bias"]
-                        cond &= pipeline.F_qscale == "no"
-                        if not cond:
-                            continue
-                    # Aiter(mha_fwd) integration
-                    elif receipt == 100:
-                        cond = dtype in ["fp16", "bf16"]
-                        cond &= mode == "batch"
-                        cond &= pipeline.F_vlayout == "row"
-                        cond &= pipeline.F_qscale == "no"
-                        if not cond:
-                            continue
-                    # Aiter(mha_batch_prefill) integration
-                    elif receipt == 200:
-                        cond = dtype in ["fp16", "bf16", "fp8bf16"]
-                        cond &= mode == "group"
-                        cond &= pipeline.F_vlayout == "row"
-                        if not cond:
-                            continue
-                    # aiter::mha_batch_prefill C++ api integration
-                    elif receipt == 600:
-                        cond = dtype in ["fp16", "bf16", "fp8bf16"]
-                        cond &= mode == "group"
-                        cond &= pipeline.F_vlayout == "row"
-                        cond &= pipeline.F_qscale == "no"
-                        if not cond:
-                            continue
-                    elif receipt == 700:
-                        continue  # TE does not use this API
-
-                    # fp32 only
-                    if receipt == 800 or receipt == 801:
-                        cond = dtype == "fp32"
-                        if not cond:
-                            continue
+                    if not receipt_accepts(receipt, dtype, mode, pipeline):
+                        continue
 
                     api_pool.register_traits(k.api_trait())
                     gen.append(k)
