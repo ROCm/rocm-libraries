@@ -4,8 +4,9 @@
 """Integrity of the MMA catalog (``traits/data/mma_traits.json``) and its strict loader.
 
 The catalog is hand-maintained, so these tests hold the invariants a hand edit could break: one
-row per instruction variant, canonical dtype names, op_ids spelled from the builtin, replication
-stated consistently, and a unique answer for every selection. The loader tests edit a copy of the
+row per instruction variant, canonical dtype names, op_ids spelled from the builtin, real backend
+target ids and an LLVM intrinsic on every row, replication stated consistently, and a unique
+answer for every selection. The loader tests edit a copy of the
 committed catalog in a temporary directory and check that each kind of data error fails the load
 with its exact message.
 """
@@ -19,6 +20,7 @@ from collections import Counter
 
 import pytest
 
+from rocke.core.arch import known_arches
 from rocke.helpers.tiling.traits import (
     DEFAULT_TRAITS_PATH,
     load_mma_traits,
@@ -76,6 +78,48 @@ def test_op_id_is_the_builtin_name_plus_the_formats_of_a_multi_format_builtin() 
             assert row["op_id"] == stem
         else:
             assert row["op_id"] == f"{stem}_{row['a_dtype']}_{row['b_dtype']}"
+
+
+def test_every_row_lists_backend_targets_only() -> None:
+    # Rows list real target ids (no family names such as 'gfx11'), and rocke's backend must know
+    # each one, so a catalog row is never stranded on a target the backend cannot compile for.
+    backend_targets = set(known_arches())
+    for row in _document()["operations"]:
+        assert row["supported_targets"], row["op_id"]
+        for target in row["supported_targets"]:
+            assert target in backend_targets, (
+                f"catalog target {target!r} is not a backend target -- add it to core.arch "
+                f"or exclude it with a reason"
+            )
+
+
+def test_excluded_targets_carry_a_reason_and_are_never_listed() -> None:
+    document = _document()
+    excluded = document["_meta"]["excluded_targets"]
+    assert sorted(excluded) == ["gfx940", "gfx941"]
+    assert all(reason for reason in excluded.values())
+    listed = {t for row in document["operations"] for t in row["supported_targets"]}
+    assert listed.isdisjoint(excluded)
+
+
+def test_every_row_names_its_llvm_intrinsic() -> None:
+    for row in _document()["operations"]:
+        assert row["llvm_intrinsic"].startswith("llvm.amdgcn."), row["op_id"]
+
+
+def test_gfx1250_scale_formats_follow_the_operand_formats() -> None:
+    # Measured with the compiler: on gfx1250 an fp4e2m1 operand takes the e8m0, e4m3 and e5m3
+    # scale formats, any other operand e8m0 only; the gfx950 scaled MFMA decodes e8m0.
+    for traits in load_mma_traits().by_op_id.values():
+        if traits.scale is None:
+            continue
+        for dtype, scale_dtypes in (
+            (traits.a_dtype, traits.scale.a_dtypes),
+            (traits.b_dtype, traits.scale.b_dtypes),
+        ):
+            on_gfx1250_fp4 = traits.supports("gfx1250") and dtype == "fp4e2m1"
+            expected = ("e8m0", "e4m3", "e5m3") if on_gfx1250_fp4 else ("e8m0",)
+            assert scale_dtypes == expected, traits.op_id
 
 
 def test_replication_is_stated_once() -> None:
@@ -250,6 +294,34 @@ def test_scale_contract_follows_the_family(tmp_path) -> None:
     assert _load_error(tmp_path, document) == (
         "mma_traits.json row 'wmma_scale_f32_32x16x128_f4': family 'scaled' needs a scale "
         "contract"
+    )
+
+
+def test_row_without_targets_fails(tmp_path) -> None:
+    document = _document()
+    _row(document, "mfma_f32_16x16x16f16")["supported_targets"] = []
+    assert _load_error(tmp_path, document) == (
+        "mma_traits.json row 'mfma_f32_16x16x16f16' lists no targets -- list every id the "
+        "compiler selects it on"
+    )
+
+
+def test_row_listing_an_excluded_target_fails(tmp_path) -> None:
+    document = _document()
+    _row(document, "mfma_f32_16x16x16f16")["supported_targets"].append("gfx940")
+    reason = document["_meta"]["excluded_targets"]["gfx940"]
+    assert _load_error(tmp_path, document) == (
+        f"mma_traits.json row 'mfma_f32_16x16x16f16' lists 'gfx940', which "
+        f"_meta.excluded_targets excludes: {reason}"
+    )
+
+
+def test_excluded_target_without_a_reason_fails(tmp_path) -> None:
+    document = _document()
+    document["_meta"]["excluded_targets"]["gfx940"] = ""
+    assert _load_error(tmp_path, document) == (
+        "mma_traits.json _meta.excluded_targets must map each excluded target id to the "
+        "reason it is not listed -- see helpers/tiling/traits/README.md"
     )
 
 
