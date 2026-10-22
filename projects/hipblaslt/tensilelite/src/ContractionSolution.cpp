@@ -6603,7 +6603,18 @@ namespace TensileLite
         const bool wholeTileGrid = launch.selectedGrid == launch.totalTiles;
         size_t physicalBudget = wholeTileGrid
             ? checkedMultiply(cluster.blocks, cluster.clusterSize) : launch.selectedGrid;
-        if(!cluster.fixedGridUsed && launch.selectedGrid > launch.totalTiles)
+        if(!cluster.fixedGridUsed && launch.reduction == origami::reduction_t::parallel
+           && launch.selectedGrid > launch.totalTiles)
+        {
+            // The predictor's uniform split count applies to real tiles. Pad
+            // each split to complete spatial blocks so out-of-bounds peers do
+            // not consume the useful K parallelism it selected. Physical grid
+            // and workspace limits below still bound the padded launch.
+            const size_t splits = std::min(launch.selectedGrid / launch.totalTiles, iters);
+            physicalBudget = checkedMultiply(
+                checkedMultiply(cluster.blocks, cluster.clusterSize), splits);
+        }
+        else if(!cluster.fixedGridUsed && launch.selectedGrid > launch.totalTiles)
         {
             // A tree predictor asking for K splits already has enough useful
             // workers for every real tile. Padding must not serialize whole

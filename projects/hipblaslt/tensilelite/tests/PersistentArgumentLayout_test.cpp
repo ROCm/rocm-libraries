@@ -1204,3 +1204,70 @@ TEST(PersistentArgumentLayout, ClusterParallelCapabilityAndPackedOutputContract)
     solution.problemType.sparse = 1;
     EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
 }
+
+TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdges)
+{
+    using arch_t = origami::hardware_t::architecture_t;
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 0;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        arch_t::gfx950, 256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+    // Only two real tiles along either spatial axis: oversized clusters must
+    // preserve the predictor's K splits instead of spending them on padding.
+    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {2, 1}, {4, 1}, {8, 1}, {2, 2}, {4, 2}, {2, 4}, {4, 4}, {8, 2}, {2, 8}})
+    {
+        SCOPED_TRACE(::testing::Message() << cs << ',' << cn);
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        solution.internalArgsSupport.streamKClusterParallel = true;
+        auto problem = clusterProblem(128, 128, 8192, 1);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+        ASSERT_GT(launch.selectedGrid, launch.totalTiles);
+        const auto expectedSplits = launch.selectedGrid / launch.totalTiles;
+        const auto& cluster = launch.clusterSchedule;
+        EXPECT_EQ(cluster.parallelSplits, expectedSplits);
+        EXPECT_EQ(cluster.physicalGrid, cluster.blocks * cs * cn * expectedSplits);
+        EXPECT_EQ(cluster.partialSlots, launch.totalTiles * expectedSplits);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), expectedSplits);
+        EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, cluster.physicalGrid);
+
+        // A fixed physical grid remains an explicit override, including when
+        // spatial padding means it cannot retain the automatic split count.
+        device.persistentFixedGrid = launch.selectedGrid;
+        const auto fixed = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(fixed.clusterSchedule.physicalGrid, device.persistentFixedGrid);
+        EXPECT_TRUE(fixed.clusterSchedule.fixedGridUsed);
+        device.persistentFixedGrid = 0;
+
+        // Padding compensation remains subject to the resident physical grid.
+        device.computeUnitCount = 64;
+        solution.sizeMapping.CUOccupancy = 1;
+        const auto bounded = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(bounded.clusterSchedule.physicalGrid, 64u);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), bounded.workspaceBytes);
+        device.computeUnitCount = 256;
+        solution.sizeMapping.CUOccupancy = 6;
+
+        // Replacing a split with whole blocks must remain workspace-safe.
+        problem.setWorkspaceSize(launch.workspaceBytes - 1);
+        const auto fallback = solution.resolvePersistentSettings(problem, device);
+        // Automatic grid selection can avoid the split up front, so a
+        // post-selection workspaceFallback flag is not required here.
+        EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
+        EXPECT_EQ(fallback.workspaceBytes, 0u);
+        EXPECT_EQ(fallback.clusterSchedule.flagEntries, 0u);
+    }
+}
