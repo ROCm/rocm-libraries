@@ -1,0 +1,231 @@
+name: gfx950 rocJITsu quick parity
+run-name: gfx950 EMU ${{ inputs.ctest_label || '^quick$' }} (dispatch ${{ inputs.dispatch_threads || '170' }}, quantum ${{ inputs.functional_quantum || '0' }}, ${{ inputs.runner_label || 'aws-linux-scale-rocm-large' }})
+
+# Full installed component sweep on the same CPU pool as the gfx942 reference.
+# Compare with gfx950-hardware-parity.yml using the same nightly and label.
+
+on:
+  push:
+    branches: [users/sa-faizal/gfx950-hw-emu-01a16468]
+    paths: [".github/workflows/gfx950-rocjitsu-parity.yml"]
+  workflow_dispatch:
+    inputs:
+      rocm_version:
+        description: "Pinned gfx950-dcgpu nightly used for runtime and tests."
+        type: string
+        default: "10.2.0a20260928"
+      rocjitsu_arg:
+        description: "Optional extra rocJITsu flag, for example --cpu-thread-budget=1 or --wait-checking=off."
+        type: string
+        default: "--wait-checking=off"
+      ctest_label:
+        description: "CTest label regex for the full installed component sweep."
+        type: string
+        default: "^quick$"
+      component_filter:
+        description: "Optional comma-separated exact component paths to run"
+        type: string
+        default: ""
+      dispatch_threads:
+        description: "Optional explicit rocJITsu cpu_dispatch_threads override (for example 80). Empty uses 170."
+        type: string
+        default: "170"
+      functional_quantum:
+        description: "Optional per-CU functional_quantum override. Empty uses 0."
+        type: string
+        default: "0"
+      runner_label:
+        description: "Optional self-hosted runner label override (for example aws-linux-scale-rocm-large). Empty uses aws-linux-scale-rocm-large."
+        type: string
+        default: "aws-linux-scale-rocm-large"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  suite-discovery:
+    name: Discover ${{ github.event.inputs.ctest_label || '^quick$' }} component suites
+    runs-on: ubuntu-24.04
+    outputs:
+      components: ${{ steps.discover.outputs.components }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
+      TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
+      COMPONENT_FILTER: ${{ github.event.inputs.component_filter || '' }}
+    steps:
+      - name: Install discovery tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
+      - name: Fetch parity script
+        run: |
+          mkdir -p .github/scripts
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/ffm_quick_rocjitsu.py" \
+            -o .github/scripts/ffm_quick_rocjitsu.py
+      - name: Download test metadata and discover components
+        id: discover
+        run: |
+          set -euo pipefail
+          root="$PWD/test-root"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o cache/tests.tar.gz \
+            "${base}/therock-dist-linux-gfx950-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf cache/tests.tar.gz -C "$root"
+          args=(--rocjitsu /bin/true --config /dev/null --rocm-root "$root" \
+            --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)
+          if [ -n "$COMPONENT_FILTER" ]; then args+=(--component-filter "$COMPONENT_FILTER"); fi
+          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py "${args[@]}")"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "Discovered $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$components") component suites for $TEST_LABEL"
+
+  component-suites:
+    name: ${{ github.event.inputs.ctest_label || '^quick$' }} / ${{ matrix.test.component }}
+    needs: suite-discovery
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJSON(needs.suite-discovery.outputs.components) }}
+    runs-on: ${{ inputs.runner_label || 'aws-linux-scale-rocm-large' }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
+      ROCM_SYSTEMS_REF: 0b8339a55657f234dbf73fd2e6204d95ef536ad3
+      TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
+      COMPONENT: ${{ matrix.test.component }}
+      DISPATCH_THREADS: ${{ inputs.dispatch_threads || '170' }}
+      FUNCTIONAL_QUANTUM: ${{ inputs.functional_quantum || '0' }}
+      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '--wait-checking=off' }}
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3 python3-yaml
+
+      - name: Fetch parity scripts
+        run: |
+          mkdir -p .github/scripts
+          for script in ffm_quick_rocjitsu.py resource_monitor.py; do
+            curl -fL --retry 3 \
+              "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/${script}" \
+              -o ".github/scripts/${script}"
+          done
+
+      - name: Checkout rocJITsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.ROCM_SYSTEMS_REF }}
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            runtimes/api-headers
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      - name: Build rocJITsu
+        run: |
+          set -euo pipefail
+          mkdir -p parity
+          cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DRJ_LOG_GROUPS=OFF
+          python3 .github/scripts/resource_monitor.py \
+            --phase "Build rocJITsu" \
+            --output parity/resources-build.json -- \
+            cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          test -x rj-build/tools/rocjitsu/rocjitsu
+
+      - name: Install pinned gfx950 runtime and tests
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx950-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx950-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          test -x "$root/bin/rocminfo"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Configure emulator settings
+        run: |
+          set -euo pipefail
+          mkdir -p parity
+          source_config="$PWD/rocm-systems/emulation/rocjitsu/configs/gfx950_mi355x.json"
+          python3 - "$source_config" parity/gfx950_mi355x-tuned.json "$DISPATCH_THREADS" "$FUNCTIONAL_QUANTUM" <<'PY'
+          import json, pathlib, sys
+          source, destination, dispatch, quantum = sys.argv[1:]
+          config = json.loads(pathlib.Path(source).read_text())
+          if dispatch:
+              config["num_threads"] = 8
+              config["cpu_dispatch_threads"] = int(dispatch)
+              config["async_helper_threads"] = 0
+          if quantum:
+              value = str(int(quantum))
+              updated = 0
+              def visit(node):
+                  global updated
+                  if isinstance(node, dict):
+                      if node.get("type") == "compute_unit":
+                          entries = node.setdefault("config", [])
+                          setting = next((x for x in entries if x.get("key") == "functional_quantum"), None)
+                          if setting is None:
+                              entries.append({"key": "functional_quantum", "value": value})
+                          else:
+                              setting["value"] = value
+                          updated += 1
+                      for child in node.values(): visit(child)
+                  elif isinstance(node, list):
+                      for child in node: visit(child)
+              visit(config.get("topology", {}))
+              if updated == 0: raise SystemExit("No compute_unit nodes found")
+          pathlib.Path(destination).write_text(json.dumps(config, indent=2) + "\n")
+          PY
+          config="$PWD/parity/gfx950_mi355x-tuned.json"
+          "$PWD/rj-build/tools/rocjitsu/rocjitsu" --config "$config" --thread-budget-table | tee parity/thread-budget-table.txt
+          printf 'suite=%s\ncomponent=%s\nfunctional_quantum=%s\ndispatch_threads=%s\nrocjitsu_arg=%s\n' \
+            "$TEST_LABEL" "$COMPONENT" "$FUNCTIONAL_QUANTUM" "$DISPATCH_THREADS" "$ROCJITSU_ARG" > parity/run-config.txt
+
+      - name: Run component suite under rocJITsu without per-test timeout
+        run: |
+          set +e
+          python3 .github/scripts/resource_monitor.py \
+            --phase "$TEST_LABEL / $COMPONENT under rocJITsu" \
+            --output parity/resources-test.json -- \
+            python3 .github/scripts/ffm_quick_rocjitsu.py \
+              --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+              --config "$PWD/parity/gfx950_mi355x-tuned.json" \
+              --rocm-root "$ROCM_ROOT" \
+              --out-dir parity --component "$COMPONENT" --label-regex "$TEST_LABEL" \
+              --rocjitsu-arg="$ROCJITSU_ARG"
+          status=$?
+          if [ -f parity/summary.md ]; then
+            cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload component parity artifacts
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-${{ matrix.test.id }}
+          path: parity/
