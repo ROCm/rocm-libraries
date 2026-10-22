@@ -769,7 +769,7 @@ static inline RppStatus box_filter_char_host_impl(T* srcPtrImage, RpptDescPtr sr
                 since (padLength * 3) number of columns from the beginning and end of each row will
                be computed using raw c code. Also subtract 14 to account for SIMD write width (32
                bytes) exceeding the processing width (18 bytes) to prevent buffer overrun. */
-            Rpp32u reservedLength = (2 * padLength) * 3 - 14;
+            Rpp32u reservedLength = (2 * padLength) * 3 + 14;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
                 alignedLength = ((bufferLength - reservedLength) / 18) * 18;
@@ -1892,7 +1892,7 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                computed using raw c code */
             /* Note: AVX loop processes 14 pixels per iteration but stores 16 pixels.
                To prevent buffer overrun, ensure alignedLength + 16 <= bufferLength - padLength */
-            Rpp32u reservedLength = padLength - 16;
+            Rpp32u reservedLength = padLength + 16;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
                 alignedLength = ((bufferLength - reservedLength) / 14) * 14;
