@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Run repeatable GEMMs through rocJITsu on CPUs and count their outcomes."""
+"""Check repeatable GEMMs for races and numerical errors with CPU rocJITsu."""
 
 import argparse
 import csv

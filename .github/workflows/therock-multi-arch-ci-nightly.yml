@@ -134,7 +134,7 @@ jobs:
       id-token: write
 
   rocjitsu_random_gemms_gfx950:
-    name: rocjitsu random GEMMs (gfx950, 1000 cases)
+    name: rocjitsu GEMM race checks (gfx950, 1000 cases)
     needs: [setup, linux_build_and_test]
     if: >-
       ${{
