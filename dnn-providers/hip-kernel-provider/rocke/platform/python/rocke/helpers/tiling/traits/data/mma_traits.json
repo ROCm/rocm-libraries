@@ -1,9 +1,16 @@
 {
-  "_meta": {"schema_version": 2},
+  "_meta": {
+    "schema_version": 2,
+    "excluded_targets": {
+      "gfx940": "superseded by gfx942, the id production parts use; the newest clang no longer accepts it",
+      "gfx941": "superseded by gfx942, the id production parts use; the newest clang no longer accepts it"
+    }
+  },
   "operations": [
     {
       "op_id": "mfma_f32_32x32x1f32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x1f32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x1f32",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -24,6 +31,7 @@
     {
       "op_id": "mfma_f32_16x16x1f32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x1f32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x1f32",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -44,6 +52,7 @@
     {
       "op_id": "mfma_f32_4x4x1f32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x1f32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.4x4x1f32",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -64,6 +73,7 @@
     {
       "op_id": "mfma_f32_32x32x2f32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x2f32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x2f32",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -84,6 +94,7 @@
     {
       "op_id": "mfma_f32_16x16x4f32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4f32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x4f32",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -104,6 +115,7 @@
     {
       "op_id": "mfma_f32_32x32x4f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x4f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -124,6 +136,7 @@
     {
       "op_id": "mfma_f32_16x16x4f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x4f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -144,6 +157,7 @@
     {
       "op_id": "mfma_f32_4x4x4f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x4f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.4x4x4f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -164,6 +178,7 @@
     {
       "op_id": "mfma_f32_32x32x8f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x8f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x8f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -184,6 +199,7 @@
     {
       "op_id": "mfma_f32_16x16x16f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x16f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x16f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -204,6 +220,7 @@
     {
       "op_id": "mfma_i32_32x32x4i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x4i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.32x32x4i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -225,6 +242,7 @@
     {
       "op_id": "mfma_i32_16x16x4i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x4i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.16x16x4i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -246,6 +264,7 @@
     {
       "op_id": "mfma_i32_4x4x4i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_4x4x4i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.4x4x4i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a", "gfx942", "gfx950"],
@@ -267,6 +286,7 @@
     {
       "op_id": "mfma_i32_32x32x8i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x8i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.32x32x8i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -288,6 +308,7 @@
     {
       "op_id": "mfma_i32_16x16x16i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x16i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.16x16x16i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -309,6 +330,7 @@
     {
       "op_id": "mfma_f32_32x32x2bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x2bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x2bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -329,6 +351,7 @@
     {
       "op_id": "mfma_f32_16x16x2bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x2bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x2bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -349,6 +372,7 @@
     {
       "op_id": "mfma_f32_4x4x2bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x2bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.4x4x2bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -369,6 +393,7 @@
     {
       "op_id": "mfma_f32_32x32x4bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x4bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -389,6 +414,7 @@
     {
       "op_id": "mfma_f32_16x16x8bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x8bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x8bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx908", "gfx90a"],
@@ -409,6 +435,7 @@
     {
       "op_id": "mfma_f32_32x32x4bf16_1k",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4bf16_1k",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x4bf16.1k",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -429,6 +456,7 @@
     {
       "op_id": "mfma_f32_16x16x4bf16_1k",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4bf16_1k",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x4bf16.1k",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -449,6 +477,7 @@
     {
       "op_id": "mfma_f32_4x4x4bf16_1k",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.4x4x4bf16.1k",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -469,6 +498,7 @@
     {
       "op_id": "mfma_f32_32x32x8bf16_1k",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x8bf16_1k",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -489,6 +519,7 @@
     {
       "op_id": "mfma_f32_16x16x16bf16_1k",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x16bf16_1k",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -509,6 +540,7 @@
     {
       "op_id": "mfma_f64_16x16x4f64",
       "llvm_builtin": "__builtin_amdgcn_mfma_f64_16x16x4f64",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f64.16x16x4f64",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -529,6 +561,7 @@
     {
       "op_id": "mfma_f64_4x4x4f64",
       "llvm_builtin": "__builtin_amdgcn_mfma_f64_4x4x4f64",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f64.4x4x4f64",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx90a", "gfx942", "gfx950"],
@@ -549,6 +582,7 @@
     {
       "op_id": "mfma_i32_16x16x32_i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x32_i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.16x16x32.i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -570,6 +604,7 @@
     {
       "op_id": "mfma_i32_32x32x16_i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x16_i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.32x32x16.i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -591,9 +626,10 @@
     {
       "op_id": "mfma_f32_16x16x8_xf32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x8_xf32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x8.xf32",
       "family": "dense",
       "wave_size": 64,
-      "supported_targets": ["gfx942", "gfx950"],
+      "supported_targets": ["gfx942"],
       "a_dtype": "tf32",
       "b_dtype": "tf32",
       "c_dtype": "fp32",
@@ -611,9 +647,10 @@
     {
       "op_id": "mfma_f32_32x32x4_xf32",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4_xf32",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x4.xf32",
       "family": "dense",
       "wave_size": 64,
-      "supported_targets": ["gfx942", "gfx950"],
+      "supported_targets": ["gfx942"],
       "a_dtype": "tf32",
       "b_dtype": "tf32",
       "c_dtype": "fp32",
@@ -631,6 +668,7 @@
     {
       "op_id": "mfma_f32_16x16x32_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -651,6 +689,7 @@
     {
       "op_id": "mfma_f32_16x16x32_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -671,6 +710,7 @@
     {
       "op_id": "mfma_f32_16x16x32_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -691,6 +731,7 @@
     {
       "op_id": "mfma_f32_16x16x32_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -711,6 +752,7 @@
     {
       "op_id": "mfma_f32_32x32x16_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -731,6 +773,7 @@
     {
       "op_id": "mfma_f32_32x32x16_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -751,6 +794,7 @@
     {
       "op_id": "mfma_f32_32x32x16_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.fp8.bf8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -771,6 +815,7 @@
     {
       "op_id": "mfma_f32_32x32x16_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -791,6 +836,7 @@
     {
       "op_id": "mfma_f32_16x16x32_f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -811,6 +857,7 @@
     {
       "op_id": "mfma_f32_16x16x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.16x16x32.bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -831,6 +878,7 @@
     {
       "op_id": "mfma_f32_32x32x16_f16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_f16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.f16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -851,6 +899,7 @@
     {
       "op_id": "mfma_f32_32x32x16_bf16",
       "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.f32.32x32x16.bf16",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -871,6 +920,7 @@
     {
       "op_id": "mfma_i32_16x16x64_i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x64_i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.16x16x64.i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -892,6 +942,7 @@
     {
       "op_id": "mfma_i32_32x32x32_i8",
       "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x32_i8",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.i32.32x32x32.i8",
       "family": "dense",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -913,6 +964,7 @@
     {
       "op_id": "smfmac_f32_16x16x32_f16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x32_f16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x32.f16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -933,6 +985,7 @@
     {
       "op_id": "smfmac_f32_32x32x16_f16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x16_f16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x16.f16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -953,6 +1006,7 @@
     {
       "op_id": "smfmac_f32_16x16x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x32.bf16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -973,6 +1027,7 @@
     {
       "op_id": "smfmac_f32_32x32x16_bf16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x16_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x16.bf16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -993,6 +1048,7 @@
     {
       "op_id": "smfmac_i32_16x16x64_i8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_i32_16x16x64_i8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.i32.16x16x64.i8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1014,6 +1070,7 @@
     {
       "op_id": "smfmac_i32_32x32x32_i8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_i32_32x32x32_i8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.i32.32x32x32.i8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1035,6 +1092,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.bf8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1055,6 +1113,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.bf8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1075,6 +1134,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.fp8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1095,6 +1155,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.fp8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1115,6 +1176,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.bf8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1135,6 +1197,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.bf8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1155,6 +1218,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.fp8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1175,6 +1239,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.fp8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx942", "gfx950"],
@@ -1195,6 +1260,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_f16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_f16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.f16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1215,6 +1281,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_f16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_f16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.f16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1235,6 +1302,7 @@
     {
       "op_id": "smfmac_f32_16x16x64_bf16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x64.bf16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1255,6 +1323,7 @@
     {
       "op_id": "smfmac_f32_32x32x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x32.bf16",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1275,6 +1344,7 @@
     {
       "op_id": "smfmac_i32_16x16x128_i8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_i32_16x16x128_i8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.i32.16x16x128.i8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1296,6 +1366,7 @@
     {
       "op_id": "smfmac_i32_32x32x64_i8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_i32_32x32x64_i8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.i32.32x32x64.i8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1317,6 +1388,7 @@
     {
       "op_id": "smfmac_f32_16x16x128_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x128.bf8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1337,6 +1409,7 @@
     {
       "op_id": "smfmac_f32_16x16x128_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x128.bf8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1357,6 +1430,7 @@
     {
       "op_id": "smfmac_f32_16x16x128_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x128.fp8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1377,6 +1451,7 @@
     {
       "op_id": "smfmac_f32_16x16x128_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.16x16x128.fp8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1397,6 +1472,7 @@
     {
       "op_id": "smfmac_f32_32x32x64_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x64.bf8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1417,6 +1493,7 @@
     {
       "op_id": "smfmac_f32_32x32x64_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x64.bf8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1437,6 +1514,7 @@
     {
       "op_id": "smfmac_f32_32x32x64_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x64.fp8.bf8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1457,6 +1535,7 @@
     {
       "op_id": "smfmac_f32_32x32x64_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.smfmac.f32.32x32x64.fp8.fp8",
       "family": "sparse",
       "wave_size": 64,
       "supported_targets": ["gfx950"],
@@ -1477,9 +1556,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1497,9 +1577,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -1517,9 +1598,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -1537,9 +1619,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -1557,9 +1640,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -1577,9 +1661,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1597,9 +1682,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_bf8e5m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -1617,9 +1703,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -1637,9 +1724,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -1657,9 +1745,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -1677,9 +1766,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1697,9 +1787,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -1717,9 +1808,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -1737,9 +1829,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -1757,9 +1850,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -1777,9 +1871,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1797,9 +1892,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -1817,9 +1913,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -1837,9 +1934,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -1857,9 +1955,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -1877,9 +1976,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1897,9 +1997,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -1917,9 +2018,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -1937,9 +2039,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -1957,9 +2060,10 @@
     {
       "op_id": "mfma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -1977,9 +2081,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp8e4m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -1997,9 +2102,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp8e4m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2017,9 +2123,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp8e4m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -2037,9 +2144,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp8e4m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -2057,9 +2165,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp8e4m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -2077,9 +2186,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_bf8e5m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2097,9 +2207,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_bf8e5m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2117,9 +2228,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_bf8e5m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -2137,9 +2249,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_bf8e5m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -2157,9 +2270,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_bf8e5m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -2177,9 +2291,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e2m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2197,9 +2312,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e2m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2217,9 +2333,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e2m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -2237,9 +2354,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e2m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -2257,9 +2375,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e2m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e2m3",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -2277,9 +2396,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e3m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2297,9 +2417,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e3m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2317,9 +2438,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e3m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -2337,9 +2459,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e3m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -2357,9 +2480,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp6e3m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp6e3m2",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -2377,9 +2501,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp4e2m1_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2397,9 +2522,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp4e2m1_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2417,9 +2543,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp4e2m1_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp6e2m3",
       "c_dtype": "fp32",
@@ -2437,9 +2564,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp4e2m1_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp6e3m2",
       "c_dtype": "fp32",
@@ -2457,9 +2585,10 @@
     {
       "op_id": "mfma_scale_f32_32x32x64_f8f6f4_fp4e2m1_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
       "family": "scaled",
       "wave_size": 64,
-      "supported_targets": [],
+      "supported_targets": ["gfx950"],
       "a_dtype": "fp4e2m1",
       "b_dtype": "fp4e2m1",
       "c_dtype": "fp32",
@@ -2477,9 +2606,10 @@
     {
       "op_id": "wmma_f32_16x16x16_f16_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.f16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp32",
@@ -2497,9 +2627,10 @@
     {
       "op_id": "wmma_f32_16x16x16_bf16_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.bf16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "fp32",
@@ -2517,9 +2648,10 @@
     {
       "op_id": "wmma_f16_16x16x16_f16_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x16.f16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp16",
@@ -2537,9 +2669,10 @@
     {
       "op_id": "wmma_bf16_16x16x16_bf16_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.bf16.16x16x16.bf16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "bf16",
@@ -2557,9 +2690,10 @@
     {
       "op_id": "wmma_f16_16x16x16_f16_tied_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x16.f16.tied",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp16",
@@ -2577,9 +2711,10 @@
     {
       "op_id": "wmma_bf16_16x16x16_bf16_tied_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.bf16.16x16x16.bf16.tied",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "bf16",
@@ -2597,9 +2732,10 @@
     {
       "op_id": "wmma_i32_16x16x16_iu8_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x16.iu8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "i8",
       "b_dtype": "i8",
       "c_dtype": "i32",
@@ -2618,9 +2754,10 @@
     {
       "op_id": "wmma_i32_16x16x16_iu4_w32",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x16.iu4",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx11"],
+      "supported_targets": ["gfx11-generic", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1154"],
       "a_dtype": "i4",
       "b_dtype": "i4",
       "c_dtype": "i32",
@@ -2639,9 +2776,10 @@
     {
       "op_id": "wmma_f32_16x16x16_f16_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.f16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp32",
@@ -2659,9 +2797,10 @@
     {
       "op_id": "wmma_f32_16x16x16_bf16_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.bf16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "fp32",
@@ -2679,9 +2818,10 @@
     {
       "op_id": "wmma_f16_16x16x16_f16_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x16.f16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp16",
@@ -2699,9 +2839,10 @@
     {
       "op_id": "wmma_bf16_16x16x16_bf16_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.bf16.16x16x16.bf16",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "bf16",
@@ -2719,9 +2860,10 @@
     {
       "op_id": "wmma_i32_16x16x16_iu8_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x16.iu8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "i8",
       "b_dtype": "i8",
       "c_dtype": "i32",
@@ -2740,9 +2882,10 @@
     {
       "op_id": "wmma_i32_16x16x16_iu4_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x16.iu4",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "i4",
       "b_dtype": "i4",
       "c_dtype": "i32",
@@ -2761,9 +2904,10 @@
     {
       "op_id": "wmma_f32_16x16x16_fp8_fp8_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2781,9 +2925,10 @@
     {
       "op_id": "wmma_f32_16x16x16_fp8_bf8_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2801,9 +2946,10 @@
     {
       "op_id": "wmma_f32_16x16x16_bf8_fp8_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -2821,9 +2967,10 @@
     {
       "op_id": "wmma_f32_16x16x16_bf8_bf8_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -2841,9 +2988,10 @@
     {
       "op_id": "wmma_i32_16x16x32_iu4_w32_gfx12",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x32.iu4",
       "family": "dense",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201"],
       "a_dtype": "i4",
       "b_dtype": "i4",
       "c_dtype": "i32",
@@ -2862,6 +3010,7 @@
     {
       "op_id": "wmma_f32_16x16x4_f32",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x4_f32",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x4.f32",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2882,6 +3031,7 @@
     {
       "op_id": "wmma_f32_16x16x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x32.bf16",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2902,6 +3052,7 @@
     {
       "op_id": "wmma_bf16_16x16x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.bf16.16x16x32.bf16",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2922,6 +3073,7 @@
     {
       "op_id": "wmma_bf16f32_16x16x32_bf16",
       "llvm_builtin": "__builtin_amdgcn_wmma_bf16f32_16x16x32_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.bf16f32.16x16x32.bf16",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2942,6 +3094,7 @@
     {
       "op_id": "wmma_f32_16x16x64_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2962,6 +3115,7 @@
     {
       "op_id": "wmma_f32_16x16x64_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -2982,6 +3136,7 @@
     {
       "op_id": "wmma_f32_16x16x64_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3002,6 +3157,7 @@
     {
       "op_id": "wmma_f32_16x16x64_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3022,6 +3178,7 @@
     {
       "op_id": "wmma_f16_16x16x64_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x64.fp8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3042,6 +3199,7 @@
     {
       "op_id": "wmma_f16_16x16x64_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x64.fp8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3062,6 +3220,7 @@
     {
       "op_id": "wmma_f16_16x16x64_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x64.bf8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3082,6 +3241,7 @@
     {
       "op_id": "wmma_f16_16x16x64_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x64.bf8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3102,6 +3262,7 @@
     {
       "op_id": "wmma_i32_16x16x64_iu8",
       "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x64_iu8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.i32.16x16x64.iu8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3123,6 +3284,7 @@
     {
       "op_id": "wmma_f16_16x16x128_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3143,6 +3305,7 @@
     {
       "op_id": "wmma_f16_16x16x128_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3163,6 +3326,7 @@
     {
       "op_id": "wmma_f16_16x16x128_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3183,6 +3347,7 @@
     {
       "op_id": "wmma_f16_16x16x128_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3203,6 +3368,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3223,6 +3389,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp8e4m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3243,6 +3410,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3263,6 +3431,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3283,6 +3452,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3303,6 +3473,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_bf8e5m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3323,6 +3494,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_bf8e5m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3343,6 +3515,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3363,6 +3536,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3383,6 +3557,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3403,6 +3578,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3423,6 +3599,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3443,6 +3620,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3463,6 +3641,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3483,6 +3662,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3503,6 +3683,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3523,6 +3704,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3543,6 +3725,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3563,6 +3746,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3583,6 +3767,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3603,6 +3788,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3623,6 +3809,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3643,6 +3830,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3663,6 +3851,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3683,6 +3872,7 @@
     {
       "op_id": "wmma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3703,6 +3893,7 @@
     {
       "op_id": "wmma_f32_16x16x128_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3723,6 +3914,7 @@
     {
       "op_id": "wmma_f32_16x16x128_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3743,6 +3935,7 @@
     {
       "op_id": "wmma_f32_16x16x128_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3763,6 +3956,7 @@
     {
       "op_id": "wmma_f32_16x16x128_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3783,6 +3977,7 @@
     {
       "op_id": "wmma_f32_16x16x32_f16",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x32_f16",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.16x16x32.f16",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3803,6 +3998,7 @@
     {
       "op_id": "wmma_f16_16x16x32_f16",
       "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x32_f16",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f16.16x16x32.f16",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3823,6 +4019,7 @@
     {
       "op_id": "wmma_f32_32x16x128_f4",
       "llvm_builtin": "__builtin_amdgcn_wmma_f32_32x16x128_f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.f32.32x16x128.f4",
       "family": "dense",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -3843,9 +4040,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_f16_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.f16",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp32",
@@ -3863,9 +4061,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_bf16_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.bf16",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "fp32",
@@ -3883,9 +4082,10 @@
     {
       "op_id": "swmmac_f16_16x16x32_f16_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x32_f16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x32.f16",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "fp16",
       "b_dtype": "fp16",
       "c_dtype": "fp16",
@@ -3903,9 +4103,10 @@
     {
       "op_id": "swmmac_bf16_16x16x32_bf16_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_bf16_16x16x32_bf16_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.bf16.16x16x32.bf16",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "bf16",
       "b_dtype": "bf16",
       "c_dtype": "bf16",
@@ -3923,9 +4124,10 @@
     {
       "op_id": "swmmac_i32_16x16x32_iu8_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.i32.16x16x32.iu8",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "i8",
       "b_dtype": "i8",
       "c_dtype": "i32",
@@ -3944,9 +4146,10 @@
     {
       "op_id": "swmmac_i32_16x16x32_iu4_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu4_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.i32.16x16x32.iu4",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "i4",
       "b_dtype": "i4",
       "c_dtype": "i32",
@@ -3965,9 +4168,10 @@
     {
       "op_id": "swmmac_i32_16x16x64_iu4_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x64_iu4_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.i32.16x16x64.iu4",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "i4",
       "b_dtype": "i4",
       "c_dtype": "i32",
@@ -3986,9 +4190,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_fp8_fp8_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.fp8.fp8",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -4006,9 +4211,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_fp8_bf8_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.fp8.bf8",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "fp8e4m3",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -4026,9 +4232,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_bf8_fp8_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.bf8.fp8",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "fp8e4m3",
       "c_dtype": "fp32",
@@ -4046,9 +4253,10 @@
     {
       "op_id": "swmmac_f32_16x16x32_bf8_bf8_w32",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x32.bf8.bf8",
       "family": "sparse",
       "wave_size": 32,
-      "supported_targets": ["gfx12"],
+      "supported_targets": ["gfx12-generic", "gfx1200", "gfx1201", "gfx1250"],
       "a_dtype": "bf8e5m2",
       "b_dtype": "bf8e5m2",
       "c_dtype": "fp32",
@@ -4066,6 +4274,7 @@
     {
       "op_id": "swmmac_f32_16x16x64_bf16",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x64_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x64.bf16",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4086,6 +4295,7 @@
     {
       "op_id": "swmmac_bf16_16x16x64_bf16",
       "llvm_builtin": "__builtin_amdgcn_swmmac_bf16_16x16x64_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.bf16.16x16x64.bf16",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4106,6 +4316,7 @@
     {
       "op_id": "swmmac_bf16f32_16x16x64_bf16",
       "llvm_builtin": "__builtin_amdgcn_swmmac_bf16f32_16x16x64_bf16",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.bf16f32.16x16x64.bf16",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4126,6 +4337,7 @@
     {
       "op_id": "swmmac_f32_16x16x128_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x128.fp8.fp8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4146,6 +4358,7 @@
     {
       "op_id": "swmmac_f32_16x16x128_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x128.fp8.bf8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4166,6 +4379,7 @@
     {
       "op_id": "swmmac_f32_16x16x128_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x128.bf8.fp8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4186,6 +4400,7 @@
     {
       "op_id": "swmmac_f32_16x16x128_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x128.bf8.bf8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4206,6 +4421,7 @@
     {
       "op_id": "swmmac_f16_16x16x128_fp8_fp8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_fp8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x128.fp8.fp8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4226,6 +4442,7 @@
     {
       "op_id": "swmmac_f16_16x16x128_fp8_bf8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_fp8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x128.fp8.bf8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4246,6 +4463,7 @@
     {
       "op_id": "swmmac_f16_16x16x128_bf8_fp8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_bf8_fp8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x128.bf8.fp8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4266,6 +4484,7 @@
     {
       "op_id": "swmmac_f16_16x16x128_bf8_bf8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_bf8_bf8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x128.bf8.bf8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4286,6 +4505,7 @@
     {
       "op_id": "swmmac_i32_16x16x128_iu8",
       "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x128_iu8",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.i32.16x16x128.iu8",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4307,6 +4527,7 @@
     {
       "op_id": "swmmac_f32_16x16x64_f16",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x64_f16",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f32.16x16x64.f16",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4327,6 +4548,7 @@
     {
       "op_id": "swmmac_f16_16x16x64_f16",
       "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x64_f16",
+      "llvm_intrinsic": "llvm.amdgcn.swmmac.f16.16x16x64.f16",
       "family": "sparse",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4347,6 +4569,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4367,6 +4590,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp8e4m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4387,6 +4611,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4407,6 +4632,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4427,6 +4653,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4441,12 +4668,13 @@
       "a_layout": "K{2, 16} L{K1M} V{K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4467,6 +4695,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_bf8e5m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4487,6 +4716,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4507,6 +4737,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4527,6 +4758,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4541,12 +4773,13 @@
       "a_layout": "K{2, 16} L{K1M} V{K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4567,6 +4800,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4587,6 +4821,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4607,6 +4842,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4627,6 +4863,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4641,12 +4878,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4667,6 +4905,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4687,6 +4926,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4707,6 +4947,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4727,6 +4968,7 @@
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4741,12 +4983,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4761,12 +5004,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "K{2, 16} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4781,12 +5025,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "K{2, 16} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4801,12 +5046,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4821,12 +5067,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4841,12 +5088,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4867,6 +5115,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp8e4m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4887,6 +5136,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4907,6 +5157,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4927,6 +5178,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4941,12 +5193,13 @@
       "a_layout": "K{2, 16} L{K1M} V{K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_bf8e5m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4967,6 +5220,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_bf8e5m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -4987,6 +5241,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_bf8e5m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5007,6 +5262,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_bf8e5m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5027,6 +5283,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_bf8e5m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5041,12 +5298,13 @@
       "a_layout": "K{2, 16} L{K1M} V{K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e2m3_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5067,6 +5325,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e2m3_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5087,6 +5346,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e2m3_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5107,6 +5367,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e2m3_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5127,6 +5388,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e2m3_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5141,12 +5403,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e3m2_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5167,6 +5430,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e3m2_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5187,6 +5451,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e3m2_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5207,6 +5472,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e3m2_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5227,6 +5493,7 @@
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp6e3m2_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5241,12 +5508,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp4e2m1_fp8e4m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5261,12 +5529,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "K{2, 16} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp4e2m1_bf8e5m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5281,12 +5550,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "K{2, 16} L{K1N} V{K2K0}",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp4e2m1_fp6e2m3",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5301,12 +5571,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp4e2m1_fp6e3m2",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5321,12 +5592,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5341,12 +5613,13 @@
       "a_layout": "K{2, 32} L{K1M} V{K2K0}",
       "b_layout": "same",
       "c_d_layout": "M{8} L{M1N} V{M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale_f32_32x16x128_f4",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_32x16x128_f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale.f32.32x16x128.f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5361,12 +5634,13 @@
       "a_layout": "K{2, 32} M{16} L{K1M0} V{M1K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{2, 8} L{M1N} V{M2M0}",
-      "scale": {"block_k": 32, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 32, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     },
     {
       "op_id": "wmma_scale16_f32_32x16x128_f4",
       "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_32x16x128_f4",
+      "llvm_intrinsic": "llvm.amdgcn.wmma.scale16.f32.32x16x128.f4",
       "family": "scaled",
       "wave_size": 32,
       "supported_targets": ["gfx1250"],
@@ -5381,7 +5655,7 @@
       "a_layout": "K{2, 32} M{16} L{K1M0} V{M1K2K0}",
       "b_layout": "K{2, 32} L{K1N} V{K2K0}",
       "c_d_layout": "M{2, 8} L{M1N} V{M2M0}",
-      "scale": {"block_k": 16, "a_dtypes": ["e8m0"], "b_dtypes": ["e8m0"]},
+      "scale": {"block_k": 16, "a_dtypes": ["e8m0", "e4m3", "e5m3"], "b_dtypes": ["e8m0", "e4m3", "e5m3"]},
       "index_layout": null
     }
   ]

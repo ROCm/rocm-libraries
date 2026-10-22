@@ -78,6 +78,35 @@ def test_select_unknown_combo_raises_valueerror_with_query() -> None:
     assert "'mfma_f32_16x16x16f16'" in message  # lists the candidates
 
 
+@pytest.mark.parametrize(
+    "target,op_id",
+    [
+        ("gfx1100", "wmma_f32_16x16x16_f16_w32"),
+        ("gfx1154", "wmma_f32_16x16x16_f16_w32"),
+        ("gfx11-generic", "wmma_f32_16x16x16_f16_w32"),
+        ("gfx1200", "wmma_f32_16x16x16_f16_w32_gfx12"),
+        ("gfx942", "mfma_f32_16x16x16f16"),
+    ],
+)
+def test_select_on_real_target_ids(target, op_id) -> None:
+    chosen = load_mma_traits().select(
+        target=target, a="fp16", b="fp16", c="fp32", m=16, n=16, k=16
+    )
+    assert chosen.op_id == op_id
+
+
+def test_family_name_is_not_a_target() -> None:
+    # Rows list real target ids; a family name such as 'gfx11' selects nothing.
+    with pytest.raises(ValueError) as excinfo:
+        load_mma_traits().select(
+            target="gfx11", a="fp16", b="fp16", c="fp32", m=16, n=16, k=16
+        )
+    assert str(excinfo.value) == (
+        "no MMA instruction for target='gfx11' a='fp16' b='fp16' c='fp32' d='fp32' "
+        "shape=(16,16,16) family='dense' -- selectable on 'gfx11': []"
+    )
+
+
 # ---- per-operand dtypes ---------------------------------------------------------------------------
 
 
