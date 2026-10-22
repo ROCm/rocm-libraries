@@ -1051,11 +1051,12 @@ class Solution(collections.abc.Mapping):
           or state["MacroTile1"] != state["MacroTile"][1]:
         reject(state, printRejectionReason, "MacroTile mismatch")
 
-    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950
+    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950/gfx11
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
+      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11) \
+          and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
@@ -7154,12 +7155,16 @@ class Solution(collections.abc.Mapping):
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
     else: # mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
-      # Restrict GRVW/VW combos so shift-ptr logic will work
-      if state["GlobalReadVectorWidthA"] > 1 \
+      # Restrict GRVW/VW combos so shift-ptr logic will work.
+      # gfx11 dot2 with K-contiguous operands reads along K and never shifts pointers.
+      gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
+      dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
+      dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
+      if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \
           and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
-      if state["GlobalReadVectorWidthB"] > 1 \
+      if state["GlobalReadVectorWidthB"] > 1 and not dotNoShiftB \
           and state["GlobalReadVectorWidthB"] != state["VectorWidthB"]:
           reject(state, printRejectionReason, "GlobalReadVectorWidthB %u must be == VectorWidthB %u or == 1" % \
                   (state["GlobalReadVectorWidthB"], state["VectorWidthB"]))
