@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -114,6 +114,17 @@ int main(int argc, char* argv[])
         {
             return status;
         }
+        catch(const hipError_t& status)
+        {
+            std::cerr << "hip error: " << hipGetErrorString(status) << " ("
+                      << static_cast<int>(status) << ")" << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
     }
     else
     {
@@ -143,6 +154,17 @@ int main(int argc, char* argv[])
         catch(const hipsparseStatus_t& status)
         {
             return status;
+        }
+        catch(const hipError_t& status)
+        {
+            std::cerr << "hip error: " << hipGetErrorString(status) << " ("
+                      << static_cast<int>(status) << ")" << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
     }
 }

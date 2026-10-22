@@ -48,15 +48,19 @@
 namespace hipsparse_test
 {
 
-    // device_malloc wraps hipMalloc and provides same API as malloc
+    // device_malloc wraps hipMalloc. A failed allocation throws so the caller
+    // stops before using a null device pointer.
     static void* device_malloc(size_t byte_size)
     {
-        // Always start from a defined value so a failed allocation never hands
-        // back an uninitialized pointer that downstream code would dereference.
         void*      pointer = nullptr;
         hipError_t status  = hipMalloc(&pointer, byte_size);
         if(status != hipSuccess)
         {
+            if(pointer != nullptr)
+            {
+                PRINT_IF_HIP_ERROR(hipFree(pointer));
+            }
+
             // Surface enough context to tell an out-of-memory condition apart
             // from a lost/faulted device on CI runners.
             size_t     free_mem   = 0;
@@ -83,7 +87,7 @@ namespace hipsparse_test
                         hipGetErrorString(mem_status));
             }
 
-            pointer = nullptr;
+            throw(status);
         }
         return pointer;
     }
