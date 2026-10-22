@@ -2906,6 +2906,48 @@ def kv_addr_width_for_builder(
     return False
 
 
+def gfx942_3d_kv_needs_i64_addr(
+    num_kv_blocks: int,
+    block_bytes: int,
+    *,
+    kv_fp8: bool,
+    use_wide_kv_load: bool,
+    tile_size: int,
+    head_size: int,
+) -> bool:
+    """``use_i64_kv_addr`` for the gfx942 tiled 3D kernel on this paged cache.
+
+    The kernel has no i64 path, so its spec refuses the flag: True means the
+    cache is past what the selected K/V loader reads. The single rule for the
+    spec builder, the cache key and the dispatcher's tuning specs.
+    """
+    from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+    limit = i32_kv_cache_bytes(
+        kv_fp8=kv_fp8,
+        use_wide_kv_load=use_wide_kv_load,
+        tile_size=tile_size,
+        head_size=head_size,
+    )
+    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > limit
+
+
+def _enable_i64_kv_addr_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_i64_kv_addr``: ``_enable_i64_kv_addr``, except on gfx942, whose
+    limit depends on the K/V loader (``gfx942_3d_kv_needs_i64_addr``)."""
+    # Below the buffer range every loader is i32, so skip the selector walk.
+    if arch != "gfx942" or not _enable_i64_kv_addr(problem):
+        return _enable_i64_kv_addr(problem)
+    return gfx942_3d_kv_needs_i64_addr(
+        problem.num_kv_blocks,
+        _kv_block_bytes(problem),
+        kv_fp8=_kv_storage_dtype(problem) is not None,
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
+        tile_size=_gfx942_3d_tile_size_override(problem, arch) or problem.block_size,
+        head_size=problem.head_size,
+    )
+
+
 def _kv_block_bytes(problem: UnifiedAttentionProblem) -> int:
     """Byte size of one paged K (or V) block for ``problem``."""
     elem_bytes = 1 if problem.use_fp8 else 2
@@ -3985,7 +4027,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _select_3d_waves_per_eu(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
-        _enable_i64_kv_addr(problem),
+        _enable_i64_kv_addr_3d(problem, arch),
         decode_grid,
         _kv_cache_policy_3d(problem, arch),
         _gfx950_3d_tile_size_override(problem, arch),

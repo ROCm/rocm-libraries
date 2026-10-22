@@ -24,6 +24,7 @@ written for the CORRECT behavior (bias should block combo_2d) and are being skip
 
 from __future__ import annotations
 
+import os
 import unittest
 from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
@@ -33,13 +34,16 @@ from unittest import mock
 import builders.common.attention_spec_builder as _asb
 import kernels.common.attention_unified as _au
 from dispatch.attention import AttentionRequest, attention_candidates
-from dispatch.attention.common import _tuning_problem
+from dispatch.attention.common import AttentionTuningSpec, _tuning_problem
 from dispatch.attention.tuning_specs import (
     ExplicitAttention2DConfig,
+    ExplicitAttention3DConfig,
     _semantic_fields,
     make_explicit_attention_2d_spec,
+    make_explicit_attention_3d_specs,
 )
 from kernels import UnifiedAttentionProblem
+from kernels.gfx942 import attention_tiled_3d as _gfx942_3d
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx942TiledSpec,
     build_gfx942_4warp_gqa,
@@ -490,6 +494,105 @@ class TestI64KvAddr(unittest.TestCase):
                         )
                     self.assertEqual(meta.kv_addr_limit, limit)
                     _au._check_kv_addr_width(p, _kv_cache(n, p), limit)
+
+
+# d128 bs16 4-kv-head bf16 blocks are 16 KiB, so 131072 blocks are exactly 2^31
+# bytes: 64 sequences of 32768 tokens.
+_AT_2GIB = 131072
+
+
+def _gfx942_decode_prob(num_kv_blocks: int, **kw) -> UnifiedAttentionProblem:
+    fields = dict(
+        total_q=64,
+        num_seqs=64,
+        num_query_heads=64,
+        num_kv_heads=4,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=1,
+        max_seqlen_k=32768,
+        dtype="bf16",
+        num_kv_blocks=num_kv_blocks,
+    )
+    fields.update(kw)
+    return UnifiedAttentionProblem(**fields)
+
+
+class TestGfx942Tiled3DKvAddr(unittest.TestCase):
+    """The gfx942 tiled 3D kernel has no i64 path; its K/V loader sets the cache
+    it reads. The flat loaders read to 2^31 bytes, the async copies to the
+    0x7FFF0000 buffer range."""
+
+    def setUp(self):
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("HIPDNN_GFX942_3D_WKV", None)
+
+    def test_loader_limits(self):
+        limit = _gfx942_3d.i32_kv_cache_bytes
+        common = dict(tile_size=16, head_size=128)
+        self.assertEqual(limit(kv_fp8=False, use_wide_kv_load=True, **common), 2**31)
+        self.assertEqual(limit(kv_fp8=True, use_wide_kv_load=False, **common), 2**31)
+        self.assertEqual(
+            limit(kv_fp8=False, use_wide_kv_load=False, **common), 0x7FFF0000
+        )
+        # 8 x 32 halves do not split over 64 lanes x 8, so the async copies run.
+        self.assertEqual(
+            limit(kv_fp8=False, use_wide_kv_load=True, tile_size=8, head_size=32),
+            0x7FFF0000,
+        )
+
+    def test_exactly_2gib_decode_builds_on_wide_loader(self):
+        for hq in (64, 32):
+            p = _gfx942_decode_prob(_AT_2GIB, num_query_heads=hq)
+            with self.subTest(num_query_heads=hq), _patch_arch("gfx942"):
+                spec = _asb._tiled_3d_spec_from_problem(p, "gfx942")
+                self.assertTrue(spec.use_wide_kv_load)
+                self.assertFalse(spec.use_i64_kv_addr)
+
+    def test_past_2gib_wide_loader_refused(self):
+        p = _gfx942_decode_prob(_AT_2GIB + 1)
+        with _patch_arch("gfx942"), self.assertRaises(NotImplementedError):
+            _asb._tiled_3d_spec_from_problem(p, "gfx942")
+
+    def test_exactly_2gib_async_loader_refused(self):
+        os.environ["HIPDNN_GFX942_3D_WKV"] = "0"
+        p = _gfx942_decode_prob(_AT_2GIB)
+        with _patch_arch("gfx942"), self.assertRaises(NotImplementedError):
+            _asb._tiled_3d_spec_from_problem(p, "gfx942")
+
+    def test_3d_key_follows_loader_limit(self):
+        # No i64 binary exists, so caches the loader reads share one key, and a
+        # cache past it gets its own key and reaches the spec's refusal.
+        small = _gfx942_decode_prob(_AT_I32_LIMIT)
+        at_2gib = _gfx942_decode_prob(_AT_2GIB)
+        over = _gfx942_decode_prob(_AT_2GIB + 1)
+        with _patch_arch("gfx942"):
+            key = _au._tiled_3d_cache_key(small, "gfx942")
+            self.assertEqual(key, _au._tiled_3d_cache_key(at_2gib, "gfx942"))
+            self.assertNotEqual(key, _au._tiled_3d_cache_key(over, "gfx942"))
+
+    def test_explicit_3d_spec_and_bind_follow_loader_limit(self):
+        p = _gfx942_decode_prob(_AT_2GIB)
+        config = ExplicitAttention3DConfig(
+            num_segments=0, knobs=(("use_wide_kv_load", True),)
+        )
+        segment, reduce = make_explicit_attention_3d_specs(p, config, arch="gfx942")
+        self.assertFalse(segment.use_i64_kv_addr)
+        tuned = AttentionTuningSpec(
+            path="3d",
+            arch="gfx942",
+            builder_kind="tiled",
+            compile_backend="llvm",
+            candidate_name="test",
+            tuning_id="test",
+            kernel_spec=segment,
+            reduce_spec=reduce,
+        )
+        self.assertFalse(tuned.with_num_kv_blocks(_AT_2GIB).kernel_spec.use_i64_kv_addr)
+        with self.assertRaises(NotImplementedError):
+            tuned.with_num_kv_blocks(_AT_2GIB + 1)
 
 
 @contextmanager
