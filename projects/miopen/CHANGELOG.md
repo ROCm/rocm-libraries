@@ -21,6 +21,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Extend gfx1250 3D grouped CK XDL-v1 backward-data old-output copy elision to FP32, preserving native FP32 arithmetic, the full CK clear, alias fallback, and existing workspace reservations.
 * [Conv] Omitted the redundant old-output layout copy for selected, fully initialized 2D FP16/BF16 grouped CK forward and backward-data invocations with disjoint tensors and workspace and default scalars; unsupported kernel families and aliases retain staged behavior.
 * [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
+* [Conv] Omit old-dW staging for selected packed 2D FP16/BF16 grouped CK WMMA-v3 backward-weights at explicit split one on gfx1250; preserve kernel arithmetic, native clears, scratch reservations, and alias/scalar fallbacks.
 
 ### Resolved Issues
 * [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.

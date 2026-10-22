@@ -514,6 +514,13 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
         return selected_id.size() >= end.size() &&
                selected_id.compare(selected_id.size() - end.size(), end.size(), end) == 0;
     };
+    if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
+    {
+        // Packed WMMA-v3 split 1 defines every dW through Set or its retained clear.
+        // Auto/atomic splits, two-stage and fused/unknown families remain staged.
+        return problem.Is2d() && split_k && *split_k == 1 && ends_with(">") &&
+               starts_with("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<");
+    }
     if(problem.Is3d())
     {
         // The registered 3D default XDL-v1 backward-data instances have no D tensor.

@@ -1054,6 +1054,117 @@ TEST(GPU_CkImplLoader_FP32, NcdhwBackwardSelectedFullClearAndAliasFallback)
     CheckNcdhwBackwardSelectedFullClearAndAliasFallback<float>(miopenFloat);
 }
 
+template <typename DataType>
+void CheckNchwWrwOverwriteAndAliasFallback(miopenDataType_t dtype)
+{
+    const auto device_name = GetCurrentDeviceName();
+    if(device_name != "gfx1250")
+        GTEST_SKIP() << "WRW copy elision targets gfx1250";
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    ASSERT_TRUE(loader.IsLoaded());
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    const miopen::TensorDescriptor x_desc(dtype, miopenTensorNCHW, {2, 16, 5, 7});
+    const miopen::TensorDescriptor w_desc(dtype, miopenTensorNCHW, {16, 8, 3, 3});
+    const miopen::ConvolutionDescriptor conv({1, 1}, {1, 1}, {1, 1}, {0, 0}, 2);
+    const auto dy_desc = conv.GetForwardOutputTensor(x_desc, w_desc, dtype);
+    auto problem       = miopen::conv::ProblemDescription{
+        dy_desc, w_desc, x_desc, conv, miopen::conv::Direction::BackwardWeights};
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+    const auto kernels  = loader.FillValidKernels(CKSolverType::GrpConvWrw, problem, dtype, false);
+    const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
+        return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, 1) &&
+               loader.IsArgsSupported(CKSolverType::GrpConvWrw, problem, id + "+1", dtype, false);
+    });
+    ASSERT_NE(selected, kernels.end());
+    EXPECT_FALSE(miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, *selected, -1));
+    EXPECT_FALSE(miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, *selected, 2));
+    const auto solution =
+        loader.GetSolution(CKSolverType::GrpConvWrw, ctx, problem, *selected + "+1", false);
+    ASSERT_EQ(solution.status, miopenStatusSuccess);
+    ASSERT_TRUE(solution.invoker_factory);
+    Workspace scratch(solution.workspace_sz);
+    const auto invoker =
+        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    const auto xs = x_desc.GetStrides();
+    const auto ys = dy_desc.GetStrides();
+    const auto ws = w_desc.GetStrides();
+    std::vector<DataType> x(x_desc.GetElementSize());
+    std::vector<DataType> dy(dy_desc.GetElementSize());
+    for(std::size_t i = 0; i < x.size(); ++i)
+        x[i] = DataType{static_cast<float>(static_cast<int>(i % 5) - 2)};
+    auto x_dev  = handle.Write(x);
+    auto dy_dev = handle.Write(dy);
+    auto w_dev  = handle.Write(std::vector<DataType>(w_desc.GetElementSize()));
+    auto alias_dev =
+        handle.Write(std::vector<DataType>(std::max(x.size(), w_desc.GetElementSize())));
+    for(const int sign : {1, -1})
+    {
+        for(std::size_t i = 0; i < dy.size(); ++i)
+            dy[i] = DataType{static_cast<float>(sign * (static_cast<int>(i % 3) - 1))};
+        std::vector<DataType> expected(w_desc.GetElementSize());
+        for(std::size_t k = 0; k < 16; ++k)
+            for(std::size_t c = 0; c < 8; ++c)
+                for(int fy = 0; fy < 3; ++fy)
+                    for(int fx = 0; fx < 3; ++fx)
+                    {
+                        int sum = 0;
+                        for(std::size_t n = 0; n < 2; ++n)
+                            for(int ho = 0; ho < 5; ++ho)
+                                for(int wo = 0; wo < 7; ++wo)
+                                {
+                                    const int hi = ho + fy - 1;
+                                    const int wi = wo + fx - 1;
+                                    if(hi < 0 || hi >= 5 || wi < 0 || wi >= 7)
+                                        continue;
+                                    const auto xi = n * xs[0] + (k / 8 * 8 + c) * xs[1] +
+                                                    hi * xs[2] + wi * xs[3];
+                                    const auto yi = n * ys[0] + k * ys[1] + ho * ys[2] + wo * ys[3];
+                                    sum += static_cast<int>(static_cast<float>(x[xi])) *
+                                           static_cast<int>(static_cast<float>(dy[yi]));
+                                }
+                        expected[k * ws[0] + c * ws[1] + fy * ws[2] + fx * ws[3]] =
+                            DataType{static_cast<float>(sum)};
+                    }
+        handle.WriteTo(dy.data(), dy_dev, dy_desc.GetNumBytes());
+        for(const bool alias : {false, true})
+        {
+            handle.WriteTo(x.data(), x_dev, x_desc.GetNumBytes());
+            const std::vector<DataType> poison(expected.size(), DataType{37.0f});
+            handle.WriteTo(poison.data(), w_dev, w_desc.GetNumBytes());
+            if(alias)
+                handle.WriteTo(x.data(), alias_dev, x_desc.GetNumBytes());
+            ASSERT_EQ(hipMemset(scratch.ptr(), sign == 1 ? 0xa5 : 0x5a, scratch.size()),
+                      hipSuccess);
+            const miopen::ConvWrwTensors tensors{dy_desc,
+                                                 dy_dev.get(),
+                                                 x_desc,
+                                                 alias ? alias_dev.get() : x_dev.get(),
+                                                 w_desc,
+                                                 alias ? alias_dev.get() : w_dev.get()};
+            invoker(handle,
+                    miopen::conv::WrWInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
+            handle.Finish();
+            EXPECT_EQ(handle.Read<DataType>(alias ? alias_dev : w_dev, expected.size()), expected)
+                << "selected=" << *selected << " sign=" << sign << " alias=" << alias;
+            EXPECT_EQ(handle.Read<DataType>(dy_dev, dy.size()), dy);
+            if(!alias)
+                EXPECT_EQ(handle.Read<DataType>(x_dev, x.size()), x);
+        }
+    }
+}
+
+TEST(GPU_CkImplLoader_FP16, NchwWrwOverwriteAndAliasFallback)
+{
+    CheckNchwWrwOverwriteAndAliasFallback<half_float::half>(miopenHalf);
+}
+
+TEST(GPU_CkImplLoader_BFP16, NchwWrwOverwriteAndAliasFallback)
+{
+    CheckNchwWrwOverwriteAndAliasFallback<bfloat16>(miopenBFloat16);
+}
+
 TEST(GPU_CkImplLoader_BF16, DepthwiseWrwTailThroughPlugin)
 {
     const auto device_name = GetCurrentDeviceName();

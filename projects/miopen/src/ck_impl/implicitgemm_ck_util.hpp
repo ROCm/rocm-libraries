@@ -1099,6 +1099,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     // retain staging even when the selected CK invoker defines E.
     const bool selected_output_complete =
         (!problem.IsDirectionForward() || PlainFwdSetOutput) &&
+        (problem.GetDirection() != miopen::conv::Direction::BackwardWeights ||
+         ctx.GetStream().GetDeviceName() == "gfx1250") &&
         (!problem.Is3d() || ctx.GetStream().GetDeviceName() == "gfx1250") &&
         SelectedNCHWCKOutputIsFullyDefined(problem, id_string, split_k);
 
