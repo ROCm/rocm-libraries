@@ -425,24 +425,15 @@ class _OccupancyGuard:
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.helpers.compile import compile_kernel
+            from rocke.runtime.compiler_options import CompilerOptionNotAccepted
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr/resource tools unavailable: {exc}")
-        # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
-        # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
-        # the whole process instead of raising. That happens when an earlier
-        # test in the session already loaded the system comgr ahead of torch's.
         try:
             from rocke.runtime.comgr import _require_compiler_info
 
-            llvm_major = int(_require_compiler_info().llvm_version[0])
+            _require_compiler_info()
         except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
             raise unittest.SkipTest(f"comgr unavailable: {exc}")
-        if llvm_major < 21:
-            raise unittest.SkipTest(
-                f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
-                "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
-            )
-
         cls.spec = cls.make_spec()
         try:
             art = compile_kernel(
@@ -452,6 +443,10 @@ class _OccupancyGuard:
             )
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr toolchain unavailable: {exc}")
+        except CompilerOptionNotAccepted as exc:
+            # The forward kernel needs -amdgpu-mfma-vgpr-form; an earlier test
+            # in the session may have loaded a comgr that does not accept it.
+            raise unittest.SkipTest(f"loaded comgr cannot build this kernel: {exc}")
         except RuntimeError as exc:
             # A forced ROCKE_LLVM_FLAVOR that the loaded comgr cannot take is an
             # environment mismatch, not a kernel defect. Any other compile

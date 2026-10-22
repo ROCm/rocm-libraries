@@ -297,11 +297,32 @@ def _can_compile():
     return tc.comgr_path is not None
 
 
+def _skip_unless_compiler_accepts(arch, *specs):
+    """Skip where the loaded compiler refuses a codegen option these main
+    kernels need (see ``rocke.runtime.compiler_options``): these tests are
+    about the backward compile, not about that compiler."""
+    from rocke.helpers.compile import _comgr_options_for_kernel
+    from rocke.runtime.comgr import require_options_accepted
+    from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+
+    from kernels.common.attention_bwd import build_attn_bwd_main
+
+    for s in specs:
+        k = build_attn_bwd_main(s, arch=arch)
+        try:
+            require_options_accepted(
+                _comgr_options_for_kernel(k), needed_by=f"kernel '{k.name}'"
+            )
+        except CompilerOptionNotAccepted as exc:
+            pytest.skip(str(exc))
+
+
 @pytest.mark.skipif(not _can_compile(), reason="no comgr library found")
 def test_real_main_kernel_compiles_and_is_cached(tmp_path):
     tc = bc.toolchain_identity()
     c = bc.CompileCache(tmp_path, toolchain=tc, source_hash=bc.backward_source_hash())
     s = _spec()
+    _skip_unless_compiler_accepts("gfx942", s)
     res = bc.compile_batch([("main", s)], arch="gfx942", cache=c, mode="serial")
     assert res[0].ok, res[0].detail
     assert res[0].entry.hsaco[:4] == b"\x7fELF"
@@ -323,6 +344,7 @@ def test_thread_pool_compiles_the_serial_code_objects(tmp_path):
         ("main", _spec(waves=4, block_n=64, block_m=32, warp_grid_g4=(2, 2))),
         ("main", _spec(head_size=128)),
     ]
+    _skip_unless_compiler_accepts("gfx942", *(s for _, s in specs))
     a = bc.compile_batch(
         specs, arch="gfx942", mode="serial",
         cache=bc.CompileCache(tmp_path / "s", toolchain=tc, source_hash=src),
@@ -367,11 +389,13 @@ def test_iglp1_code_objects_do_not_depend_on_what_the_process_compiled_before():
         return lower_kernel_to_llvm(k, arch=arch), _comgr_options_for_kernel(k)
 
     probe = spec("atomic", stage_order="g4g1g3")
+    other = spec("direct", head_pack=True, stage_order="g3g4g1")
+    _skip_unless_compiler_accepts(arch, probe, other)
     ll, opts = lowered(probe)
     alone, _ = build_hsaco_from_llvm_ir(ll, isa=isa, options=opts, fresh_process=True)
     # in-process iglp_opt(1) compiles move the strategy's counts here: another
     # kernel, then the probe itself (the history of the observed failure)
-    for s in (spec("direct", head_pack=True, stage_order="g3g4g1"), probe):
+    for s in (other, probe):
         ll, opts = lowered(s)
         build_hsaco_from_llvm_ir(ll, isa=isa, options=opts)
     _name, blob, _secs = bc.compile_one("main", probe, arch)

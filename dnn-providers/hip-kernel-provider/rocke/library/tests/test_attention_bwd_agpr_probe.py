@@ -106,12 +106,16 @@ def _compile_isa(kernel, arch):
 
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found")
+    from rocke.runtime.compiler_options import CompilerOptionNotAccepted
+
     try:
         from rocke.helpers.compile import compile_kernel
 
         art = compile_kernel(kernel, arch=arch, capture_ir_text=False, backend="python")
     except (ImportError, OSError) as exc:  # pragma: no cover - environment-dependent
         pytest.skip(f"comgr unavailable: {exc}")
+    except CompilerOptionNotAccepted as exc:  # the loaded compiler, not the kernel
+        pytest.skip(str(exc))
     return disassemble(art.hsaco, arch=arch)
 
 
