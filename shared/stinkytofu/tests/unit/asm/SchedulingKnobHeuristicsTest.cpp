@@ -120,6 +120,31 @@ TEST(SchedulingKnobHeuristics, UserOverrideWinsOverPolicy) {
     EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
 }
 
+TEST(SchedulingKnobHeuristics, ReduceClusterBarrierPerLoopWhenWmmaBudgetCoversDsLoads) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+
+    // 2501 cycles over 500 ds_loads is 5 cycles each, and the sum is above 2500.
+    const SchedulingFeatures enabled =
+        makeFeatures(/*wmma=*/64, /*ds=*/500, /*sumWmmaLatency=*/2501);
+    const ResolvedSchedulingKnobs on = resolveSchedulingKnobs(enabled, overrides, policy);
+    EXPECT_TRUE(on.reduceClusterBarrierPerLoop);
+    EXPECT_EQ(on.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
+
+    // Exactly 5 cycles per ds_load is enough once the sum is above 2500.
+    const SchedulingFeatures exact = makeFeatures(/*wmma=*/64, /*ds=*/501, /*sumWmmaLatency=*/2505);
+    EXPECT_TRUE(resolveSchedulingKnobs(exact, overrides, policy).reduceClusterBarrierPerLoop);
+
+    // The sum threshold is strict.
+    const SchedulingFeatures atSumCap =
+        makeFeatures(/*wmma=*/64, /*ds=*/100, /*sumWmmaLatency=*/2500);
+    EXPECT_FALSE(resolveSchedulingKnobs(atSumCap, overrides, policy).reduceClusterBarrierPerLoop);
+
+    // 2501 / 501 truncates to 4 cycles per ds_load.
+    const SchedulingFeatures tight = makeFeatures(/*wmma=*/64, /*ds=*/501, /*sumWmmaLatency=*/2501);
+    EXPECT_FALSE(resolveSchedulingKnobs(tight, overrides, policy).reduceClusterBarrierPerLoop);
+}
+
 TEST(SchedulingKnobHeuristics, ReduceClusterBarrierUserOverrideWinsOverPolicy) {
     HeuristicSchedulingKnobPolicy policy;
     SchedulingKnobOverrides overrides;
