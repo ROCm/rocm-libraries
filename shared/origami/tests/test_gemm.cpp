@@ -946,7 +946,7 @@ TEST_CASE("GEMM: LocalSplitU waves fill SIMDs a single-wave group leaves idle", 
         tp.wave_group_m  = wave_group_m;
         tp.wave_group_n  = wave_group_n;
         tp.local_split_u = local_split_u;
-        return origami::gemm::compute_total_latency(problem, hardware, config, false, false);
+        return origami::gemm::compute_total_latency(problem, hardware, config);
       };
       REQUIRE(latency(1, 1, 4) < latency(1, 1, 1));
     }
@@ -959,8 +959,7 @@ TEST_CASE("GEMM: occupancy only helps when the grid fills it", "[gemm][occupancy
       auto hardware = make_hardware(gpu_arch);
       auto latency  = [&](size_t m, size_t n, int occupancy) {
         auto config = make_config(128, 128, 64, 16, 16, 16, false, 1, occupancy, 0, 0, 0);
-        return origami::gemm::compute_total_latency(
-            make_problem(m, n, 4096), hardware, config, false, false);
+        return origami::gemm::compute_total_latency(make_problem(m, n, 4096), hardware, config);
       };
       // Four tiles: no CU gets a second WG, whatever the kernel's occupancy allows.
       REQUIRE(latency(256, 256, 2) == latency(256, 256, 1));
@@ -980,7 +979,7 @@ TEST_CASE("GEMM: a problem narrower than one MFMA isn't charged twice for its pa
         auto config = make_config(256, 16, 64, 16, 16, 16, false, 1, 2, 0, 0, 0);
         auto problem =
             make_problem(4096, n, 4096, origami::transpose_t::N, origami::transpose_t::N);
-        return origami::gemm::compute_total_latency(problem, hardware, config, false, false);
+        return origami::gemm::compute_total_latency(problem, hardware, config);
       };
       REQUIRE(latency(1) <= latency(16));
     }
@@ -2339,7 +2338,7 @@ TEST_CASE("GEMM: one LDS buffer exposes the next tile's writes once they outlast
     auto hw                    = make_hardware(950);
     auto c                     = make_config(128, 128, depth_u, 16, 16, 32, false, 1, 1, 0, 0, 0);
     c.tensile().one_lds_buffer = one_buffer;
-    return origami::gemm::compute_total_latency(make_problem(128, 8192, 8192), hw, c, false, false);
+    return origami::gemm::compute_total_latency(make_problem(128, 8192, 8192), hw, c);
   };
 
   SECTION("writes that fit in the last K-step cost nothing") {

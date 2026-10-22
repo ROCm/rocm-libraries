@@ -2112,10 +2112,11 @@ double compute_tile_latency(const problem_t& problem,
   double L_single_lds_buffer = 0.0;
   if (tp.one_lds_buffer) {
     const dim3_t wave       = compute_wave_share(config);
-    const double kstep_mfma = static_cast<double>(wave.m / std::max<size_t>(config.mi.m, 1)) *
-                              static_cast<double>(wave.n / std::max<size_t>(config.mi.n, 1)) *
-                              static_cast<double>(hardware.get_mi_latency(
-                                  config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype));
+    const double kstep_mfma =
+        (static_cast<double>(wave.m) / static_cast<double>(std::max<size_t>(config.mi.m, 1))) *
+        (static_cast<double>(wave.n) / static_cast<double>(std::max<size_t>(config.mi.n, 1))) *
+        static_cast<double>(
+            hardware.get_mi_latency(config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype));
     const double tile_write = (static_cast<double>(config.mt.m) * context.a_bytes +
                                static_cast<double>(config.mt.n) * context.b_bytes) *
                               static_cast<double>(MT_K) /
