@@ -46,8 +46,10 @@ kmd_fields:
   default_value: 64
 - name: lds_row_pad
   type: int
+  default_value: 8
 - name: pv_priority
   type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype

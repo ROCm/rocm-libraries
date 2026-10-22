@@ -293,6 +293,42 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # The gfx942 dense-attention production pack, gated like gfx950 above.
+    hkp_gfx942_attention_dense_available(_hkp_gfx942_attention_dense)
+    if(_hkp_gfx942_attention_dense)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionDensePacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+
+        # Hand-written companion census: every shipped kernel's tile passes the engine's
+        # own isSupportedGfx942AttentionDenseTile() check.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionDenseCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsTileIsOneTheEngineLaunches
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942AttentionDense for "
+            "gfx942, so its census is not registered.")
+    endif()
+
     # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
     # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
     # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.

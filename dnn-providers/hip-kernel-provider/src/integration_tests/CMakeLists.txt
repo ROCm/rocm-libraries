@@ -228,6 +228,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
     )
 endif()
 
+# hipkernel:Gfx942AttentionDense, gated and sharded like the gfx950 target above.
+set(_hkp_gfx942_attention_dense FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx942_attention_dense_available(_hkp_gfx942_attention_dense)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND _hkp_gfx942_attention_dense
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx942AttentionDense"
+        INSTALL_SUBDIR hip_kernel_provider
+        INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx942
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
+
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(

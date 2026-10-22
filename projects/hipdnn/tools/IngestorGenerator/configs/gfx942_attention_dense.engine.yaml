@@ -64,6 +64,14 @@ kmd_fields:
 - name: block_n
   type: int
   default_value: 64
+# Performance knobs at the policy default the kernel resolves when left unset
+# (Gfx942AttentionDenseSpec.lds_row_pad / pv_priority).
+- name: lds_row_pad
+  type: int
+  default_value: 8
+- name: pv_priority
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -78,6 +86,8 @@ specialization:
   - seqlen_kv
   - block_m
   - block_n
+  - lds_row_pad
+  - pv_priority
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -108,6 +118,10 @@ specialization:
       field: block_m
     block_n:
       field: block_n
+    lds_row_pad:
+      field: lds_row_pad
+    pv_priority:
+      field: pv_priority
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -156,6 +170,8 @@ enumerate:
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
   spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
+  # Frozen build cost: a registry that grows past this fails here, not at pack time.
+  max_kernels: 1000
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
@@ -180,3 +196,66 @@ ground_truth:
     mask_type:
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+
+# Launch-surface audit (`tools/launch_surface.py --check <this file>`).
+launch_surface:
+  - name: grid
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch]
+    guard: >
+      gfx942AttentionDenseGeometry() throws HipdnnPluginException for a block_m
+      that is not a positive multiple of 32 within a 1024-thread CTA, and for
+      non-positive seqlen_q, num_query_heads or batch. Grid is
+      (ceil(Sq/block_m), Hq, B) from the candidate's own block_m and the graph's
+      shape; every shipped variant is non-persistent.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+
+  - name: block
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp
+    kmd_fields: [block_m]
+    guard: >
+      block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+
+  # The tile rules, the window translation and the sliding-window zero-trip guard are
+  # restated by hand from the rocKE Python. The LDS budget is not restated.
+  - name: matcher
+    python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n]
+    guard: >
+      kernelMatches() returns false (no panic) if dtype, head_size, causal or
+      sliding_window disagrees with the graph, the candidate's tile is not one
+      isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
+      Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
+      query block no key tile. Head counts, batch and sequence lengths are runtime
+      kernel arguments and are never compared. graph_match maps a causal band of
+      left_bound L to sliding_window L + 1 and declines every non-causal band.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  - name: kernargs
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch]
+    guard: >
+      attentionDenseKernelSignature() always returns the 10-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads). Every
+      variant is non-persistent (no fast-division kernargs), use_sinks=False and
+      emit_lse=False. Validated at prepare() time by
+      buildIngestorKernelCode(..., expectedSignature).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseSignature.cpp
+
+  # The cold ranking reads the two LDS/scheduling knobs to order arms; they do not
+  # enter the launch.
+  - name: score
+    python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [block_m, block_n, lds_row_pad, pv_priority]
+    guard: >
+      scoreKernel() returns 0 for a record without a launchable tile or with a
+      missing or negative lds_row_pad / pv_priority; otherwise a distinct positive
+      score per knob combination, policy arms (256/64, lds_row_pad 8,
+      pv_priority 0) first.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp

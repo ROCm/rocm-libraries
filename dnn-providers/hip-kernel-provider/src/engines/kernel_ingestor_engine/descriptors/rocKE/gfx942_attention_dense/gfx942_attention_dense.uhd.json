@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "da6923b6-2fc4-4810-af0a-18e8d8c4b081",
+  "name": "Gfx942AttentionDense selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx942_attention_dense.score"
+  }
+}

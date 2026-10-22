@@ -408,6 +408,50 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipkernel:Gfx950AttentionDense is not shipped for gfx950 by this configuration - skipping gfx950-attention-dense-external-integration-check")
     endif()
 
+    # hipkernel:Gfx942AttentionDense, routed into the gfx942 shard for the same reasons as
+    # the gfx950 block above.
+    set(_hkp_gfx942_external_ctest
+        "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx942_CTestTestfile.cmake")
+    file(WRITE "${_hkp_gfx942_external_ctest}" "")
+    set_property(GLOBAL PROPERTY
+                 HKP_CENSUS_EXTERNAL_TEST_FILE_gfx942 "${_hkp_gfx942_external_ctest}")
+
+    set(_gfx942_attention_dense_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx942_attention_dense_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx942_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx942-attention-dense-external-integration
+        )
+    endif()
+
+    set(_hkp_gfx942_attention_dense FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx942_attention_dense_available(_hkp_gfx942_attention_dense)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND _hkp_gfx942_attention_dense
+       AND TARGET hipdnn_integration_tests)
+        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx942-attention-dense-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx942AttentionDense"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx942
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx942AttentionDense.toml
+            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_gfx942_attention_dense_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx942-attention-dense-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx942AttentionDense is not shipped for gfx942 by this configuration - skipping gfx942-attention-dense-external-integration-check")
+    endif()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
