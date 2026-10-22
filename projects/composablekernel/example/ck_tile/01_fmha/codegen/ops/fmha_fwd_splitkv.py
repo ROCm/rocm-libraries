@@ -721,7 +721,10 @@ class FmhaFwdSplitKVKernel:
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_subtilepage=BOOL_MAP[
                 "t"
-                if (self.F_pipeline.F_pagedkv == "t" and self.F_tile.F_page_shorter_than_tile)
+                if (
+                    self.F_pipeline.F_pagedkv == "t"
+                    and self.F_tile.F_page_shorter_than_tile
+                )
                 else "f"
             ],
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
@@ -1000,6 +1003,10 @@ def get_fwd_splitkv_blobs(
             ):
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
+                    continue
+                # A cross-page tile only serves paged KV: non-paged dispatch
+                # always reaches the bn0=64 tile listed before it.
+                if tile.F_page_shorter_than_tile and pipeline.F_pagedkv != "t":
                     continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
