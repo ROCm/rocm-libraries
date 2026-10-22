@@ -1402,7 +1402,12 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             manifest = registry_enumerator.load_manifest(str(path))
             assert manifest["engine"]["name"], path
-            assert manifest["enumerate"]["max_kernels"] > 0, path
+            # Every manifest freezes its build cost: a slice by max_kernels, a full space
+            # (which the enumerator does not hold to max_kernels) by the AOT budget.
+            if manifest["enumerate"].get("space", "slice") == "full":
+                assert manifest["reduction"]["aot_budget_per_arch"] > 0, path
+            else:
+                assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
     def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
