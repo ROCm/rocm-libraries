@@ -46,20 +46,24 @@ class Engine:
     shipped_kmd: Path
 
 
-def _engine(name: str) -> Engine:
+def _engine(name: str, stem: str | None = None) -> Engine:
+    """`name` is the bundle folder and config stem; `stem` the descriptor file stem,
+    the generator's engine slug, which splits only before capitals: `Gfx942AttentionUnified3d`
+    gives `gfx942_attention_unified3d`, not the folder's `gfx942_attention_unified_3d`."""
     shipped = _DESCRIPTORS / name
+    stem = stem or name
     return Engine(
         name=name,
         manifest=_ROOT / "configs" / f"{name}.engine.yaml",
         selection=_ROOT / "configs" / f"{name}.yaml",
-        shipped_kdp=shipped / "artifacts" / f"{name}.kdp.json",
-        shipped_kmd=shipped / f"{name}.kmd.json",
+        shipped_kdp=shipped / "artifacts" / f"{stem}.kdp.json",
+        shipped_kmd=shipped / f"{stem}.kmd.json",
     )
 
 
 ENGINES = (
     _engine("gfx950_attention_dense"),
-    _engine("gfx942_attention_unified_3d"),
+    _engine("gfx942_attention_unified_3d", stem="gfx942_attention_unified3d"),
 )
 
 
