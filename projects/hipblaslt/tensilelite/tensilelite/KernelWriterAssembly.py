@@ -253,10 +253,13 @@ class KernelWriterAssembly(KernelWriter):
 
   ########################################
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
+    # gfx11 (RDNA) shares a 128 KB LDS pool across the WGP (2x the 64 KB per-workgroup cap).
+    ldsPool = 2 * deviceLdsSize if self.states.version[0] == 11 else deviceLdsSize
     ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
-        deviceLdsSize, ldsSize, self.states.archCaps["LdsGranularity"])
+        ldsPool, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -291,7 +294,7 @@ class KernelWriterAssembly(KernelWriter):
 
   @staticmethod
   def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
-    """Max. number of workgroups that can run on the same CU due to LDS size
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to LDS size
 
     granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
     occupies a whole number of granules, so the rounding can cost a workgroup at a
@@ -19442,8 +19445,24 @@ class KernelWriterAssembly(KernelWriter):
     # the last instruction may use ValuC VGPR (ex. no tailloop case), need 2 snop
     module.add(SNop(waitState=0, comment="1 wait states"))
     module.add(SNop(waitState=0, comment="1 wait states"))
+    numC = kernel["ThreadTile0"] * kernel["ThreadTile1"]
+    # gfx11 has no DPP row_bcast; cross the 16-lane rows with ds_bpermute instead.
+    noRowBcast = kernel["ISA"][0] == 11
     accK = 1
     while accK < kernel["NumWaveSplitK"]:
+      if noRowBcast and accK >= 16:
+        assert accK == 16 and kernel["WavefrontSize"] == 32
+        tmp = self.vgprPool.checkOut(numC + 1, tag="waveSplitKReduction")
+        module.add(VXorB32(dst=vgpr(tmp), src0=16, src1=vgpr("Serial"), comment="lane ^ 16"))
+        module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=2, src=vgpr(tmp), comment="bpermute byte address"))
+        for vgprIdx in range(numC):
+          module.add(DSBPermuteB32(vgpr(tmp + 1 + vgprIdx), vgpr(tmp), vgpr("ValuC+%d"%vgprIdx)))
+        module.add(SWaitCnt(dscnt=0, comment="wait for bpermute"))
+        for vgprIdx in range(numC):
+          module.add(VAddF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=vgpr(tmp + 1 + vgprIdx), comment="Reduce %s elements"%(accK*2)))
+        self.vgprPool.checkIn(tmp)
+        accK *= 2
+        continue
       # if only one VGPR, need to insert one SNOP in between
       if (kernel["ThreadTile1"] == 1 and kernel["ThreadTile0"] == 1) and accK != 1:
         module.add(SNop(waitState=0, comment="1 wait states"))

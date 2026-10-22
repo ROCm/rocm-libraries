@@ -230,7 +230,8 @@ def test_gfx1250_preserves_context_and_direct_graph_storage_keys(gfx1250, runtim
     resident = au._3D_GRAPHS
     first_key = next(iter(resident))
     first = resident[first_key]
-    assert len(first_key) == 22 and first_key[5] == first.bindings
+    assert len(first_key) == 26 and first_key[5] == first.bindings
+    assert len(first.bindings) == 11  # includes the optional additive-bias slot
     assert first.bindings[0][0][:2] == (str(args["q"].device), str(args["q"].dtype))
     allocations = len(runtime.allocations)
     args["q"].contents += 1

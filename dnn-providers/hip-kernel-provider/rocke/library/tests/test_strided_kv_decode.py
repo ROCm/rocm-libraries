@@ -342,6 +342,10 @@ def strided_binding_case():
     tensors = {
         name: object() for name in ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k")
     }
+    # The runtime validates additive-bias device agreement before either path.
+    from types import SimpleNamespace
+
+    tensors["q"] = SimpleNamespace(device="cuda:0")
     tensors["problem"] = _problem(req)
     return req, result, tensors
 
@@ -599,7 +603,7 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     with pytest.raises(NotImplementedError, match="paged contract reached"):
         au.run_unified_attention_torch(
             problem=problem,
-            q=object(),
+            q=SimpleNamespace(device="cuda:0"),
             k=SimpleNamespace(shape=(1,)),
             v=object(),
             out=object(),

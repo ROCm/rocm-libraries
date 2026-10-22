@@ -198,3 +198,38 @@ def test_older_resident_replay_updates_lru_before_eviction(replay):
     assert first_key in graphs and len(graphs) == 2
     assert second_entry not in graphs.values()
     assert operations[0] == ("wait", second_entry.stream)
+
+
+@pytest.mark.parametrize("owned", [False, True])
+def test_additive_bias_storage_replacement_refreshes_graph(replay, owned):
+    arguments, graphs, operations = replay
+    arguments["problem"] = replace(arguments["problem"], use_additive_bias=True)
+    arguments["additive_bias"] = Tensor(8192)
+    owner = au.Attention3DExecution() if owned else None
+    resident = owner._graphs if owned else graphs
+    with au.no_fence():
+        au._run_3d_tiled(**arguments, execution=owner)
+        key, entry = next(iter(resident.items()))
+        assert entry.bindings[-1][1] == 8192
+        assert arguments["additive_bias"] in entry.refs
+        operations.clear()
+        arguments["additive_bias"].contents += 1
+        au._run_3d_tiled(**arguments, execution=owner)
+        assert resident[key] is entry
+        assert operations == [("replay", entry.graph), ("retain", entry)]
+        arguments["additive_bias"].pointer += 1024
+        operations.clear()
+        au._run_3d_tiled(**arguments, execution=owner)
+        assert len(resident) == 1 and resident[key] is not entry
+        assert operations[0] == ("wait", entry.stream)
+        assert resident[key].bindings[-1][1] == 9216
+
+
+def test_prepared_execution_rejects_changed_additive_bias_strides(replay):
+    arguments, _graphs, _operations = replay
+    arguments["problem"] = replace(arguments["problem"], use_additive_bias=True)
+    arguments["additive_bias"] = Tensor(8192)
+    owner = au.Attention3DExecution()
+    au._run_3d_tiled(**arguments, execution=owner)
+    with pytest.raises(ValueError, match="prepare again"):
+        au._run_3d_tiled(**arguments, execution=owner, additive_bias_head_stride=64)

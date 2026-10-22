@@ -4,7 +4,7 @@ This file lists known limits in current hipDNN testing.
 
 ## Integration test bundles
 
-Integration test bundles are off by default. See [Bundles are opt-in at runtime](https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md#bundles-are-opt-in-at-runtime-for-now).
+Integration test bundles run by default (#10416). The C++ graph tests under `dnn-providers/integration-tests/src/integration-tests/` build only with `-DBUILD_CPP_GRAPH_TESTS=ON`, which is off by default, so provider CI runs bundles only. See [In CI](../../../../dnn-providers/integration-tests/docs/running-tests.md#in-ci).
 
 ## Sanitizers and platforms
 
@@ -26,7 +26,7 @@ The 80% coverage number is a goal, not a merge requirement. Local [coverage targ
 
 ## Tested GPUs and supported GPUs
 
-- A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock CI](../../../../.github/workflows/therock-ci.yml), [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
+- A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock Multi-Arch CI](../../../../.github/workflows/therock-multi-arch-ci.yml) and the [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
 - Passing CI on one GPU does not prove support for every GPU. Support can depend on the operation, engine, build options, libraries, and runtime checks. Use [hipDNN operation support](../OperationSupport.md) and provider documentation for support claims.
 
 ## Automated performance checks

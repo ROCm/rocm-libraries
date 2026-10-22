@@ -253,3 +253,47 @@ def test_null_stream_retention_is_device_scoped(monkeypatch, device_sync):
     device[0] = 0
     rt.wait_stream(0)
     assert not rt._pending_bound_args
+
+
+@pytest.mark.parametrize(
+    "change", ["pointer", "batch_stride", "head_stride", "sq_stride"]
+)
+def test_additive_bias_changes_rebind_and_retain_prior_storage(eager, change):
+    from dataclasses import replace
+
+    args, bindings, launches, retained = eager
+    args["problem"] = replace(args["problem"], use_additive_bias=True)
+    args["additive_bias"] = Tensor(8192)
+    args["additive_bias_batch_stride"] = 256
+    args["additive_bias_head_stride"] = 64
+    args["additive_bias_sq_stride"] = 0
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+        prior_resources = next(iter(retained[17].values()))[1]
+        au._run_3d_tiled(**args)
+        assert len(bindings) == 2 and len(retained[17]) == 1
+        if change == "pointer":
+            args["additive_bias"].pointer += 1024
+        else:
+            args[f"additive_bias_{change}"] += 64
+        au._run_3d_tiled(**args)
+    assert len(bindings) == 4 and len(launches) == 6
+    assert len(retained[17]) == 2
+    assert prior_resources[-1].pointer == 8192
+    assert bindings[2]["additive_bias_ptr"] == args["additive_bias"].pointer
+    for name in ("batch_stride", "head_stride", "sq_stride"):
+        assert bindings[2][f"additive_bias_{name}"] == args[f"additive_bias_{name}"]
+
+
+def test_reused_pair_still_requires_additive_bias(eager):
+    from dataclasses import replace
+
+    args, bindings, launches, _retained = eager
+    args["problem"] = replace(args["problem"], use_additive_bias=True)
+    args["additive_bias"] = Tensor(8192)
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+        args["additive_bias"] = None
+        with pytest.raises(ValueError, match="requires an additive_bias tensor"):
+            au._run_3d_tiled(**args)
+    assert len(bindings) == 2 and len(launches) == 2
