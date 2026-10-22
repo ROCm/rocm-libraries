@@ -116,11 +116,14 @@ the strategy's biggest holes live (see
   exercise end-to-end kernel wiring for real model shapes.
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
-  on gfx942 using a conservative triangle-inequality error budget. Required
-  executions fail when hardware or qualification is missing. The first cohort
+  on gfx942, gfx950, gfx1151, or gfx1201 using a conservative triangle-inequality
+  error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. The gfx1201
+  replacement compiles for `gfx12-generic`; gfx1200 uses the same compile target
+  but remains qualification-only until its own certificate and archive exist. Required
+  executions fail when hardware or qualification is missing. Each architecture cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_TEST_GPU_REFERENCES` by default. Run
-  `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc`
+  `dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
   every payload hash against
@@ -169,7 +172,8 @@ the strategy's biggest holes live (see
   When reference installation is enabled, CMake installs each pair in
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
-  not publication status. SDPA/gfx942 and convolution/gfx942 are published. Adding another
+  not publication status. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
+  and convolution/gfx942 are published. Adding another
   published pair requires its adapter, independently qualified lock, retrievable
   bundle, and publication entry.
   Qualification accepts `--arch` and freezes the shared worker and architecture
@@ -348,6 +352,42 @@ convention and same rule as `KNOWN_VIOLATIONS` in
 shrinks.** An entry that starts compiling is itself reported as a failure, so a
 fix cannot leave dead weight behind.
 
+### 4.5 Can this target lower this intrinsic? (the arch-domain gate)
+
+§4.4 asks a compiler. The **arch-domain gate**,
+[`check_arch_domain.py`](platform/tools/check_arch_domain.py), asks *committed
+measured data* instead: `tools/gen_arch_domain.py` probes, per (declaration key,
+gfx target), whether that declaration actually links, and commits one JSON column
+per LLVM flavor under `platform/python/rocke/core/arch/data/`. The lowerer's
+`_need` chokepoint consults that table on every intrinsic demand and warns
+(`ArchDomainWarning`) when the answer is a measured negative. This gate lowers
+the same corpus §4.4 uses, harvests the warnings, and compares them against an
+`EXPECTED_WARNINGS` allowlist that names, for each entry, the corpus cases allowed
+to demand it.
+
+The two gates overlap on purpose and neither subsumes the other:
+
+- **It needs no toolchain.** Lowering is pure Python and the table is committed
+  data, so this gate rules on *every* flavor on any host — where §4.4 can only
+  ever rule on the host's own and reports `UNVALIDATED` for the rest.
+- **It names the intrinsic.** §4.4 reports whatever the backend chose to say,
+  often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
+  diagnostic the probe recorded.
+- **Only a definite negative speaks.** `arch_absent` is the sole negative
+  status. A flavor with no committed column, an unswept target, a key absent
+  from the table, and the no-data statuses (`target_unsupported`,
+  `toolchain_crash`, `toolchain_timeout`, `probe_error`) are all silent — 14% of
+  the llvm20 column is no-data, and warning on those would train people to
+  ignore the lane.
+  `name_absent` is deliberately *not* warned on: §4.4 already catches a reachable
+  one with a real diagnostic.
+
+`EXPECTED_WARNINGS` carries the same rule as `KNOWN_BAD`: **it only shrinks**,
+and an entry, or one of its cases, that stops firing is itself a failure. Naming
+the cases is what stops it widening in silence: a different case that starts
+demanding an allowlisted intrinsic is a new finding. `ROCKE_ARCH_DOMAIN=off`
+disables the lookup.
+
 ---
 
 ## 5. Execution tiers & gating
@@ -356,13 +396,13 @@ Four distinct things run here; **do not conflate them**:
 
 | Tier | What | Gated? |
 |---|---|---|
-| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
+| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → arch-domain gate → pytest (`platform/tests`) → ctest | ✅ blocking |
 | **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
 **Two entrypoints with different environments and selection.** [`run_all.py`](platform/tests/run_all.py) is
-the **developer** runner (guard → gate → IR validity → pytest → ctest). **CI does not run
+the **developer** runner (guard → gate → IR validity → arch domain → pytest → ctest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
@@ -417,6 +457,25 @@ Python root and, only where indicated, the matching `cpp/bindings` build directo
 | Permissive C++ | `cpp` | `0` | Yes | Python exception after native rejection |
 | Strict C++ | `cpp` | `1` | Yes | Native exception; fallback is an error |
 | Differential | `both` | `1` | Yes | Python runs first; its rejection prevents a native comparison |
+
+On Linux, direct source pytest runs need a matching engine archive for the native
+compiler-detection fixture. Build it once outside the source tree and set
+`ROCKE_TEST_ENGINE_ARCHIVE` to its absolute path before the commands below:
+
+```bash
+cmake -S . -B "$TMPDIR/engine" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DROCKE_BUILD_PYBIND=OFF -DROCKE_INSTALL_TESTS=OFF
+cmake --build "$TMPDIR/engine" --target rocke_core --parallel 2
+export ROCKE_TEST_ENGINE_ARCHIVE="$TMPDIR/engine/librocke_core.a"
+```
+
+Use an absolute, unique `TMPDIR` as described below. With a multi-config generator,
+select `--config Release` and use `engine/Release/librocke_core.a`. The developer
+runner supplies an archive from its build root to both pytest passes automatically;
+an explicit archive override takes precedence. Installed tests use the packaged
+archive beside the detector module. Missing or invalid explicit archives fail.
+Without either archive, standalone source tests build the engine in their fixture
+setup, which counts toward the per-test timeout; prebuilding keeps that work outside
+the documented `--timeout=60` run.
 
 For rejection-contract changes, run these affected modules from `platform/` under
 every row, then the complete platform pytest suite in the default missing-binding
@@ -535,7 +594,10 @@ The existing replay CLI target is `rocke_portable_ir_replay_cli`; its installed
 location is `tests/portable_ir/`. `ROCKE_REPLAY_CLI` is the single launcher setting
 for native CLI replay, including TF32 and the portable-IR suites. Installed CTest
 supplies the relative executable path once for the pytest run, enabling all
-consumers of that artifact.
+consumers of that artifact. It also supplies `ROCKE_PROVENANCE_MANIFEST`, a
+build-generated version/build-ID record installed beside the CLI. Source-less
+tests validate the CLI against that independent expectation instead of trying
+to hash or build from unavailable sources.
 
 For source execution, build the target first and supply its executable through
 `ROCKE_REPLAY_CLI`. Reuse this setting for new replay consumers rather than adding
@@ -656,15 +718,37 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx942|conv_gpu_gfx942)_pytest$' --output-on-failure
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx(942|950|1151|1201)|conv_gpu_gfx942)_pytest$' --output-on-failure --no-tests=error
 ```
 
 Inspect the selected tests: disabling reference installation omits the GPU
-entries, so a successful CTest command alone does not establish that both
-operations ran. Default publication supplies both gfx942 bundles. Fetch both
-DVC archives before configuring; missing published archives fail configuration.
+entries, and entries for other architectures skip. A successful CTest command
+alone does not establish GPU coverage. On the matching GPU, expect eight SDPA
+comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failure
+controls. The gfx942 convolution entry adds sixteen comparisons and three failure
+controls. Confirm the matching entries executed with zero selected GPU skips.
+
+For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
+entry with code 77. There is no installed gfx1200 pinned entry until its own
+archive is qualified and published. See
+[gfx120X family selection](docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
+for the distinction between a valid skip and GPU reference coverage.
+
+Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
+and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
+missing published archives fail configuration.
+
+The generic gfx1201 replacement is published. A fresh anonymous download matches
+its committed DVC pointer and baseline lock. From the rocm-libraries root:
+
+```bash
+dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles
+```
+
 See the [reference inventory](platform/tests/README.md#installed-pinned-reference-suites)
-for the expected entries and cases.
+for the expected entries and cases, and the
+[WMMA runtime requirements](docs/sdpa-test-reference.md#standalone-wmma-coverage)
+for the tested gfx1151/gfx1201 environments.
 
 The shared launcher blocks Torch imports in baseline and current worker
 interpreters, including frozen replay workers. Neither CPU oracle runs during
@@ -683,9 +767,13 @@ not add `ex_gpu_*` labels: the current provider runner would use those labels
 as an inclusion filter and omit unrelated tests. Architecture selection occurs
 inside the reference test entry, before collection and bundle lookup. TheRock
 passes `AMDGPU_FAMILIES` for the family and comma-separated `AMDGPU_TARGETS`
-for the fetched target artifacts. The gate uses exact targets when available,
-falls back to family expectations for local runs, and checks the actual HIP
-device architecture before executing a selected cohort. Adding a
+for the fetched target artifacts. The gate uses exact targets when available
+and selects by the physical HIP processor when they are absent. It does not
+infer reference enrollment from family names. A processor without a published
+cohort skips the other processors' suites; this records absent pinned-reference
+coverage. Explicit candidate requests still require their bundle and lock.
+See the [processor-selection rules](docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+Adding a
 published architecture creates a separate CTest automatically. Add its exact
 test name to the provider category YAML; it also requires an adapter, qualified
 bundle, and matching CI hardware.

@@ -32,6 +32,7 @@ from .common import (
     _selector_matches,
 )
 from .candidate import make_tuning_candidate
+from .tuning_specs import NUM_SEGMENTS
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -81,8 +82,8 @@ def _variants():
     for tile in ("1x", "half"):
         # ``half`` is translated below by the explicit builder through a
         # concrete token; use per-block variants because it is only legal for
-        # block sizes >=32.
-        for segments in (8, 16, 32, 64, 128):
+        # block sizes >=32. Segment count 0 is the dispatcher's split rule's.
+        for segments in NUM_SEGMENTS + (0,):
             yield AttentionGeometryVariant(
                 arch="gfx942",
                 path="3d",
@@ -129,6 +130,8 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, why
         if problem.select_path() != "2d":
             return False, "problem routes to 3D, not 2D"
+        if not problem.default_mask:
+            return False, "gfx942 tiled 2D implements only bottom-right causal"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
         if not _enable_gfx942_fp16_flash(problem, req.arch):
@@ -167,7 +170,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
             # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8"},
+            supports_features=ATTENTION_FEATURES - {"fp8", "band", "full_attention"},
         ),
         _supports=support,
         select_spec=select,

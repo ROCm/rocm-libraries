@@ -14,6 +14,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from . import generic_targets as gtmod
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -105,12 +106,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD carrying `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -127,7 +131,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
@@ -336,8 +341,7 @@ def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
     """Identity of a descriptor as the matcher sees it: the completed tuple,
     not the emitted document.
 
-    Architecture is not part of this key; `build_kdp` decides overlap against
-    the arch coverage recorded beside each key.
+    Architecture is not part of this key; `build_kdp` compares arch separately.
     """
     return json.dumps(_completed_metadata(metadata, config), sort_keys=True)
 
@@ -356,11 +360,9 @@ def _candidate_identity(kernel: KernelSpec) -> str:
     )
 
 
-def _arch_overlaps(left: list, right: list) -> bool:
-    """Whether two arch coverages can select on the same device. An empty list
-    is the loader's wildcard and overlaps everything. Mirrors
-    ``hkp_pack.agreement.overlap``."""
-    return not left or not right or bool(set(left) & set(right))
+def _arch_competes(left: list, right: list) -> bool:
+    """Whether two arch lists tie on some device at the same tier."""
+    return gtmod.compete(left, right, gtmod.default_table())
 
 
 def _pack_index(config: IngestorConfig, pack: PackSpec) -> int:
@@ -451,9 +453,8 @@ def build_kdp(
     if config.is_multi_pack:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
-    # tuple has four outcomes: disjoint arch coverage is not a duplicate;
-    # overlapping coverage with the same candidate and equal arch de-duplicates
-    # here; a different candidate, or unequal coverage, is refused.
+    # tuple is a duplicate only when arch coverage competes: the same candidate
+    # with equal arch de-duplicates, anything else is refused.
     kernel_descriptors = []
     if seen_metadata is None:
         seen_metadata = {}
@@ -475,7 +476,7 @@ def build_kdp(
         identity = _candidate_identity(kernel)
         already = None
         for prior in seen_metadata.setdefault(key, []):
-            if not _arch_overlaps(arch, prior["arch"]):
+            if not _arch_competes(arch, prior["arch"]):
                 continue
             if prior["identity"] == identity:
                 if sorted(prior["arch"]) == sorted(arch):
@@ -485,19 +486,19 @@ def build_kdp(
                     f"kernel {kernel.name!r} (pack {pack.name!r}) and kernel "
                     f"{prior['name']!r} (pack {prior['pack']!r}) are the SAME "
                     f"candidate and complete to the SAME catalog tuple "
-                    f"{json.loads(key)}, but their architectures overlap without "
-                    f"being equal ({arch or ['<any>']} vs "
+                    f"{json.loads(key)}, but they compete at the same arch tier "
+                    f"without having equal arch lists ({arch or ['<any>']} vs "
                     f"{prior['arch'] or ['<any>']}). On the shared architectures "
                     f"the matcher would see one tuple twice, which drops the whole "
                     f"engine at load; coalescing them would instead advertise one "
                     f"of the two on devices its arch list never claimed. Give the "
-                    f"two entries the SAME arch list so they de-duplicate, or make "
-                    f"them disjoint."
+                    f"two entries the SAME arch list so they de-duplicate, or put "
+                    f"them at different arch tiers."
                 )
             raise ValueError(
                 f"kernel {kernel.name!r} (pack {pack.name!r}) and kernel "
                 f"{prior['name']!r} (pack {prior['pack']!r}) complete to the SAME "
-                f"catalog tuple {json.loads(key)} on overlapping architectures "
+                f"catalog tuple {json.loads(key)} at the same arch tier "
                 f"({arch or ['<any>']} vs {prior['arch'] or ['<any>']}), but they "
                 f"are not the same candidate: their kernel_source/priority differ, "
                 f"so they name different binaries. The matcher compares the tuple "
@@ -505,7 +506,8 @@ def build_kdp(
                 f"whole engine at load, and dropping one of them here would "
                 f"discard a binary that was deliberately built. Distinguish them "
                 f"in metadata (a knob the spec pins belongs in the tuple), narrow "
-                f"one of the arch lists, or do not ship both."
+                f"one of the arch lists, move one to a different arch tier, or do "
+                f"not ship both."
             )
         if already is not None:
             # Carry the prior kernel's own pack: a drop that empties this pack
@@ -616,8 +618,8 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
     lowered to ``kpack`` first. A descriptor with no ``arch`` is filed under
     its pack's; a pack with none under `ARCH_WILDCARD`.
 
-    Each concrete arch row is unioned with the wildcard row, one way only,
-    because a wildcard entry ships on that device too.
+    Each generic's descriptors also fill the rows of its members; the wildcard
+    row fills every row.
     """
     arches: dict[str, dict] = {}
 
@@ -634,6 +636,21 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             total += 1
             for arch in list(descriptor.get("arch") or []) or pack_arch:
                 bucket(arch)["descriptors"].append(descriptor["name"])
+
+    table = gtmod.default_table()
+    generic_rows = {
+        name: (list(arches[name]["descriptors"]), set(arches[name]["pack_names"]))
+        for name in table.names()
+        if name in arches
+    }
+    for name in generic_rows:
+        for member in table.members(name):
+            bucket(member)
+    for arch, entry in arches.items():
+        for name, (descriptors, pack_names) in generic_rows.items():
+            if arch in table.members(name):
+                entry["descriptors"].extend(descriptors)
+                entry["pack_names"].update(pack_names)
 
     wildcard = arches.get(ARCH_WILDCARD)
     if wildcard is not None:
@@ -720,10 +737,14 @@ class IngestorGenerator:
         ddir = config.descriptor_dir
         (output_dir / ddir).mkdir(parents=True, exist_ok=True)
 
-        def write_json(rel: str, obj: dict) -> None:
-            path = output_dir / rel
-            path.write_text(_dump(obj), encoding="utf-8")
+        def write_text(rel: str, text: str) -> None:
+            # LF on every platform: committed descriptors and sources are LF, and
+            # text mode would write CRLF on Windows.
+            (output_dir / rel).write_text(text, encoding="utf-8", newline="\n")
             written.append(rel)
+
+        def write_json(rel: str, obj: dict) -> None:
+            write_text(rel, _dump(obj))
 
         kdp_documents = build_kdp_documents(config, ids)
         emitted = emitted_inventory(config, kdp_documents)
@@ -754,29 +775,26 @@ class IngestorGenerator:
         tests_dir.mkdir(parents=True, exist_ok=True)
 
         native_rel = f"packs/{config.native_class_name}Native.cpp"
-        (output_dir / native_rel).write_text(
+        write_text(
+            native_rel,
             self._render_template("native.cpp.j2", config, ids=ids, emitted=emitted),
-            encoding="utf-8",
         )
-        written.append(native_rel)
 
         packs_test_rel = f"tests/Test{config.engine.pascal_name}Packs.cpp"
-        (output_dir / packs_test_rel).write_text(
+        write_text(
+            packs_test_rel,
             self._render_template(
                 "test_packs.cpp.j2", config, ids=ids, emitted=emitted
             ),
-            encoding="utf-8",
         )
-        written.append(packs_test_rel)
 
         matchers_test_rel = f"tests/Test{config.engine.pascal_name}Matchers.cpp"
-        (output_dir / matchers_test_rel).write_text(
+        write_text(
+            matchers_test_rel,
             self._render_template(
                 "test_matchers.cpp.j2", config, ids=ids, emitted=emitted
             ),
-            encoding="utf-8",
         )
-        written.append(matchers_test_rel)
 
         # --- fragments ---
         fragments_dir = output_dir / "fragments"
@@ -785,8 +803,7 @@ class IngestorGenerator:
             content = self._render_template(
                 template_name, config, ids=ids, emitted=emitted
             )
-            (fragments_dir / out_name).write_text(content, encoding="utf-8")
-            written.append(f"fragments/{out_name}")
+            write_text(f"fragments/{out_name}", content)
 
         return written
 

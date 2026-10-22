@@ -3,11 +3,14 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
-## (Unreleased) hipSOLVER
+## hipSOLVER 3.8.0 for ROCm 10.2.0
 
 ### Added
 
 * Added functions:
+  * gelsBatched
+    * hipsolverXXgelsBatched_bufferSize
+    * hipsolverXXgelsBatched
   * geqrfBatched
     * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
     * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
@@ -29,15 +32,10 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 * The rocSOLVER backend now allows devIpiv to be passed as a null pointer to hipsolverXgetrs and hipsolverDnXgetrs.
 
-### Removed
-### Optimized
 ### Resolved issues
 
 * Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
 * Fixed hipsolverSpSetStream not setting the internal rocsparse_handle stream.
-
-### Known issues
-### Upcoming changes
 
 
 ## hipSOLVER 3.7.0 for ROCm 10.1.0
