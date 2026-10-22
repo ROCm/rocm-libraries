@@ -3182,6 +3182,41 @@ TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesSkipClusterHandshake) 
         << "a second pass must not hand the handshake to a later copy";
 }
 
+TEST_F(InsertClusterBarrierPassTest, ReducedLoopAddsHandshakeAfterTwoThousandCycles) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* first = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    // gfx1250 WMMAs contribute enough estimated latency that this clears the
+    // 2000-cycle interval with room to spare.
+    for (int i = 0; i < 300; ++i) createWMMA(80, 8, 16);
+    StinkyInstruction* second = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    for (int i = 0; i < 10; ++i) createWMMA(88, 16, 24);
+    StinkyInstruction* third = appendHandshake(/*loadS0=*/32, /*loadS1=*/36);
+    closeLoop();
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_GE(cycleMap.at(second) - cycleMap.at(first), 2000u);
+    ASSERT_LT(cycleMap.at(third) - cycleMap.at(second), 2000u);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/true);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(first)) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(second))
+        << "a same-loop trigger at least 2000 cycles later needs another handshake:"
+        << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(third))
+        << "spacing restarts at the second accepted trigger:" << blockListing(*bb);
+
+    const std::string once = blockListing(*bb);
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/true);
+    EXPECT_EQ(blockListing(*bb), once) << "the cycle-spaced reduction must be idempotent";
+}
+
 TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesEachGetClusterHandshakeWhenKnobOff) {
     const LaterUnrollCopies copies = buildLaterUnrollCopies();
     runPass();
