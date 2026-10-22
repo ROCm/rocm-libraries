@@ -72,6 +72,8 @@ inline constexpr int64_t K_UID = 22;
 inline constexpr int64_t V_UID = 33;
 inline constexpr int64_t O_UID = 44;
 inline constexpr int64_t EXTRA_UID = 99;
+/// The RFC-0014 offsets tensor a ragged operand names.
+inline constexpr int64_t RAGGED_OFFSET_UID = 55;
 
 /// The mask kinds in the catalog's `mask_type` numbering.
 inline constexpr int64_t NO_MASK = 0;
@@ -160,6 +162,9 @@ struct GraphSpec
     /// Sets any further attribute on the SDPA node (an optional tensor uid, a probability).
     std::function<void(data_objects::SdpaAttributesBuilder&)> extra;
 
+    /// Operand uid (Q/K/V/O) that carries a ragged offsets tensor, if any.
+    std::optional<int64_t> raggedOperand;
+
     bool twoNodes = false;
     /// One RELU node from Q to O in place of the SDPA node.
     bool pointwiseOnly = false;
@@ -209,8 +214,20 @@ inline flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                data_objects::DataType dataType,
                                const std::vector<int64_t>& strides,
                                const std::vector<int64_t>& dims) {
-        return data_objects::CreateTensorAttributesDirect(
-            builder, uid, nullptr, dataType, &strides, &dims, false);
+        const ::flatbuffers::Optional<int64_t> ragged
+            = spec.raggedOperand == uid ? ::flatbuffers::Optional<int64_t>(RAGGED_OFFSET_UID)
+                                        : ::flatbuffers::nullopt;
+        return data_objects::CreateTensorAttributesDirect(builder,
+                                                          uid,
+                                                          nullptr,
+                                                          dataType,
+                                                          &strides,
+                                                          &dims,
+                                                          false,
+                                                          data_objects::TensorValue::NONE,
+                                                          0,
+                                                          false,
+                                                          ragged);
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -218,6 +235,13 @@ inline flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     tensors.push_back(tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStrides, kDims));
     tensors.push_back(tensorFor(V_UID, spec.dataType, vStrides, vDims));
     tensors.push_back(tensorFor(O_UID, spec.dataType, oStrides, oDims));
+    if(spec.raggedOperand.has_value())
+    {
+        const std::vector<int64_t> offsetDims{spec.batch + 1, 1, 1, 1};
+        const std::vector<int64_t> offsetStrides{1, 1, 1, 1};
+        tensors.push_back(
+            tensorFor(RAGGED_OFFSET_UID, data_objects::DataType::INT32, offsetStrides, offsetDims));
+    }
 
     const auto attributesFor = [&]() {
         data_objects::SdpaAttributesBuilder attributesBuilder(builder);
