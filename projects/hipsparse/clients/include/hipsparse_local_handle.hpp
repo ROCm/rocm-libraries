@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
 
@@ -44,6 +45,8 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
+            std::cerr
+                << "ERROR: hipsparseLocalHandle_t constructor: status != HIPSPARSE_STATUS_SUCCESS";
             throw(status);
         }
     }
@@ -54,12 +57,18 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
+            std::cerr
+                << "ERROR: hipsparseLocalHandle_t constructor: status != HIPSPARSE_STATUS_SUCCESS";
             throw(status);
         }
     }
     ~hipsparseLocalHandle_t()
     {
-        hipsparseDestroy(this->handle);
+        const hipsparseStatus_t status = hipsparseDestroy(this->handle);
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            verify_hipsparse_status_success(status, "ERROR: hipsparseLocalHandle_t destructor");
+        }
     }
 
     // Allow hipsparseLocalHandle_t to be used anywhere hipsparseHandle_t is expected

@@ -32,7 +32,6 @@
 #include <hipsparse.h>
 
 #include "hipsparse_arguments.hpp"
-#include "hipsparse_local_handle.hpp"
 #include "utility.hpp"
 
 #include <iostream>
@@ -865,7 +864,6 @@ void testing_spmat_descr(void)
     CHECK_HIP_ERROR(
         hipMemcpy(dcsr_valC, hcsr_valC.data(), nnzC * sizeof(float), hipMemcpyHostToDevice));
 
-    hipsparseLocalHandle_t handle;
     hipsparseSpMatDescr_t  matA, matB, matC, matD, matE, matF, matG, matH, matI, matJ, matK, matL,
         matM, matN, matO;
 
