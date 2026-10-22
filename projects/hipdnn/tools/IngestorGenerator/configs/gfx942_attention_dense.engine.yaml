@@ -1,0 +1,182 @@
+# Engine manifest for hipkernel:Gfx942AttentionDense.
+#
+# Everything about the engine that rocKE does not know: identity, KMD schema,
+# metadata mapping, the registry space its kernels are drawn from, and how that
+# space is reduced. The shipped kernel set is configs/gfx942_attention_dense.yaml.
+#
+#     python tools/registry_enumerator.py --manifest configs/gfx942_attention_dense.engine.yaml --out <scratch>/config.yaml
+#
+# The generated packs/Gfx942AttentionDenseNative.cpp and
+# tests/TestGfx942AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+#
+# Unlike gfx950, the gfx942 dense body reads batch, both sequence lengths AND both
+# head counts from kernel params (Gfx942AttentionDenseSpec.runtime_param_fields), so a
+# kernel is identified by dtype, head size, mask, window and tuning alone. The head
+# counts therefore sit in enumerate.fixed rather than in a cell axis: every head
+# configuration lands on the same kernels.
+
+dialect: packaged
+authored_subpath: rocKE/gfx942_attention_dense
+engine:
+  name: hipkernel:Gfx942AttentionDense
+  census_name_symbol: GFX942_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - block_m
+  - block_n
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+# Tile metadata, also public engine knobs. A record omitting either field
+# completes to the 256/64 baseline tile through these defaults.
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+kernel_source_kind: rocke
+workspace_policy: none
+
+pack: gfx942_attention_dense
+arch: gfx942
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx942/attention_dense.py
+builder: build_attention_dense
+kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_swa{sliding_window}_bm{block_m}_bn{block_n}.gfx942
+
+# The registry space the selection is drawn from (see registry_enumerator.py).
+enumerate:
+  candidates: dispatch.attention:attention_candidates
+  request: dispatch.attention.common:AttentionRequest
+  # gfx942 registers one dense candidate; persistent is a knob of it, not a
+  # separate algorithm. At the fixed cell shape below the default spec is the
+  # non-persistent grid (work = 2 * nhead_q < 304), and `persistent` is in
+  # reduction.fields.ignored, so every variant stays on the grid body.
+  pin: {algorithm: attention_dense, spec_id: gfx942_dense}
+  # Request fields every cell shares. Batch, sequence lengths and head counts are
+  # runtime kernel params on gfx942, so they only seed the build-time spec.
+  fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+  # Crossed in order, first group outermost (the catalog order).
+  cells:
+    - fields: [hdim_q, hdim_v]
+      values:
+        - [64, 64]
+        - [128, 128]
+    - fields: [dtype]
+      values: [bf16, fp16]
+    # A causal sliding window is TOP_LEFT_CAUSAL plus sliding_window = W, the number
+    # of keys attended including the diagonal (graph left_bound + 1). The window is
+    # baked into the kernel and must be a multiple of block_n.
+    - fields: [mask_type, sliding_window]
+      values:
+        - [TOP_LEFT_CAUSAL, 0]
+        - [NO_MASK, 0]
+        - [TOP_LEFT_CAUSAL, 128]
+        - [TOP_LEFT_CAUSAL, 512]
+        - [TOP_LEFT_CAUSAL, 1024]
+        - [TOP_LEFT_CAUSAL, 2048]
+  sweep_level: production
+  # Every production-sweep spec sharing a cell's feature fields; the knobs it keeps
+  # are reduction.fields.performance, every other varying field is held at default.
+  space: full
+  # Fields of the registry spec every generated kernel carries: the whole
+  # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
+
+# How the variant space is reduced; copied verbatim into the generated config.
+# Feature fields define a cell; performance knobs are the tuning arms, in priority order.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    performance:
+      - {name: block_m, divides: seqlen_q}
+      - {name: block_n, divides: seqlen_kv}
+      - {name: lds_row_pad}
+      - {name: pv_priority}
+    # Held at the registry default. The grid catalog never varies the persistent
+    # fields; the rest are gfx942 levers left to the kernel's own policy.
+    ignored: [waves_per_eu, lds_k_group_pad, persistent, num_persistent, interleave, persist_decode, use_exp2_fast, iglp, iglp_mode, pv_loop_order, o_store_width, pv_sched_fence_mask, causal_diag_split, v_row_pad, use_cfvst, use_v_swizzle]
+  aot_budget_per_arch: 1000
+
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
