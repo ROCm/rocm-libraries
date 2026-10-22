@@ -211,8 +211,13 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
                                   ? k_base // column-major: row offset
                                   : int64_t(k_base) * ld_b; // transposed: col offset
 
-            // First chunk uses original beta; subsequent use beta=1 to accumulate
-            const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
+            // First chunk computes D = alpha*A*B + beta*C; subsequent chunks accumulate
+            // into D, so they must read D (not the original C) with beta=1
+            const bool     first_chunk    = k_base == 0;
+            const Tc*      chunk_beta     = first_chunk ? beta : &one_val;
+            const To*      chunk_C        = first_chunk ? C_base : D_base;
+            rocblas_int    chunk_ld_c     = first_chunk ? ld_c : ld_d;
+            rocblas_stride chunk_stride_c = first_chunk ? stride_c : stride_d;
 
             RocblasContractionProblem<Ti, To, Tc> problem{handle,
                                                           trans_a,
@@ -232,10 +237,10 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
                                                           stride_b,
                                                           0 /* offset_b */,
                                                           chunk_beta,
-                                                          C_base,
+                                                          chunk_C,
                                                           nullptr,
-                                                          ld_c,
-                                                          stride_c,
+                                                          chunk_ld_c,
+                                                          chunk_stride_c,
                                                           0 /* offset_c */,
                                                           D_base,
                                                           nullptr,
