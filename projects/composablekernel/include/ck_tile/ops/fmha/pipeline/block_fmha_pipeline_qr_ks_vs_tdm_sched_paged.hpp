@@ -118,7 +118,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr const char* name = "qr_tdm_sched_paged_core";
 
     // Page transfer budget. The physical page size selects how many native tensor
-    // issues one wave makes per K/V load group: one for P>=128, two for P16.
+    // issues one wave makes per K/V load group: one for P>=64, two for P16.
     // The global FmhaTdmSchedTuning 0/1 assertions stay untouched; this budget is
     // page-specific and is used only by this experimental paged core.
     using PageTileTraits = FmhaBatchPrefillPageTileTraits<Problem::kPageBlockSize, kQKHeaddim>;
@@ -143,8 +143,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                       ((Policy::kKPrefetchTensorCount != 0 || Policy::kVPrefetchTensorCount != 0) &&
                        Policy::kPrefetchTailDrain),
                   "page transfers in flight but the shared policy disables the epilogue drain");
-    static_assert(Problem::kPageBlockSize == 16 || Problem::kPageBlockSize == 128 ||
-                  Problem::kPageBlockSize == 256 || Problem::kPageBlockSize == 1024);
+    static_assert(Problem::kPageBlockSize == 16 || Problem::kPageBlockSize == 64 ||
+                  Problem::kPageBlockSize == 128 || Problem::kPageBlockSize == 256 ||
+                  Problem::kPageBlockSize == 1024);
     static_assert(Problem::kPageBlockSize % kN0 == 0 || kN0 % Problem::kPageBlockSize == 0);
 
     static constexpr bool kUsesUntransposedVKernelPath = true;
@@ -152,7 +153,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
 
-    // Steady-loop shape for D64/V64, N128, whole-tile pages (P >= 128), no sink and no bias.
+    // Steady-loop shape for D64/V64, N128, one page per wave slice (P >= 64), no sink and no bias.
     // It is used for every grid; the benefit is largest with one wave per SIMD (grids of at
     // most one workgroup per CU), where every scalar stall in the tile loop is on the critical
     // path. This configuration
@@ -161,7 +162,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     //  - waits for the next K tile at the barrier in load_next_k, which publishes it before
     //    its first reader, the last PV stage, instead of a separate wait + barrier after QK.
     static constexpr bool kLeanD64Loop = Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
-                                         Geometry::kN == 128 && Problem::kPageBlockSize >= 128 &&
+                                         Geometry::kN == 128 && Problem::kPageBlockSize >= 64 &&
                                          !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
 
     // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
@@ -532,15 +533,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         // Read each valid table entry once. Invalid lookahead tiles use page
         // zero with zero token rows, but retain the original TDM issue count.
         // Each value owns exactly this wave's fragments: one shared id for
-        // P>=128, two wave-local ids for P16.
+        // P>=128, the id of the wave's page for P64, two wave-local ids for P16.
         PageIds page_id0 = k_dram_window.prefetch_page_id(0, num_total_loop, kv_load_start);
         PageIds page_id1 = k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start);
         PageIds page_id2 = k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start);
         PageIds page_id3{};
         // Raw ids read before PV, validated into the queue value after PV.
         PageIds page_id3_raw{};
-        // For P>=128 the async j+3 queue keeps SCALAR semantics: owned[0] carries one
-        // shared physical id for the whole tile. P16 uses the two-fragment struct.
+        // For P>=64 the async j+3 queue keeps SCALAR semantics: owned[0] carries one
+        // physical id (shared by the tile for P>=128, the wave's page for P64). P16 uses the
+        // two-fragment struct.
         index_t page_id3_valid_tokens = 0;
         index_t page_id3_raw_scalar   = 0;
 
@@ -778,7 +780,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 block_sync_lds<k_lds_insts>();
                 // The barrier also ends all reads of the previous page-ID slot.
                 // Issue the next ID before QK/PV without exposing its result.
-                if constexpr(Problem::kPageBlockSize >= 128)
+                if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     page_id3_valid_tokens = k_dram_window.prefetch_page_id_to_lds_scalar(
                         page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
@@ -1118,7 +1120,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     s_wait_tensorcnt<PagedTransfer::kVPrefetchTensorCount>();
                 }
                 block_sync_lds<v_lds_insts>();
-                if constexpr(Problem::kPageBlockSize >= 128)
+                if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     page_id3_raw_scalar = k_dram_window.load_page_id_from_lds_scalar(
                         page_id3_valid_tokens, id_lds_slot);
@@ -1146,7 +1148,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
             auto advance_iteration = [&]() {
                 // PV separates the page-ID LDS load from its first use.
                 s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount>();
-                if constexpr(Problem::kPageBlockSize >= 128)
+                if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     page_id3 = k_dram_window.complete_page_id_from_value_scalar(
                         page_id3_valid_tokens, page_id3_raw_scalar);

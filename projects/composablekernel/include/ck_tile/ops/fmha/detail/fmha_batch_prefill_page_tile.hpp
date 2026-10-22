@@ -20,14 +20,15 @@ namespace ck_tile {
 template <index_t PageSize, index_t HeadDim>
 struct FmhaBatchPrefillPageTileTraits
 {
-    static_assert(PageSize == 16 || PageSize == 128 || PageSize == 256 || PageSize == 1024,
-                  "page size must be 16, 128, 256 or 1024");
+    static_assert(PageSize == 16 || PageSize == 64 || PageSize == 128 || PageSize == 256 ||
+                      PageSize == 1024,
+                  "page size must be 16, 64, 128, 256 or 1024");
     static_assert(HeadDim == 64 || HeadDim == 128, "head dim must be 64 or 128");
 
     static constexpr index_t kTileRows    = 128;
     static constexpr index_t kWaves       = 4;
     static constexpr index_t kRowsPerWave = 32;
-    // P>=N issues one 32-row box per wave; P16 issues two 16-row boxes per wave.
+    // P>=64 issues one 32-row box per wave; P16 issues two 16-row boxes per wave.
     static constexpr index_t kFragmentsPerWave = PageSize == 16 ? 2 : 1;
     static constexpr index_t kFragmentRows     = PageSize == 16 ? 16 : 32;
     static constexpr index_t kMetadataBytes    = PageSize == 16 ? 32 : 16;
@@ -51,6 +52,8 @@ struct FmhaBatchPrefillPageFragmentId
 // Wave-local owned metadata.
 //   P>=128: owned[0] carries the one shared physical id and the logical tile's
 //           valid rows (0..128).
+//   P64   : owned[0] carries the id of the page holding this wave's 32-row slice (waves 0-1
+//           the tile's first page, waves 2-3 its second) and the logical tile's valid rows.
 //   P16   : owned[r] is fragment f = 2*w + r with valid_rows 0..16.
 template <index_t PageSize>
 struct FmhaBatchPrefillPageTileIds
@@ -62,15 +65,16 @@ struct FmhaBatchPrefillPageTileIds
 
 namespace detail {
 
-// P16 source distribution. One warp coordinate factor of length 1 keeps the
-// ordinary source coordinate (0,0) in all four waves: each wave rebases its own
-// physical page pointer, so no 32*w or 16*w source offset may enter the view.
-template <index_t BoxWidth>
-CK_TILE_HOST_DEVICE constexpr auto MakePage16FragmentDistribution()
+// Per-wave page source distribution (P16 16-row fragments, P64 32-row slices). One warp
+// coordinate factor of length 1 keeps the ordinary source coordinate (0,0) in all four waves:
+// each wave rebases its own physical page pointer, so no 32*w or 16*w source offset may enter
+// the view.
+template <index_t Rows, index_t BoxWidth>
+CK_TILE_HOST_DEVICE constexpr auto MakePageFragmentDistribution()
 {
     return make_static_tile_distribution(
         tile_distribution_encoding<sequence<>,
-                                   tuple<sequence<1, 16>, sequence<BoxWidth>>,
+                                   tuple<sequence<1, Rows>, sequence<BoxWidth>>,
                                    tuple<sequence<1>>,
                                    tuple<sequence<0>>,
                                    sequence<1, 2>,
@@ -78,7 +82,7 @@ CK_TILE_HOST_DEVICE constexpr auto MakePage16FragmentDistribution()
         bool_constant<true>{});
 }
 
-// P>=128 keeps the existing four-wave 32-row split.
+// P>=128 keeps the existing four-wave 32-row split (one page base for the whole tile).
 template <index_t BoxWidth>
 CK_TILE_HOST_DEVICE constexpr auto MakePageN32RowDistribution()
 {
@@ -124,6 +128,9 @@ struct FmhaBatchPrefillLinearPageTileWriter
     static constexpr index_t kFragmentRows     = Traits::kFragmentRows;
     static constexpr index_t kPageSize         = PageSize;
     static constexpr index_t kHeadDim          = HeadDim;
+    // Pages smaller than the tile: every wave rebases its own page (P16 per fragment, P64 per
+    // 32-row slice). Whole-tile pages share one base and the four-wave split.
+    static constexpr bool kPerWavePage = PageSize < 128;
 
     // This wave's owned fragment valid rows, in physical page coordinates.
     CK_TILE_HOST_DEVICE static constexpr index_t fragment_valid_rows(
@@ -193,9 +200,12 @@ struct FmhaBatchPrefillLinearPageTileWriter
         const auto lds_view   = lds_window.get_bottom_tensor_view();
         const auto lds_origin = lds_window.get_window_origin();
 
-        // Within-page token offset of this wave's slice (P>=128 only).
-        const index_t slice_row =
-            PageSize >= 128 ? static_cast<index_t>(logical_tile_origin % PageSize) : 0;
+        // Within-page token offset of this wave's slice: the tile's offset in its page for
+        // P>=128, the slice's offset in its page for P64 (tiles start on page boundaries).
+        const index_t slice_row = PageSize >= 128
+                                      ? static_cast<index_t>(logical_tile_origin % PageSize)
+                                  : PageSize == 64 ? (kRowsPerWave * wave) % PageSize
+                                                   : 0;
 
         static_for<0, kFragmentsPerWave, 1>{}([&](auto i_fragment) {
             constexpr index_t kFragment = decltype(i_fragment)::value;
@@ -206,8 +216,8 @@ struct FmhaBatchPrefillLinearPageTileWriter
             // R; using the per-wave count would clamp waves 1..3 to zero rows.
             const index_t wave_rows = fragment_valid_rows(wave, kFragment, ids);
             const index_t tile_rows = clamp(ids.owned[0].valid_rows, index_t{0}, index_t{128});
-            const index_t view_rows = PageSize == 16 ? wave_rows : tile_rows;
-            const index_t pad_rows  = PageSize == 16 ? kFragmentRows : index_t{128};
+            const index_t view_rows = kPerWavePage ? wave_rows : tile_rows;
+            const index_t pad_rows  = kPerWavePage ? kFragmentRows : index_t{128};
             // Retire the previous fragment's tensor traffic before the next fragment's
             // descriptor is issued. P16 only: a P16 wave emits two 16-row boxes per operand
             // (fragments 2w and 2w+1, each with its own page base); P>=128 has one fragment
@@ -250,7 +260,7 @@ struct FmhaBatchPrefillLinearPageTileWriter
             // mask then discards those rows (their scores become -inf); for V it does NOT -
             // V rows are multiplied by P, so a non-zero (e.g. NaN) row would propagate -
             // so correctness of the V tail depends on that zero fill.
-            const index_t present_rows = PageSize == 16 ? wave_rows : tile_rows;
+            const index_t present_rows = kPerWavePage ? wave_rows : tile_rows;
             const index_t physical_page =
                 present_rows > 0 ? ids.owned[kFragment].physical_page : index_t{0};
             if(physical_page < 0)
@@ -259,11 +269,12 @@ struct FmhaBatchPrefillLinearPageTileWriter
             // Full 64-bit pointer rebase; never a 32-bit pool-relative offset. The
             // P>=128 distribution's (4,32) warp factor already contributes the
             // 32*wave source rows, so the rebase adds the slice offset only. P16
-            // fragments always start at physical row 0 of their own page.
+            // fragments always start at physical row 0 of their own page; a P64 slice
+            // starts at row 0 or 32 of its page.
             const long_index_t page_elements =
                 static_cast<long_index_t>(physical_page) * page_stride;
             long_index_t within_page = 0;
-            if constexpr(PageSize >= 128)
+            if constexpr(PageSize >= 64)
             {
                 within_page =
                     static_cast<long_index_t>(slice_row) * static_cast<long_index_t>(token_stride);
@@ -285,7 +296,7 @@ struct FmhaBatchPrefillLinearPageTileWriter
                                                   make_tuple(number<pad_rows>{}, number<HeadDim>{}),
                                                   sequence<true, false>{});
 
-            if constexpr(PageSize == 16)
+            if constexpr(kPerWavePage)
             {
                 const auto fragment_lds = make_tile_window(
                     lds_view,
@@ -293,11 +304,11 @@ struct FmhaBatchPrefillLinearPageTileWriter
                     {lds_origin.at(number<0>{}) + fragment_destination_row(wave, kFragment),
                      lds_origin.at(number<1>{})});
 
-                const auto src_window =
-                    make_tile_window(src_view,
-                                     make_tuple(number<kFragmentRows>{}, number<kBoxWidth>{}),
-                                     {0, 0},
-                                     detail::MakePage16FragmentDistribution<kBoxWidth>());
+                const auto src_window = make_tile_window(
+                    src_view,
+                    make_tuple(number<kFragmentRows>{}, number<kBoxWidth>{}),
+                    {0, 0},
+                    detail::MakePageFragmentDistribution<kFragmentRows, kBoxWidth>());
 
                 if constexpr(RematerializeStride)
                 {

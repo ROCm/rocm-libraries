@@ -252,7 +252,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # one a single-instance build produces: with several of these kernels in one translation
     # unit the compiler emitted different code for some of them, and the P16 residency limit
     # these tests guard is an empirical property of the generated code.
-    foreach(page IN ITEMS 16 128 256 1024)
+    foreach(page IN ITEMS 16 64 128 256 1024)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
                 set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask})
@@ -273,8 +273,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
-    # FP16: P16 and P128 (the two page-writer paths) at both head dimensions and masks.
-    foreach(page IN ITEMS 16 128)
+    # FP16: P16, P64 and P128 (the three page-writer paths) at both head dimensions and masks.
+    foreach(page IN ITEMS 16 64 128)
         foreach(head_dim IN ITEMS 64 128)
             foreach(mask IN ITEMS dense causal)
                 set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_${mask}_fp16)
@@ -316,9 +316,10 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
-    # SGLang 1D page list: the page-size boundary (P16 fragments vs one id per tile) at both head
-    # dimensions, causal only (the table lookup does not depend on the mask).
-    foreach(page IN ITEMS 16 128)
+    # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
+    # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
+    # mask).
+    foreach(page IN ITEMS 16 64 128)
         foreach(head_dim IN ITEMS 64 128)
             set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_causal_sglang)
             add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)

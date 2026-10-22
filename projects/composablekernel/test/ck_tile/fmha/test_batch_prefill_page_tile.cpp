@@ -64,7 +64,7 @@ using DataConfig     = std::conditional_t<kFp16, FmhaFwdFp16, FmhaFwdBf16>;
 constexpr int kMantissaBits = kFp16 ? 10 : 7;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
-static_assert(kPage == 16 || kPage == 128 || kPage == 256 || kPage == 1024);
+static_assert(kPage == 16 || kPage == 64 || kPage == 128 || kPage == 256 || kPage == 1024);
 constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
 constexpr bool kLse    = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
 constexpr auto kLookupTable =

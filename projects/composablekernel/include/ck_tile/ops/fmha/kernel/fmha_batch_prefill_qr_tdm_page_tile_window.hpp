@@ -38,6 +38,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     static constexpr index_t kFragmentsPerWave = PageIds::kFragmentsPerWave;
     static constexpr index_t kFragmentRows =
         FmhaBatchPrefillPageTileTraits<PageSize_, HeadDim_>::kFragmentRows;
+    static constexpr index_t kSliceRows =
+        FmhaBatchPrefillPageTileTraits<PageSize_, HeadDim_>::kRowsPerWave;
+    // Pages per logical 128-row tile on the scalar queue: two for P64, one for P>=128.
+    static constexpr index_t kQueuePages = PageSize_ < 128 ? 128 / PageSize_ : 1;
 
     const DataType* pool_ptr_ = nullptr;
     index_t seqlen_k_         = 0;
@@ -64,6 +68,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
 
     // Physical page lookup for one owned fragment.
     // P>=128: fragment 0 only, table column t / P.
+    // P64   : fragment 0 only, table column (t + 32*w) / 64; valid_rows stays tile-level.
     // P16   : fragment f = 2*w + r, table column (t + 16*f) / 16.
     CK_TILE_DEVICE FmhaBatchPrefillPageFragmentId load_fragment_id(long_index_t tile_origin,
                                                                    index_t wave,
@@ -88,6 +93,25 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             result.physical_page = physical_page;
             result.valid_rows    = valid_rows;
         }
+        else if constexpr(PageSize_ == 64)
+        {
+            (void)fragment;
+            const index_t valid_rows =
+                static_cast<index_t>(clamp<long_index_t>(seqlen_k_ - tile_origin, 0, 128));
+            const index_t page_in_tile = kSliceRows * wave / PageSize_;
+            result.valid_rows          = valid_rows;
+            // A wave whose page holds no valid row keeps the dummy id: no table read.
+            if(valid_rows <= page_in_tile * PageSize_)
+                return result;
+            const index_t logical_page =
+                static_cast<index_t>(tile_origin / PageSize_) + page_in_tile;
+            if(logical_page >= page_capacity_ || page_row_ == nullptr)
+                __builtin_trap();
+            const index_t physical_page = page_row_[logical_page];
+            if(physical_page < 0 || physical_page >= total_pages_)
+                __builtin_trap();
+            result.physical_page = physical_page;
+        }
         else
         {
             (void)wave;
@@ -109,7 +133,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     }
 
     // Synchronous prologue lookup for the j / j+1 / j+2 metadata values.
-    // P>=128 returns the one shared id; P16 returns this wave's two owned ids.
+    // P>=128 returns the one shared id; P64 this wave's page id; P16 this wave's two owned ids.
     CK_TILE_DEVICE PageIds prefetch_page_id(index_t tile_index,
                                             index_t num_total_loop,
                                             index_t first_origin) const
@@ -172,7 +196,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         }
     }
 
-    // ---- P16 page-id queue (P>=128 uses the *_scalar queue below) ----
+    // ---- P16 page-id queue (P>=64 uses the *_scalar queue below) ----
     // Returns the owned valid-row metadata for the pending tile with dummy ids.
     CK_TILE_DEVICE PageIds prefetch_page_id_to_lds(index_t tile_index,
                                                    index_t num_total_loop,
@@ -240,9 +264,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
-    // ---- P>=128 scalar page-id queue (one shared physical page per logical tile) ----
-    // P>=128 only. publish returns valid rows; read returns the raw slot id;
-    // complete validates and yields one shared PageIds with that id.
+    // ---- P>=64 scalar page-id queue ----
+    // P>=128: one shared physical page per logical tile. P64: the tile's two page ids, one
+    // per slot; each wave reads the one holding its 32-row slice. publish returns the tile's
+    // valid rows; read returns this wave's raw slot id; complete validates it.
     CK_TILE_DEVICE index_t prefetch_page_id_to_lds_scalar(index_t tile_index,
                                                           index_t num_total_loop,
                                                           index_t first_origin,
@@ -261,6 +286,25 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         const long_index_t logical_origin =
             static_cast<long_index_t>(first_origin) + static_cast<long_index_t>(tile_index) * 128;
         const index_t logical_page = static_cast<index_t>(logical_origin / PageSize_);
+        if constexpr(kQueuePages > 1)
+        {
+            // One lane per page that holds a valid row (lane 1 only when the tile reaches
+            // its second page), so no table entry past the sequence is read. The pointer is
+            // uniform across the active lanes; the lane offset selects the page.
+            const index_t valid_tokens =
+                min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
+            const index_t lane = get_thread_id();
+            if(lane < kQueuePages && lane * PageSize_ < valid_tokens)
+            {
+                amd_async_global_load_to_lds<int32_t, 1, 0, true>(
+                    id_slot + lane,
+                    reinterpret_cast<const CK_TILE_GLOBAL_ADDR int32_t*>(page_row_ + logical_page),
+                    lane,
+                    true);
+            }
+            return valid_tokens;
+        }
+        // P>=128 keeps its original statement order (its code objects are compared bit for bit).
         if(get_thread_id() == 0)
         {
             amd_async_global_load_to_lds<int32_t, 1>(
@@ -275,6 +319,14 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     CK_TILE_DEVICE index_t load_page_id_from_lds_scalar(index_t valid_tokens,
                                                         CK_TILE_LDS_ADDR int32_t* id_slot) const
     {
+        if constexpr(kQueuePages > 1)
+        {
+            // A page without a valid row was not published: report the dummy id 0.
+            const index_t page_in_tile = kSliceRows * get_warp_id() / PageSize_;
+            if(valid_tokens <= page_in_tile * PageSize_)
+                return 0;
+            return id_slot[page_in_tile];
+        }
         if(valid_tokens <= 0)
             return 0;
         return *id_slot;
@@ -305,7 +357,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             __builtin_trap();
     }
 
-    // ---- lean whole-tile TDM issue (P >= 128) ----
+    // ---- lean whole-tile TDM issue (P >= 64) ----
     // The per-wave inputs of a page-tile TDM descriptor that do not change between tiles: the
     // wave's (row, column) origin inside the 128-row tile and its LDS element offset. The
     // generic issue path re-derives them from the warp index for every tile, which puts a
@@ -320,7 +372,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     template <typename LdsWindow>
     CK_TILE_DEVICE LeanIssueState make_lean_issue_state(const LdsWindow& lds_window) const
     {
-        static_assert(PageSize_ >= 128, "the lean issue covers whole-tile pages only");
+        static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         static_assert(!std::is_void_v<Distribution>);
         constexpr auto distribution = Distribution{};
         // Same thread coordinate as tile_window_with_static_distribution::prepare_coords.
@@ -346,7 +398,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                        const LdsWindow& lds_window,
                                        const LeanIssueState& state) const
     {
-        static_assert(PageSize_ >= 128, "the lean issue covers whole-tile pages only");
+        static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         constexpr auto raw_box =
             to_sequence(Distribution{}.get_ys_to_d_descriptor().get_lengths()).reverse();
         static_assert(raw_box.size() == 2);
@@ -357,11 +409,19 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         const index_t physical_page =
             valid_tokens > 0 ? page_id_.owned[0].physical_page : index_t{0};
         // P > 128 pages hold several tiles; the tile starts at origin % P inside its page.
+        // P64: the wave's page (owned[0]) holds its slice at row wave_row0 % 64.
         const index_t slice_row = PageSize_ > 128 ? origin_[0] % PageSize_ : index_t{0};
-        const long_index_t element_offset =
-            static_cast<long_index_t>(physical_page) * page_stride_ +
-            static_cast<long_index_t>(slice_row + state.wave_row0) * token_stride_ +
-            state.wave_col0;
+        long_index_t element_offset;
+        if constexpr(PageSize_ < 128)
+            element_offset =
+                static_cast<long_index_t>(physical_page) * page_stride_ +
+                static_cast<long_index_t>(state.wave_row0 % PageSize_) * token_stride_ +
+                state.wave_col0;
+        else
+            element_offset =
+                static_cast<long_index_t>(physical_page) * page_stride_ +
+                static_cast<long_index_t>(slice_row + state.wave_row0) * token_stride_ +
+                state.wave_col0;
         // Remaining extents measured from the wave's origin, columns first (TDM order).
         const uint32_t dims[2] = {
             static_cast<uint32_t>(max(index_t{0}, HeadDim_ - state.wave_col0)),
