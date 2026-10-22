@@ -981,6 +981,45 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
     return cases;
 }
 
+/// Each operand marked runtime pass-by-value: a host scalar where the kernel takes a device
+/// pointer. The scale is the only tensor the FlyDSL SDPA engines read that way, so every
+/// family declines each of these. A case with a feature carries the feature without the
+/// mark as its control.
+inline std::vector<SdpaFieldDecline> sdpaPassByValueDeclines()
+{
+    std::vector<SdpaFieldDecline> cases;
+    const auto byValue
+        = [](int64_t uid) { return [uid](SdpaGraphSpec& s) { s.passByValueTensors.insert(uid); }; };
+    for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
+                                   std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},
+                                   std::pair{"V", FLYDSL_SDPA_RDNA_V_UID},
+                                   std::pair{"O", FLYDSL_SDPA_RDNA_O_UID}})
+    {
+        cases.push_back({std::string("PassByValue") + name, byValue(uid), {}});
+    }
+    const auto withFeature = [&cases, &byValue](std::string name,
+                                                int64_t uid,
+                                                const std::function<void(SdpaGraphSpec&)>& add) {
+        const auto mark = byValue(uid);
+        cases.push_back({std::move(name),
+                         [add, mark](SdpaGraphSpec& s) {
+                             add(s);
+                             mark(s);
+                         },
+                         add});
+    };
+    withFeature("PassByValueBias", FLYDSL_SDPA_RDNA_BIAS_UID, [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+    });
+    withFeature("PassByValueStats", FLYDSL_SDPA_RDNA_STATS_UID, [](SdpaGraphSpec& s) {
+        s.stats = SdpaStats::LSE;
+    });
+    withFeature(
+        "PassByValueSink", FLYDSL_SDPA_RDNA_SINK_UID, [](SdpaGraphSpec& s) { s.withSink = true; });
+    return cases;
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

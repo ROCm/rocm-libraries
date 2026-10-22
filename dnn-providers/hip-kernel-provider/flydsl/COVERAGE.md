@@ -911,9 +911,10 @@ the harness's own bias. The measurements are kept outside the repository.
     keeps the bias inside one FMA without changing the results, or a gfx90a tile retuned
     for the bias build, are the candidates.
 14. *gfx950 `head_dim` 128 causal prefill objects at a single query row.* The plain and sink
-    64-row objects are about 12% slower at one query row against 2048 keys than before the
-    shared mask resolution and the round's host changes, with their own objects unchanged;
-    the cause is in the arguments or launch the host now gives them and is not yet found.
+    64-row objects are about 12% slower at one query row against 2048 keys than when the
+    RDNA and CDNA matchers each resolved the mask themselves, before `FlydslSdpaShared.hpp`;
+    the same objects run that much slower under the current host code, so the cause is in
+    the arguments or launch the host gives them, and is not yet found.
     The split decode object serves that shape several times faster, so it is not the one
     autotune picks there.
 

@@ -414,6 +414,13 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(sdpaFieldDeclines()),
                          [](const auto& info) { return info.param.name; });
 
+// Q, K, V, O, the bias, the LSE and the sink, each a host scalar where the kernel reads a
+// device pointer.
+INSTANTIATE_TEST_SUITE_P(PassByValue,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(sdpaPassByValueDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
 /// 2^31: one past the largest 32-bit kernel argument.
 constexpr int64_t TWO_POW_31 = int64_t{1} << 31;
 

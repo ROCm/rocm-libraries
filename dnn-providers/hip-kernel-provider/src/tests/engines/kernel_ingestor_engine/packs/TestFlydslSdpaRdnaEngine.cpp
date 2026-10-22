@@ -351,47 +351,24 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(sdpaFieldDeclines()),
                          [](const auto& info) { return info.param.name; });
 
-/// Each operand marked runtime pass-by-value: a host scalar where the kernel takes a device
-/// pointer. The scale is the only tensor these engines read that way.
+/// The shared pass-by-value table, plus the bias in the shape a host scalar has: rank 1, one
+/// element. The RDNA engines accept that bias as a device tensor (it broadcasts over every
+/// axis); the CDNA engines decline it for its broadcast key axis, so it is RDNA's case only.
 std::vector<SdpaFieldDecline> passByValueDeclines()
 {
-    std::vector<SdpaFieldDecline> cases;
-    const auto byValue
-        = [](int64_t uid) { return [uid](SdpaGraphSpec& s) { s.passByValueTensors.insert(uid); }; };
-    for(const auto& [name, uid] : {std::pair{"Q", FLYDSL_SDPA_RDNA_Q_UID},
-                                   std::pair{"K", FLYDSL_SDPA_RDNA_K_UID},
-                                   std::pair{"V", FLYDSL_SDPA_RDNA_V_UID},
-                                   std::pair{"O", FLYDSL_SDPA_RDNA_O_UID}})
-    {
-        cases.push_back({std::string("PassByValue") + name, byValue(uid), {}});
-    }
-    const auto withFeature = [&cases, &byValue](std::string name,
-                                                int64_t uid,
-                                                const std::function<void(SdpaGraphSpec&)>& add) {
-        const auto mark = byValue(uid);
-        cases.push_back({std::move(name),
-                         [add, mark](SdpaGraphSpec& s) {
-                             add(s);
-                             mark(s);
-                         },
-                         add});
-    };
-    withFeature("PassByValueBias", FLYDSL_SDPA_RDNA_BIAS_UID, [](SdpaGraphSpec& s) {
-        s.withBias = true;
-        s.biasDataType = s.dataType;
-    });
-    // A rank-1 bias of one element is the shape a host scalar has.
-    withFeature("PassByValueScalarBias", FLYDSL_SDPA_RDNA_BIAS_UID, [](SdpaGraphSpec& s) {
+    auto cases = sdpaPassByValueDeclines();
+    const auto scalarBias = [](SdpaGraphSpec& s) {
         s.withBias = true;
         s.biasDataType = s.dataType;
         s.biasDims = {1};
         s.biasStrides = {1};
-    });
-    withFeature("PassByValueStats", FLYDSL_SDPA_RDNA_STATS_UID, [](SdpaGraphSpec& s) {
-        s.stats = SdpaStats::LSE;
-    });
-    withFeature(
-        "PassByValueSink", FLYDSL_SDPA_RDNA_SINK_UID, [](SdpaGraphSpec& s) { s.withSink = true; });
+    };
+    cases.push_back({"PassByValueScalarBias",
+                     [scalarBias](SdpaGraphSpec& s) {
+                         scalarBias(s);
+                         s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_BIAS_UID);
+                     },
+                     scalarBias});
     return cases;
 }
 
