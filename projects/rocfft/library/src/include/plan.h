@@ -118,7 +118,8 @@ struct rocfft_field_t
     /**
      * @return The field's global data range (as a contiguous layout), i.e.,
      * the minimal full layout that logically includes all bricks' partial layouts.
-     * @note In-buffer strides are meaningless in this object.
+     * @note In-buffer strides are meaningless in this object, and it carries no array
+     * type nor precision (see `get_array_type()` and `get_precision()`).
     */
     const data_set_t& get_global_data_range() const
     {
@@ -144,6 +145,26 @@ struct rocfft_field_t
     }
 
     /**
+     * @return The array type shared by all bricks of the field.
+     */
+    rocfft_array_type get_array_type() const;
+
+    /**
+     * @return The precision shared by all bricks of the field.
+     */
+    rocfft_precision get_precision() const;
+
+    /**
+     * @brief Relabels the array type of all bricks (see `data_set_t::reinterpret_as`).
+     *
+     * @param[in] new_array_type array type to be given to all bricks.
+     *
+     * @throw Whatever `data_set_t::reinterpret_as` throws for any brick, in which
+     * case the field is left unchanged (all-or-nothing).
+     */
+    void reinterpret_as(rocfft_array_type new_array_type);
+
+    /**
      * @brief Verifies whether this field is consistent as input (resp. output)
      * for embarrassingly-parallel computations of specific types of Fourier
      * Transforms and, if so, returns the corresponding output (resp. input)
@@ -156,7 +177,11 @@ struct rocfft_field_t
      * @param[in] fft_type intended type of Fourier Transform
      * @param[in] placement intended placement of each brick's results for the
      * desired transform. For out-of-place operations, each brick in the
-     * returned field is given a default, contiguous data layout.
+     * returned field is given a default, contiguous data layout. The returned
+     * bricks have this object's precision; their array type is this object's for
+     * complex transforms, and `rocfft_array_type_real` (resp.
+     * `rocfft_array_type_hermitian_interleaved`) in real (resp. hermitian) domain
+     * for real transforms.
      * @param[in] other_innermost_length_is_odd flag indicating whether the
      * logical span of the innermost length axis in the corresponding field's
      * full data range is odd (if `true`) or not (if `false`). This is ignored
@@ -199,13 +224,22 @@ struct rocfft_field_t
      *
      * @param[in] field_bricks vector of bricks composing the field. Must be
      * non-empty and dimensionally consistent (all bricks must have the same
-     * length rank and batch rank).
+     * length rank and batch rank), and all bricks must have the same, set
+     * array type and precision once given `array_type` and `precision`.
+     * @param[in] array_type array type given to the bricks that have none
+     * (ignored if unset, the default).
+     * @param[in] precision precision given to the bricks that have none
+     * (ignored if `std::nullopt`, the default).
      *
-     * @throw std::invalid_argument if @p field_bricks is empty, if bricks are
-     * not dimensionally consistent, or if the bricks do not form a valid
-     * tessellation of the field's global data range.
+     * @throw std::invalid_argument if @p field_bricks is empty, if any brick has
+     * an unset array type or precision, if bricks have different array types or
+     * precisions (or ones different from `array_type` or `precision` if provided),
+     * if bricks are not dimensionally consistent, or if the bricks do not form a
+     * valid tessellation of the field's global data range.
      */
-    rocfft_field_t(std::vector<rocfft_brick_t> field_bricks);
+    rocfft_field_t(std::vector<rocfft_brick_t>     field_bricks,
+                   rocfft_array_type               array_type = rocfft_array_type_unset,
+                   std::optional<rocfft_precision> precision  = std::nullopt);
 
     rocfft_field_t(const rocfft_field_t&) = default;
     rocfft_field_t& operator=(const rocfft_field_t&) = default;
@@ -275,6 +309,7 @@ private:
     friend rocfft_status rocfft_field_add_brick(rocfft_field, rocfft_brick);
     // The `rocfft_plan_description_t` finalizes the user-defined fields by
     // - all-gathering bricks across all processes in the description's communicator;
+    // - setting the array type and precision of all bricks;
     // - erasing non-distributed unit-length axes from all bricks;
     // - re-ordering length axes by increasing in-buffer strides.
     // These operations require access to the private members of this class.
@@ -335,7 +370,8 @@ struct rocfft_plan_description_t
      * - gathering all the fields' bricks on all processes involved in the description's
      *   communicator, if any;
      * 
-     * - finalizing, and validating all member fields;
+     * - setting the I/O array types and precision on all bricks of the I/O fields, then
+     *   finalizing and validating all member fields;
      * 
      * - removing trivial unit-span axes from all layouts (including bricks' if any)
      * and sorting length axes by increasing strides if that can be done consistently
@@ -622,6 +658,8 @@ private:
      * plan, no input-gathering plan items are created.
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
+     * @param[in] exec_plan_input_layout input data set of the single-device execution plan
+     * (see `get_single_dev_exec_plan_metadata`).
      * @param[in] exec_plan_location location of the single-device execution plan.
      * @return An `std::vector<size_t>` of indices of the created
      * plan items that the execution plan would need to wait for before beginning.
@@ -630,6 +668,7 @@ private:
      */
     std::vector<size_t>
         CreateInputGatheringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+                                          const data_set_t&        exec_plan_input_layout,
                                           const rocfft_location_t& exec_plan_location);
 
     /**
@@ -640,6 +679,8 @@ private:
      * plan items are created.
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
+     * @param[in] exec_plan_output_layout output data set of the single-device execution plan
+     * (see `get_single_dev_exec_plan_metadata`).
      * @param[in] exec_plan_location location of the single-device execution plan.
      * @param[in] device_specific_ops store ops that are bound to specific output bricks
      * (i.e. JIT callbacks)
@@ -651,6 +692,7 @@ private:
      */
     std::vector<size_t>
         CreateOutputScatteringItemsIfNeeded(const NodeMetaData&            exec_plan_metadata,
+                                            const data_set_t&              exec_plan_output_layout,
                                             const rocfft_location_t&       exec_plan_location,
                                             const std::optional<StoreOps>& dev_specific_store_ops);
 
@@ -789,9 +831,13 @@ private:
      * this vector.
      * @param[in] exec_plan_location location where the single-device execution plan
      * configured by the returned object is meant to reside.
+     * @param[out] exec_plan_io_layouts the input and output data sets of the single-device
+     * execution plan (in that order), with the description's array types and precision,
+     * which the returned object's lengths, strides and distances describe untyped.
      */
     NodeMetaData get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
-                                                   const rocfft_location_t& exec_plan_location);
+                                                   const rocfft_location_t&      exec_plan_location,
+                                                   std::vector<data_set_t>& exec_plan_io_layouts);
 
     struct field_view_t
     {

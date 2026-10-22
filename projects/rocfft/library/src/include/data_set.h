@@ -395,15 +395,6 @@ struct data_set_t
     bool has_same_batch_range_as(const data_set_t& other) const;
 
     /**
-     * @param[in] other data set to be compared to this one.
-     * @return `true` iff all length and batch axes of this object and `other` are
-     * identical, regardless of their precisions, array types and embeddings.
-     * @note Temporary helper for comparing typed description data sets with untyped
-     * brick data sets: to be removed once bricks get types (AIFFT-563).
-     */
-    bool has_same_axes_as(const data_set_t& other) const;
-
-    /**
      * @param[in] first a data_set_t object
      * @param[in] second a data_set_t object that's dimensionally consistent with `first`
      * @return A data_set_t object capturing the intersection of the logical ranges
@@ -721,7 +712,7 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // rocfft-internal-test drives private members directly (defined in data_set_test.cpp),
+    // rocfft-internal-test drives private members directly (see tests/data_set_test_access.h),
     // e.g., reorder_length_axes, or setting array types and precisions as friends do.
     friend struct data_set_test_access;
 };
