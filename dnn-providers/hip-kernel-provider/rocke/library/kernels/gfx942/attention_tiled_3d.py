@@ -30,7 +30,6 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -60,6 +59,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     wave64_reduce_max as _wave64_reduce_max,
@@ -232,9 +232,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
