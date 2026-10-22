@@ -234,12 +234,13 @@ class KernelWriterAssembly(KernelWriter):
   def getSgprOccupancy(self, sgprs):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
-  def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
+  def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False, totalVgprs=None):
     multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
     maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
     vgprAllocateAligned = 4    if not doubleVgpr else 8
-    totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+    if totalVgprs is None:
+      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
     vgprsAligned *= multiplier
 
@@ -252,7 +253,7 @@ class KernelWriterAssembly(KernelWriter):
     return occupancy
 
   ########################################
-  def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+  def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False, totalVgprs=None):
     """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
@@ -262,14 +263,24 @@ class KernelWriterAssembly(KernelWriter):
         ldsPool, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
-      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
-      accvgprLimitedOccupancy = self.getVgprOccupancy(numThreads, accvgprs,       doubleVgpr)
+      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr, totalVgprs)
+      accvgprLimitedOccupancy = self.getVgprOccupancy(numThreads, accvgprs,       doubleVgpr, totalVgprs)
     else:
-      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, ceil(vgprs/8)*8+accvgprs, doubleVgpr)
+      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, ceil(vgprs/8)*8+accvgprs, doubleVgpr, totalVgprs)
       accvgprLimitedOccupancy = vgprLimitedOccupancy
     sgprLimitedOccupancy = self.getSgprOccupancy(sgprs)
 
     return min(ldsLimitedOccupancy, vgprLimitedOccupancy, accvgprLimitedOccupancy, sgprLimitedOccupancy)
+
+  def getCUOccupancy(self, kernel, vgprs, sgprs, accvgprs):
+    # Resident workgroups per CU as written to the library. Origami ranks with it and the
+    # stream-K / persistent grids are sized from it, so it has to count what the hardware fits.
+    # doubleVgpr budgets MaxVgpr*2 per SIMD, which is the physical file where MaxVgpr is half of
+    # it (gfx9 unified acc, wave32 RDNA). gfx1250 addresses its whole 1024-entry file per lane,
+    # so there the budget is PhysicalMaxVgpr. Same value on every other ISA.
+    totalVgprs = self.states.regCaps["PhysicalMaxVgpr"] if self.states.doubleVgpr else None
+    return self.getOccupancy(kernel["NumThreads"], vgprs, sgprs, self.getLdsSize(kernel), accvgprs,
+                             self.states.doubleVgpr, totalVgprs)
 
   # TODO: also consider sgpr
   def getMaxRegsForOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
@@ -2348,8 +2359,7 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
-      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getCUOccupancy(kernel, self.vgprPool.size(), self.sgprPool.size(), self.agprPool.size())
     if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       self.states.overflowedResources = 6
 
@@ -2445,9 +2455,7 @@ class KernelWriterAssembly(KernelWriter):
     mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
                 totalSgprs=self.sgprPool.size())
 
-    kernel["CUOccupancy"] = self.getOccupancy(
-      kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
-      self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getCUOccupancy(kernel, max_vgpr, self.sgprPool.size(), pool_agprs)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer

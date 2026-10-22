@@ -815,3 +815,50 @@ class TestUpdateOccupancyFromMaxVgpr:
         kernel, mkb = self._run_with_max_vgpr(max_vgpr=-1)
         assert kernel["CUOccupancy"] == 1
         assert mkb._set_gprs_calls == []
+
+
+# ---------------------------------------------------------------------------
+# CUOccupancy: VGPR budget is the physical file (gfx1250 addresses all of it)
+# ---------------------------------------------------------------------------
+
+def _cu_writer(isa):
+    ri = _init_rocisa(isa)
+    kw = _make_writer(ri, isa)
+    kw.states.doubleVgpr = True
+    kw.getLdsSize = lambda k: k["LdsNumBytes"]
+    return kw
+
+
+@pytest.mark.parametrize(
+    "vgprs,expected,codegen_budget",
+    [
+        (1024, 1, 2),
+        (680, 1, 3),
+        (512, 2, 4),
+        (336, 3, 6),
+        (256, 4, 8),
+    ],
+)
+def test_gfx1250_cu_occupancy_uses_the_physical_vgpr_file(vgprs, expected, codegen_budget):
+    """gfx1250 has MaxVgpr == PhysicalMaxVgpr == 1024, so MaxVgpr*2 counts the file twice.
+
+    CUOccupancy (what the library reports and Origami ranks with) uses the physical file,
+    getOccupancy (codegen register budgets) keeps MaxVgpr*2.
+    """
+    kw = _cu_writer((12, 5, 0))
+    kernel = {"NumThreads": 256, "LdsNumBytes": 1024}
+    assert kw.getCUOccupancy(kernel, vgprs, 64, 0) == expected
+    assert kw.getOccupancy(256, vgprs, 64, 1024, 0, True) == codegen_budget
+
+
+@pytest.mark.parametrize(
+    "isa", [(9, 0, 10), (9, 4, 2), (9, 5, 0), (11, 0, 0), (12, 0, 0)],
+    ids=["gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1200"],
+)
+@pytest.mark.parametrize("vgprs,accvgprs", [(24, 240), (64, 192), (128, 128), (256, 256)])
+def test_cu_occupancy_unchanged_where_max_vgpr_is_half_the_file(isa, vgprs, accvgprs):
+    kw = _cu_writer(isa)
+    assert kw.states.regCaps["PhysicalMaxVgpr"] == 2 * kw.states.regCaps["MaxVgpr"]
+    kernel = {"NumThreads": 256, "LdsNumBytes": 32768}
+    assert kw.getCUOccupancy(kernel, vgprs, 88, accvgprs) == kw.getOccupancy(
+        256, vgprs, 88, 32768, accvgprs, True)
