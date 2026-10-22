@@ -125,6 +125,36 @@ namespace TensileLite
             if(pointerArrayBatch && m_sparse)
                 throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
 
+            // The two MX scale declarations describe the same buffer and cannot
+            // both hold. mx-scales-packed says the scales are a row-major array
+            // with no slack, which is what fixes the row pitch handed to a custom
+            // kernel. mx-scale-format 1 says they went through the gfx950
+            // e8m0_shuffle permutation, which is not a row-major array at all and
+            // so has no row pitch to be unpadded.
+            //
+            // Rejecting the pair rather than letting one win is deliberate,
+            // because the failure it prevents is a false pass. mx-scales-packed
+            // is only ever true when every kernel in the run is an externally
+            // captured one, and no such kernel declares MXScaleFormat, so all of
+            // them read canonical scales. DataInitialization keys the actual
+            // upload off the selected kernel's format, not off this option, so
+            // the run would quietly upload canonical scales and report success
+            // for what the user asked to be a pre-swizzled test. Measured with
+            // this check disabled: the pair runs to PASSED having permuted
+            // nothing.
+            //
+            // Neither request can be dropped silently instead. ClientWriter
+            // derives mx-scales-packed from the kernels in the run, so overriding
+            // it would hide that decision, and mx-scale-format is an explicit
+            // statement about the input. Refusing costs nothing: with every
+            // kernel NoSwizzle there is no kernel in the run that could have read
+            // a pre-swizzled buffer.
+            if(m_mxScalesPacked && m_mxScaleHostPreSwizzle)
+                throw std::invalid_argument(
+                    "mx-scales-packed and mx-scale-format=1 are mutually exclusive: "
+                    "pre-swizzled MX scales are a permutation, not an unpadded "
+                    "row-major array");
+
             // Which MX scale layout to allocate. Tensile's own generated gfx950
             // kernels read a padded scale tensor, so the arch still picks the
             // padding when nothing says otherwise. But when ClientWriter reports
