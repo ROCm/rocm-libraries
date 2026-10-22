@@ -28,7 +28,6 @@
 
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
-#include "bitwise_difference.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
 #include "cotenant.hpp"
@@ -47,12 +46,13 @@
 #include "mxDataGen.hpp"
 #endif
 // Ungated: generateW4A16Input is used even without the MX data generator.
-#include "w4a16_datagen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
+#include "relaunch_compare.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include "w4a16_datagen.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
@@ -6478,91 +6478,94 @@ void testing_matmul_with_bias(const Arguments& arg,
             assert(perf_monitor);
             perf_monitor->start();
         };
-        // --verify_all_iters: each launch path sets relaunch to one launch of rotation block 0,
-        // which writes the D that the first cold launch copied to hD_1.
-        std::function<void(size_t)> relaunch;
-        std::vector<HipHostBuffer>  hD_relaunch;
-        const int                   d_copies
+        // --post_bench_verify_iters: each launch path sets relaunch to one launch of rotation
+        // block 0, which writes the D that the first cold launch copied to hD_1.
+        std::function<void(size_t)>  relaunch;
+        std::vector<HipDeviceBuffer> dD_reference;
+        const int                    d_copies
             = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? arg.batch_count : gemm_count;
         // Where element e of D copy c sits: copy c is gemm c, or batch c in pointer-array mode.
-        auto describeElement = [&](int c, size_t e, const void* got, const void* expected) {
-            const bool         pointer_array = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-            const int          gemm          = pointer_array ? 0 : c;
-            const int64_t      stride        = pointer_array ? 0 : stride_d[gemm];
-            const int64_t      batch  = pointer_array ? c : (stride ? int64_t(e) / stride : 0);
-            const int64_t      within = int64_t(e) - (pointer_array ? 0 : batch * stride);
-            std::ostringstream s;
-            s << std::setprecision(9) << "gemm " << gemm << ", batch " << batch << ", row "
-              << within % ldd[gemm] << ", column " << within / ldd[gemm] << ": "
-              << fast_check_load(got, To, e) << " instead of " << fast_check_load(expected, To, e);
-            return s.str();
+        auto describeElement = [&](int c, uint64_t e) {
+            const bool    pointer_array = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const int     gemm          = pointer_array ? 0 : c;
+            const int64_t stride        = pointer_array ? 0 : stride_d[gemm];
+            const int64_t batch         = pointer_array ? c : (stride ? int64_t(e) / stride : 0);
+            const int64_t within        = int64_t(e) - (pointer_array ? 0 : batch * stride);
+            return "gemm " + std::to_string(gemm) + ", batch " + std::to_string(batch) + ", row "
+                   + std::to_string(within % ldd[gemm]) + ", column "
+                   + std::to_string(within / ldd[gemm]);
         };
-        // Relaunches solution sol --iters times and compares each D bit for bit with hD_1.
+        // Relaunches solution sol back to back, comparing each D bit for bit with hD_1 on the
+        // device, and copies the per-relaunch results to the host once at the end.
         auto verifyRelaunches = [&](size_t sol) {
+            const int    relaunches   = hipblaslt_bench_options::post_bench_verify_iters();
             const size_t element_size = realDataTypeSize(To);
-            if(hD_relaunch.empty())
+            auto         elementsOf   = [&](int c) { return hD_1[c].getNumBytes() / element_size; };
+            if(dD_reference.empty())
                 for(int c = 0; c < d_copies; c++)
-                    hD_relaunch.emplace_back(To, hD_1[c].getNumBytes() / element_size);
+                    dD_reference.emplace_back(To, elementsOf(c));
+            for(int c = 0; c < d_copies; c++)
+                CHECK_HIP_ERROR(hipMemcpyAsync(dD_reference[c].buf(),
+                                               hD_1[c].buf(),
+                                               hD_1[c].getNumBytes(),
+                                               hipMemcpyHostToDevice,
+                                               stream));
 
-            int         differing = 0;
-            int         first     = 0;
-            std::string report;
-            for(int iter = 1; iter <= arg.iters; iter++)
+            HipDeviceBuffer slots(HIP_R_8I, relaunches * sizeof(RelaunchSlot));
+            RelaunchSlot*   dSlots = slots.as<RelaunchSlot>();
+            CHECK_HIP_ERROR(relaunch_slots_reset_device(dSlots, relaunches, stream));
+            for(int k = 0; k < relaunches; k++)
             {
                 relaunch(sol);
-                copy_gemm_to_host(stream, d_copies, hD_relaunch, (*dDp));
-                bool same = true;
+                uint64_t offset = 0;
                 for(int c = 0; c < d_copies; c++)
                 {
-                    const BitwiseDifference d
-                        = bitwise_difference(hD_1[c].buf(),
-                                             hD_relaunch[c].buf(),
-                                             hD_1[c].getNumBytes() / element_size,
-                                             element_size);
-                    if(d.count == 0)
-                        continue;
-                    same = false;
-                    if(first == 0)
-                    {
-                        const char* elementPtr = hD_relaunch[c].as<char>();
-                        const char* firstPtr   = hD_1[c].as<char>();
-                        const int   gemm  = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 0 : c;
-                        double      atol  = 0;
-                        double      rtol  = 0;
-                        const bool  close = allclose_check_general(
-                            'F',
-                            M[gemm],
-                            N[gemm],
-                            ldd[gemm],
-                            batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 0 : stride_d[gemm],
-                            hD_gold[c].buf(),
-                            hD_relaunch[c].buf(),
-                            batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : num_batches[gemm],
-                            atol,
-                            rtol,
-                            To);
-                        first  = iter;
-                        report = std::to_string(d.count) + " elements of D differ; the first is "
-                                 + describeElement(c, d.first, elementPtr, firstPtr)
-                                 + (close ? ". That relaunch still passes the allclose check "
-                                            "against the CPU reference, so the solution may "
-                                            "sum in a different order from launch to launch"
-                                          : ". That relaunch also fails the allclose check "
-                                            "against the CPU reference");
-                    }
+                    CHECK_HIP_ERROR(relaunch_compare_device((*dDp)[c].buf(),
+                                                            dD_reference[c].buf(),
+                                                            elementsOf(c),
+                                                            element_size,
+                                                            offset,
+                                                            dSlots + k,
+                                                            stream));
+                    CHECK_HIP_ERROR(relaunch_capture_first_device(
+                        (*dDp)[c].buf(), elementsOf(c), element_size, offset, dSlots + k, stream));
+                    offset += elementsOf(c);
                 }
-                if(!same)
-                    differing++;
             }
-            if(differing)
+            std::vector<RelaunchSlot> hSlots(relaunches);
+            CHECK_HIP_ERROR(hipMemcpyAsync(hSlots.data(),
+                                           dSlots,
+                                           relaunches * sizeof(RelaunchSlot),
+                                           hipMemcpyDeviceToHost,
+                                           stream));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+            int differing = 0;
+            int first     = -1;
+            for(int k = 0; k < relaunches; k++)
             {
-                hipblaslt_bench_options::verification_failures()++;
-                hipblaslt_cerr << "verify_all_iters failed for solution " << sol << ": "
-                               << differing << " of " << arg.iters
-                               << " relaunches gave a different D than the first launch. In "
-                                  "relaunch "
-                               << first << ", " << report << std::endl;
+                if(hSlots[k].count == 0)
+                    continue;
+                differing++;
+                if(first < 0)
+                    first = k;
             }
+            if(!differing)
+                return;
+
+            const RelaunchSlot& slot = hSlots[first];
+            int                 c    = 0;
+            uint64_t            e    = slot.first;
+            while(c + 1 < d_copies && e >= elementsOf(c))
+                e -= elementsOf(c++);
+            hipblaslt_bench_options::verification_failures()++;
+            hipblaslt_cerr << std::setprecision(9) << "post_bench_verify_iters failed for solution "
+                           << sol << ": " << differing << " of " << relaunches
+                           << " relaunches gave a different D than the first launch. In relaunch "
+                           << first + 1 << ", " << slot.count
+                           << " elements of D differ; the first is " << describeElement(c, e)
+                           << ": " << fast_check_load(slot.bits, To, 0) << " instead of "
+                           << fast_check_load(hD_1[c].buf(), To, e) << std::endl;
         };
         auto measured = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
             // hipblaslt-bench stops a single GEMM's cotenant before the efficiency
@@ -6685,7 +6688,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Talpha,
                       batchMode);
             }
-            if(hipblaslt_bench_options::verify_all_iters() && relaunch)
+            if(hipblaslt_bench_options::post_bench_verify_iters() > 0 && relaunch)
                 verifyRelaunches(sol);
 
 #define argument_param                                                                            \

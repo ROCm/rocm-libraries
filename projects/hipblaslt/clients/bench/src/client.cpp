@@ -491,11 +491,12 @@ try
          "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
          "failed). Implies --verify.")
 
-        ("verify_all_iters",
-         value<bool>(&hipblaslt_bench_options::verify_all_iters())->default_value(false),
-         "After timing, relaunch each solution --iters more times, untimed, and check that every "
-         "relaunch gives the same D, bit for bit, as the first launch, which --verify compares "
-         "with the CPU. A difference counts as a failed check for --verify_strict. Implies --verify.")
+        ("post_bench_verify_iters",
+         value<int32_t>(&hipblaslt_bench_options::post_bench_verify_iters())->default_value(0),
+         "After timing, relaunch each solution this many more times, untimed and back to back, and "
+         "check on the GPU that every relaunch gives the same D, bit for bit, as the first launch, "
+         "which --verify compares with the CPU. The timed launches are not checked. A difference "
+         "counts as a failed check for --verify_strict. 0 turns it off. Implies --verify.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),
@@ -1321,13 +1322,15 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(hipblaslt_bench_options::verify_all_iters() && arg.c_equal_d && arg.beta != 0)
-        throw std::invalid_argument("--verify_all_iters does not support --c_equal_d with a "
-                                    "nonzero beta, since each launch then reads the D the "
+    if(hipblaslt_bench_options::post_bench_verify_iters() < 0)
+        throw std::invalid_argument("--post_bench_verify_iters must be 0 or more");
+    if(hipblaslt_bench_options::post_bench_verify_iters() > 0 && arg.c_equal_d && arg.beta != 0)
+        throw std::invalid_argument("--post_bench_verify_iters does not support --c_equal_d with "
+                                    "a nonzero beta, since each launch then reads the D the "
                                     "previous launch wrote");
 
     if(verify || ulp || hipblaslt_bench_options::verify_strict()
-       || hipblaslt_bench_options::verify_all_iters())
+       || hipblaslt_bench_options::post_bench_verify_iters() > 0)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;

@@ -190,7 +190,7 @@ namespace
     }
 
     // Runs a 64 x 64 x 64 f32 GEMM through the hipblaslt-bench timing path with
-    // --verify_all_iters and C stored in D, and counts the checks that failed.
+    // --post_bench_verify_iters 3 and C stored in D, and counts the checks that failed.
     int64_t bench_relaunch_failures(double beta)
     {
         Arguments arg{};
@@ -215,11 +215,11 @@ namespace
         arg.norm_check_assert = false;
         arg.fast_check        = 0;
 
-        const bool saved                            = hipblaslt_bench_options::verify_all_iters();
-        hipblaslt_bench_options::verify_all_iters() = true;
+        const int32_t saved = hipblaslt_bench_options::post_bench_verify_iters();
+        hipblaslt_bench_options::post_bench_verify_iters() = 3;
         const int64_t before = hipblaslt_bench_options::verification_failures();
         testing_matmul(arg);
-        hipblaslt_bench_options::verify_all_iters() = saved;
+        hipblaslt_bench_options::post_bench_verify_iters() = saved;
         return hipblaslt_bench_options::verification_failures() - before;
     }
 
