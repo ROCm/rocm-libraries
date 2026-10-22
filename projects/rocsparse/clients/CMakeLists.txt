@@ -171,6 +171,8 @@ endif()
 add_subdirectory(tools)
 
 if(BUILD_CLIENTS_TESTS)
+  include(rocsparse_gtest)
+
   add_subdirectory(tests)
 
   # Fast, GPU-independent unit tests for individual host-side components.

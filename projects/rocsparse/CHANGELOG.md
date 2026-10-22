@@ -18,6 +18,12 @@ Documentation for rocSPARSE is available at
 
 ### Changed
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest 1.11.0 or later must be installed before building the clients. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* `install.sh -d` no longer builds and installs GoogleTest from source.
+
+### Removed
+* Removed the GoogleTest superbuild in `deps/CMakeLists.txt`, together with `deps/external-gtest.cmake` and `cmake/get-cli-arguments.cmake`.
 
 ### Optimized
 * Improved the performance of the sparse triangular solves and the incomplete factorizations on gfx942 and gfx950. The kernels no longer write back and invalidate the L2 cache for every solved or factorized row. The row results and their completion flags are now exchanged with device-scope atomic stores and loads instead. This affects `rocsparse_spsv` and `rocsparse_sptrsv` (CSR, CSC, COO, and ELL formats), `rocsparse_spsm` and `rocsparse_sptrsm` (CSR, CSC, and COO formats), `rocsparse_Xcsrsv_solve`, `rocsparse_Xcsrsm_solve`, `rocsparse_Xcsrilu0`, `rocsparse_Xcsric0`, `rocsparse_spilu0`, `rocsparse_spic0`, and `rocsparse_spildlt0`. It also affects `rocsparse_Xbsrsv_solve` with block sizes up to 32, `rocsparse_Xbsrilu0` with block sizes up to 8, and `rocsparse_Xbsric0` with block sizes up to 16 and at most 128 blocks per block row. Larger block sizes and `rocsparse_Xbsrsm_solve` keep the previous synchronization, because their kernels reread row results too often for device-scope atomics to pay off.
