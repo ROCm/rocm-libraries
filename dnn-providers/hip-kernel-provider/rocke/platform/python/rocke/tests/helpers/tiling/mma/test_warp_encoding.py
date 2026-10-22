@@ -19,6 +19,7 @@ from rocke.helpers.tiling.mma.warp_encoding import (
     a_warp_encoding,
     b_warp_encoding,
     c_warp_encoding,
+    encoder_supports_layout,
 )
 from rocke.helpers.tiling.traits import load_mma_traits
 
@@ -107,3 +108,27 @@ def test_non_divisible_c_shape_fails_fast() -> None:
     with pytest.raises(ValueError) as excinfo:
         c_warp_encoding(bad)
     assert "not divisible" in str(excinfo.value)
+
+
+def test_encoder_supports_a_single_block_instruction() -> None:
+    assert encoder_supports_layout(_traits("mfma_f32_16x16x16f16")) == (True, "")
+
+
+@pytest.mark.parametrize(
+    "encoding_fn", [a_warp_encoding, b_warp_encoding, c_warp_encoding]
+)
+def test_multi_block_instruction_is_a_named_encoder_boundary(encoding_fn) -> None:
+    # mfma_f32_16x16x1f32 computes 4 independent 16x16 blocks per instruction. The encoder does not
+    # model the block axis, so every operand encoding refuses it by name instead of laying out one
+    # block as if it were the whole instruction.
+    traits = _traits("mfma_f32_16x16x1f32")
+    supported, reason = encoder_supports_layout(traits)
+    assert not supported
+    with pytest.raises(NotImplementedError) as excinfo:
+        encoding_fn(traits)
+    assert str(excinfo.value) == (
+        "MMA instruction 'mfma_f32_16x16x1f32' cannot be laid out by the tiling encoder: it "
+        "computes 4 independent blocks per instruction and the block axis is not modelled "
+        "-- TODO: not implemented yet"
+    )
+    assert reason in str(excinfo.value)
