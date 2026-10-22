@@ -174,6 +174,34 @@ public:
   /// Emits dst = the low 32 bits of a * b.
   void muli32(RegisterRef dst, Operand a, Operand b);
 
+  // The 64-bit integer ops below share these rules. Results wrap modulo 2^64,
+  // so the ops are sign-agnostic.
+  //
+  // dst and the register operands are register pairs, and an immediate is any
+  // int64 value, its full 64-bit pattern. The op is a SALU sequence iff dst and
+  // every register operand are SGPRs: add is s_add_u32 + s_addc_u32, sub is
+  // s_sub_u32 + s_subb_u32 and mul is s_mul_i32, s_mul_hi_u32 and s_add_u32;
+  // they write SCC. A VGPR dst gives a VALU sequence: add is v_add_co_u32 +
+  // v_addc_co_u32 and sub is v_sub_co_u32 + v_subb_co_u32, carrying through a
+  // temporary SGPR pair so that VCC is untouched, with s_nop 1 before the
+  // carry-in read; mul is v_mul_lo_u32, v_mul_hi_u32 and v_add3_u32.
+  //
+  // Every instruction is 32-bit, so pairs may start at any index and an
+  // immediate is split into 32-bit halves; no 64-bit literal is ever emitted.
+  // Operands that gfx9 cannot encode are copied into temporaries, which are
+  // released after the op. dst may alias or overlap a or b.
+  //
+  // Throws std::invalid_argument, before emitting anything, if dst or a
+  // register operand is not exactly two registers or is an AGPR, or if dst is
+  // an SGPR pair and an operand is a VGPR.
+
+  /// Emits dst = a + b.
+  void addi64(RegisterRef dst, Operand a, Operand b);
+  /// Emits dst = a - b.
+  void subi64(RegisterRef dst, Operand a, Operand b);
+  /// Emits dst = the low 64 bits of a * b.
+  void muli64(RegisterRef dst, Operand a, Operand b);
+
   // The comparisons below share these rules.
   //
   // A destination of one SGPR holds a uniform bool, 0 or 1, and needs scalar

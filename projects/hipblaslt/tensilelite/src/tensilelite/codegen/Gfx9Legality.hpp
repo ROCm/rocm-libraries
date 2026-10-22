@@ -25,7 +25,11 @@ constexpr int64_t minInlineInteger = -16;
 constexpr int64_t maxInlineInteger = 64;
 
 /// Wait states a VALU read of an SGPR needs after a VALU instruction wrote it;
-/// the s_nop that covers them takes this minus one.
+/// the s_nop that covers them takes this minus one. This also covers the
+/// carry-in read of v_addc_co_u32 or v_subb_co_u32 after v_add_co_u32 or
+/// v_sub_co_u32 wrote the carry to VCC or an SGPR pair: LLVM's hazard
+/// recognizer inserts s_nop 1 there on gfx940 and gfx950, but not on gfx90a.
+/// SALU carry chains through SCC need none.
 constexpr int valuWriteSgprReadWaitStates = 2;
 
 bool isInlineConstant(int64_t value);
@@ -65,6 +69,10 @@ bool isLegalVop3Source64(Operand src);
 /// True if src is a legal v_cndmask_b32 data source: a VGPR or an inline
 /// constant; an SGPR would violate the constant bus once the mask is read.
 bool isLegalCndmaskSource(Operand src);
+/// True if src is a v_addc_co_u32 or v_subb_co_u32 data source: a VGPR or an
+/// inline constant, because the carry-in SGPR pair already uses the constant
+/// bus.
+bool isLegalCarryInSource(Operand src);
 /// True if ref can hold a lane mask: an SGPR pair at an even index.
 bool isLaneMask(RegisterRef ref);
 

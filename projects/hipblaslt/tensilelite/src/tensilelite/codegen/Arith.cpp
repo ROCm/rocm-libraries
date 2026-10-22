@@ -9,6 +9,7 @@
 #include "container.hpp"
 #include "instruction/common.hpp"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -16,49 +17,52 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 using namespace rocm::tensilelite::codegen;
+using detail::copyToTemporary;
+using detail::Temporaries;
 using detail::toInput;
 
 namespace {
 
 enum class BinaryOp { add, sub, mul };
 
-// Temporary registers that stay allocated until the op has been emitted.
-using Temporaries = std::vector<RegisterRange>;
-
-std::string_view opName(BinaryOp op) {
+std::string_view opName(BinaryOp op, int width) {
+  bool wide = width == 2;
   switch (op) {
   case BinaryOp::add:
-    return "addi32";
+    return wide ? "addi64" : "addi32";
   case BinaryOp::sub:
-    return "subi32";
+    return wide ? "subi64" : "subi32";
   case BinaryOp::mul:
-    return "muli32";
+    return wide ? "muli64" : "muli32";
   }
   throw std::invalid_argument("invalid binary op");
 }
 
-void requireRegister32(BinaryOp op, RegisterRef ref) {
-  detail::requireNotAgpr(opName(op), ref);
-  detail::requireRegisterCount(opName(op), ref, 1);
+void requireRegister(BinaryOp op, int width, RegisterRef ref) {
+  detail::requireNotAgpr(opName(op, width), ref);
+  detail::requireRegisterCount(opName(op, width), ref, width);
 }
 
-Operand canonicalize32(BinaryOp op, Operand operand) {
+// A 64-bit immediate is any int64 value, so only registers need checking.
+Operand validateOperand(BinaryOp op, int width, Operand operand) {
   if (operand.isRegister())
-    requireRegister32(op, operand.reg());
-  return detail::canonicalizeImmediate32(opName(op), operand);
+    requireRegister(op, width, operand.reg());
+  if (width == 2)
+    return operand;
+  return detail::canonicalizeImmediate32(opName(op, width), operand);
 }
 
-void requireScalarSources(BinaryOp op, RegisterRef dst, Operand a, Operand b) {
+void requireScalarSources(BinaryOp op, int width, RegisterRef dst, Operand a,
+                          Operand b) {
   if (dst.kind != RegisterKind::sgpr)
     return;
   for (Operand source : {a, b}) {
     if (!source.isRegister(RegisterKind::vgpr))
       continue;
     throw std::invalid_argument(
-        std::string(opName(op)) + " cannot write sgpr destination " +
+        std::string(opName(op, width)) + " cannot write sgpr destination " +
         detail::registerText(dst) + " from vgpr operand " +
         detail::registerText(source.reg()));
   }
@@ -94,43 +98,34 @@ void createValu(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
   }
 }
 
-// Copies source into a new VGPR that lives as long as temps does.
-Operand copyToVgpr(IRBuilder &builder, Operand source, Temporaries &temps) {
-  RegisterRange copy = builder.allocateVgpr(1);
-  builder.movb32(copy.ref(), source);
-  temps.push_back(std::move(copy));
-  return Operand(temps.back());
-}
-
-// Copies source into a new SGPR that lives as long as temps does.
-Operand copyToSgpr(IRBuilder &builder, Operand source, Temporaries &temps) {
-  RegisterRange copy = builder.allocateSgpr(1);
-  builder.movb32(copy.ref(), source);
-  temps.push_back(std::move(copy));
-  return Operand(temps.back());
-}
-
 void emitSalu(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
               Operand b) {
   Temporaries temps;
   // Only two distinct literals are illegal, and one of them moves to a copy.
   if (!gfx9::isLegalSop2(a, b))
-    b = copyToSgpr(builder, b, temps);
+    b = copyToTemporary(builder, RegisterKind::sgpr, 1, b, temps);
   assert(gfx9::isLegalSop2(a, b) && "illegal salu operands");
   createSalu(builder, op, dst, a, b);
+}
+
+// Copies literals and an excess SGPR into VGPRs so that a and b suit VOP3,
+// which takes no literals.
+void legalizeVop3Sources(IRBuilder &builder, Operand &a, Operand &b,
+                         Temporaries &temps) {
+  if (gfx9::isLiteral(a))
+    a = copyToTemporary(builder, RegisterKind::vgpr, 1, a, temps);
+  if (gfx9::isLiteral(b))
+    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
+  // Two distinct SGPRs exceed the constant bus.
+  if (!gfx9::isLegalVop3(a, b))
+    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
 }
 
 // v_mul_lo_u32 is VOP3 only, so it takes no literals.
 void emitVop3Only(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                   Operand b) {
   Temporaries temps;
-  if (gfx9::isLiteral(a))
-    a = copyToVgpr(builder, a, temps);
-  if (gfx9::isLiteral(b))
-    b = copyToVgpr(builder, b, temps);
-  // Two distinct SGPRs exceed the constant bus.
-  if (!gfx9::isLegalVop3(a, b))
-    b = copyToVgpr(builder, b, temps);
+  legalizeVop3Sources(builder, a, b, temps);
   assert(gfx9::isLegalVop3(a, b) && "illegal vop3 operands");
   createValu(builder, op, dst, a, b);
 }
@@ -156,7 +151,7 @@ void emitVop2(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
   Temporaries temps;
   if (!gfx9::isLegalVop2(a, b) && !gfx9::isLegalVop3(a, b))
     // A VGPR in src1 makes any src0 legal.
-    b = copyToVgpr(builder, b, temps);
+    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
   assert((gfx9::isLegalVop2(a, b) || gfx9::isLegalVop3(a, b)) &&
          "illegal valu operands");
   createValu(builder, op, dst, a, b);
@@ -164,10 +159,10 @@ void emitVop2(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
 
 void emitBinaryI32(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                    Operand b) {
-  requireRegister32(op, dst);
-  a = canonicalize32(op, a);
-  b = canonicalize32(op, b);
-  requireScalarSources(op, dst, a, b);
+  requireRegister(op, 1, dst);
+  a = validateOperand(op, 1, a);
+  b = validateOperand(op, 1, b);
+  requireScalarSources(op, 1, dst, a, b);
   // Copies go into fresh temporaries before the single op, which reads all its
   // sources before writing dst, so dst may alias a or b.
   if (dst.kind == RegisterKind::sgpr)
@@ -175,6 +170,164 @@ void emitBinaryI32(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
   if (op == BinaryOp::mul)
     return emitVop3Only(builder, op, dst, a, b);
   emitVop2(builder, op, dst, a, b);
+}
+
+// The 32-bit halves of a 64-bit operand.
+struct Halves {
+  Operand lo;
+  Operand hi;
+};
+
+Halves halvesOf(Operand operand) {
+  return {detail::operandHalf(operand, 0), detail::operandHalf(operand, 1)};
+}
+
+// Two halves that one instruction reads together.
+struct HalfPair {
+  Operand *first;
+  Operand *second;
+};
+
+// The carry chains write dst's low register before they read the high halves,
+// so a high half that is that register, possible only for overlapping pairs,
+// is copied first.
+void protectHighHalves(IRBuilder &builder, RegisterRef dst, Halves &a,
+                       Halves &b, Temporaries &temps) {
+  for (Operand *half : {&a.hi, &b.hi}) {
+    if (!half->isRegister() || half->reg() != dst.slice(0))
+      continue;
+    *half = copyToTemporary(builder, half->reg().kind, 1, *half, temps);
+  }
+}
+
+void emitSaluCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
+                        Halves a, Halves b) {
+  Temporaries temps;
+  for (HalfPair pair : {HalfPair{&a.lo, &b.lo}, HalfPair{&a.hi, &b.hi}})
+    if (!gfx9::isLegalSop2(*pair.first, *pair.second))
+      *pair.second =
+          copyToTemporary(builder, RegisterKind::sgpr, 1, *pair.second, temps);
+  protectHighHalves(builder, dst, a, b, temps);
+  // Every copy is emitted above because nothing may write SCC between the
+  // halves.
+  std::shared_ptr<rocisa::RegisterContainer> lo = dst.slice(0).container();
+  std::shared_ptr<rocisa::RegisterContainer> hi = dst.slice(1).container();
+  if (op == BinaryOp::add) {
+    builder.create<rocisa::SAddU32>(lo, toInput(a.lo), toInput(b.lo));
+    builder.create<rocisa::SAddCU32>(hi, toInput(a.hi), toInput(b.hi));
+    return;
+  }
+  builder.create<rocisa::SSubU32>(lo, toInput(a.lo), toInput(b.lo));
+  builder.create<rocisa::SSubBU32>(hi, toInput(a.hi), toInput(b.hi));
+}
+
+void emitValuCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
+                        Halves a, Halves b) {
+  Temporaries temps;
+  // The low half is VOP3 because its carry-out is an SGPR pair.
+  legalizeVop3Sources(builder, a.lo, b.lo, temps);
+  for (Operand *half : {&a.hi, &b.hi})
+    if (!gfx9::isLegalCarryInSource(*half))
+      *half = copyToTemporary(builder, RegisterKind::vgpr, 1, *half, temps);
+  protectHighHalves(builder, dst, a, b, temps);
+  assert(gfx9::isLegalVop3(a.lo, b.lo) && "illegal vop3 operands");
+  assert(gfx9::isLegalCarryInSource(a.hi) && gfx9::isLegalCarryInSource(b.hi) &&
+         "illegal carry-in operands");
+  // A temporary pair rather than VCC, because the allocator does not track VCC
+  // and using it would clobber a caller's value invisibly.
+  RegisterRange carry = builder.allocateSgpr(2, 2);
+  std::shared_ptr<rocisa::RegisterContainer> lo = dst.slice(0).container();
+  std::shared_ptr<rocisa::RegisterContainer> hi = dst.slice(1).container();
+  bool isAdd = op == BinaryOp::add;
+  if (isAdd)
+    builder.create<rocisa::VAddCOU32>(lo, carry.container(), toInput(a.lo),
+                                      toInput(b.lo));
+  else
+    builder.create<rocisa::VSubCoU32>(lo, carry.container(), toInput(a.lo),
+                                      toInput(b.lo));
+  builder.create<rocisa::SNop>(gfx9::valuWriteSgprReadWaitStates - 1);
+  InstructionInput carryIn = toInput(Operand(carry));
+  if (isAdd)
+    builder.create<rocisa::VAddCCOU32>(hi, carry.container(), toInput(a.hi),
+                                       toInput(b.hi), carryIn);
+  else
+    builder.create<rocisa::VSubBCoU32>(hi, carry.container(), toInput(a.hi),
+                                       toInput(b.hi), carryIn);
+}
+
+bool isLegalProductPair(RegisterKind kind, HalfPair pair) {
+  if (kind == RegisterKind::vgpr)
+    return gfx9::isLegalVop3(*pair.first, *pair.second);
+  return gfx9::isLegalSop2(*pair.first, *pair.second);
+}
+
+void legalizeProductHalves(IRBuilder &builder, Halves &a, Halves &b,
+                           RegisterKind kind, Temporaries &temps) {
+  // VOP3 takes no literals.
+  if (kind == RegisterKind::vgpr)
+    for (Operand *half : {&a.lo, &a.hi, &b.lo, &b.hi})
+      if (gfx9::isLiteral(*half))
+        *half = copyToTemporary(builder, kind, 1, *half, temps);
+  for (HalfPair pair : std::array<HalfPair, 3>{
+           {{&a.lo, &b.lo}, {&a.lo, &b.hi}, {&a.hi, &b.lo}}})
+    if (!isLegalProductPair(kind, pair))
+      *pair.second = copyToTemporary(builder, kind, 1, *pair.second, temps);
+}
+
+void emitSaluMul64(IRBuilder &builder, RegisterRef dst, Halves a, Halves b) {
+  Temporaries temps;
+  legalizeProductHalves(builder, a, b, RegisterKind::sgpr, temps);
+  RegisterRange high = builder.allocateSgpr(1);
+  RegisterRange cross = builder.allocateSgpr(1);
+  builder.create<rocisa::SMulHIU32>(high.container(), toInput(a.lo),
+                                    toInput(b.lo));
+  builder.create<rocisa::SMulI32>(cross.container(), toInput(a.lo),
+                                  toInput(b.hi));
+  builder.create<rocisa::SAddU32>(high.container(), high.container(),
+                                  cross.container());
+  builder.create<rocisa::SMulI32>(cross.container(), toInput(a.hi),
+                                  toInput(b.lo));
+  builder.create<rocisa::SMulI32>(dst.slice(0).container(), toInput(a.lo),
+                                  toInput(b.lo));
+  builder.create<rocisa::SAddU32>(dst.slice(1).container(), high.container(),
+                                  cross.container());
+}
+
+// dst is written only by the last two instructions. The low write is the last
+// read of a and b and reads them before writing, and the high write reads only
+// temporaries, so dst may alias or overlap a or b.
+void emitValuMul64(IRBuilder &builder, RegisterRef dst, Halves a, Halves b) {
+  Temporaries temps;
+  legalizeProductHalves(builder, a, b, RegisterKind::vgpr, temps);
+  RegisterRange high = builder.allocateVgpr(1);
+  RegisterRange crossA = builder.allocateVgpr(1);
+  RegisterRange crossB = builder.allocateVgpr(1);
+  builder.create<rocisa::VMulHIU32>(high.container(), toInput(a.lo),
+                                    toInput(b.lo));
+  builder.create<rocisa::VMulLOU32>(crossA.container(), toInput(a.lo),
+                                    toInput(b.hi));
+  builder.create<rocisa::VMulLOU32>(crossB.container(), toInput(a.hi),
+                                    toInput(b.lo));
+  builder.create<rocisa::VMulLOU32>(dst.slice(0).container(), toInput(a.lo),
+                                    toInput(b.lo));
+  builder.create<rocisa::VAdd3U32>(dst.slice(1).container(), high.container(),
+                                   crossA.container(), crossB.container());
+}
+
+void emitBinaryI64(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
+                   Operand b) {
+  requireRegister(op, 2, dst);
+  a = validateOperand(op, 2, a);
+  b = validateOperand(op, 2, b);
+  requireScalarSources(op, 2, dst, a, b);
+  bool scalar = dst.kind == RegisterKind::sgpr;
+  if (op == BinaryOp::mul && scalar)
+    return emitSaluMul64(builder, dst, halvesOf(a), halvesOf(b));
+  if (op == BinaryOp::mul)
+    return emitValuMul64(builder, dst, halvesOf(a), halvesOf(b));
+  if (scalar)
+    return emitSaluCarryChain(builder, op, dst, halvesOf(a), halvesOf(b));
+  emitValuCarryChain(builder, op, dst, halvesOf(a), halvesOf(b));
 }
 
 } // namespace
@@ -189,4 +342,16 @@ void IRBuilder::subi32(RegisterRef dst, Operand a, Operand b) {
 
 void IRBuilder::muli32(RegisterRef dst, Operand a, Operand b) {
   emitBinaryI32(*this, BinaryOp::mul, dst, a, b);
+}
+
+void IRBuilder::addi64(RegisterRef dst, Operand a, Operand b) {
+  emitBinaryI64(*this, BinaryOp::add, dst, a, b);
+}
+
+void IRBuilder::subi64(RegisterRef dst, Operand a, Operand b) {
+  emitBinaryI64(*this, BinaryOp::sub, dst, a, b);
+}
+
+void IRBuilder::muli64(RegisterRef dst, Operand a, Operand b) {
+  emitBinaryI64(*this, BinaryOp::mul, dst, a, b);
 }

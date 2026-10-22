@@ -3,6 +3,7 @@
 
 target_sources(tensilelite-tests
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Arith64_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Arith_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BufferResource_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Compare_test.cpp"
@@ -19,6 +20,7 @@ target_sources(tensilelite-tests
 if(TENSILELITE_ENABLE_JIT)
     target_sources(tensilelite-tests
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/Arith64Device_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/ArithDeviceTest.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/ArithDevice_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/BufferResourceDevice_test.cpp"

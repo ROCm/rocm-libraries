@@ -393,6 +393,7 @@ std::vector<uint64_t> arithEdgeValues64() {
           0x000000007FFFFFFF,
           0xFFFFFFFF00000000,
           0x0000000100000000,
+          0x00000000FFFFFFFF,
           0x123456789ABCDEF0,
           0x1234567800000001,
           0x12345678FFFFFFFF,
