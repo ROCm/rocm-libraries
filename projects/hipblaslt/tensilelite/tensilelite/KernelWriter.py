@@ -282,7 +282,7 @@ class StateValues:
   lrvwUnrollMetadata: int                = 0 # For Sparse Metadat
 
   numMfmaPerIter: int                    = 0
-  SubTileIdx: int                       = 0
+  SubTileIdx: int                        = 0
   subtileLdsSwizzle: bool                = False
   subtileIterateModeA: bool              = False
   subtileIterateModeB: bool              = False
@@ -343,7 +343,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprPersistentConsts: int                 = -1
+  startVgprPersistentConsts: int         = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
   startVgprInfCheck: int                 = -1
@@ -380,6 +380,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  rndSeedKernArgOffset: int              = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -392,7 +393,7 @@ class StateValues:
   numStoreSgprInstExt: int               = 0 # For pose-loop kernel args
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
-  numSgprPersistent: int                    = 0
+  numSgprPersistent: int                 = 0
   tileProcessing: TileProcessingSettings               = field(default_factory=TileProcessingSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
