@@ -200,4 +200,4 @@ For detailed information on adding new operations or datatypes to the CPU Refere
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
 - [GPU Reference Implementation - Operation Support](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md) - GPU counterpart in the integration test project
 - [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
-- [Feature Release Test Plan](./feature_release/TestPlan.md) - Testing strategy and procedures
+- [Release Testing](./testing/RELEASE_TESTING.md) - Testing strategy and procedures
