@@ -183,7 +183,7 @@ load_output() {
 load_output || { echo "STOP: sweep input missing, not clean" >&2; exit 1; }
 sed -i.bak 's#users/[A-Za-z0-9._-]*/#users/#g' "$L/pub.content" && rm "$L/pub.content.bak"   # the expected branch prefix
 cat > "$L/sweep-allow.txt" <<'EOF2'
-^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
+^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
 ^(handoffs?|worktrees?)$
 ^https?://(github\.com/ROCm/[A-Za-z0-9._-]+|raw\.githubusercontent\.com/ROCm/[A-Za-z0-9._-]+|rocm\.docs\.amd\.com|docs\.amd\.com|www\.amd\.com|example\.com)([/:?#].*)?$
 EOF2
@@ -200,3 +200,4 @@ source leak is a separate finding). A public URL outside the list is checked und
 public only when `gh api repos/<owner>/<repo> --jq .private` prints `false`. Write each counted hit to
 `$EVIDENCE/r<N>/lanes/LEAK-sweep.md` as `<file>:<line>` without the token (see *Sweep dispatch*); the orchestrator redacts it in the file and in the `$KNOWLEDGE` copy to a repo-relative `path:line` or a
 `$REPO`-style variable, then dispatches the sweep again. The sweep is clean when the load succeeded and `sweep-hits.tsv` is empty.
+Write `Sweep: clean` only from a run of this block, after the last edit of any file it reads: `comments.py check-sweep` rejects a sweep older than any of them.

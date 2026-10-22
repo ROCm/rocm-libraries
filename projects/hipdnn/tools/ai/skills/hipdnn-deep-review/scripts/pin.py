@@ -9,6 +9,9 @@
               [--clone DIR] [--remote-url URL] [--skill DIR]
   pin.py cleanup --evidence DIR --round N
 
+`init` also writes drift.txt: the target tip, whether it merges cleanly with the head, the
+commits since BASE that touch the change, and whether the DRIFT lane triggers.
+
 Each subcommand prints terse results and exits non-zero with a one-line reason.
 """
 
@@ -24,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewlib as rl  # noqa: E402
 
-PIN_VARS = "SKILL|EVIDENCE|SCRATCH|CLONE|KEY|TARGET|HEAD|HEAD_SHORT|BASE|REPO|REPO_BASE|KNOWLEDGE"
+PIN_VARS = "SKILL|EVIDENCE|SCRATCH|CLONE|KEY|TARGET|TARGET_TIP|HEAD|HEAD_SHORT|BASE|REPO|REPO_BASE|KNOWLEDGE"
 
 # Loads PIN.md values as quoted exports; eval-based, so it works in a persistent shell.
 ENV_SH = (
@@ -122,6 +125,57 @@ def pin_lines(values):
 
 def append_pin(rdir, text):
     rl.write(rdir / "PIN.md", (rdir / "PIN.md").read_text(encoding="utf-8") + text)
+
+
+def drift_report(clone, tip, base, head, files, range_review):
+    """drift.txt text: target tip, merge result of tip into head, conflicted paths, tip
+    commits since base that touch a changed path or a file beside one, and the trigger.
+    """
+    if range_review:
+        return (
+            f"Target tip: {tip}\nMerge: not checked (range review)\nConflicts: \n"
+            "Trigger: no (range review)\n"
+        )
+    code, out, err = rl.git(
+        clone, "merge-tree", "--write-tree", "--name-only", tip, head
+    )
+    if code not in (0, 1):
+        lines = err.strip().splitlines()
+        die(f"git merge-tree failed: {lines[-1] if lines else code}")
+    conflicts = []
+    if code == 1:
+        for line in out.splitlines()[1:]:
+            if not line:
+                break
+            conflicts.append(line)
+    changed = set(files)
+    dirs = {f.rpartition("/")[0] for f in files}
+    touching = []
+    log = git(
+        clone,
+        "log",
+        "--no-renames",
+        "--name-only",
+        "--format=%x01%H %s",
+        f"{base}..{tip}",
+    )
+    for entry in log.split("\x01")[1:]:
+        subject, _, names = entry.partition("\n")
+        if any(n in changed or n.rpartition("/")[0] in dirs for n in names.split()):
+            touching.append(subject)
+    if conflicts or touching:
+        trigger = "yes"
+    elif tip == base:
+        trigger = "no (target tip is BASE)"
+    else:
+        trigger = "no (no target commit touches the change)"
+    return (
+        f"Target tip: {tip}\n"
+        f"Merge: {'conflicts' if code else 'clean'}\n"
+        f"Conflicts: {', '.join(conflicts)}\n"
+        + "".join(f"Touching commits: {t}\n" for t in touching)
+        + f"Trigger: {trigger}\n"
+    )
 
 
 def is_sha(text):
@@ -222,11 +276,13 @@ def cmd_init(args):
         base = git(clone, "rev-parse", f"{ref_t}^{{commit}}")
     else:
         base = git(clone, "merge-base", ref_t, head)
+    tip = git(clone, "rev-parse", f"{ref_t}^{{commit}}")
     append_pin(
         rdir,
         pin_lines(
             [
                 ("TARGET", target),
+                ("TARGET_TIP", tip),
                 ("HEAD", head),
                 ("HEAD_SHORT", head[:12]),
                 ("BASE", base),
@@ -246,6 +302,10 @@ def cmd_init(args):
     rl.write(
         rdir / "commits.txt",
         git(clone, "log", "--format=%H %s", f"{base}..{head}") + "\n",
+    )
+    rl.write(
+        rdir / "drift.txt",
+        drift_report(clone, tip, base, head, files, bool(args.range)),
     )
     sparse_text = (rdir / "sparse.txt").read_text(encoding="utf-8")
     for w, sha in ((repo, head), (repo_base, base)):
@@ -268,7 +328,7 @@ def pr_gate(args, rdir, clone, base, head):
     pr, o = args.pr, args.owner_repo
     pr_dir = rdir / "pr"
     pr_dir.mkdir(exist_ok=True)
-    fields = "title,body,baseRefName,headRefName,headRefOid,files,comments,reviews"
+    fields = "title,body,baseRefName,headRefName,headRefOid,mergeStateStatus,mergeable,files,comments,reviews"
     meta = gh("pr", "view", pr, "-R", o, "--json", fields)
     rl.write(pr_dir / "pr.json", meta)
     info = json.loads(meta)
@@ -355,7 +415,7 @@ def cmd_cleanup(args):
     clone, key = pin["CLONE"], pin["KEY"]
     clone_path, scratch_path = same_path(clone), same_path(pin["SCRATCH"])
     n = 0
-    for rel in ("RUN/head", "RUN/base", "ROCK/src"):
+    for rel in ("RUN/head", "RUN/base", "ROCK/src", "DRIFT/merge"):
         if (scratch_path / rel).is_dir():
             remove_tree(scratch_path / rel)
             n += 1

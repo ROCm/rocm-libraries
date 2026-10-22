@@ -3,7 +3,7 @@
 ## Precedence
 On conflict, the first source wins: the repository's machine gate, the Libraries PR Bot
 (`tools/libraries_pr_bot`); then the M-rules; then the rest of this file. No waiver
-overrides the gate.
+overrides the gate. A result on the merged tree (`DRIFT`) outranks the same result at `$HEAD`, because the merge is what lands.
 
 ## Tiers
 
@@ -52,6 +52,9 @@ diff; reformat churn mixed into a functional change.
 
 ## Review rules
 
+- A merge with the target's tip that fails to build, fails a selected test or breaks a contract the change depends on is
+  `BLOCKING`. A conflict whose resolution needs an author decision is `IMPORTANT` (kind `process`). A conflict that resolves
+  mechanically and passes is no finding. A failure that also occurs at `$HEAD` belongs to `RUN`.
 - An undescribed public API change goes to **Needs human decision**, whatever its tier.
 - A change that can affect TheRock (built code, tests, install, build, packaging or CI
   files) that TheRock CI neither builds nor tests (flag-guarded, skip-listed or

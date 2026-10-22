@@ -292,3 +292,125 @@ def test_round_dirs_sort_numerically(rl, tmp_path):
     for name in ("r1", "r2", "r10", "r3x", "rx", "notes"):
         (tmp_path / name).mkdir()
     assert [p.name for p in rl.round_dirs(tmp_path)] == ["r1", "r2", "r10"]
+
+
+def test_draft_holds_no_head_variable_provisional_id_or_evidence_path(
+    comments, repo, tmp_path
+):
+    ev = build(
+        tmp_path,
+        repo,
+        [
+            (
+                "CORR-1",
+                "BLOCKING",
+                "$HEAD:a.txt:5",
+                "Wrong at $HEAD:a.txt:5, as CORR1-p9 shows (see $EVIDENCE/r1/lanes/CORR1.md).",
+                "OPEN",
+                "defect",
+            ),
+            (
+                "CORR-2",
+                "IMPORTANT",
+                "$BASE:a.txt:8",
+                "Removed line mattered ($BASE:a.txt:8, CORR1-p2).",
+                "OPEN",
+                "defect",
+            ),
+        ],
+    )
+    out = draft(comments, ev)
+    assert "### a.txt:5 (CORR-1, BLOCKING)" in out
+    assert "a.txt:5" in out and "Removed line mattered" in out
+    for banned in ("$HEAD", "$BASE", "$EVIDENCE", "-p9", "-p2", "CORR1"):
+        assert banned not in out
+
+
+def sweep_round(tmp_path, sweep_text="Sweep: clean\n"):
+    """A round whose sweep input files all exist and are older than the sweep file."""
+    ev = tmp_path / "ev"
+    r1 = ev / "r1"
+    know = tmp_path / "know" / "k-r1"
+    for d in (r1 / "lanes", r1 / "orient", r1 / "verify", know):
+        d.mkdir(parents=True)
+    (r1 / "PIN.md").write_text(f"KEY: k\nKNOWLEDGE: {tmp_path / 'know'}\n")
+    inputs = [
+        r1 / "REPORT.md",
+        r1 / "COMMENTS.md",
+        r1 / "CONTEXT.md",
+        ev / "LEDGER.md",
+        r1 / "orient" / "a.md",
+        r1 / "verify" / "CORR-1.md",
+        know / "CONTEXT.md",
+    ]
+    for p in inputs:
+        p.write_text("x\n")
+        os.utime(p, (1_000_000, 1_000_000))
+    sweep = r1 / "lanes" / "LEAK-sweep.md"
+    sweep.write_text(sweep_text)
+    os.utime(sweep, (2_000_000, 2_000_000))
+    return ev, inputs
+
+
+def test_check_sweep_passes_when_clean_and_newer_than_every_input(comments, tmp_path):
+    ev, _ = sweep_round(tmp_path)
+    assert comments.main(["check-sweep", str(ev), "1"]) == 0
+
+
+@pytest.mark.parametrize("which", [0, 3, 4, 5, 6])
+def test_check_sweep_fails_when_any_input_is_edited_after_the_sweep(
+    comments, tmp_path, capsys, which
+):
+    ev, inputs = sweep_round(tmp_path)
+    os.utime(inputs[which], (3_000_000, 3_000_000))
+    assert comments.main(["check-sweep", str(ev), "1"]) == 1
+    assert "stale" in capsys.readouterr().err
+
+
+def test_check_sweep_fails_when_not_clean(comments, tmp_path, capsys):
+    ev, _ = sweep_round(tmp_path, "a.md:3\n")
+    assert comments.main(["check-sweep", str(ev), "1"]) == 1
+    assert "Sweep: clean" in capsys.readouterr().err
+
+
+def test_draft_keeps_prose_that_only_resembles_process_references(
+    comments, repo, tmp_path
+):
+    ev = build(
+        tmp_path,
+        repo,
+        [
+            (
+                "CORR-1",
+                "BLOCKING",
+                "a.txt:5",
+                "Requires ROCm-p5 toolchain; projects/x/lanes/drift.md: broken.",
+                "OPEN",
+                "defect",
+            ),
+        ],
+    )
+    out = draft(comments, ev)
+    assert (
+        "Requires ROCm-p5 toolchain" in out
+        and "projects/x/lanes/drift.md: broken" in out
+    )
+
+
+def test_general_removed_content_item_has_one_removed_anchor(comments, repo, tmp_path):
+    ev = build(
+        tmp_path,
+        repo,
+        [
+            (
+                "CORR-1",
+                "IMPORTANT",
+                "$BASE:a.txt:8, a.txt:2",
+                "Removed line mattered.",
+                "OPEN",
+                "defect",
+            ),
+        ],
+    )
+    general = draft(comments, ev).split("## General")[1]
+    assert "- a.txt:8 (removed) (CORR-1," in general and "a.txt:2" not in general

@@ -15,7 +15,7 @@ what each agent reads, and `lanes/` holds the briefs. `RUN` builds with
 [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and tests with
 [hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); install those skills alongside this one.
 
-Prerequisites: network access, an authenticated `gh` with read access, `git`, and Python 3 (it runs the scripts under
+Prerequisites: network access, an authenticated `gh` with read access, `git` 2.38 or later (`pin.py` uses `git merge-tree --write-tree`), and Python 3 (it runs the scripts under
 `$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. `RUN` and verifiers also need
 a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human

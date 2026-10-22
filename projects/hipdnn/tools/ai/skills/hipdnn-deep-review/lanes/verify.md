@@ -5,7 +5,7 @@ lane reports.
 
 Where this file and [common.md](common.md) conflict, this file wins: write
 `$EVIDENCE/r<N>/verify/<ID>.md` per finding ([../findings.md](../findings.md) *Verifier
-output*), work in `$SCRATCH/VER-<batch>/`, and judge a ledger `REFUTED` claim on its merits.
+output*) and any defect you find yourself to `verify/VER<batch>.md` (`VER<batch>-p<n>`), work in `$SCRATCH/VER-<batch>/`, and judge a ledger `REFUTED` claim on its merits.
 
 ## Per finding
 
@@ -37,6 +37,11 @@ one to `IMPORTANT` or above, also run step 3.
      the baseline before the next mutant. Discard a mutant that changes no observable
      behavior. When the reporter already mutated, rerun only the 3 most decisive mutants and state which were reused.
 4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
+
+## Handoffs
+
+A finding that duplicates or overlaps another is not a finding of yours. Write `ORCH: cluster <ID> with <ID>` under **Handoffs**
+and give each its own verdict. The orchestrator clusters them ([../RUNBOOK.md](../RUNBOOK.md) *Merge and verify*).
 
 Use the claim's revision and configuration. A proof awaiting approval stays `UNVERIFIED`;
 put the request in the verify file.

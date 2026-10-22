@@ -485,3 +485,70 @@ def test_mlines_newest_follow_up_wins(ledger, ev, capsys):
     assert run(ledger, "mlines", ev) == 0
     out = capsys.readouterr().out
     assert "M1 PASS (TESTQ-f1)" in out and "UNVERIFIED" not in out
+
+
+def test_ids_maps_verifier_batch_file_next_to_a_final_id_verdict(ledger, rl, ev):
+    make_candidates(ledger, ev, "IMPORTANT")
+    write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT")
+    (ev / "r1" / "verify" / "VER-1.md").write_text(
+        verify_file("VER-1", "CONFIRMED", "IMPORTANT")
+    )
+    (ev / "r1" / "verify" / "VER1.md").write_text(
+        report("VER1", [finding("VER1-p1", where="b.bin:1")])
+    )
+    assert run(ledger, "ids", ev) == 0
+    ids = [r["ID"] for r in table(rl, ev, "Findings").rows]
+    assert ids == ["CORR-1", "VER-1"]
+    assert run(ledger, "verdicts", ev) == 0
+
+
+FENCED = "```\n{}```\n"
+
+
+def test_fenced_finding_blocks_are_mapped_and_nested_code_survives(rl):
+    first = finding("CORR1-p1", actual="Breaks:\n```cpp\nint x;\n```\nafter")
+    text = report(
+        "CORR1",
+        [FENCED.format(first + "\n" + finding("CORR1-p2")), finding("CORR1-p3")],
+    )
+    blocks = rl.parse_findings(text)
+    assert [b["ID"] for b in blocks] == ["CORR1-p1", "CORR1-p2", "CORR1-p3"]
+    assert blocks[0]["Actual"] == "Breaks:\n```cpp\nint x;\n```\nafter"
+    assert "```" not in blocks[1]["Fix"] and blocks[1]["Fix"] == "clamp it"
+    assert rl.unparsed_ids(text) == 0
+
+
+def test_ids_fails_on_id_lines_it_cannot_parse(ledger, ev, capsys):
+    seeded(ledger, ev)
+    odd = "```text\nThe finding follows.\n" + finding("CORR1-p1") + "```\n"
+    with_reports(ledger, ev, CORR1=report("CORR1", [odd]))
+    assert run(ledger, "ids", ev) == 1
+    assert "CORR1.md" in capsys.readouterr().err
+
+
+def test_coverage_fails_on_annotated_depth_of_an_owned_changed_file(
+    ledger, rl, ev, capsys
+):
+    seeded(ledger, ev)
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1",
+            coverage=[("a.cpp", "full (skimmed)", "-"), ("unchanged.h", "weird", "-")],
+        ),
+    )
+    assert run(ledger, "coverage", ev) == 1
+    captured = capsys.readouterr()
+    assert "non-conforming: CORR1: a.cpp" in captured.out
+    assert "unchanged.h" not in captured.out
+
+
+@pytest.mark.parametrize("sub", ["ids", "coverage"])
+def test_gates_fail_on_a_report_below_a_nested_round_directory(ledger, ev, sub, capsys):
+    seeded(ledger, ev)
+    nested = ev / "r1" / "r1" / "lanes"
+    nested.mkdir(parents=True)
+    (nested / "CORR1.md").write_text(report("CORR1"))
+    assert run(ledger, sub, ev) == 1
+    assert "r1/r1/lanes/CORR1.md" in capsys.readouterr().err.replace("\\", "/")

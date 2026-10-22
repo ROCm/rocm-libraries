@@ -32,20 +32,23 @@ python3 <skill dir>/scripts/pin.py init --evidence <evidence dir> --scratch <scr
   a wrong merge base with exit 0), and sets `gc.auto 0`;
 - fetches head and target into `refs/review/$KEY/` with `+` refspecs; a range side that is a
   SHA is set with `update-ref`, not fetched;
-- appends `TARGET`, `HEAD`, `HEAD_SHORT` and `BASE` (the merge base; the left side of a
+- appends `TARGET`, `TARGET_TIP` (the target's tip), `HEAD`, `HEAD_SHORT` and `BASE` (the merge base; the left side of a
   range) to `PIN.md` and writes `env.sh`; on an empty diff it prints `empty diff: PR already
   merged by merge commit?` to stderr;
 - writes `files.txt`, `numstat.txt`, `commits.txt` and `sparse.txt`: the project root of each
   touched project (`projects/<x>`, `dnn-providers/<x>`, `shared/<x>`; all of `projects/hipdnn`
   when it is touched), each other touched directory, and root `tools/` when
   `projects/*/tools/` changes;
+- writes `drift.txt` from `git merge-tree --write-tree`: the target tip, `Merge: clean | conflicts`, the conflicted paths, the
+  commits in `BASE..TARGET_TIP` that touch a changed path or a file beside one, and `Trigger: yes | no (<reason>)`. The trigger
+  is `yes` when the merge conflicts or a commit touches the change; it is `no` for a range review;
 - adds the sparse worktrees `$REPO` (at `$HEAD`) and `$REPO_BASE` (at `$BASE`) and checks
   both are at their SHAs;
-- for a PR saves `pr/pr.json`, `body.md`, `inline.json`, `files.json`, `checks.tsv` and the plain-text `branch.txt`, `pr-text.txt`, `pr-comment.txt` and `pr-inline.txt`, and
+- for a PR saves `pr/pr.json` (with GitHub's `mergeStateStatus` and `mergeable`; nothing gates on them), `body.md`, `inline.json`, `files.json`, `checks.tsv` and the plain-text `branch.txt`, `pr-text.txt`, `pr-comment.txt` and `pr-inline.txt`, and
   checks `$HEAD` against `headRefOid` and the file counts (below).
 
 `. <evidence dir>/r<N>/env.sh` exports every `PIN.md` variable among `SKILL EVIDENCE SCRATCH
-CLONE KEY TARGET HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE`, fails when `EVIDENCE`,
+CLONE KEY TARGET TARGET_TIP HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE`, fails when `EVIDENCE`,
 `SCRATCH`, `CLONE` or `KEY` is unset, and changes to the round directory. It works in a fresh
 shell and in a persistent one; every later block starts by sourcing it.
 
@@ -125,7 +128,9 @@ It cannot judge context: edit `owners.tsv` by hand for what only judgment decide
 
 - A total at or under the target is one lane. Split only for distinct contexts (areas that
   share no contracts) and record why in the ledger Lanes table.
-- Keep a header with its implementation, a producer with its consumer, a test with its code.
+- Keep a header with its implementation and a producer with its consumer. `plan` keeps a changed test with its changed source:
+  `test_<x>.py` or `Test<X>.cpp` pairs with every changed non-test file whose stem is `<x>` (case-insensitive) when they share a directory (`X.cpp` and `X.hpp`),
+  in their area group; a test with no such file, or same-stem files in several directories, stays where its own area puts it. A pair over the target gets its own lane.
 - Generated code, golden data and bundles get their own `CORR<k>`: list them in a `--sampled`
   file, one row per path: `path<TAB>generator-or-source-of-truth`, plus a third column
   `sample` on the files the lane reads. `plan` puts every listed path in the last lane, and
@@ -150,6 +155,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `LEAK` | [leaks](lanes/leaks.md) | Private information in the change and in review output | Always |
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
+| `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
 
 `ORCH` (process findings you file), `SCOUT<k>`, `SYNTH` ([orient](lanes/orient.md)) and `VER`
@@ -168,7 +174,8 @@ ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)'
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
 each lane of `owners.tsv` and each concern lane in `--lanes` (changed files in scope with their
 `numstat` rows, areas and Orient paths; BUILD and DEPS scope to their trigger files and print
-`<LANE>: no changed file in scope, N/A` when none; every other concern lane takes all changed
+`<LANE>: no changed file in scope, N/A` when none; `DRIFT` adds `drift.txt` and prints
+`DRIFT: N/A (<reason>)` when its trigger is `no` (give that reason to `seed` with `--lane`); every other concern lane takes all changed
 files, so name only lanes whose trigger holds; `--parent` is the stack parent). In round 2 on,
 write `range-diff.txt` and `affected.txt` first so the packets list them.
 
@@ -193,7 +200,7 @@ every agent shares.
 
 ```markdown
 Env:       export SKILL=… EVIDENCE=… SCRATCH=… CLONE=… KNOWLEDGE=… REPO=… REPO_BASE=…
-                  HEAD=… HEAD_SHORT=… BASE=… KEY=… TARGET=…   (absolute); <owner>/<repo>; PR <pr> | none
+                  HEAD=… HEAD_SHORT=… BASE=… KEY=… TARGET=… TARGET_TIP=…   (absolute); <owner>/<repo>; PR <pr> | none
 Approved:  <verbatim commands with architecture and walltime> | none
 Builds:    every scratch configure (RUN, ROCK, VER) passes -DENABLE_CLANG_TIDY=OFF, and
            -DCMAKE_CXX_CLANG_TIDY= where the environment or preset sets it; each attempt sets
@@ -207,8 +214,8 @@ Mutation:  <host-provided recipe or wrapper command for mutating a built tree> |
 writer as its own fresh agent with shell and write access; fill this template as its first
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
-**Queue.** Run at most `Agents:` agents at once, in this priority order: `RUN` first, then the
-longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN` and an approved
+**Queue.** Run at most `Agents:` agents at once, in this priority order: `RUN` first, then `DRIFT`, the
+longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT` and an approved
 `ROCK` build, or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
 split `Cores:` between them while they overlap, `RUN` taking the larger share.
 
@@ -242,7 +249,7 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH` and `TESTQ` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH`, `TESTQ` and `DRIFT` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
@@ -272,8 +279,9 @@ lane. Re-dispatch a non-conforming report once, naming the rule.
    report format (`ORCH-p<n>`, Kind `process`).
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate
-   row per finding; re-running keeps assigned IDs. Cluster findings with the same location and
-   claim: keep one, put its ID in the `SUPERSEDED-BY` cell of each other row of `ID-MAP.md`,
+   row per finding; re-running keeps assigned IDs; it exits 1 when a report sits below a nested `r<k>/`
+   directory or holds `ID:` lines it cannot parse. Cluster findings with the same location and
+   claim, and those a verifier reported as `ORCH: cluster <ID> with <ID>` under **Handoffs**: keep one, put its ID in the `SUPERSEDED-BY` cell of each other row of `ID-MAP.md`,
    and run `ids` again, which sets their status `SUPERSEDED-BY:<ID>`. `ledger.py coverage`
    re-copies read depth and tests after a follow-up.
 3. Route **Handoffs** to a follow-up dispatch of the target lane or into the ledger as a
@@ -285,7 +293,7 @@ lane. Re-dispatch a non-conforming report once, naming the rule.
 Verify every candidate with an agent that did not report it ([lanes/verify.md](lanes/verify.md)):
 `BLOCKING` and `IMPORTANT` in batches of at most 10 per verifier, grouped by lane;
 `SUGGESTION` and `FUTURE WORK` in batches of at most 30. Re-dispatch a verifier whose files
-lack the fields in [findings.md](findings.md) *Verifier output*. Verify `VER` candidates with
+lack the fields in [findings.md](findings.md) *Verifier output*. Verify `VER` candidates (`verify/VER<batch>.md`) with
 a different verifier. Send to a second verifier each `REFUTED` `BLOCKING` or `IMPORTANT`
 finding and each verdict whose final tier is on the other side of the `IMPORTANT`/`SUGGESTION`
 line from the reported tier ([findings.md](findings.md) *Verdicts*).
@@ -314,9 +322,10 @@ pending one keeps `Closure: OPEN`. Run `comments.py draft "$EVIDENCE" <N>` for `
 item, and `SUGGESTION` and `FUTURE WORK` one item per tier and kind. Review and edit the
 drafts. Re-dispatch `LEAK` for
 its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes/LEAK-sweep.md`) before the user sees either file; redact each hit it reports in the output and in the published `$KNOWLEDGE` copy (the sweep reads both and fails when the copy is missing), then sweep again. Evidence subdirectories are local-only and not swept.
+`comments.py check-sweep "$EVIDENCE" <N>` exits 0 only when the sweep says `Sweep: clean` and is newer than every file it read; a later edit makes it stale.
 
 **Gate:** every statement in `REPORT.md` traces to a ledger row or a lane report, its
-`Closure:` line equals the `ledger.py counts` line, and the `LEAK` sweep of the output is clean.
+`Closure:` line equals the `ledger.py counts` line, and `comments.py check-sweep` exits 0.
 
 ## Iterate
 
@@ -334,6 +343,7 @@ git -C "$CLONE" diff --name-only --no-renames <old-head> <new-head> | sort -u |
 Findings whose `Where` is in `affected.txt`, and every `process` finding, are affected. Re-run
 each lane the delta touches, every lane `FAILED` earlier (closing its `ORCH` finding when it
 completes), and always `AUTH` and `LEAK`: a new head brings new commits, PR text and CI runs.
+Re-run `DRIFT` whenever the round's `drift.txt` says `Trigger: yes`: the target moves between rounds.
 Re-verify every affected `OPEN` or `UNVERIFIED` finding. A lane not re-run carries forward
 (Coverage and Lanes rows copied, marked `carried from r<M>`).
 
@@ -352,5 +362,5 @@ Decisions and Open questions tables, by hand.
 
 **Gate:** [SKILL.md](SKILL.md) *Completion*. On closing, `pin.py cleanup --evidence "$EVIDENCE"
 --round <N>` removes the review worktrees under `$SCRATCH` (including the lanes'), the `fullclone` checkouts
-`$SCRATCH/RUN/head`, `RUN/base` and `ROCK/src`, and this review's refs (a head that exists only as a ref is lost); it keeps
+`$SCRATCH/RUN/head`, `RUN/base`, `ROCK/src` and `DRIFT/merge`, and this review's refs (a head that exists only as a ref is lost); it keeps
 `$EVIDENCE` and prints `removed <n> worktrees, <m> refs`.

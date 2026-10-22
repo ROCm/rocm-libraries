@@ -74,6 +74,21 @@ def read_reports(rp, pattern="lanes/*.md"):
     ]
 
 
+def require_flat(rp):
+    """Fail when a lane or verify report sits below a nested `r<k>/` of the round directory
+    (a lane that wrote to a relative path)."""
+    nested = sorted(
+        str(p.relative_to(rp.parent))
+        for sub in rp.glob("r[0-9]*")
+        if sub.is_dir()
+        for pattern in ("lanes/*.md", "verify/*.md")
+        for p in sub.rglob(pattern)
+    )
+    if nested:
+        more = f" (+{len(nested) - 1} more)" if len(nested) > 1 else ""
+        raise rl.Fail(f"report below a nested r<k>/ directory: {nested[0]}{more}")
+
+
 def cmd_seed(a):
     """Create LEDGER.md (round 1) or append this round's Coverage and Lanes tables
     (round 2+), from owners.tsv, numstat.txt and packets/. One Coverage row per changed
@@ -135,11 +150,13 @@ def cmd_seed(a):
 
 def cmd_ids(a):
     """Assign final `<LANE>-<n>` IDs (lane digits dropped, so all CORR<k> share CORR-<n>)
-    to the provisional IDs in lanes/*.md and verify/VER-*.md, continuing each prefix's
+    to the provisional IDs in lanes/*.md and verify/VER<batch>.md, continuing each prefix's
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
-    status."""
+    status. Fails when a report is nested below `r<k>/` or holds `ID:` lines it cannot parse.
+    """
     rp = rl.round_dir(a.evidence, a.round)
+    require_flat(rp)
     tables = load_ledger(a.evidence)
     ft = rl.find_table(tables, "Findings")
     map_path = rp / "ID-MAP.md"
@@ -161,8 +178,12 @@ def cmd_ids(a):
     for r in old:
         note(r["Final ID"])
     reported = {}
+    unparsed = []
     for path in rl.lane_files(rp):
-        for f in rl.parse_findings(path.read_text(encoding="utf-8")):
+        text = path.read_text(encoding="utf-8")
+        if rl.unparsed_ids(text):
+            unparsed.append(path.name)
+        for f in rl.parse_findings(text):
             prov = f["ID"]
             m = re.fullmatch(r"(.+)-p(\d+)", prov)
             if not m:
@@ -170,6 +191,8 @@ def cmd_ids(a):
             if prov in reported:
                 raise rl.Fail(f"provisional ID {prov} reported twice")
             reported[prov] = (path.stem, f, re.sub(r"\d+$", "", m.group(1)))
+    if unparsed:
+        raise rl.Fail(f"unparsed ID: lines in {', '.join(unparsed)}")
     for prov, (stem, f, prefix) in sorted(reported.items(), key=lambda kv: kv[1][0]):
         if prov not in mapping:
             counters[prefix] = counters.get(prefix, 0) + 1
@@ -217,28 +240,38 @@ def cmd_ids(a):
 def cmd_coverage(a):
     """Copy each owner lane's read depth and tests (lane report Coverage rows) into this
     round's Coverage rows. Reports paths still `pending`; paths a lane lists that are not
-    changed files are ignored."""
+    changed files are ignored. Fails when a report is nested below `r<k>/` or an owner
+    lane's row for a changed file has a depth other than full, diff-only or sampled."""
     rp = rl.round_dir(a.evidence, a.round)
+    require_flat(rp)
     tables = load_ledger(a.evidence)
     cov = rl.find_table(tables, f"Coverage (round {a.round})")
     rows = {r["File"]: r for r in cov.rows}
     reports = read_reports(rp)
     own_reports = {stem for stem, _ in reports}
-    updated = 0
+    updated, bad = 0, []
     for stem, text in reports:
         lane = re.sub(r"-f\d+$", "", stem)
-        for path, depth, tests in rl.parse_coverage(text):
+        for path, depth, tests in rl.coverage_rows(text):
             row = rows.get(path)
-            if row and (
+            if not row or not (
                 row["Owner lane"] == lane or row["Owner lane"] not in own_reports
             ):
-                row["Read depth"], row["Tests reaching it"] = depth, tests
-                updated += 1
+                continue
+            if depth not in rl.READ_DEPTHS:
+                bad.append(f"{stem}: {path}: read depth '{depth}'")
+                continue
+            row["Read depth"], row["Tests reaching it"] = depth, tests
+            updated += 1
     save_ledger(a.evidence, tables)
     pending = [r["File"] for r in cov.rows if r["Read depth"] == "pending"]
     print(f"coverage: {updated} rows copied, {len(pending)} pending")
     for path in pending:
         print(f"pending: {path}")
+    for reason in bad:
+        print(f"non-conforming: {reason}")
+    if bad:
+        raise rl.Fail(f"{len(bad)} non-conforming Coverage rows")
 
 
 def crosses(reported, final):

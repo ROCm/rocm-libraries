@@ -4,6 +4,7 @@
 """Draft COMMENTS.md for a deep review.
 
 Usage: comments.py draft <evidence dir> <round>
+       comments.py check-sweep <evidence dir> <round>
 
 Exits 1 with a one-line reason on failure.
 """
@@ -14,10 +15,24 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import partition  # noqa: E402
 import reviewlib as rl  # noqa: E402
 
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 ANCHOR = re.compile(r"^\s*`?([^\s:`,$]+):(\d+)")
+# `$HEAD:path:line` anchors a head-side line; `$BASE:` content is removed, so it stays General.
+HEAD_ANCHOR = re.compile(r"^(\s*`?)\$HEAD:")
+BASE_ANCHOR = re.compile(r"^\s*`?\$BASE:([^\s:`,$]+):(\d+)")
+# Review-process references that mean nothing to the PR author: provisional IDs, lane
+# reports, evidence paths and the $HEAD:/$BASE: prefixes of inline references.
+_LANES = "|".join(
+    ["CORR", "SCOUT", "SYNTH", "VER", "ORCH", *sorted(partition.CONCERN_LANES)]
+)
+_REF = (
+    r"\$EVIDENCE/\S*|\br\d+/lanes/[\w.-]+\.md"
+    rf"|\b(?:{_LANES})\d*(?:-f\d+)?-p\d+\b|\$(?:HEAD|BASE):"
+)
+PROCESS_REFS = re.compile(rf"\(\s*(?:{_REF})\s*\)|{_REF}")
 
 
 def new_side_ranges(clone, base, head, path):
@@ -37,8 +52,15 @@ def new_side_ranges(clone, base, head, path):
 
 
 def strip_fences(text):
+    """text without code fences and review-process references (final IDs stay), and
+    without the spacing those leave behind."""
     kept = [line for line in text.splitlines() if not rl.is_fence(line)]
-    return "\n".join(kept).replace("```", "").strip()
+    text = "\n".join(kept).replace("```", "")
+    cleaned = PROCESS_REFS.sub("", text)
+    if cleaned != text:
+        cleaned = re.sub(r"(?<=\S)[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"[ \t]+([,.;:])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def finding_blocks(evidence):
@@ -67,8 +89,10 @@ def cmd_draft(a):
     finding is an inline `### <path>:<line> (<ID>, <tier>)` entry (Actual, Expected, Fix)
     when its first `Where` location is `path:line` inside a changed new-side hunk between
     PIN.md's BASE and HEAD; otherwise (line outside every hunk, `$BASE:` removed content,
-    another anchor form) it is a `## General` item. OPEN SUGGESTION and FUTURE WORK findings
-    are one General item per tier and kind. Fenced code is dropped from pasted text."""
+    another anchor form) it is a `## General` item with one `path:line` anchor. A `$HEAD:`
+    prefix is dropped before the anchor match. OPEN SUGGESTION and FUTURE WORK findings are
+    one General item per tier and kind. Pasted text loses fenced code, provisional IDs, lane
+    reports, `$EVIDENCE` paths and `$HEAD:`/`$BASE:` prefixes."""
     rp = rl.round_dir(a.evidence, a.round)
     pins = {k: rl.pin_value(rp, k) for k in ("CLONE", "BASE", "HEAD")}
     if not all(pins.values()):
@@ -86,7 +110,14 @@ def cmd_draft(a):
         block = blocks.get(fid, {})
         claim = strip_fences(row["Claim"])
         where = row["Where"]
-        m = ANCHOR.match(where)
+        m = ANCHOR.match(HEAD_ANCHOR.sub(r"\1", where))
+        removed = BASE_ANCHOR.match(where)
+        if m:
+            anchor = f"{m.group(1)}:{m.group(2)}"
+        elif removed:
+            anchor = f"{removed.group(1)}:{removed.group(2)} (removed)"
+        else:
+            anchor = re.split(r"[,;]\s*", strip_fences(where))[0]
         if tier in rl.TIERS[:2]:
             inside = False
             if m:
@@ -116,12 +147,12 @@ def cmd_draft(a):
                 )
             else:
                 general.append(
-                    f"- {where or fid} ({fid}, {tier}; not in a changed hunk): {claim}"
+                    f"- {anchor or fid} ({fid}, {tier}; not in a changed hunk): {claim}"
                     + (f" Fix: {fix}" if fix else "")
                 )
         else:
             themes.setdefault((tier, row["Kind"]), []).append(
-                f"{claim} (`{where}`, {fid})"
+                f"{claim} (`{strip_fences(where)}`, {fid})"
             )
     out = ["# Draft comments (nothing posted)", ""]
     for entry in sorted(inline, key=lambda e: e[:3]):
@@ -139,6 +170,48 @@ def cmd_draft(a):
     )
 
 
+def sweep_inputs(evidence, rp):
+    """Every file the LEAK output sweep reads (lanes/leaks.md *Sweeping review output*):
+    the round's REPORT.md, COMMENTS.md and CONTEXT.md, LEDGER.md, the `.md` files under
+    orient/ and verify/ outside `*-evidence/`, and the published `$KNOWLEDGE/$KEY-r<N>/`
+    copy."""
+    files = [rp / n for n in ("REPORT.md", "COMMENTS.md", "CONTEXT.md")]
+    files.append(Path(evidence) / "LEDGER.md")
+    for name in files:
+        if not name.is_file():
+            raise rl.Fail(f"sweep input missing: {name}")
+    for sub in ("orient", "verify"):
+        files += [
+            p
+            for p in sorted((rp / sub).rglob("*.md"))
+            if not any(part.endswith("-evidence") for part in p.relative_to(rp).parts)
+        ]
+    knowledge, key = rl.pin_value(rp, "KNOWLEDGE"), rl.pin_value(rp, "KEY")
+    if not knowledge or not key:
+        raise rl.Fail("PIN.md lacks KNOWLEDGE or KEY")
+    copy = sorted((Path(knowledge) / f"{key}-{rp.name}").rglob("*.md"))
+    if not copy:
+        raise rl.Fail(f"missing published copy {Path(knowledge) / f'{key}-{rp.name}'}")
+    return files + copy
+
+
+def cmd_check_sweep(a):
+    """Pass when lanes/LEAK-sweep.md says `Sweep: clean` and is newer than every file the
+    sweep reads (sweep_inputs): a later edit leaves the sweep stale, not clean."""
+    rp = rl.round_dir(a.evidence, a.round)
+    sweep = rp / "lanes" / "LEAK-sweep.md"
+    if not sweep.is_file():
+        raise rl.Fail(f"missing {sweep}")
+    if not re.search(r"^\W*Sweep: clean\b", sweep.read_text(encoding="utf-8"), re.M):
+        raise rl.Fail("LEAK-sweep.md does not say 'Sweep: clean'")
+    stamp = sweep.stat().st_mtime_ns
+    stale = [p for p in sweep_inputs(a.evidence, rp) if p.stat().st_mtime_ns >= stamp]
+    if stale:
+        more = f" (+{len(stale) - 1} more)" if len(stale) > 1 else ""
+        raise rl.Fail(f"sweep is stale: {stale[0]} is not older than it{more}")
+    print("check-sweep: clean and current")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -146,6 +219,10 @@ def main(argv=None):
     s.add_argument("evidence")
     s.add_argument("round", type=int)
     s.set_defaults(fn=cmd_draft)
+    s = sub.add_parser("check-sweep", help=cmd_check_sweep.__doc__.split(". ")[0])
+    s.add_argument("evidence")
+    s.add_argument("round", type=int)
+    s.set_defaults(fn=cmd_check_sweep)
     args = p.parse_args(argv)
     try:
         args.fn(args)

@@ -10,11 +10,11 @@ and inputs. Scouts and `SYNTH` read this file and [orient.md](orient.md) only.
 | `$SCRATCH` | Disposable directory; work only in `$SCRATCH/<ID>/` (your lane, scout, `SYNTH`, `VER-<batch>`) |
 | `$CLONE`, `$KNOWLEDGE` | The repository clone (read-only); the store of published Orient files |
 | `$HEAD`, `$HEAD_SHORT`, `$BASE` | Full SHA of the head; its first 12 hex digits; full SHA of the base (merge base; left side of a range) |
-| `$KEY`, `$TARGET` | Key for `refs/review/$KEY/`; the branch the change is measured against |
+| `$KEY`, `$TARGET`, `$TARGET_TIP` | Key for `refs/review/$KEY/`; the branch the change is measured against; full SHA of that branch's tip at pin time |
 | `$REPO`, `$REPO_BASE` | Sparse worktrees of `$CLONE` at `$HEAD` and `$BASE` |
 ```markdown
 $EVIDENCE/LEDGER.md   $EVIDENCE/r<N>/: PIN.md env.sh CONTEXT.md ID-MAP.md REPORT.md COMMENTS.md
-  dispatch-context.md files.txt numstat.txt commits.txt sparse.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt)
+  dispatch-context.md files.txt numstat.txt commits.txt sparse.txt drift.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt)
   pr/ (pr.json body.md inline.json files.json checks.tsv branch.txt pr-text.txt pr-comment.txt pr-inline.txt) | intent.md   orient/<slug>.md
   packets/<LANE>.md  lanes/<LANE>.md  verify/<ID>.md
   evidence subdirectories: verify/<ID>-evidence/  lanes/*-evidence/  lanes/<ID>/
@@ -27,6 +27,7 @@ shared, published or swept, and no report or comment may depend on a reader open
 - Read the description (`pr/body.md` or `intent.md`) with its `Known issues` items (`K<n>`). Do not file a known item. File it
   only when the description understates it (worse effect, wider reach or higher tier than stated); the finding then says
   `understated: known-open-item K<n>`.
+- Write every output to the absolute `Output:` path of your dispatch, never to a path relative to your working directory.
 - Shell blocks begin `. ./env.sh`, which exports the variables above, `GREP` and `fullclone`: run each block as its own
   command in a subshell (`( … )` or `bash -c`) from `$EVIDENCE/r<N>/` (the absolute paths are in `dispatch-context.md`), so a
   `cd` or an `exit` does not outlive it. A block that prints `STOP:` ends the lane with `STOP: <reason>`.

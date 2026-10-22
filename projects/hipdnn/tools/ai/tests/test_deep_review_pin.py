@@ -204,8 +204,11 @@ def test_cleanup_removes_worktrees_and_refs(pin, origin):
         "refs/review/other/target",
         origin["base"],
     )
+    merge = t / "scratch/DRIFT/merge"
+    (merge / ".git").mkdir(parents=True)
     pin.main(["cleanup", "--evidence", str(t / "ev"), "--round", "1"])
     assert not (t / "scratch/r1/head").exists() and not (t / "scratch/r1/base").exists()
+    assert not merge.exists()
     assert run("git", "-C", str(clone), "for-each-ref", "refs/review/feat-one/") == ""
     assert run("git", "-C", str(clone), "for-each-ref", "refs/review/other/")
     assert clone.is_dir()
@@ -310,3 +313,80 @@ def test_fullclone_checks_out_a_full_tree_and_cleanup_removes_it(pin, origin):
     )
     pin.main(["cleanup", "--evidence", str(t / "ev"), "--round", "1"])
     assert not head.exists()
+
+
+def target_commit(origin, rel, text):
+    """Add a commit to the origin's develop (the target) after the feature branched."""
+    g = [
+        "git",
+        "-C",
+        str(origin["tmp"] / "work"),
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+    ]
+    run(*g, "checkout", "-q", "develop")
+    path = origin["tmp"] / "work" / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    run(*g, "add", "-A")
+    run(*g, "commit", "-qm", f"target {rel}")
+    run(*g, "push", "-q", origin["url"], "develop")
+    return run(*g, "rev-parse", "HEAD")
+
+
+def drift_lines(origin):
+    text = (origin["tmp"] / "ev/r1/drift.txt").read_text()
+    return text, dict(l.split(": ", 1) for l in text.splitlines() if ": " in l)
+
+
+def test_drift_conflicting_target_triggers_and_names_paths(pin, origin):
+    tip = target_commit(origin, "projects/hipdnn/src/a.cpp", "a\nc\n")
+    pin.main(init_args(origin, "--branch", "feat/one"))
+    text, fields = drift_lines(origin)
+    assert fields["Target tip"] == tip
+    assert fields["Merge"] == "conflicts"
+    assert fields["Conflicts"] == "projects/hipdnn/src/a.cpp"
+    assert fields["Trigger"] == "yes"
+    assert "Touching commits: " + tip in text
+    assert f"TARGET_TIP: {tip}\n" in (origin["tmp"] / "ev/r1/PIN.md").read_text()
+
+
+def test_drift_target_commit_beside_a_changed_file_triggers_without_conflict(
+    pin, origin
+):
+    target_commit(origin, "projects/hipdnn/src/b.cpp", "b\n")
+    pin.main(init_args(origin, "--branch", "feat/one"))
+    _, fields = drift_lines(origin)
+    assert (fields["Merge"], fields["Conflicts"], fields["Trigger"]) == (
+        "clean",
+        "",
+        "yes",
+    )
+
+
+def test_drift_unrelated_target_commit_does_not_trigger(pin, origin):
+    target_commit(origin, "dnn-providers/q/other.cpp", "o\n")
+    pin.main(init_args(origin, "--branch", "feat/one"))
+    text, fields = drift_lines(origin)
+    assert fields["Merge"] == "clean" and fields["Trigger"].startswith("no")
+    assert "Touching commits" not in text
+
+
+def test_drift_range_review_never_triggers(pin, origin):
+    target_commit(origin, "projects/hipdnn/src/a.cpp", "a\nc\n")
+    pin.main(init_args(origin, "--range", "develop..feat/one"))
+    assert drift_lines(origin)[1]["Trigger"] == "no (range review)"
+
+
+def test_drift_range_review_skips_merge_tree(pin, origin, monkeypatch):
+    real = pin.rl.git
+
+    def no_merge_tree(clone, *args, **kw):
+        assert args[0] != "merge-tree"
+        return real(clone, *args, **kw)
+
+    monkeypatch.setattr(pin.rl, "git", no_merge_tree)
+    pin.main(init_args(origin, "--range", "develop..feat/one"))
+    assert drift_lines(origin)[1]["Trigger"] == "no (range review)"

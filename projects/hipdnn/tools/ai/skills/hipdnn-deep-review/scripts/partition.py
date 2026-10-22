@@ -64,6 +64,7 @@ CONCERN_LANES = {
     "DUP",
     "DOCS",
     "RUN",
+    "DRIFT",
 }
 
 
@@ -171,18 +172,54 @@ def cmd_areas(args) -> None:
     print(f"areas.tsv: {len(files)} files, {len({area_of(p) for p in files})} areas")
 
 
+def test_stem(path: str) -> str | None:
+    """Lowercased stem of a test file with its `test_` or `Test` prefix stripped, else None."""
+    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if stem.startswith("test_"):
+        return stem[5:].lower()
+    if stem.startswith("Test") and len(stem) > 4:
+        return stem[4:].lower()
+    return None
+
+
+def pair_tests(paths: list[str]) -> dict[str, str]:
+    """path -> unit key for each changed test and its sources. A test pairs with every
+    changed non-test file of its stem when they all sit in one directory (`X.cpp` and
+    `X.hpp`); with no such file, or same-stem files in several directories, it is left out.
+    The key is the first source."""
+    sources: dict[str, list[str]] = {}
+    for p in paths:
+        if test_stem(p) is None:
+            sources.setdefault(
+                p.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower(), []
+            ).append(p)
+    unit = {}
+    for p in paths:
+        stem = test_stem(p)
+        found = sources.get(stem, []) if stem is not None else []
+        if found and len({q.rpartition("/")[0] for q in found}) == 1:
+            unit[p] = found[0]
+            unit.update({q: found[0] for q in found})
+    return unit
+
+
 def plan_lanes(
     files: list[tuple[str, int, str]], areas: dict[str, str]
 ) -> list[list[tuple[str, int, str]]]:
     """Pack area groups (first-appearance order) into lanes of ~TARGET_LINES lines.
 
-    A total within target is one lane; an area over target splits by file; a file over
-    target gets its own lane; no file is split."""
+    A test file travels with its source (pair_tests) in the source's area group. A total
+    within target is one lane; an area over target splits by unit; a unit over target gets
+    its own lane; no file is split from its unit."""
     if sum(f[1] for f in files) <= TARGET_LINES:
         return [files] if files else []
-    groups: dict[str, list] = {}
+    pairs = pair_tests([f[0] for f in files])
+    units: dict[str, list] = {}
     for f in files:
-        groups.setdefault(areas[f[0]], []).append(f)
+        units.setdefault(pairs.get(f[0], f[0]), []).append(f)
+    groups: dict[str, list[list]] = {}
+    for key, unit in units.items():
+        groups.setdefault(areas[key], []).append(unit)
     lanes: list[list] = []
     cur: list = []
     cur_lines = 0
@@ -194,23 +231,24 @@ def plan_lanes(
         cur, cur_lines = [], 0
 
     for group in groups.values():
-        g_lines = sum(f[1] for f in group)
+        g_lines = sum(f[1] for unit in group for f in unit)
         if g_lines <= TARGET_LINES:
             if cur_lines + g_lines > TARGET_LINES:
                 flush()
-            cur += group
+            cur += [f for unit in group for f in unit]
             cur_lines += g_lines
             continue
         flush()
-        for f in group:
-            if f[1] > TARGET_LINES:
+        for unit in group:
+            u_lines = sum(f[1] for f in unit)
+            if u_lines > TARGET_LINES:
                 flush()
-                lanes.append([f])
+                lanes.append(unit)
             else:
-                if cur_lines + f[1] > TARGET_LINES:
+                if cur_lines + u_lines > TARGET_LINES:
                     flush()
-                cur.append(f)
-                cur_lines += f[1]
+                cur += unit
+                cur_lines += u_lines
         flush()
     flush()
     return lanes
@@ -293,6 +331,17 @@ def concern_scope(lane: str, rows):
     return rows
 
 
+def drift_trigger(rd: Path) -> str:
+    """The value of the `Trigger:` line of drift.txt (`yes` or `no (<reason>)`)."""
+    path = rd / "drift.txt"
+    if not path.is_file():
+        fail(f"drift.txt not found: {path}")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Trigger:"):
+            return line.partition(":")[2].strip()
+    fail("drift.txt has no Trigger line")
+
+
 def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -> None:
     out = [f"# Packet: {lane}", "", f"Lane: {lane} ({kind})", ""]
     out += [
@@ -310,6 +359,8 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
     ]
     if kind == "concern":
         out += ["", f"Stack parent: {parent or 'none'}"]
+    if lane == "DRIFT":
+        out += ["", "## Target drift", "", "- drift.txt"]
     marked = [r[0] for r in rows if r[0] in sampled]
     if marked and kind == "correctness":
         gens = sorted({sampled[p][0] for p in marked})
@@ -335,7 +386,8 @@ def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
     scope). BUILD and DEPS scope to their trigger files, other concern lanes take every
-    changed file. The diff is not read."""
+    changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The diff
+    is not read."""
     rd = Path(args.round_dir)
     rows = {r[0]: r for r in read_numstat(rd)}
     areas = read_areas(rd)
@@ -356,6 +408,11 @@ def cmd_packets(args) -> None:
             fail(f"unknown concern lane: {lane}")
         if lane in owned:
             continue
+        if lane == "DRIFT":
+            trigger = drift_trigger(rd)
+            if trigger.startswith("no"):
+                print(f"DRIFT: N/A {trigger[2:].strip()}")
+                continue
         scope = concern_scope(lane, list(rows.values()))
         if not scope:
             print(f"{lane}: no changed file in scope, N/A")

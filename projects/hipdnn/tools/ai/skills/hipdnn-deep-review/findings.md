@@ -16,6 +16,9 @@ Proof:     what was run or read: command, exit code, log as $EVIDENCE/<relative 
 Fix:       smallest change that resolves it, or the decision a human must make
 ```
 
+Write the block as plain lines, never inside a code fence. `Actual` and `Fix` are written for the PR author, who posts them
+nearly verbatim: no first person, no lane IDs and no `$VAR`s (`path:line` anchors, quoted code and final IDs are fine).
+
 `<LANE>` is the lane's name (`VER` for a verifier). `<n>` counts from 1 within the report; a
 follow-up report continues after the lane's last `p<n>`. Read each anchor from `$HEAD`
 (`$REPO`, or `git -C "$CLONE" show` outside the sparse set), not from a diff hunk or an
@@ -63,7 +66,7 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
 2. **Coverage:** one row per examined file: path, read depth (`full`, `diff-only`,
-   `sampled`), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
+   `sampled`; nothing else in that cell), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
    line or preset>)` for each option enabled, and `Build: none (<missing>)` when nothing built. Ledger and Coverage parsing ignore
    them (a row counts only when its second cell is a read depth); keep them free of `|`.
 3. **Checked, no finding:** what was examined and found correct. A lane that owns an M-rule
@@ -84,7 +87,7 @@ first line is present.
 
 ## Verifier output
 
-`$EVIDENCE/r<N>/verify/<ID>.md`, or `<ID>-2.md` for a second verifier. It starts with this
+`$EVIDENCE/r<N>/verify/<ID>.md`, or `<ID>-2.md` for a second verifier. `<ID>` is a final ID (`VER-<n>` for a verifier's own finding). It starts with this
 block, one labelled line each; an approval request in the form above may follow:
 
 ```markdown
@@ -100,5 +103,6 @@ Not established: <what the proof does not cover>
 
 Keep mutation diffs and logs in
 `verify/<ID>-evidence/`; evidence subdirectories are local-only (never shared) and the
-verify file cites them by `$EVIDENCE/` path. Write issues found while verifying to
-`verify/VER-<batch>.md` (*Lane report* format) as `VER<batch>-p<n>` candidates.
+verify file cites them by `$EVIDENCE/` path. Write defects found in the code under review while verifying to
+`verify/VER<batch>.md` (*Lane report* format) as `VER<batch>-p<n>` candidates; `verify/VER-<n>.md` is the verdict file of the
+final ID `VER-<n>`. Duplicate and cluster observations are Handoffs, never findings ([lanes/verify.md](lanes/verify.md)).

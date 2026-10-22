@@ -11,7 +11,7 @@ Formats the orchestrator writes; lanes use [findings.md](findings.md).
 Change: <PR URL | branch:<name> | <base>..<head>>
 Round: <N>
 Repo: <owner>/<repo>
-<VAR>: <value>   one line each: SKILL EVIDENCE SCRATCH CLONE KEY TARGET HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE
+<VAR>: <value>   one line each: SKILL EVIDENCE SCRATCH CLONE KEY TARGET TARGET_TIP HEAD HEAD_SHORT BASE REPO REPO_BASE KNOWLEDGE
 Stack parent: <PR number and URL | none>
 Description: pr/body.md | intent.md
 Files: <count> (GitHub <count> | unverifiable (>3000))
@@ -87,6 +87,7 @@ statement traces to a ledger row; the REPORT may call a finding with a
 ```markdown
 # Review of <owner>/<repo>#<pr> | <branch or range>: <title or intent summary>
 <one line: commit and base or stack parent reviewed, size, whether the head moved>
+Target drift: <`DRIFT` result: no trigger | merges clean, tests pass | conflicts resolved mechanically | breaks the merge (see fix list)>; target tip <12 hex digits>
 
 ## Verdict
 <paragraph 1: assessment and risk (*Assessment and risk* above); open
@@ -120,5 +121,6 @@ Drafts for the user to post. One `### <path>:<line> (<ID>, <tier>)` entry per `B
 `comments.py draft` writes the first draft from the `OPEN` ledger rows. The anchor line must lie
 inside a changed new-side hunk of the diff between `$BASE` and `$HEAD` for that path (`-U0`
 `@@ +<start>,<count>` headers; a count of 0 is an empty range). A finding whose line is
-outside every hunk, or about removed content, goes under `## General`. Text pasted from
-`Actual:` carries no code fences. Edit the draft before the user sees it.
+outside every hunk, or about removed content (`$BASE:` anchors), goes under `## General`
+with one `path:line` anchor and its one-line claim; a `$HEAD:path:line` anchor counts as `path:line`. Pasted text carries no code
+fences, `$VAR`s, lane stems, provisional IDs or `$EVIDENCE` paths. Edit the draft before the user sees it.

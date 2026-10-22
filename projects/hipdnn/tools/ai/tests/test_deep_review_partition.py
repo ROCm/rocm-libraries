@@ -372,3 +372,70 @@ def test_build_and_deps_scope_cover_registration_files_and_source(part):
     deps = {r[0] for r in part.concern_scope("DEPS", rows)}
     assert build == {rows[0][0], rows[1][0], rows[2][0]}
     assert deps == {rows[0][0], rows[1][0], rows[3][0]}
+
+
+def test_plan_keeps_a_test_with_its_source_across_areas(part, tmp_path):
+    rd = make_round(
+        tmp_path,
+        [
+            (900, 0, "projects/hipdnn/tests/test_widget.py"),
+            (900, 0, "projects/hipdnn/backend/a.cpp"),
+            (900, 0, "projects/hipdnn/backend/widget.cpp"),
+            (900, 0, "projects/hipdnn/backend/b.cpp"),
+        ],
+    )
+    lanes = plan(part, rd)
+    pair = {
+        "projects/hipdnn/tests/test_widget.py",
+        "projects/hipdnn/backend/widget.cpp",
+    }
+    assert any(pair <= set(ps) for ps in lanes.values())
+
+
+def test_plan_pairs_a_test_with_its_header_and_implementation(part, tmp_path):
+    paths = [
+        "projects/hipdnn/tests/TestWidget.cpp",
+        "projects/hipdnn/backend/widget.cpp",
+        "projects/hipdnn/backend/widget.hpp",
+    ]
+    key = "projects/hipdnn/backend/widget.cpp"
+    assert part.pair_tests(paths) == {p: key for p in paths}
+
+
+def test_plan_leaves_a_test_unpaired_when_same_stem_files_span_directories(part):
+    paths = [
+        "projects/hipdnn/tests/TestWidget.cpp",
+        "projects/hipdnn/backend/widget.cpp",
+        "projects/hipdnn/frontend/widget.hpp",
+    ]
+    assert part.pair_tests(paths) == {}
+    assert part.pair_tests(paths[:2]) == {p: paths[1] for p in paths[:2]}
+
+
+def test_plan_gives_an_oversized_pair_its_own_lane(part, tmp_path):
+    rd = make_round(
+        tmp_path,
+        [
+            (1500, 0, "projects/hipdnn/tests/test_big.py"),
+            (1500, 0, "projects/hipdnn/backend/big.cpp"),
+            (50, 0, "projects/hipdnn/backend/small.cpp"),
+        ],
+    )
+    lanes = plan(part, rd)
+    assert [
+        "projects/hipdnn/tests/test_big.py",
+        "projects/hipdnn/backend/big.cpp",
+    ] in [sorted(ps, reverse=True) for ps in lanes.values()]
+    assert len(lanes) == 2
+
+
+def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
+    rd = make_round(tmp_path, [(3, 1, "projects/hipdnn/backend/a.cpp")])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    (rd / "drift.txt").write_text("Target tip: abc\nTrigger: no (range review)\n")
+    run(part, "packets", rd, "--lanes", "DRIFT")
+    assert not (rd / "packets" / "DRIFT.md").exists()
+    (rd / "drift.txt").write_text("Target tip: abc\nTrigger: yes\n")
+    run(part, "packets", rd, "--lanes", "DRIFT")
+    assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
