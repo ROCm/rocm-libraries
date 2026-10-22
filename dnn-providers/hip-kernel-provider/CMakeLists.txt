@@ -437,31 +437,40 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950AttentionDense_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
     set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
     set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
-    if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
-       AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
-       AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
-       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    set(_hkp_provider_category_yamls
+        "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+        "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+        "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+        "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+        "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+        "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+        "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+    )
+    # The category YAMLs live beside this file, so a missing one is a broken tree, not a
+    # configuration: falling back to legacy labels would drop every tier label of every
+    # suite with only a STATUS line. Only shared/ctest, which a standalone or sparse
+    # checkout can lack, selects the legacy fallback.
+    foreach(_hkp_yaml IN LISTS _hkp_provider_category_yamls)
+        if(NOT EXISTS "${_hkp_yaml}")
+            message(FATAL_ERROR
+                "hip-kernel-provider: test category YAML ${_hkp_yaml} is missing. Every "
+                "suite it labels would lose its tier labels; restore the file or remove its "
+                "registration.")
+        endif()
+    endforeach()
+    if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}")
-        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
-            "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
-            "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
-            "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-        )
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS ${_hkp_provider_category_yamls})
         set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
         message(STATUS "hip-kernel-provider: YAML-based CTest categorization enabled")
     else()
-        message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+        message(STATUS "hip-kernel-provider: shared/ctest not found, using legacy CTest labels")
     endif()
 endif()
 
