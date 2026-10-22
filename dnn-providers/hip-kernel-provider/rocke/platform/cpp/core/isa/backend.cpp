@@ -258,21 +258,6 @@ static const rocke_wmma_spec_t RDNA_WMMA[] = {
 };
 static const int RDNA_WMMA_N = (int)(sizeof(RDNA_WMMA) / sizeof(RDNA_WMMA[0]));
 
-/* _RDNA_WMMA_INT: RDNA3/3.5 integer WMMA (iu8/iu4). */
-static const rocke_wmma_int_spec_t RDNA_WMMA_INT[] = {
-    {"tile.wmma_i32_16x16x16_iu8",
-     "wmma.i32.16x16x16.iu8",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-     4,
-     8},
-    {"tile.wmma_i32_16x16x16_iu4",
-     "wmma.i32.16x16x16.iu4",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-     2,
-     8},
-};
-static const int RDNA_WMMA_INT_N = (int)(sizeof(RDNA_WMMA_INT) / sizeof(RDNA_WMMA_INT[0]));
-
 /* _RDNA_GFX12_WMMA: RDNA4 float WMMA. frag_width = 8 (no cross-half dup). */
 static const rocke_wmma_spec_t RDNA_GFX12_WMMA[] = {
     {"tile.wmma_gfx12_f32_16x16x16_f16",
@@ -354,23 +339,6 @@ const rocke_wmma_spec_t* rocke_isa_wmma_lookup(const char* op_name)
         if(strcmp(RDNA_WMMA[i].op_name, op_name) == 0)
         {
             return &RDNA_WMMA[i];
-        }
-    }
-    return NULL;
-}
-
-const rocke_wmma_int_spec_t* rocke_isa_wmma_int_lookup(const char* op_name)
-{
-    int i;
-    if(op_name == NULL)
-    {
-        return NULL;
-    }
-    for(i = 0; i < RDNA_WMMA_INT_N; ++i)
-    {
-        if(strcmp(RDNA_WMMA_INT[i].op_name, op_name) == 0)
-        {
-            return &RDNA_WMMA_INT[i];
         }
     }
     return NULL;
@@ -556,42 +524,6 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
     return 0;
 }
 
-int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
-                                 const rocke_wmma_int_spec_t* spec,
-                                 const char* result_name,
-                                 const char* a_name,
-                                 const char* b_name,
-                                 const char* c_name)
-{
-    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL
-       || c_name == NULL)
-    {
-        return -1;
-    }
-    /* signedA=1, signedB=1 (our quantized data is signed), clamp=0 (values stay
-     * within i32 range). a_name and b_name already name <op_vec x i32> values;
-     * the lowerer reinterprets an operand of another shape before the call. */
-    if(rocke_strbuf_appendf(out,
-                            "  %s = call <%d x i32> @%s("
-                            "i1 1, <%d x i32> %s, "
-                            "i1 1, <%d x i32> %s, "
-                            "<%d x i32> %s, i1 0)\n",
-                            result_name,
-                            spec->acc_vec,
-                            spec->intrinsic,
-                            spec->op_vec,
-                            a_name,
-                            spec->op_vec,
-                            b_name,
-                            spec->acc_vec,
-                            c_name)
-       != 0)
-    {
-        return -1;
-    }
-    return 0;
-}
-
 /* ---------------------------------------------------------------------------
  * emit_mma / emit_wmma full lowerer dispatch -- ported in lower_llvm.
  *
@@ -615,6 +547,6 @@ int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
  *
  * What is self-contained and therefore lives HERE -- the byte-identical WMMA
  * call text and its bf16 bitcast prologue given SSA operand name strings -- is
- * rocke_isa_emit_wmma_call / rocke_isa_emit_wmma_int_call above, and the full
+ * rocke_isa_emit_wmma_call above, and the full
  * op.name -> spec resolution is rocke_isa_resolve_wmma / the lookup functions.
  * --------------------------------------------------------------------------- */

@@ -138,7 +138,13 @@ unpacks them explicitly. Both lowerings still refuse an `i4` value that reaches
 them (`no LLVM mapping for type i4`, `no HIP mapping for type i4`).
 
 **Unsigned integers.** `u8` and `u4` name unsigned data, so integer matrix
-instructions with a per-operand signedness flag can be selected for it. `u8`
+instructions with a per-operand signedness flag can be selected for it. Each
+integer WMMA has one catalog row per signedness combination: the signed op_id
+(for example `wmma_gfx12_i32_16x16x16_iu8`) and the op_id with `_u8_i8` (A
+unsigned), `_i8_u8` (B unsigned) or `_u8_u8` appended (`_u4_i4`, `_i4_u4`,
+`_u4_u4` for 4-bit operands). The lowering derives each flag from the row's
+operand dtype (`i8` / `i4` signed, `u8` / `u4` unsigned); CDNA integer MFMA is
+signed only, so a `u8` operand finds no MFMA. `u8`
 renders as LLVM `i8` (LLVM integers carry no sign) and HIP `uint8_t`, and takes
 one byte in LDS, like `i8`. `u8` is an arithmetic type: every op whose result
 depends on signedness emits its unsigned form for it -- `udiv` / `urem` for
@@ -511,11 +517,11 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
 | `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
 | `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, i8, f64 |
-| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
-| `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_iu8` + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8 |
+| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`) | f16, bf16, **i8, i4, u8, u4** |
+| `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
-| `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
-| `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8 |
+| `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
+| `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
   and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
@@ -523,15 +529,19 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 - The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
   only) and the mixed `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only
   gfx942's `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
-- The gfx12 fp8 / bf8 -> f32, `iu8` and 16-bit-output (f16 -> f16, bf16 -> bf16)
-  WMMA atoms are declared on `gfx12-generic` (and so on `gfx1201`); no family
-  uses them yet.
+- The gfx12 fp8 / bf8 -> f32, `iu8`, `iu4` and 16-bit-output (f16 -> f16,
+  bf16 -> bf16) WMMA atoms are declared on `gfx12-generic` (and so on
+  `gfx1201`); no family uses them yet.
+- In the table, `_u_i`, `_i_u` and `_u_u` stand for the unsigned rows of an
+  integer atom: `_u8_i8`, `_i8_u8`, `_u8_u8` for `iu8` and `_u4_i4`, `_i4_u4`,
+  `_u4_u4` for `iu4` (section 1). No family uses the unsigned rows yet.
 
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
 The following gaps compare section 4A with section 4B and concern atom
 declarations only. The gfx942 XF32, gfx1201 fp8/bf8 WMMA (4C.2), CDNA integer
-MFMA (4C.3) and CDNA f64 MFMA (4C.6) declaration gaps are now closed; section 4D describes XF32's logical
+MFMA (4C.3), gfx1201 integer WMMA (4C.4) and CDNA f64 MFMA (4C.6) declaration
+gaps are now closed; section 4D describes XF32's logical
 dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
@@ -551,13 +561,13 @@ forms are covered by 4C.5.
 declared (section 4B); no family uses them yet, which keeps `i8` at C5=1
 (section 2.5).
 
-#### 4C.4 RDNA4 / CDNA5 — integer WMMA is in silicon but undeclared
+#### 4C.4 RDNA4 / CDNA5 -- integer WMMA (closed on gfx1201)
 gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
 K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
 `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. gfx1201 now declares
-`wmma_gfx12_i32_16x16x16_iu8` (section 4B), so the remaining integer declaration
-gap is **gfx1201 integer WMMA on int4 and gfx1250 integer WMMA**. `gfx1151` and
-`gfx11-generic` do declare both `wmma_i32_16x16x16_iu8` and
+the three dense forms in every operand signedness (section 4B), so the remaining
+integer declaration gap is **gfx1250 integer WMMA**. `gfx1151` and
+`gfx11-generic` declare, in every operand signedness, `wmma_i32_16x16x16_iu8` and
 `wmma_i32_16x16x16_iu4` (§4B). The existing integer WMMA GEMM builders (§5)
 and quant epilogues give `i8` some family coverage; its C5=1 score reflects
 limited target and packed-input API coverage, as explained in §2.5.

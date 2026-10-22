@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: MIT
 /* Emit one MMA instruction from its matrix-call description.
  *
- * Mirrors core/isa/matrix_call_lowering.py (emit_matrix_call) and the
- * rendering half of core/isa/matrix_operand_forms.py (AsIs / ZeroPadded /
- * EvenHalves). Every line, fresh name and error text matches the Python engine:
- * fresh names are taken in the same order, so the two emit the same bytes. */
+ * Mirrors core/isa/matrix_call_lowering.py (emit_matrix_call), the rendering
+ * half of core/isa/matrix_operand_forms.py (AsIs / ZeroPadded / EvenHalves)
+ * and core/isa/matrix_calls.py's Signedness. Every line, fresh name and error
+ * text matches the Python engine: fresh names are taken in the same order, so
+ * the two emit the same bytes. */
 #include "rocke/matrix_calls_internal.h"
 
 #include <string>
 
 #include <string.h>
 
+#include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
@@ -231,6 +233,40 @@ static void even_halves_result(rocke_lower_t* L,
                        rocke_ll_llvm_type(L, result->type));
 }
 
+const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    const rocke_mma_op_t* catalog_op
+        = target ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+    if(!catalog_op)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "tile.%s is not available on %s: its MMA catalog does not list it",
+                      op_id,
+                      gfx ? gfx : "(unknown)");
+    return catalog_op;
+}
+
+/* Python Signedness.argument: "i1 1" for a signed integer operand of the
+ * catalog row, "i1 0" for an unsigned one (rocke_type_is_unsigned). */
+static std::string
+    signedness_argument(rocke_lower_t* L, const char* op_id, rocke_matrix_arg_kind_t operand)
+{
+    const rocke_mma_op_t* catalog_op = rocke_ll_require_catalog_op(L, op_id);
+    const char* dtype = operand == ROCKE_MATRIX_ARG_A ? catalog_op->a_dtype : catalog_op->b_dtype;
+    if(rocke_require_dtype_info(dtype)->category != ROCKE_DTYPE_INTEGER)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.%s operand %s is %s; a signedness flag is derived from an integer "
+                      "operand (%s)",
+                      op_id,
+                      role_name(operand),
+                      dtype,
+                      rocke_dtype_names(ROCKE_DTYPE_INTEGER).c_str());
+    return std::string("i1 ") + (rocke_type_is_unsigned(rocke_require_ir_type(dtype)) ? "0" : "1");
+}
+
 /* The declaration text the lowerer resolves for `key`: the flavor's table, then
  * the dynamically registered declarations. NULL when neither holds it. */
 static const char* declared_text(rocke_lower_t* L, const char* key)
@@ -287,6 +323,11 @@ void rocke_ll_emit_matrix_call(rocke_lower_t* L,
         if(arg.kind == ROCKE_MATRIX_ARG_IMM)
         {
             arguments += std::string(arg.imm_type) + " " + std::to_string(arg.imm_value);
+            continue;
+        }
+        if(arg.kind == ROCKE_MATRIX_ARG_SIGNEDNESS)
+        {
+            arguments += signedness_argument(L, op_id, arg.operand);
             continue;
         }
         const rocke_matrix_form_t& form = form_of(call, arg.kind);

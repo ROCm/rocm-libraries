@@ -101,7 +101,9 @@
     "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32": "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32",
     "llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32": "llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32",
     "llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32": "llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32",
+    "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32": "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32",
     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32": "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
+    "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32": "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32",
     "log2.f32": "llvm.log2.f32",
     "make.buffer.rsrc.p1": "llvm.amdgcn.make.buffer.rsrc.p8.p1.i64",
     "maxnum.bf16": "llvm.maxnum.bf16",
@@ -8478,6 +8480,95 @@
         "verified_on": "llvm24"
       }
     },
+    "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32, i32, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu4 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32, i32, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu4 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32, i32, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu4 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32, i32, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu4 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32, i32, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu4 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      }
+    },
     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu8",
@@ -8563,6 +8654,95 @@
       },
       "gfx950": {
         "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x16.iu8 requires target feature 'wmma-256b-insts|wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      }
+    },
+    "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32": {
+      "gfx11-generic": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
+        "status": "arch_absent",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <2 x i32>, <2 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x32.iu4 requires target feature 'wmma-128b-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }

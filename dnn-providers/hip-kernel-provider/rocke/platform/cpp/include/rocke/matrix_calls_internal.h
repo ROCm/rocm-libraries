@@ -21,6 +21,7 @@
 #ifndef ROCKE_MATRIX_CALLS_INTERNAL_H
 #define ROCKE_MATRIX_CALLS_INTERNAL_H
 
+#include "rocke/arch_target.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -66,13 +67,17 @@ typedef struct rocke_matrix_form
     rocke_matrix_register_t register_type;
 } rocke_matrix_form_t;
 
-/* One call argument: an MMA operand (A, B, C) or a literal immediate. */
+/* One call argument: an MMA operand (A, B, C), a literal immediate, or the
+ * signedness flag of operand A or B (Python Signedness): an i1 that is 1 when
+ * that operand's dtype in the target's catalog row is signed (i8, i4) and 0
+ * when it is unsigned (u8, u4). */
 typedef enum rocke_matrix_arg_kind
 {
     ROCKE_MATRIX_ARG_A = 0,
     ROCKE_MATRIX_ARG_B,
     ROCKE_MATRIX_ARG_C,
-    ROCKE_MATRIX_ARG_IMM
+    ROCKE_MATRIX_ARG_IMM,
+    ROCKE_MATRIX_ARG_SIGNEDNESS
 } rocke_matrix_arg_kind_t;
 
 typedef struct rocke_matrix_arg
@@ -81,6 +86,7 @@ typedef struct rocke_matrix_arg
     const char* imm_type; /* "i1" / "i16" / "i32" / "i64" (ROCKE_MATRIX_ARG_IMM)  */
     long long imm_value;
     bool immarg; /* the declaration marks the parameter `immarg`      */
+    rocke_matrix_arg_kind_t operand; /* A or B, whose flag a SIGNEDNESS arg passes */
 } rocke_matrix_arg_t;
 
 /* One MMA instruction's call. `decl_key` NULL means the intrinsic name. */
@@ -114,8 +120,9 @@ const char* rocke_matrix_call_key(const rocke_matrix_call_t* call);
 
 /* Throw ckc::ValueError / ckc::TypeError, with the Python text, for a call the
  * Python schema would refuse to construct: A, B and C not passed exactly once,
- * a ZERO_PADDED result, a register type its form cannot fill, an immediate of
- * another type or out of range, an override naming an unknown flavor. */
+ * a signedness flag for an operand other than A or B, a ZERO_PADDED result, a
+ * register type its form cannot fill, an immediate of another type or out of
+ * range, an override naming an unknown flavor. */
 void rocke_matrix_call_check(const rocke_matrix_call_t* call);
 
 /* The register type of `form` at `flavor` (Python _Form.register_type_at),
@@ -131,9 +138,16 @@ const char* rocke_matrix_call_declaration(const rocke_matrix_call_t* call,
 
 typedef struct rocke_lower rocke_lower_t;
 
+/* The lowering target's catalog row for `op_id`; fails with
+ * ROCKE_ERR_NOTIMPL "tile.<op_id> is not available on <gfx>: its MMA catalog
+ * does not list it" where the catalog does not list it (Python
+ * ISABackend._require_catalog_lists, same text). */
+const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id);
+
 /* Lower MMA op `op` (operands A, B, C) with op_id `op_id` through `call`
  * (Python emit_matrix_call): each operand through its form, the immediates as
- * written, the call, the result through its form. The call's declaration is
+ * written, each signedness flag from the target's catalog row for `op_id`, the
+ * call, the result through its form. The call's declaration is
  * the one the lowerer resolves for its key; a call outside the table (one a
  * test builds) registers its derived declaration dynamically, and a resolved
  * text that differs from the derived one is refused. */
