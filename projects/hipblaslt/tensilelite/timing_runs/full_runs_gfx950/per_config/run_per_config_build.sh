@@ -20,6 +20,7 @@ TL=/home/alvasile/rocm-libraries/projects/hipblaslt/tensilelite
 OUT=${OUT:-$TL/timing_runs/full_runs_gfx950/per_config_build}
 LIST=${1:-$TL/timing_runs/full_runs_gfx950/per_config/configs.txt}
 SCRATCH=${SCRATCH:-/tmp/tl_build_scratch_gfx950}
+CLIENT=/tmp/tl_client_msgpack/tensilelite/client/tensilelite-client   # ductile builds run the client
 cd $TL || exit 1
 export OMP_NUM_THREADS=25 OPENBLAS_NUM_THREADS=25 PYTHONUNBUFFERED=1
 TO="--cxx-compiler,/usr/bin/amdclang++,--global-parameters,TimingInstrumentation=True"
@@ -40,7 +41,7 @@ while read -r cfg; do
   BID="tensilelite/Tests/common/test_config_build.py::test_config_build[$cfg]"
   rm -rf /home/alvasile/.tensile /home/alvasile/.tensilelite   # cold cache for every build
   s=$(date +%s)
-  taskset -c 0-24 pytest "$BID" --build-only --gpu-targets gfx950 --artifact-dir $A \
+  taskset -c 0-24 pytest "$BID" --build-only --gpu-targets gfx950 --artifact-dir $A --prebuilt-client=$CLIENT \
     "${COMMON[@]}" > $D/${name}_build.log 2>&1
   rc=$?
   echo "build_cold rc=$rc seconds=$(( $(date +%s)-s )) ($n/$total)" > $D/times.txt
