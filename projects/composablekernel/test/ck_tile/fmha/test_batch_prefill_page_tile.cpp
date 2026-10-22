@@ -26,6 +26,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,10 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG
 #define CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG 0
 #endif
+// 1: FP16 Q/K/V/O instead of BF16.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_FP16
+#define CK_TILE_FMHA_PAGE_TILE_TEST_FP16 0
+#endif
 // 1: the kernel also writes the per-row LSE ([Hq, total_q] floats), checked against the reference.
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_LSE
 #define CK_TILE_FMHA_PAGE_TILE_TEST_LSE 0
@@ -52,7 +57,11 @@ namespace {
 
 namespace reference = ck_tile::test::reference;
 using ck_tile::index_t;
-using Data = ck_tile::bf16_t;
+constexpr bool kFp16 = CK_TILE_FMHA_PAGE_TILE_TEST_FP16 != 0;
+using Data           = std::conditional_t<kFp16, ck_tile::half_t, ck_tile::bf16_t>;
+using DataConfig     = std::conditional_t<kFp16, FmhaFwdFp16, FmhaFwdBf16>;
+// Mantissa bits of the 16-bit type, for the accuracy contract (P is rounded to it).
+constexpr int kMantissaBits = kFp16 ? 10 : 7;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 128 || kPage == 256 || kPage == 1024);
@@ -62,12 +71,12 @@ constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
 
-// BF16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group mode,
-// M128/N128.
+// BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
+// mode, M128/N128.
 template <index_t HeadDim, bool Causal>
 struct Model
 {
-    using TypeConfig = FmhaFwdTypeConfig<FmhaFwdBf16>;
+    using TypeConfig = FmhaFwdTypeConfig<DataConfig>;
     using Shape      = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 32, HeadDim, 32, HeadDim>,
                                               ck_tile::sequence<4, 1, 1>,
                                               ck_tile::sequence<16, 16, 32>,
@@ -135,7 +144,8 @@ struct ModelNames
     static std::string GetName(int)
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
-               (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "");
+               (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "") +
+               (kFp16 ? "Fp16" : "");
     }
 };
 
@@ -734,7 +744,7 @@ reference::Metrics CompareWithReference(const HostProblem& h,
     }
     const auto expected = reference::Compute(sequences);
     return reference::Compare(
-        sequences, expected, outputs, {}, reference::AccuracyContract{7, 128});
+        sequences, expected, outputs, {}, reference::AccuracyContract{kMantissaBits, 128});
 }
 
 template <typename M>

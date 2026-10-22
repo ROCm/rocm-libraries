@@ -171,10 +171,11 @@ struct FmhaBatchPrefillLinearPageTileWriter
                                     number<Alignment>,
                                     bool_constant<RematerializeStride>)
     {
-        static_assert(std::is_same_v<remove_cvref_t<T>, bf16_t>,
-                      "the page tile writer currently instantiates BF16 only");
+        static_assert(std::is_same_v<remove_cvref_t<T>, bf16_t> ||
+                          std::is_same_v<remove_cvref_t<T>, half_t>,
+                      "the page tile writer instantiates BF16 and FP16");
         static_assert(Alignment > 0 && 64 % Alignment == 0, "unsupported global alignment");
-        static_assert(sizeof(T) == 2, "BF16 element size contract");
+        static_assert(sizeof(T) == 2, "16-bit element size contract");
 #if defined(__HIP_DEVICE_COMPILE__)
         static_assert(CK_TILE_ENABLE_TDM_FEATURE,
                       "the page tile writer requires the gfx125 tensor data mover");

@@ -35,9 +35,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                       BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D);
     static_assert(Problem::kPadSeqLenQ && Problem::kPadSeqLenK);
     static_assert(!Problem::kPadHeadDimQ && !Problem::kPadHeadDimV);
-    static_assert(std::is_same_v<typename Base::QDataType, bf16_t> &&
-                  std::is_same_v<typename Base::KDataType, bf16_t> &&
-                  std::is_same_v<typename Base::VDataType, bf16_t>);
+    // BF16 or FP16, the same type for Q, K and V.
+    static_assert((std::is_same_v<typename Base::QDataType, bf16_t> ||
+                   std::is_same_v<typename Base::QDataType, half_t>) &&
+                  std::is_same_v<typename Base::KDataType, typename Base::QDataType> &&
+                  std::is_same_v<typename Base::VDataType, typename Base::QDataType>);
     static_assert(Base::kM0 == 128 && Base::kN0 == 128);
     // D64/V64 and D128/V128 are the supported head dimensions; the physical WMMA
     // shape stays 16x16x32 and is not the head width.
