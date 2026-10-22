@@ -6,6 +6,8 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -161,6 +163,45 @@ TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
 
     EXPECT_TRUE(cache.get(1).has_value());
     EXPECT_FALSE(cache.get(2).has_value());
+}
+
+using Batch = std::vector<std::pair<int, std::string>>;
+
+/// Key 1's newer value comes first and gets evicted; its older duplicate must still not be
+/// admitted. A miss is acceptable.
+TEST(TestIngestorLruCache, MergeAbsentNeverAdmitsAnOlderDuplicate)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "newer"}, {3, "three"}, {2, "two"}, {1, "older"}});
+
+    const auto found = cache.get(1);
+    ASSERT_TRUE(found.has_value()) << "the newest entries are the resident ones";
+    EXPECT_EQ(*found, "newer");
+}
+
+/// A key already cached is newer than the whole batch: it may be evicted, never replaced.
+TEST(TestIngestorLruCache, MergeAbsentNeverReplacesAKeyThatWasPresent)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "in memory");
+
+    cache.mergeAbsent(Batch{{2, "two"}, {3, "three"}, {1, "from batch"}});
+
+    const auto found = cache.get(1);
+    EXPECT_TRUE(!found.has_value() || *found == "in memory");
+}
+
+TEST(TestIngestorLruCache, MergeAbsentKeepsTheEarliestBatchEntriesWhenItOverflows)
+{
+    LruCache<int, std::string> cache(2);
+
+    cache.mergeAbsent(Batch{{1, "one"}, {2, "two"}, {3, "three"}});
+
+    EXPECT_EQ(cache.size(), 2U);
+    EXPECT_TRUE(cache.get(1).has_value());
+    EXPECT_TRUE(cache.get(2).has_value());
+    EXPECT_FALSE(cache.get(3).has_value());
 }
 
 } // namespace

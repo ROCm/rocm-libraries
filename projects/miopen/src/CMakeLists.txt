@@ -507,6 +507,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/hip_math_ops.hpp
         kernels/inst_wrappers.inc
         kernels/miopen_cstdint.hpp
+        kernels/miopen_initializer_list.hpp
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
@@ -526,10 +527,12 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c32_stride1.inc
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_gfx117_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_X_X_X_metadata.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx94x_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_gfx117x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx94x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
@@ -672,8 +675,10 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c32_stride1.s
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_fp16_fp16acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_fp16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -913,6 +918,26 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
+    # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
+    # frontend configured to dlopen the backend at first use, so libMIOpen.so
+    # carries no DT_NEEDED entry for libhipdnn_backend.so and a machine without
+    # hipDNN installed still loads MIOpen. Linking hipdnn_frontend instead would
+    # make the backend a hard load-time dependency of every MIOpen consumer.
+    # In a superbuild hipDNN is already part of the build graph; its generated
+    # package config re-creates these targets as imported ones, which collides.
+    if(NOT TARGET hipdnn_frontend_dynamic)
+        find_package(hipdnn_frontend REQUIRED)
+    else()
+        # An in-tree target's headers arrive as -I, so MIOpen's -Werror set gets
+        # applied to them. An installed hipDNN arrives as -isystem and does not.
+        set_target_properties(hipdnn_frontend_dynamic PROPERTIES SYSTEM TRUE)
+    endif()
+    target_sources(MIOpen PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_conv.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
+    target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
+
     # Deliberately excludes src/include: the wrapper must see only the public
     # header and its own _impl declarations. Without that restriction a stub
     # could include an internal C++ header and re-couple the public shim to
@@ -960,9 +985,21 @@ endif()
 # sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
 # only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
 # driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+#
+# The same opt-out is needed at link time. These shared libraries link with --hip-link, and the
+# device toolchain otherwise inherits the host -fsanitize=undefined. Since LLVM #219973, clang then
+# links the host-side libclang_rt.ubsan_offload.a into the shared library. That archive references
+# sanitizer_common internals (e.g. __sanitizer::SanitizerToolName) that only the static
+# ubsan_standalone runtime of the executable defines and that the executable does not export, so
+# every consumer fails to load with "undefined symbol: _ZN11__sanitizer17SanitizerToolNameE".
+# The link option is per-target, not add_link_options: links without --hip-link (host tools)
+# would reject the unused -Xarch_device argument under -Werror.
 if(MIOPEN_DISABLE_DEVICE_UBSAN)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+    foreach(_miopen_lib IN LISTS _MIOPEN_INSTALL_TARGETS)
+        target_link_options(${_miopen_lib} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
+    endforeach()
 endif()
 
 # Add dependency on inlined rocrand header if it was created

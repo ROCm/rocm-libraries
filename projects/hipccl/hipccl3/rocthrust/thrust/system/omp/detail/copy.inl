@@ -31,7 +31,7 @@
 #include <thrust/system/detail/sequential/copy.h>
 #include <thrust/system/omp/detail/copy.h>
 
-#include <cuda/std/type_traits>
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::omp::detail
@@ -45,7 +45,7 @@ copy(execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator l
 
   using traversal = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
 
-  if constexpr (::cuda::std::is_convertible_v<traversal, random_access_traversal_tag>)
+  if constexpr (_THRUST_STD::is_convertible_v<traversal, random_access_traversal_tag>)
   {
     return system::detail::generic::copy(exec, first, last, result);
   }
@@ -61,7 +61,7 @@ OutputIterator copy_n(execution_policy<DerivedPolicy>& exec, InputIterator first
   using traversal1 = typename iterator_traversal<InputIterator>::type;
   using traversal2 = typename iterator_traversal<OutputIterator>::type;
   using traversal  = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
-  if constexpr (::cuda::std::is_convertible_v<traversal, random_access_traversal_tag>)
+  if constexpr (_THRUST_STD::is_convertible_v<traversal, random_access_traversal_tag>)
   {
     return system::detail::generic::copy_n(exec, first, n, result);
   }

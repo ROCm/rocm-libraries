@@ -25,12 +25,20 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from kernels.common.conv_abi import ArgSpec, conv_arg_names, conv_direct_arg_names
-from rocke.helpers.transforms import calculate_magic_numbers
+from kernels.common.conv_abi import (
+    STREAMK_REDUCTIONS,
+    ArgSpec,
+    conv_arg_names,
+    conv_direct_arg_names,
+)
+from rocke.helpers.spec import ceil_div
+from rocke.helpers.magic_division import calculate_magic_numbers
+from rocke.helpers.streamk import StreamKIterPartition, streamk_iter_partition
 
 __all__ = [
     "ConvArgs",
     "ConvGeometry",
+    "StreamKLaunch",
 ]
 
 
@@ -51,10 +59,6 @@ def _magic_pair(name_prefix: str, divisor: int) -> Dict[str, int]:
         f"{name_prefix}_mult": _magic_as_i32(mult),
         f"{name_prefix}_shift": shift,
     }
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
 
 
 @dataclass(frozen=True)
@@ -330,7 +334,39 @@ _LAYOUT_OF_TENSOR = {
 
 # Host state the kernel reads but that cannot be derived from the problem:
 # the caller has to hand it over, and forgetting to is an error, not a zero.
-_CALLER_SUPPLIED = ("ws_ptr", "ws_bytes", "sub_gemm_buf", "num_sub_gemms")
+_CALLER_SUPPLIED = (
+    "ws_ptr",
+    "ws_bytes",
+    "sub_gemm_buf",
+    "num_sub_gemms",
+    "sk_flags",
+    "sk_partials",
+)
+
+
+@dataclass(frozen=True)
+class StreamKLaunch:
+    """How a stream-K wgrad kernel is launched.
+
+    ``reduction`` is baked into the kernel (it picks the ABI and the fixup);
+    ``pool`` and ``persistent`` are not -- the pool is the CTA budget the host
+    partitions the MAC iterations over, and ``persistent`` must match the
+    kernel's launch mode, which decides the grid. Like the split-K degree, the
+    pool is a launch parameter, so one binary serves any pool.
+    """
+
+    pool: int
+    persistent: bool = False
+    reduction: str = "linear"
+
+    def __post_init__(self) -> None:
+        if self.pool <= 0:
+            raise ValueError(f"stream-K pool must be > 0 (got {self.pool})")
+        if self.reduction not in STREAMK_REDUCTIONS:
+            raise ValueError(
+                f"unknown stream-K reduction {self.reduction!r}; expected one "
+                f"of {STREAMK_REDUCTIONS}"
+            )
 
 
 # Which directions each algorithm has a kernel for.
@@ -441,14 +477,22 @@ class ConvArgs:
 
     # ---- the ABI ----
 
-    def arg_names(self, *, two_stage: bool = False) -> List[ArgSpec]:
-        """The ordered kernarg ABI of the kernel these args launch."""
+    def arg_names(
+        self, *, two_stage: bool = False, streamk: Optional[str] = None
+    ) -> List[ArgSpec]:
+        """The ordered kernarg ABI of the kernel these args launch.
+
+        ``streamk`` is the stream-K reduction of a stream-K wgrad kernel.
+        """
         if self.algorithm == "direct":
-            if two_stage:
-                raise ValueError("direct conv has no two-stage variant")
+            if two_stage or streamk is not None:
+                raise ValueError("direct conv has no two-stage or stream-K variant")
             return conv_direct_arg_names(direction=self.direction)
         return conv_arg_names(
-            direction=self.direction, is_3d=self.geom.is_3d, two_stage=two_stage
+            direction=self.direction,
+            is_3d=self.geom.is_3d,
+            two_stage=two_stage,
+            streamk=streamk,
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -481,12 +525,12 @@ class ConvArgs:
     @property
     def num_pid_m(self) -> int:
         """M-axis tile count; the kernel reads this as ``p_num_pid_m``."""
-        return _ceil_div(self.gemm_m, self.tile_m)
+        return ceil_div(self.gemm_m, self.tile_m)
 
     @property
     def num_pid_n(self) -> int:
         """N-axis tile count; the kernel reads this as ``p_num_pid_n``."""
-        return _ceil_div(self.gemm_n, self.tile_n)
+        return ceil_div(self.gemm_n, self.tile_n)
 
     def grid(self, split_k: int = 1) -> Tuple[int, int, int]:
         """``(gx, gy, gz)``: N tiles by M tiles by groups (times the split).
@@ -496,6 +540,52 @@ class ConvArgs:
         benchmark's grid helper.
         """
         return (self.num_pid_n, self.num_pid_m, self.geom.groups * split_k)
+
+    # ---- stream-K (implicit-GEMM wgrad only) ----
+
+    def streamk_partition(
+        self, pool: int, *, persistent: bool = False
+    ) -> StreamKIterPartition:
+        """The stream-K iteration partition of this launch over ``pool`` CTAs.
+
+        Output tiles are ``num_pid_m * groups`` by ``num_pid_n``: the conv
+        groups fold into GEMM-M per group, so a partial last M tile of one
+        group never spills into the next. A K iteration is one ``tile_k``.
+        """
+        self._require_gemm()
+        if self.direction != "wgrad":
+            raise ValueError(
+                f"stream-K is implemented for wgrad only (got {self.direction!r})"
+            )
+        return streamk_iter_partition(
+            m_tiles=self.num_pid_m * self.geom.groups,
+            n_tiles=self.num_pid_n,
+            iters_per_tile=ceil_div(self.gemm_k, self.tile_k),
+            max_active_wgs=pool,
+            persistent=persistent,
+        )
+
+    def streamk_grid(self, sk: StreamKLaunch) -> Tuple[int, int, int]:
+        """One-dimensional grid of a stream-K launch."""
+        return (
+            self.streamk_partition(sk.pool, persistent=sk.persistent).grid_size,
+            1,
+            1,
+        )
+
+    def _streamk_values(self, sk: StreamKLaunch) -> Dict[str, int]:
+        part = self.streamk_partition(sk.pool, persistent=sk.persistent)
+        return {
+            "sk_iters_per_tile": part.iters_per_tile,
+            "sk_dp_tiles": part.dp_tiles,
+            "sk_ctas": part.sk_ctas,
+            # A divisor in the kernel's owner lookup, which an all-DP launch
+            # still evaluates; the partition clamps it to >= 1 for that case.
+            "sk_iters_per_cta": part.iters_per_sk_cta,
+            "sk_extra_iters": part.extra_iters,
+            "sk_pool": part.max_active_wgs,
+            "sk_tree_rounds": part.tree_rounds,
+        }
 
     # ---- values ----
 
@@ -548,7 +638,7 @@ class ConvArgs:
             # The tail past wg_K reads zero through the descriptor's bounds,
             # which is what lets all ``split_k`` slices share one uniform
             # bound computation.
-            values["ks"] = _ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
+            values["ks"] = ceil_div(self.gemm_k, self.tile_k * split_k) * self.tile_k
             values["ks_count"] = split_k
         return values
 
@@ -607,6 +697,9 @@ class ConvArgs:
         ws_bytes: Optional[int] = None,
         sub_gemm_buf: Optional[int] = None,
         num_sub_gemms: Optional[int] = None,
+        streamk: Optional[StreamKLaunch] = None,
+        sk_flags: Optional[int] = None,
+        sk_partials: Optional[int] = None,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -621,6 +714,10 @@ class ConvArgs:
           them selects the two-stage ABI.
         * ``sub_gemm_buf`` / ``num_sub_gemms`` -- dgrad's tilde record table,
           which the kernel always reads.
+        * ``streamk`` -- a stream-K wgrad launch; selects the stream-K ABI and
+          fills its partition block. The ``workspace`` reduction takes
+          ``ws_ptr``/``ws_bytes``; ``linear``/``tree`` take ``sk_flags`` and
+          ``sk_partials`` (see ``wgrad_streamk_workspace_layout``).
 
         Anything the ABI needs but was not passed, and anything passed that
         the ABI does not have, is an error here rather than a misread on the
@@ -637,7 +734,15 @@ class ConvArgs:
                 f"implicit-GEMM fwd needs a reduction extent (Z*Y*X*cpg) below "
                 f"2**23 for its 24-bit address products; got {self.gemm_k}"
             )
-        abi = self.arg_names(two_stage=ws_ptr is not None)
+        if streamk is not None and split_k != 1:
+            raise ValueError(
+                f"stream-K partitions K itself; launch it with split_k=1 "
+                f"(got {split_k})"
+            )
+        abi = self.arg_names(
+            two_stage=ws_ptr is not None and streamk is None,
+            streamk=streamk.reduction if streamk is not None else None,
+        )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(
             zip(names[:6], (a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes))
@@ -647,10 +752,14 @@ class ConvArgs:
             "ws_bytes": (ws_bytes or 0) if ws_ptr is not None else ws_bytes,
             "sub_gemm_buf": sub_gemm_buf,
             "num_sub_gemms": num_sub_gemms,
+            "sk_flags": sk_flags,
+            "sk_partials": sk_partials,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()
         named.update(self._variant_values(split_k))
+        if streamk is not None:
+            named.update(self._streamk_values(streamk))
         for name in names[6:]:
             values[name] = (
                 supplied.pop(name) if name in supplied else self._resolve(name, named)

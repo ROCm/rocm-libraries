@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 """The validator's two opt-in regressions: the generate -> validate round trip and
-the discriminating mutation fixtures under ``tests/fixtures/validate_descriptors/``.
+the discriminating mutation and role fixtures under
+``tests/fixtures/validate_descriptors/``.
 
 Both need ``hipdnn_validate_descriptors``, a C++ binary this Python suite does not
 build -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` -- so they skip
@@ -56,13 +57,38 @@ MALFORMED_FIXTURES = [
     ("undeclared_knob", "tile_count"),
 ]
 
+# Each role fixture is valid/ with one role-bound UHD changed; the engine loads in every
+# case. Expected: exit status, then (role, success) for every model_checks entry in report
+# order. See the fixtures' README for the runtime admission each one mirrors.
+ROLE_FIXTURES = [
+    ("l2_static_order", 0, [("sort_kernel_catalog", True)]),
+    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)]),
+    (
+        "l1_static_order",
+        1,
+        [("sort_kernel_catalog", True), ("predict_engine", False)],
+    ),
+    (
+        "l1_native",
+        0,
+        [("sort_kernel_catalog", True), ("predict_engine", True)],
+    ),
+]
 
-def _run_validator(validator, root):
+
+def _run_validator(validator, root, *extra):
     """Validate a fixture bundle, always naming the engine it should expose: malformed
     bundles fail by making the loader DROP the engine, leaving no error behind, and
     ``--expect-engine`` turns that silent drop into a non-zero exit."""
     result = subprocess.run(
-        [str(validator), str(root), "--expect-engine", FIXTURE_ENGINE, "--json"],
+        [
+            str(validator),
+            str(root),
+            "--expect-engine",
+            FIXTURE_ENGINE,
+            "--json",
+            *extra,
+        ],
         capture_output=True,
         text=True,
     )
@@ -101,6 +127,51 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
         f"be failing for a reason other than its one deliberate defect. Diagnostics: "
         f"{diagnostics}"
     )
+
+
+@pytest.mark.parametrize(
+    "name,exit_code,expected_checks",
+    ROLE_FIXTURES,
+    ids=[name for name, _, _ in ROLE_FIXTURES],
+)
+def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
+    result, payload = _run_validator(validator, FIXTURE_ROOT / name)
+
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert payload["success"] is (exit_code == 0)
+    assert FIXTURE_ENGINE in payload["engines"]
+    assert [
+        (check["role"], check["success"]) for check in payload["model_checks"]
+    ] == expected_checks, payload["model_checks"]
+
+
+@pytest.mark.parametrize(
+    "bindings,exit_code,rows",
+    [({"graph.batch": 8}, 0, 2), ({}, 1, None)],
+    ids=["bound", "unbound"],
+)
+def test_a_covering_sample_requires_every_feature_to_extract(
+    validator, tmp_path, bindings, exit_code, rows
+):
+    """Extraction is skipped only when no sample covers the engine. Once one does, every
+    feature must extract -- one row per candidate kernel -- and a sample leaving a
+    feature unbound fails the run instead of being skipped."""
+    samples = tmp_path / "samples.json"
+    samples.write_text(
+        json.dumps([{"engine": FIXTURE_ENGINE, "arch": "gfx942", "bindings": bindings}])
+    )
+    result, payload = _run_validator(
+        validator,
+        FIXTURE_ROOT / "l2_dynamic_features",
+        "--feature-samples",
+        str(samples),
+    )
+
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    [check] = payload["model_checks"]
+    assert check["success"] is (exit_code == 0), check
+    assert check.get("feature_rows_checked") == rows, check
+    assert "feature_extraction_skipped" not in check, check
 
 
 def test_scale_add_round_trip_validates_clean(

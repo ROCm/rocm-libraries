@@ -320,6 +320,7 @@ def _run_one(
     tile_m: "int | None" = None,
     tile_n: "int | None" = None,
     unroll_k: bool = False,
+    prefetch_addr: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -349,12 +350,16 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
-    if spec is not None and (group_merge > 1 or tile_m or tile_n or unroll_k):
+    if spec is not None and (
+        group_merge > 1 or tile_m or tile_n or unroll_k or prefetch_addr
+    ):
         from dataclasses import replace as _dc_replace
 
         _over = {}
         if unroll_k:
             _over["unroll_k"] = True
+        if prefetch_addr:
+            _over["prefetch_addr"] = True
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -1147,26 +1152,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
             if prev is not None:
                 os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
 
-    def test_dispatch_uses_the_same_policy(self):
-        """Dispatch must not carry its own copy of the gate.
-
-        The divergent copy compared a module constant against a tuple, which is
-        constant-true regardless of the request, and never checked wave_size.
-        """
-        try:
-            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
-        except ImportError:
-            self.skipTest("library.dispatch not importable in this environment")
-
-        class _Req:
-            def __init__(self, arch, dtype):
-                self.arch, self.dtype = arch, dtype
-
-        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
-
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""
         from kernels.common._conv_implicit_gemm_common import ConvProblem
@@ -1368,6 +1353,7 @@ def _check_two_stage(
     group_merge: int = 1,
     tile_m: "int | None" = None,
     tile_n: "int | None" = None,
+    prefetch_addr: bool = False,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1415,6 +1401,8 @@ def _check_two_stage(
         ts_spec = _dc_replace(ts_spec, tile_n=tile_n)
     if group_merge > 1:
         ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
+    if prefetch_addr:
+        ts_spec = _dc_replace(ts_spec, prefetch_addr=True)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -2327,6 +2315,137 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             group_merge=8,
         )
         _assert_case_ran(self, ok, why)
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradPrefetchAddrNumerics(unittest.TestCase):
+    """GPU numerics for ``prefetch_addr`` (carried K-loop byte offsets).
+
+    The flag replaces the synchronous K loop of every pipeline that shares it,
+    so the cases cover each pipeline, both LDS layouts, the split-K atomic and
+    two-stage epilogues, grouped and group-merged problems. Most shapes in
+    ``_SHAPES`` have a reduction that is not a multiple of tile_k, so the last
+    tile's out-of-range rows exercise the carried sentinel offsets too.
+    """
+
+    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+
+    def _run(self, shape, dtype, pipeline, epilogue, **kw):
+        ok, why = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_addr=True, **kw
+        )
+        _assert_case_ran(self, ok, why)
+
+    def test_pipelines(self):
+        for pipeline in _PIPELINES:
+            for kouter in self._KOUTER_AXIS:
+                for dtype in _DTYPES:
+                    shapes = _SHAPES if pipeline == "mem" else _SHAPES[:3]
+                    for shape in shapes:
+                        with self.subTest(
+                            pipeline=pipeline,
+                            kouter=kouter,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape, dtype, pipeline, "cshuffle", lds_k_outer=kouter
+                            )
+
+    def test_atom_16x16x16(self):
+        for kouter in self._KOUTER_AXIS:
+            for shape in _SHAPES[:3]:
+                with self.subTest(kouter=kouter, shape=shape.id):
+                    self._run(
+                        shape,
+                        "bf16",
+                        "compv4",
+                        "cshuffle",
+                        lds_k_outer=kouter,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                    )
+
+    def test_split_k_atomic(self):
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv4"):
+                for shape in (_SHAPES[0], _SHAPES[2]):
+                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
+                        self._run(
+                            shape,
+                            "bf16",
+                            pipeline,
+                            "cshuffle",
+                            split_k=4,
+                            lds_k_outer=kouter,
+                        )
+
+    def test_two_stage(self):
+        for kouter in self._KOUTER_AXIS:
+            for shape in (_SHAPES[0], _SHAPES[2]):
+                with self.subTest(kouter=kouter, shape=shape.id):
+                    ok, why = _check_two_stage(
+                        shape,
+                        "bf16",
+                        "mem",
+                        split_k=4,
+                        lds_k_outer=kouter,
+                        seed=90,
+                        prefetch_addr=True,
+                    )
+                    _assert_case_ran(self, ok, why)
+
+    def test_grouped(self):
+        shape = _Shape(
+            "g4_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        for kouter in self._KOUTER_AXIS:
+            with self.subTest(kouter=kouter):
+                self._run(shape, "bf16", "mem", "cshuffle", lds_k_outer=kouter)
+
+    def test_group_merge(self):
+        dw = TestWgradGroupMergeNumerics._DW
+        kouter = TestWgradGroupMergeNumerics._KOUTER
+        for gm in (4, 8):
+            with self.subTest(group_merge=gm, split_k=1):
+                self._run(
+                    dw,
+                    "bf16",
+                    "mem",
+                    "default",
+                    lds_k_outer=kouter,
+                    warp_tile_mn=16,
+                    tile_k=32,
+                    tile_m=32,
+                    tile_n=128,
+                    group_merge=gm,
+                )
+            with self.subTest(group_merge=gm, split_k=4):
+                ok, why = _check_two_stage(
+                    dw,
+                    "bf16",
+                    "mem",
+                    groups=64,
+                    split_k=4,
+                    group_merge=gm,
+                    tile_m=32,
+                    tile_n=128,
+                    warp_tile_mn=16,
+                    tile_k=32,
+                    seed=95 + gm,
+                    prefetch_addr=True,
+                )
+                _assert_case_ran(self, ok, why)
 
 
 if __name__ == "__main__":
