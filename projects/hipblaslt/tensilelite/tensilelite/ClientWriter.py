@@ -728,6 +728,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         for key,value in dataInitParams(problemType):
             param(key, value)
+        if globalParameters["MXDataGenerator"] is not None:
+            param("mx-data-generator", int(globalParameters["MXDataGenerator"]))
 
         param("c-equal-d",                globalParameters["CEqualD"])
 

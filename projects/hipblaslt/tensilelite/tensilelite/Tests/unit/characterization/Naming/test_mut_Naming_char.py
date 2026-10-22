@@ -7,9 +7,9 @@ from copy import deepcopy
 
 import pytest
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.SolutionStructs.Problem import ProblemType
-import Tensile.SolutionStructs.Naming as N
+from tensilelite.Common.Constants import MAX_FILENAME_LENGTH
+from tensilelite.SolutionStructs.Problem import ProblemType
+import tensilelite.SolutionStructs.Naming as N
 
 pytestmark = pytest.mark.unit
 

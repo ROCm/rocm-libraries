@@ -326,8 +326,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     struct KernelFor
     {
-        // CompTDMProducerConsumer stays at the default BlockWarps [2, 2, 1] (4 consumer + 2
-        // producer waves).
+        // CompTDMProducerConsumer stays at its BlockWarps default of [2, 2, 1] (4 consumer +
+        // 2 producer waves).
         //
         // [4, 4, 1] was tried as the default and REVERTED: it passes SingleTile (64x64x32 and
         // 128x128x64) on hardware and the host ring replay is sound at ring_spec<3, 2, 16> for
@@ -338,8 +338,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
         //
         // So the 16-consumer-wave path is NOT merely untuned, it is unsafe at large shapes, and
         // the cause is unknown. Do not restore it as the default, and do not add a pinned
-        // [4, 4, 1] type-list entry, until the large-shape hang is root-caused -- a gtest entry
-        // that hangs takes the whole device with it. The hang was observed while
+        // [4, 4, 1] BlockWarps type-list entry, until the large-shape hang is root-caused -- a
+        // gtest entry that hangs takes the whole device with it. The hang was observed while
         // named_barrier.hpp was missing its release/acquire fences; those are restored now, so
         // re-testing [4, 4, 1] against the fenced build is the first step in root-causing it.
         static constexpr ck_tile::index_t M_Warp = BlockWarps::at(ck_tile::number<0>{});
