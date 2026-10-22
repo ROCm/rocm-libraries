@@ -259,3 +259,81 @@ reduction:
       - {name: num_segments}
     ignored: [num_seqs]
   aot_budget_per_arch: 1000
+
+# The Python/C++ launch-contract restatement, per surface (tools/launch_surface.py).
+# C++ mirrors are relative to the repo root; python_source to rocke/library.
+launch_surface:
+  - name: grid
+    python_source: kernels/common/attention_unified.py:_get_3d_pipeline
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dGeometry
+    kmd_fields: [num_segments, num_query_heads, num_kv_heads]
+    guard: >
+      gfx942AttentionUnified3dGeometry() throws HipdnnPluginException for a
+      non-positive batch, head count or segment count. Segment grid is
+      (B, Hkv, num_segments) from the graph's B/Hkv and the candidate's own
+      num_segments (decode grid); reduce grid is (B, Hq, 1).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
+
+  - name: block
+    python_source: kernels/common/attention_unified.py:_get_3d_pipeline
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dGeometry
+    kmd_fields: []
+    guard: >
+      Both launches are one wave64 CTA (GFX942_UNIFIED_3D_WAVE_LANES = 64), as
+      _get_3d_pipeline sets off gfx1250.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
+
+  - name: workspace
+    python_source: kernels/common/attention_unified.py:_attention_3d_workspace_specs
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942AttentionUnified3dWorkspace
+    kmd_fields: [num_segments, head_size, num_query_heads]
+    guard: >
+      f32 segm_output[B,Hq,nseg,D], segm_max[B,Hq,nseg], segm_expsum[B,Hq,nseg]
+      plus int32 seqused_k[B] and cu_seqlens_q[B+1], each 256-byte aligned;
+      workspaceBytes() sizes it with the candidate's num_segments, and
+      launch() refuses a null workspace. The segment kernel writes every slot
+      and the reduce always runs, so the unzeroed hipDNN workspace is safe.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dMatchers.cpp:WorkspaceIsTheGeometryHeadersLayoutForTheCandidate
+
+  - name: split_rule
+    python_source: kernels/common/attention_unified.py:_num_segments
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp:gfx942SplitRuleSegments
+    kmd_fields: [num_segments, block_size]
+    guard: >
+      Perf only: scoreKernel() ranks block_size 16 first, then num_segments
+      nearest gfx942SplitRuleSegments(B, Hq, Hkv, D, 16, Skv, live CUs or 120),
+      ties to fewer segments. It never removes a candidate (any num_segments
+      is correct). The restatement holds only for sliding_window 0 and
+      target_ctas 0, which graph_match guarantees by refusing every window.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dScorer.cpp
+
+  - name: admission
+    python_source: dispatch/attention/strided_decode.py:make_candidate
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:gfx942AttentionUnified3dGraphMatches
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
+    guard: >
+      graph_match restates make_candidate().admits() (Sq 1; D 64/128/256;
+      fp16/bf16; GQA ratio 1/2/4/8/16; not top-left causal) plus the strided
+      binding's tensor contract (contiguous [B,Hq,1,D] Q/O; KvTensorLayout's
+      K/V rules), and refuses in v1 every window, stats/LSE, attn-mask,
+      dropout, sinks, page tables, seq_len tensors, FP8 scales, ALiBi and
+      padding masks. kernelMatches() compares dtype, head_size,
+      num_query_heads and num_kv_heads exactly and requires sliding_window 0;
+      never batch or Skv. A record missing a field, with block_size outside
+      {16,32,64}, num_segments <= 0, or a tile_size_override other than
+      rocKE's gfx942 rule is declined. The admission table is generated from
+      rocKE and kept current by a quick pytest drift guard.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dAdmission.cpp
+
+  - name: kernargs
+    python_source: kernels/common/attention_unified.py:_3d_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:segmentSignature
+    kmd_fields: []
+    guard: >
+      segment = _3d_signature(dtype, strided_kv=True), 19 base + 8 strided-KV
+      arguments; reduce = _reduce_signature(dtype) without LSE. prepare()
+      compares both launches' recorded lists (names included) before loading
+      either. launch() passes null sink/block-table/ALiBi/QQ-bias pointers,
+      k_scale = v_scale = 1, softcap 0, num_seqs = B, block_table_stride 0,
+      and KvTensorLayout.arguments() byte strides and per-head span.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dSignature.cpp

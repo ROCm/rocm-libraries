@@ -56,6 +56,6 @@ the selection's `authored_subpath`.
 - Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc`. See
   `../../README.md`.
 - The native symbols (`hipkernel.gfx942_attention_unified3d.*`) are registered in
-  `packs/Gfx942AttentionUnified3dNative.cpp`. Until that native pack lands, the loader
-  refuses this engine at provider load.
+  `packs/Gfx942AttentionUnified3dNative.cpp`, which launches `segment` then `reduce` on the
+  handle's stream. Its census is `TestGfx942AttentionUnified3dPacks`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
