@@ -1,0 +1,302 @@
+# Packaged-dialect (`variants`) reference config for the hipkernel:Gfx950AttentionUnified3D
+# catalog. The catalog's source of truth is the rocKE dispatcher registry, expanded from
+# configs/gfx950_attention_unified_3d.engine.yaml by tools/registry_enumerator.py, then
+# compacted with tools/factorise_config.py:
+#     python tools/registry_enumerator.py --manifest configs/gfx950_attention_unified_3d.engine.yaml --out <scratch>/config.yaml
+#     python tools/factorise_config.py --config <scratch>/config.yaml --out configs/gfx950_attention_unified_3d.yaml \
+#         --knobs num_segments --vocabulary 'dtype:bf16=BF16,fp16=FP16'
+#
+# The descriptors under
+# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_unified_3d/
+# and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified3DPacks.cpp
+# are generated from this file. Generation mints fresh UUIDs on every run, so after the
+# first generation never copy a regenerated descriptor directory over the live one: render
+# into an empty scratch directory and splice only the additions
+# (tools/splice_additions.py refuses, writing nothing, if a retained entry changed).
+# tests/test_registry_regeneration.py gates this file against
+# configs/gfx950_attention_unified_3d.engine.yaml. The generated
+# packs/Gfx950AttentionUnified3DNative.cpp and tests/TestGfx950AttentionUnified3DMatchers.cpp
+# are stubs; the provider's copies are hand-maintained and must not be overwritten.
+#
+# The generated gfx950_attention_unified_3d.kdp.json is a DVC output: copy it to
+# descriptors/rocKE/gfx950_attention_unified_3d/artifacts/ and run `dvc add artifacts`,
+# not `git add`. See the descriptors README ("Large rocKE files live in DVC").
+#
+# Decode only (seqlen_q 1, decode grid). Two registry candidates, one pack. head_size 64 and
+# 128, bf16 and fp16: 16 KV splits, a one-page KV tile. head_size 256, bf16: the split
+# rule's segment count at the reference shape (batch 1, 4096 keys). Every kernel carries the
+# reduce kernel as its companion, derived by the pack's `companions` rule. Masks are the two
+# causal kinds; a NO_MASK decode graph is the bottom-right causal computation.
+#
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_unified_3d
+engine:
+  name: hipkernel:Gfx950AttentionUnified3D
+  slug: gfx950_attention_unified_3d
+  census_name_symbol: GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - num_segments
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: block_size
+  type: int
+  default_value: 16
+- name: mask_type
+  type: int
+  default_value: 2
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: num_segments
+  type: int
+  default_value: 16
+- name: use_decode_grid
+  type: int
+  default_value: 1
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - block_size
+  - mask_type
+  - sliding_window
+  - num_segments
+  - use_decode_grid
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    block_size:
+      field: block_size
+    mask_type:
+      method: mask_type
+    sliding_window:
+      field: sliding_window
+    num_segments:
+      field: num_segments
+    use_decode_grid:
+      field: use_decode_grid
+kernel_source_kind: rocke
+workspace_policy: derived
+reduction:
+  fields:
+    feature:
+    - dtype
+    - head_size
+    - num_query_heads
+    - num_kv_heads
+    - mask_type
+    - sliding_window
+    - block_size
+    - use_decode_grid
+    performance:
+    - name: num_segments
+    - name: waves_per_eu
+    ignored: []
+  aot_budget_per_arch: 400
+packs:
+- name: gfx950_attention_unified_3d
+  arch:
+  - gfx950
+  companions:
+  - source: kernels/gfx950/attention_tiled_3d.py
+    builder: build_unified_attention_reduce_tiled
+    spec_from:
+      head_size: head_size
+      num_query_heads: num_query_heads
+      num_kv_heads: num_kv_heads
+      dtype: dtype
+      num_segments: num_segments
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx950/attention_tiled_3d.py
+    builder: build_unified_attention_3d_tiled
+  variants:
+  - name: attention_unified_{tag}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_seg16.gfx950
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, num_seqs, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load, causal_top_left, right_bound, use_i64_kv_addr]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: stream, right_bound: 0, use_i64_kv_addr: false}
+    knob_sets:
+      knobs0:
+      - {num_segments: 16, tag: 3d.bf16, default: true}
+      knobs1:
+      - {num_segments: 16, tag: 3d.fp16, default: true}
+    shapes:
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, use_kv_lds_swizzle: false, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+  - name: attention_unified_3d.bf16_d256_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_{tag}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_segments, num_seqs, use_decode_grid, kv_cache_policy, use_kv_lds_swizzle, use_wave_page_id_load, causal_top_left, right_bound, use_i64_kv_addr]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 256, block_size: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: false, right_bound: 0, use_i64_kv_addr: false}
+    knob_sets:
+      knobs0:
+      - {num_segments: 128, tag: 'seg{md_num_segments}.gfx950', default: true}
+      knobs1:
+      - {num_segments: 64, tag: 'seg{md_num_segments}.gfx950', default: true}
+      knobs2:
+      - {num_segments: 32, tag: 'seg{md_num_segments}.gfx950', default: true}
+    shapes:
+    - {num_query_heads: 8, num_kv_heads: 1, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 8, num_kv_heads: 1, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 8, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {num_query_heads: 8, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 2, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 2, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 4, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 4, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 16, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 16, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 4, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 4, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 32, use_wave_page_id_load: true, causal_top_left: true, knobs: knobs2, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 32, use_wave_page_id_load: true, causal_top_left: false, knobs: knobs2, resolved: {mask_type: 2}}
+    - {num_query_heads: 64, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: true, knobs: knobs1, resolved: {mask_type: 1}}
+    - {num_query_heads: 64, num_kv_heads: 8, use_wave_page_id_load: false, causal_top_left: false, knobs: knobs1, resolved: {mask_type: 2}}
