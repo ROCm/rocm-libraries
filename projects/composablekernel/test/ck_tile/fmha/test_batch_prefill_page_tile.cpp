@@ -61,6 +61,11 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP
 #define CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP 0
 #endif
+// 1: elementwise bias [Hq, total_q, max seqlen_k]; 2: ALiBi with per-head slopes. Every forward
+// test runs with it.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_BIAS
+#define CK_TILE_FMHA_PAGE_TILE_TEST_BIAS 0
+#endif
 
 namespace {
 
@@ -80,6 +85,11 @@ constexpr bool kSink    = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
 constexpr bool kSoftcap = CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP != 0;
 // Scaled scores of the random inputs are about N(0, 1), so a cap of 1.5 bends most of them.
 constexpr float kSoftcapValue = 1.5f;
+constexpr int kBias           = CK_TILE_FMHA_PAGE_TILE_TEST_BIAS;
+static_assert(kBias >= 0 && kBias <= 2);
+constexpr auto kBiasEnum = kBias == 1   ? ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS
+                           : kBias == 2 ? ck_tile::BlockAttentionBiasEnum::ALIBI
+                                        : ck_tile::BlockAttentionBiasEnum::NO_BIAS;
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
@@ -103,7 +113,7 @@ struct Model
             false,
             false,
             kSoftcap,
-            ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+            kBiasEnum,
             false,
             kLse,
             false,
@@ -159,7 +169,10 @@ struct ModelNames
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
                (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "") +
-               (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "") + (kSoftcap ? "Softcap" : "");
+               (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "") + (kSoftcap ? "Softcap" : "") +
+               (kBias == 1   ? "Bias"
+                : kBias == 2 ? "Alibi"
+                             : "");
     }
 };
 
@@ -177,6 +190,7 @@ struct Pointers
     const void* kv_last_page_lens = nullptr;
     void* lse                     = nullptr;
     const void* sink              = nullptr; // per-head sink logits [Hq]
+    const void* bias              = nullptr; // elementwise bias, or the ALiBi slopes [Hq]
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
@@ -263,11 +277,16 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.nhead_stride_lse         = l.seqstart_q.back(); // LSE is [Hq, total_q]
     a.batch_stride_lse         = 0;
     a.logits_soft_cap          = kSoftcap ? kSoftcapValue : 0.f;
-    a.sink_size                = M::kCausal ? w.sink : 0;
-    a.sink_ptr                 = w.sink_logits ? d.sink : nullptr;
-    a.window_size_left         = M::kCausal ? w.left : -1;
-    a.window_size_right        = M::kCausal ? w.right : -1;
-    a.mask_type                = static_cast<int>(
+    // Elementwise bias [Hq, total_q, max_k]; ALiBi slopes [Hq] shared by every batch.
+    a.bias_ptr          = d.bias;
+    a.stride_bias       = kBias == 1 ? max_k : 0;
+    a.nhead_stride_bias = kBias == 1 ? l.seqstart_q.back() * max_k : 0;
+    a.batch_stride_bias = 0;
+    a.sink_size         = M::kCausal ? w.sink : 0;
+    a.sink_ptr          = w.sink_logits ? d.sink : nullptr;
+    a.window_size_left  = M::kCausal ? w.left : -1;
+    a.window_size_right = M::kCausal ? w.right : -1;
+    a.mask_type         = static_cast<int>(
         !M::kCausal ? mask_enum::no_mask
                     : (w.top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
     return a;
@@ -330,7 +349,9 @@ TYPED_TEST(PageTileContract, CheckLaunch)
                      fake(0x60000),
                      fake(0x80000),
                      fake(0x90000),
-                     fake(0xa0000)};
+                     fake(0xa0000),
+                     nullptr,
+                     fake(0xb0000)};
     const auto [base, grids] =
         fmha_batch_prefill_create_kargs_and_grids<Kernel>(MakeArgs<TypeParam>(l, d));
     const index_t need = Kernel::GetLaunchDynamicSmemSize();
@@ -428,6 +449,14 @@ TYPED_TEST(PageTileContract, CheckLaunch)
             expect_refused(
                 "sink tokens need a sink instance", need, [](Kargs& k) { k.sink_size = 4; });
     }
+    if constexpr(kBias == 1)
+        expect_refused("an elementwise-bias instance needs bias_ptr", need, [](Kargs& k) {
+            k.bias_ptr = nullptr;
+        });
+    if constexpr(kBias == 2)
+        expect_refused("an ALiBi instance needs the slopes", need, [](Kargs& k) {
+            k.alibi_slope_ptr = nullptr;
+        });
     if constexpr(kSink)
         EXPECT_EQ(refusal(need, [&](Kargs& k) { k.sink_ptr = fake(0xa0000); }), "");
     else
@@ -482,6 +511,10 @@ struct HostProblem
     std::vector<Data> q, k, v;
     std::vector<float> q_float;
     std::vector<float> sink_logits; // per query head, in the scaled score domain
+    // Elementwise bias [Hq, total_q, bias_stride] (kBias == 1) and ALiBi slopes [Hq] (kBias == 2).
+    std::vector<Data> bias;
+    int bias_stride = 0;
+    std::vector<float> alibi_slopes;
 };
 
 // Values of V. Marker: V is zero except for the keys of one logical page (the middle page of
@@ -633,6 +666,16 @@ HostProblem MakeProblem(const Case& s,
         return out;
     };
     h.q_float = decode(h.q);
+    if constexpr(kBias == 1)
+    {
+        h.bias_stride = *std::max_element(l.seqlen_k.begin(), l.seqlen_k.end());
+        std::uniform_real_distribution<float> bias_value(-2.0f, 2.0f);
+        h.bias.resize(static_cast<std::size_t>(l.q_heads) * l.seqstart_q.back() * h.bias_stride);
+        for(auto& x : h.bias)
+            x = ck_tile::type_convert<Data>(bias_value(rng));
+    }
+    if constexpr(kBias == 2)
+        h.alibi_slopes = ck_tile::get_alibi_slopes<float>(l.q_heads);
     // Sink logits around the score range, with one head at -inf (that head has no sink).
     for(int head = 0; head < h.layout.q_heads; ++head)
         h.sink_logits.push_back(head % 4 == 3 ? -std::numeric_limits<float>::infinity()
@@ -643,7 +686,7 @@ HostProblem MakeProblem(const Case& s,
 struct DeviceProblem
 {
     ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
-        lse, sink;
+        lse, sink, bias;
 
     // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
     static const std::vector<int32_t>& Pages(const Layout& l)
@@ -674,8 +717,14 @@ struct DeviceProblem
           lse(std::max<std::size_t>(
                   static_cast<std::size_t>(h.layout.q_heads) * h.layout.seqstart_q.back(), 1) *
               sizeof(float)),
-          sink(std::max<std::size_t>(h.sink_logits.size(), 1) * sizeof(float))
+          sink(std::max<std::size_t>(h.sink_logits.size(), 1) * sizeof(float)),
+          bias(std::max<std::size_t>(
+              std::max(h.bias.size() * sizeof(Data), h.alibi_slopes.size() * sizeof(float)), 4))
     {
+        if(!h.bias.empty())
+            bias.ToDevice(h.bias.data());
+        if(!h.alibi_slopes.empty())
+            bias.ToDevice(h.alibi_slopes.data());
         q.ToDevice(h.q.data());
         if(!h.sink_logits.empty())
             sink.ToDevice(h.sink_logits.data());
@@ -712,7 +761,8 @@ struct DeviceProblem
                 kv_indptr.GetDeviceBuffer(),
                 kv_last_page_lens.GetDeviceBuffer(),
                 lse.GetDeviceBuffer(),
-                sink.GetDeviceBuffer()};
+                sink.GetDeviceBuffer(),
+                bias.GetDeviceBuffer()};
     }
 };
 
@@ -802,6 +852,35 @@ reference::Metrics CompareWithReference(const HostProblem& h,
             s.score_transform = [](std::size_t, std::size_t, std::size_t, float x) {
                 return kSoftcapValue * std::tanh(x / kSoftcapValue);
             };
+        if constexpr(kBias == 1)
+        {
+            const Data* bias       = h.bias.data();
+            const std::size_t rows = static_cast<std::size_t>(l.seqstart_q.back());
+            const std::size_t q0   = static_cast<std::size_t>(l.seqstart_q[b]);
+            const std::size_t ld   = static_cast<std::size_t>(h.bias_stride);
+            s.score_transform      = [bias, rows, q0, ld](
+                                    std::size_t head, std::size_t query, std::size_t key, float x) {
+                return x +
+                       ck_tile::type_convert<float>(bias[(head * rows + q0 + query) * ld + key]);
+            };
+        }
+        if constexpr(kBias == 2)
+        {
+            // CK's ALiBi: + slope * key under the causal window (vertical mode); otherwise
+            // - slope * |diagonal - key| from the mask corner (bottom-right without a mask).
+            const auto slopes    = h.alibi_slopes;
+            const int64_t offset = causal && window.top_left ? 0 : k_len - q_len;
+            const bool vertical  = causal && window.left < 0 && window.right == 0;
+            s.score_transform    = [slopes, offset, vertical](
+                                    std::size_t head, std::size_t query, std::size_t key, float x) {
+                const float slope = slopes[head];
+                if(vertical)
+                    return x + slope * static_cast<float>(key);
+                const int64_t distance =
+                    static_cast<int64_t>(query) + offset - static_cast<int64_t>(key);
+                return x - slope * static_cast<float>(distance < 0 ? -distance : distance);
+            };
+        }
         if(causal)
         {
             // Key k is visible to query q when q + offset - left <= k <= q + offset + right.
@@ -1146,6 +1225,10 @@ TYPED_TEST(PageTileForward, LargePool)
 // sampled set of rows is also checked against the reference.
 TYPED_TEST(PageTileForward, Deterministic)
 {
+    // The bias would be [32, 8192, 32768] (17 GB); the bias does not change the page addressing or
+    // the TDM timing this test exercises, which the unbiased models cover.
+    if constexpr(kBias == 1)
+        GTEST_SKIP() << "elementwise bias: covered by the unbiased models";
     const Case shape{"race", 32, 8, {8192}, {32768}};
     const auto h =
         MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, TypeParam::kCausal, 99);

@@ -24,11 +24,11 @@ namespace ck_tile {
 // pools, D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
 // bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
 // optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional tanh logits soft
-// cap, optional LSE output, no dropout or bias. Build each instance in its own translation unit
-// with the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
-// -fgpu-flush-denormals-to-zero): the launch contract below rests on measurements of that generated
-// code, and the generated code was observed to change when several instances share a translation
-// unit.
+// cap (no bias), optional elementwise bias or ALiBi, optional LSE output, no dropout. Build each
+// instance in its own translation unit with the scheduled-TDM FMHA flags (-mllvm
+// -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the launch contract below rests on
+// measurements of that generated code, and the generated code was observed to change when several
+// instances share a translation unit.
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaBatchPrefillQrTdmPageTileKernel
     : private FmhaBatchPrefillWithPagedKVCacheKernel<FmhaPipeline_, EpiloguePipeline_>
@@ -44,6 +44,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     using ODataType           = typename FmhaPipeline::ODataType;
     using SaccDataType        = typename FmhaPipeline::SaccDataType;
     using LSEDataType         = typename FmhaPipeline::LSEDataType;
+    using BiasDataType        = remove_cvref_t<typename FmhaPipeline::BiasDataType>;
     using FmhaMask            = typename FmhaPipeline::FmhaMask;
     using Policy              = typename FmhaPipeline::Policy;
 
@@ -59,6 +60,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static constexpr bool kHasSink = FmhaPipeline::kHasSink;
     // Tanh logits soft cap (no bias), as in the existing batch prefill kernel.
     static constexpr bool kHasLogitsSoftCap = FmhaPipeline::kHasLogitsSoftCap;
+    // Elementwise bias [nhead, total_q, stride_bias] or ALiBi slopes, as in the existing kernel.
+    static constexpr auto BiasEnum = FmhaPipeline::BiasEnum;
     static_assert(!kHasSink || FmhaMask::IsMasking, "sink tokens need a masked instance");
     static constexpr auto kKVLookupTable = Base::kKVLookupTable;
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
@@ -218,6 +221,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             require(kargs.sink_ptr == nullptr, "sink logits need a sink instance");
         if constexpr(kHasLogitsSoftCap)
             require(kargs.logits_soft_cap > 0.f, "a soft-cap instance needs logits_soft_cap > 0");
+        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            require(kargs.bias_ptr != nullptr && kargs.stride_bias >= kargs.seqlen_k,
+                    "an elementwise-bias instance needs bias_ptr and stride_bias >= seqlen_k");
+        if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            require(kargs.alibi_slope_ptr != nullptr, "an ALiBi instance needs the slopes");
     }
 
     // Checked launch path: owns the dynamic LDS request, so a launcher cannot issue a value
@@ -359,8 +367,31 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             {},
             {0, 0}};
 
-        auto bias_window = make_null_tile_window(
-            make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{}));
+        // Elementwise bias [nhead, total_q, stride_bias], bounded by seqlen_q x seqlen_k.
+        auto bias_window = [&]() {
+            constexpr auto bias_lengths =
+                make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
+                const BiasDataType* bias_ptr =
+                    reinterpret_cast<const BiasDataType*>(kargs.bias_ptr) +
+                    static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_bias +
+                    query_start * kargs.stride_bias;
+                const auto bias_naive = make_naive_tensor_view<address_space_enum::global>(
+                    bias_ptr,
+                    make_tuple(kargs.seqlen_q, kargs.seqlen_k),
+                    make_tuple(kargs.stride_bias, 1),
+                    number<FmhaPipeline::kAlignmentBias>{},
+                    number<1>{});
+                const auto bias_view =
+                    pad_tensor_view(bias_naive, bias_lengths, sequence<true, true>{});
+                return make_tile_window(bias_view, bias_lengths, {i_m0, 0});
+            }
+            else
+            {
+                return make_null_tile_window(bias_lengths);
+            }
+        }();
         // LSE [nhead, total_q] (group mode), one value per query row, bounded by seqlen_q like O.
         auto lse_window = [&]() {
             constexpr auto lse_lengths = make_tuple(number<FmhaPipeline::kM0>{});
@@ -408,13 +439,42 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         }();
 
         // Per-head sink logit in the score domain, as in the existing batch prefill kernel.
+        // With bias the core seeds the row max with sink_v * log2(e), so the logit enters as is.
         const float sink_value = [&]() {
-            if constexpr(kHasSink)
+            if constexpr(kHasSink && BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
+                return kargs.sink_ptr != nullptr
+                           ? *(static_cast<const float*>(kargs.sink_ptr) + i_nhead)
+                           : -numeric<float>::infinity();
+            else if constexpr(kHasSink)
                 return kargs.sink_ptr != nullptr
                            ? *(static_cast<const float*>(kargs.sink_ptr) + i_nhead) / kargs.scale_s
                            : -numeric<float>::infinity();
             else
                 return -numeric<float>::infinity();
+        }();
+        // ALiBi with the slope folded into the exp2 domain, as in the existing kernel.
+        const auto position_encoding = [&]() {
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
+                const SaccDataType slope =
+                    *(reinterpret_cast<const SaccDataType*>(kargs.alibi_slope_ptr) +
+                      i_batch * kargs.alibi_slope_stride + i_nhead) *
+                    log2e_v<SaccDataType>;
+                if constexpr(FmhaMask::IsMasking)
+                    return make_alibi_from_lr_mask<SaccDataType, true>(slope,
+                                                                       kargs.window_size_left,
+                                                                       kargs.window_size_right,
+                                                                       kargs.seqlen_q,
+                                                                       kargs.seqlen_k,
+                                                                       kargs.mask_type);
+                else
+                    return Alibi<SaccDataType, true>{
+                        slope, kargs.seqlen_q, kargs.seqlen_k, AlibiMode::FROM_BOTTOM_RIGHT};
+            }
+            else
+            {
+                return EmptyPositionEncoding<SaccDataType>{};
+            }
         }();
         const float logits_soft_cap = [&]() {
             if constexpr(kHasLogitsSoftCap)
@@ -428,7 +488,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                          bias_window,
                                          lse_window,
                                          mask,
-                                         EmptyPositionEncoding<SaccDataType>{},
+                                         position_encoding,
                                          kargs.scale_s,
                                          sink_value,
                                          logits_soft_cap,

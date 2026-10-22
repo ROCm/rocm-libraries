@@ -90,8 +90,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded into "
                   "scale_s");
-    static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                  "qr_tdm_sched does not implement attention bias");
+    // Bias and ALiBi scale the scores into the exp2 domain before the softmax (process_score), so
+    // the softmax then runs with a unit scale.
+    static constexpr bool kScoresInLog2Domain = BiasEnum != BlockAttentionBiasEnum::NO_BIAS;
     static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "the logits soft cap applies to unbiased scores");
     static_assert(!kHasDropout, "qr_tdm_sched does not support dropout");
@@ -370,7 +371,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
 
                     if(__builtin_isinf_sign(sink_v) >= 0)
                     {
-                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                        // With bias sink_v is the natural sink logit itself.
+                        set_tile(
+                            lse_acc,
+                            SMPLComputeDataType{kScoresInLog2Domain ? sink_v : sink_v * scale_s});
                     }
                     else
                     {
@@ -1120,7 +1124,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     Schedule::template RunSplitSoftmax<Mode>(
                         [&]() {
                             Policy::template RunSplitSoftmaxPart01<Problem>(
-                                s_new, m, scale_s, delta_m0, delta_m1);
+                                s_new, m, kScoresInLog2Domain ? 1.0f : scale_s, delta_m0, delta_m1);
                         },
                         [&]() { s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>(); },
                         [&](auto ordinal) {
@@ -1138,7 +1142,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                 s_new,
                                 m,
                                 l,
-                                scale_s,
+                                kScoresInLog2Domain ? 1.0f : scale_s,
                                 delta_m0,
                                 delta_m1,
                                 pv_output_scale_m0,
