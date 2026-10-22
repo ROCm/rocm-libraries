@@ -1,0 +1,210 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * rocke/instance_attention_dense_spec.h -- C port of the architecture-neutral
+ * dense attention spec contract, library/kernels/common/attention_dense_spec.py.
+ * Shared by the gfx942 and gfx950 dense attention ports.
+ *
+ *   Python (attention_dense_spec.py)              C (this header)
+ *   -------------------------------------------   -------------------------------------
+ *   DENSE_TILE_GEOMETRIES                         ROCKE_DENSE_TILE_GEOMETRIES
+ *   INT32_LIMIT                                   ROCKE_ATTENTION_DENSE_INT32_LIMIT
+ *   @dataclass AttentionDenseSpec                 rocke_attention_dense_spec_t
+ *                                                   + rocke_attention_dense_spec_default()
+ *   AttentionDenseSpec.__post_init__              rocke_attention_dense_spec_validate()
+ *   num_waves / num_queries_per_kv                rocke_attention_dense_spec_num_waves() / ...
+ *   resolved_persist_decode (base policy)         rocke_attention_dense_spec_resolved_persist_decode()
+ *   kernel_name() + the _*_name_parts hooks       rocke_attention_dense_kernel_name()
+ *                                                   + rocke_attention_dense_name_parts_t
+ *   check_dense_spec_preflight(spec)              rocke_attention_dense_spec_preflight()
+ *
+ * SUBCLASS HOOKS. The Python base calls overridable methods on the concrete
+ * subclass. The C port passes them in explicitly:
+ *   - __post_init__ consults _supports_noncausal_window,
+ *     _supports_noncausal_cross_length_ragged and supported_persist_decodes:
+ *     rocke_attention_dense_traits_t.
+ *   - kernel_name() consults the _*_name_parts methods:
+ *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
+ *   - check_dense_spec_preflight re-runs the CONCRETE type's validators:
+ *     rocke_attention_dense_validate_fn, the arch's full validator.
+ * rocke_attention_dense_traits_base() / rocke_attention_dense_name_parts_base()
+ * are the base-class answers.
+ *
+ * REASON STRINGS. Every reject reason is the Python ValueError text byte for
+ * byte, so a C caller can log the same message the Python predicate returns.
+ *
+ * Not ported: attention_dense_cache_key (a Python launcher-cache key over
+ * dataclass fields and the spec's class object; it has no C caller).
+ *
+ * Pure host code: nothing here builds IR.
+ */
+#ifndef ROCKE_INSTANCE_ATTENTION_DENSE_SPEC_H
+#define ROCKE_INSTANCE_ATTENTION_DENSE_SPEC_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "rocke/ir.h" /* rocke_status_t */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* DENSE_TILE_GEOMETRIES: name -> (block_m, block_n), in Python dict order. */
+typedef struct rocke_dense_tile_geometry
+{
+    const char* name;
+    int block_m;
+    int block_n;
+} rocke_dense_tile_geometry_t;
+
+#define ROCKE_DENSE_TILE_GEOMETRY_COUNT 2
+extern const rocke_dense_tile_geometry_t
+    ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_GEOMETRY_COUNT];
+/* DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]. */
+#define ROCKE_DENSE_DEFAULT_BLOCK_M 256
+#define ROCKE_DENSE_DEFAULT_BLOCK_N 64
+
+/* INT32_LIMIT = 2**31: signed 32-bit ceiling for tensor extents. */
+#define ROCKE_ATTENTION_DENSE_INT32_LIMIT 2147483648LL
+
+/* Reason / message buffers: every reject reason fits. */
+#define ROCKE_ATTENTION_DENSE_REASON_CAP 512
+#define ROCKE_ATTENTION_DENSE_NAME_CAP 512
+
+/* AttentionDenseSpec, field for field in Python declaration order. dtype and
+ * persist_decode are caller-owned strings (not copied). */
+typedef struct rocke_attention_dense_spec
+{
+    /* Problem shape and semantics. */
+    int batch;
+    int seqlen_q;
+    int seqlen_kv;
+    int num_query_heads;
+    int num_kv_heads;
+    int head_size;
+    bool causal; /* True */
+    const char* dtype; /* "bf16" */
+    int sliding_window; /* 0 */
+    bool ragged; /* False */
+    bool varlen; /* False */
+
+    /* Geometry and common implementation policy. */
+    int block_m; /* 256 */
+    int block_n; /* 64 */
+    int waves_per_eu; /* 2 */
+    int lds_k_group_pad; /* 8 */
+    bool persistent; /* False */
+    int num_persistent; /* 256 */
+    bool interleave; /* False */
+    const char* persist_decode; /* "auto" */
+    bool lazy_rescale; /* True */
+
+    /* Problem modes implemented by a subset of architectures. */
+    bool paged; /* False */
+    int block_size; /* 0 */
+    int num_kv_blocks; /* 0 */
+    bool use_sinks; /* False */
+    bool causal_bottom_right; /* False (kw_only) */
+} rocke_attention_dense_spec_t;
+
+/* The dataclass defaults. The six shape fields have no Python default and are
+ * left 0; the caller sets them. */
+rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void);
+
+/* The subclass answers __post_init__ consults. */
+typedef struct rocke_attention_dense_traits
+{
+    /* type(spec).__name__, used by check_dense_spec_preflight's reason. */
+    const char* type_name;
+    /* _supports_noncausal_window() */
+    bool supports_noncausal_window;
+    /* _supports_noncausal_cross_length_ragged() */
+    bool supports_noncausal_cross_length_ragged;
+    /* supported_persist_decodes(), sorted ascending (the order Python's
+     * sorted() prints in the reject reason). */
+    const char* const* persist_decodes;
+    size_t num_persist_decodes;
+} rocke_attention_dense_traits_t;
+
+/* The base class: no noncausal window, no noncausal cross-length ragged, and
+ * persist decodes {"auto", "hkv_major", "qb_major"}. type_name
+ * "AttentionDenseSpec". */
+rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void);
+
+/* AttentionDenseSpec.__post_init__. Returns true when the spec is valid. On
+ * false, writes the Python exception text (ValueError, or the one
+ * ZeroDivisionError a degenerate paged tile reaches) NUL-terminated into
+ * reason (capacity reason_cap), if non-NULL. */
+bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spec,
+                                         const rocke_attention_dense_traits_t* traits,
+                                         char* reason,
+                                         size_t reason_cap);
+
+/* @property num_waves: block_m // 32. */
+int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spec);
+/* @property num_queries_per_kv: num_query_heads // num_kv_heads. */
+int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
+/* @property resolved_persist_decode, the base policy: persist_decode unless it
+ * is "auto"; auto resolves to "hkv_major" when the GQA ratio > 1 and the work
+ * per KV head is at least twice num_persistent, else "qb_major". Returns
+ * spec->persist_decode or a static literal. */
+const char*
+    rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* spec);
+
+/* The _*_name_parts hooks of kernel_name(), filled by the concrete spec. */
+#define ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS 8
+#define ROCKE_ATTENTION_DENSE_NAME_PART_CAP 32
+typedef struct rocke_attention_dense_name_parts
+{
+    /* _head_name_parts(): hq{num_query_heads}, kv{num_kv_heads} when true. */
+    bool head_parts;
+    /* _shape_name_parts(): sq{seqlen_q}, sk{seqlen_kv} when true. */
+    bool shape_parts;
+    /* _layout_name_parts(), _band_name_parts(), _algorithm_name_parts(). */
+    char layout[ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS][ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
+    int num_layout;
+    char band[ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS][ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
+    int num_band;
+    char algorithm[ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS][ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
+    int num_algorithm;
+    /* _persist_decode_name_part(); "" for none. */
+    char persist_decode[ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
+} rocke_attention_dense_name_parts_t;
+
+/* The base-class hooks for spec: head and shape parts on, no layout or band
+ * parts, algorithm ("lazyrs",) when lazy_rescale, and persist decode "hkvmaj"
+ * when the base policy resolves to "hkv_major". */
+void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* spec,
+                                           rocke_attention_dense_name_parts_t* out);
+
+/* AttentionDenseSpec.kernel_name() with the given hooks, NUL-terminated into
+ * out (capacity out_cap). Returns ROCKE_OK, or ROCKE_ERR_VALUE when an argument
+ * is NULL or the buffer is too small. */
+rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spec_t* spec,
+                                                 const rocke_attention_dense_name_parts_t* parts,
+                                                 char* out,
+                                                 size_t out_cap);
+
+/* The concrete type's full validator (its __post_init__, base checks
+ * included), for preflight to re-run. Same contract as
+ * rocke_attention_dense_spec_validate; ctx is the concrete spec. */
+typedef bool (*rocke_attention_dense_validate_fn)(const void* ctx, char* reason, size_t reason_cap);
+
+/* check_dense_spec_preflight(spec) -> (ok, reason): re-run the concrete
+ * validators (validate(ctx)), then positive extents, block_n dividing the
+ * query tile, and the 32-bit extent bounds, in the Python order. base is the
+ * concrete spec's AttentionDenseSpec fields; type_name is type(spec).__name__.
+ * On false, writes the Python reason into reason (if non-NULL). */
+bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* base,
+                                          const char* type_name,
+                                          rocke_attention_dense_validate_fn validate,
+                                          const void* ctx,
+                                          char* reason,
+                                          size_t reason_cap);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /* ROCKE_INSTANCE_ATTENTION_DENSE_SPEC_H */
