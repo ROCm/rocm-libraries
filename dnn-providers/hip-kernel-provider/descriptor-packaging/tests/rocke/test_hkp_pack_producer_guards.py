@@ -285,6 +285,24 @@ _HAS_ROCKE_LIBRARY = (
 ).is_dir()
 
 
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_the_gfx950_reduce_builder_is_validated_by_its_own_predicate():
+    """The reduce builder reaches ``supports_tiled_reduce_spec`` through the alias, and
+    that predicate -- not the 3D one -- refuses a spec the builder cannot lower."""
+    module = import_module("kernels.gfx950.attention_tiled_3d")
+    builder = "build_unified_attention_reduce_tiled"
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
+    good = spec_cls(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    _check_support_predicate(module, builder, good, "gfx950")
+    bad = dataclasses.replace(good, head_size=96)
+    with pytest.raises(
+        HkpPackError, match="supports_tiled_reduce_spec.*divisible by 64"
+    ):
+        _check_support_predicate(module, builder, bad, "gfx950")
+
+
 _DESCRIPTOR_TREE = (
     Path(__file__).resolve().parents[3]
     / "src"
