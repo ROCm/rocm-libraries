@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Emit one MMA instruction from its :class:`~rocke.core.isa.matrix_calls.MatrixCall`.
 
-Each operand goes through its form, the immediates are printed as written, the
-call is emitted, and the result goes through its form. The backends call
+Each operand goes through its form, the immediates are printed as written, each
+signedness flag is derived from the target's catalog row, the call is emitted,
+and the result goes through its form. The backends call
 :func:`emit_matrix_call` for every op_id in
 :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS`. The C++ engine's twin is
 ``rocke_ll_emit_matrix_call`` in ``cpp/core/lower_llvm/matrix_call.cpp``.
@@ -12,7 +13,7 @@ call is emitted, and the result goes through its form. The backends call
 from __future__ import annotations
 
 from ..ir import Op
-from .matrix_calls import Imm, MatrixCall
+from .matrix_calls import Imm, MatrixCall, Signedness
 
 
 def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
@@ -48,6 +49,9 @@ def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
         if isinstance(arg, Imm):
             arguments.append(arg.argument())
             continue
+        if isinstance(arg, Signedness):
+            arguments.append(arg.argument(_catalog_op(lowerer, op_id)))
+            continue
         form = call.form(arg)
         value = form.operand(lowerer, op, arg.value)
         arguments.append(f"{_llvm_type(form.register_type_at(flavor))} {value}")
@@ -55,3 +59,12 @@ def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
     call.result.emit_result(
         lowerer, op, f"call {returned} @{call.intrinsic}({', '.join(arguments)})"
     )
+
+
+def _catalog_op(lowerer, op_id: str):
+    """The lowering target's catalog row for ``op_id``, whose operand dtypes the
+    signedness flags follow; refused, as by the backend, where the catalog does
+    not list it."""
+    backend = lowerer._backend
+    backend._require_catalog_lists(op_id)
+    return backend.arch.mma.by_op_id(op_id)

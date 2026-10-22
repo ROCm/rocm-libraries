@@ -392,9 +392,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
     # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
-    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
-    # matrix operand and a trailing i1 clamp. Emission goes through
-    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    # signature carries an i1 signedness flag (1 = signed) before each matrix
+    # operand and a trailing i1 clamp. Emitted from its MATRIX_CALLS entries
+    # (core/isa/matrix_calls.py). LLVM-lowered to v_wmma_i32_16x16x16_iu8.
     "wmma.i32.16x16x16.iu8": (
         "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
         "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"

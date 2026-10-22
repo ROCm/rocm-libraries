@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """The gfx12 WMMA instructions beyond f16 / bf16 -> f32.
 
-The gfx12-generic row gained the four fp8 / bf8 -> f32 WMMAs, i8 -> i32 and the
+The gfx12-generic row lists the four fp8 / bf8 -> f32 WMMAs, i8 -> i32, i4 ->
+i32 at K 16 and K 32 (each integer one in every operand signedness), and the
 two 16-bit-output WMMAs (f16 -> f16, bf16 -> bf16); gfx1200 and gfx1201 take
 them through their ``facts_of`` pointers. Each case below pins, for one
 instruction:
@@ -10,11 +11,12 @@ instruction:
 - the catalog row on gfx12-generic, gfx1200 and gfx1201 (dtypes, shape,
   fragment lengths per lane);
 - the lowered call in both engines at every LLVM flavor: the intrinsic, the
-  register type of every argument and the immediates;
+  register type of every argument and the immediates, including the
+  signedness flag the row's operand dtypes give;
 - that the module compiles and links for gfx1200, gfx1201 and gfx12-generic,
   and that LLVM selects the named instruction (compile-verified, not run);
-- that its lane maps place every element of A, B and the result exactly once,
-  on the gfx12 16x16x16 maps.
+- that its lane maps place every element of A, B and the result exactly once:
+  lane l holds row l % 16 of A (column l % 16 of B) and a contiguous K run.
 
 The C++ engine's catalog rows and lane maps are pinned to the same data by
 ``tests/core/gfx12_wmma_ops.cpp``.
@@ -26,12 +28,14 @@ from typing import NamedTuple
 
 import pytest
 from rocke.core.arch import ArchTarget
+from rocke.core.arch.target import integer_mma_op_ids
 from rocke.core.ir import (
     I32,
     IRBuilder,
     PtrType,
     VectorType,
     dtype_to_ir_type,
+    is_packed_only,
     type_bits,
 )
 from rocke.core.lower_llvm import LLVM_FLAVORS
@@ -49,10 +53,34 @@ class _Case(NamedTuple):
     intrinsic: str
     arguments: tuple[str, ...]  # every call argument's type, immediates as written
     mnemonic: str
+    k: int = 16
+    k_per_lane: int = 8  # values of A (and of B) per lane: one lane's K run
 
 
 _FP8 = ("<2 x i32>", "<2 x i32>", "<8 x float>")
 _SIXTEEN_BIT_OUT = "<8 x {t}>", "<8 x {t}>", "<8 x {t}>", "i1 0"
+# The signedness flag of an operand of each integer dtype.
+_FLAG = {"i8": "i1 1", "i4": "i1 1", "u8": "i1 0", "u4": "i1 0"}
+
+
+def _integer_cases(op_id, bits, intrinsic, words, mnemonic, k=16, k_per_lane=8):
+    """The case of each signedness combination of one integer WMMA."""
+    dtypes = ((f"i{bits}", f"i{bits}"), (f"u{bits}", f"i{bits}"))
+    dtypes += ((f"i{bits}", f"u{bits}"), (f"u{bits}", f"u{bits}"))
+    return {
+        row: _Case(
+            a,
+            b,
+            "i32",
+            intrinsic,
+            (_FLAG[a], words, _FLAG[b], words, "<8 x i32>", "i1 0"),
+            mnemonic,
+            k,
+            k_per_lane,
+        )
+        for row, (a, b) in zip(integer_mma_op_ids(op_id, bits), dtypes)
+    }
+
 
 _CASES = {
     "wmma_gfx12_f32_16x16x16_fp8_fp8": _Case(
@@ -75,11 +103,20 @@ _CASES = {
         "llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32", _FP8,
         "v_wmma_f32_16x16x16_bf8_bf8",
     ),
-    "wmma_gfx12_i32_16x16x16_iu8": _Case(
-        "i8", "i8", "i32",
-        "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
-        ("i1 1", "<2 x i32>", "i1 1", "<2 x i32>", "<8 x i32>", "i1 0"),
+    **_integer_cases(
+        "wmma_gfx12_i32_16x16x16_iu8", 8,
+        "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32", "<2 x i32>",
         "v_wmma_i32_16x16x16_iu8",
+    ),
+    **_integer_cases(
+        "wmma_gfx12_i32_16x16x16_iu4", 4,
+        "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32", "i32",
+        "v_wmma_i32_16x16x16_iu4",
+    ),
+    **_integer_cases(
+        "wmma_gfx12_i32_16x16x32_iu4", 4,
+        "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32", "<2 x i32>",
+        "v_wmma_i32_16x16x32_iu4", k=32, k_per_lane=16,
     ),
     "wmma_gfx12_f16_16x16x16_f16": _Case(
         "fp16", "fp16", "fp16",
@@ -105,14 +142,20 @@ _COMPILE_TARGETS = ("gfx1200", "gfx1201", "gfx12-generic")
 
 def _operand(b: IRBuilder, name: str, dtype: str, count: int):
     """Operand ``name``: each lane's ``count`` values of ``dtype``, loaded as
-    32-bit words from a kernel parameter and reinterpreted."""
-    logical = VectorType(dtype_to_ir_type(dtype), count)
-    words = type_bits(logical) // 32
+    32-bit words from a kernel parameter. Values of a type that has a vector
+    form are reinterpreted as it; packed-only i4 / u4 values stay in their
+    words (one word is a plain i32)."""
+    element = dtype_to_ir_type(dtype)
+    bits = 4 if is_packed_only(element) else type_bits(element)
+    words = bits * count // 32
     ptr = b.param(name, PtrType(I32, "global"))
-    loaded = b.global_load_vN(
-        ptr, b.mul(b.thread_id_x(), b.const_i32(words)), I32, words
-    )
-    return b.bitcast(loaded, logical)
+    index = b.mul(b.thread_id_x(), b.const_i32(words))
+    if words == 1:
+        return b.global_load(ptr, index, I32)
+    loaded = b.global_load_vN(ptr, index, I32, words)
+    if is_packed_only(element):
+        return loaded
+    return b.bitcast(loaded, VectorType(element, count))
 
 
 def _kernel(gfx: str, op_id: str):
@@ -157,10 +200,10 @@ def test_the_target_lists_the_instruction(op_id, gfx):
         case.b,
         case.c,
     )
-    assert (op.m, op.n, op.k) == (16, 16, 16)
+    assert (op.m, op.n, op.k) == (16, 16, case.k)
     assert (op.a_frag_len, op.b_frag_len, op.c_frag_len, op.wave_size) == (
-        8,
-        8,
+        case.k_per_lane,
+        case.k_per_lane,
         8,
         32,
     )
@@ -202,20 +245,24 @@ def test_the_target_compiles_links_and_selects_the_instruction(op_id, target):
 
 @pytest.mark.parametrize("op_id", sorted(_CASES))
 def test_the_lane_maps_place_every_element_once(op_id):
-    """32 lanes x 8 slots cover A (16 x 16), B (16 x 16) and the result
-    (16 x 16) exactly once: lane l holds row l % 16 of A (column l % 16 of B)
-    and the K run starting at (l // 16) * 8; result slot i of lane l is
-    (row (l // 16) * 8 + i, column l % 16)."""
+    """32 lanes cover A (16 x K), B (K x 16) and the result (16 x 16) exactly
+    once: lane l holds row l % 16 of A (column l % 16 of B) and the K run of
+    k_per_lane values starting at (l // 16) * k_per_lane; result slot i of lane
+    l is (row (l // 16) * 8 + i, column l % 16)."""
+    case = _CASES[op_id]
+    kpl = case.k_per_lane
     op = ArchTarget.from_gfx("gfx12-generic").mma.by_op_id(op_id)
     a = lane_placements(op.a_layout(), 32)
     b = lane_placements(op.b_layout(), 32)
     c = lane_placements(op.c_layout(), 32)
     assert a == [
-        (lane % 16, (lane // 16) * 8 + slot) for lane in range(32) for slot in range(8)
+        (lane % 16, (lane // 16) * kpl + slot)
+        for lane in range(32)
+        for slot in range(kpl)
     ]
     assert b == [(k, col) for col, k in a]
     assert c == [
         ((lane // 16) * 8 + slot, lane % 16) for lane in range(32) for slot in range(8)
     ]
-    full = sorted((i, j) for i in range(16) for j in range(16))
-    assert sorted(a) == sorted(b) == sorted(c) == full
+    assert sorted(a) == sorted((i, k) for i in range(16) for k in range(case.k))
+    assert sorted(c) == sorted((i, j) for i in range(16) for j in range(16))

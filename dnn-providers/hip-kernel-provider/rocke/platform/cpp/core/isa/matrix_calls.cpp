@@ -55,16 +55,17 @@ static constexpr rocke_matrix_call_t
                                NULL};
 }
 
-/* A gfx12 WMMA 16x16x16 (Python _gfx12_wmma): A and B in one register type,
- * the accumulator and the result in another, the arguments in `args` order. */
+/* A gfx11 or gfx12 WMMA (Python _wmma): A and B in one register type, the
+ * accumulator and the result in another, the arguments in `args` order. */
 template <int N>
-static constexpr rocke_matrix_call_t gfx12_wmma(const char* intrinsic,
-                                                const rocke_matrix_arg_t (&args)[N],
-                                                rocke_matrix_register_t operand,
-                                                rocke_matrix_register_t acc)
+static constexpr rocke_matrix_call_t wmma(const char* intrinsic,
+                                          const rocke_matrix_arg_t (&args)[N],
+                                          rocke_matrix_register_t operand,
+                                          rocke_matrix_register_t acc,
+                                          const char* decl_key = NULL)
 {
     return rocke_matrix_call_t{
-        intrinsic, args, N, as_is(operand), as_is(operand), as_is(acc), as_is(acc), NULL};
+        intrinsic, args, N, as_is(operand), as_is(operand), as_is(acc), as_is(acc), decl_key};
 }
 
 /* gfx12 fp8 / bf8 WMMA: (A, B, C). */
@@ -74,17 +75,38 @@ static const rocke_matrix_arg_t k_gfx12_wmma_args[] = {
     {ROCKE_MATRIX_ARG_C, NULL, 0, false},
 };
 
-/* gfx12 integer WMMA (Python _GFX12_IU8_ARGS): (signed A, A, signed B, B, C,
- * clamp). The catalog row's operands are i8, so both flags are 1; the result
- * is not clamped. */
-static const rocke_matrix_arg_t k_gfx12_iu8_args[] = {
-    {ROCKE_MATRIX_ARG_IMM, "i1", 1, true},
+/* Integer WMMA (Python _INTEGER_WMMA_ARGS): (signed A, A, signed B, B, C,
+ * clamp). Each flag comes from its operand's dtype in the catalog row; the
+ * result is not clamped. */
+static const rocke_matrix_arg_t k_integer_wmma_args[] = {
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_A},
     {ROCKE_MATRIX_ARG_A, NULL, 0, false},
-    {ROCKE_MATRIX_ARG_IMM, "i1", 1, true},
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_B},
     {ROCKE_MATRIX_ARG_B, NULL, 0, false},
     {ROCKE_MATRIX_ARG_C, NULL, 0, false},
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
 };
+
+/* The same arguments for the gfx11 integer WMMAs (Python
+ * _GFX11_INTEGER_WMMA_ARGS), whose hand-written declarations spell the three
+ * i1 parameters without immarg. */
+static const rocke_matrix_arg_t k_gfx11_integer_wmma_args[] = {
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, false, ROCKE_MATRIX_ARG_A},
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, false, ROCKE_MATRIX_ARG_B},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, false},
+};
+
+/* One integer WMMA's call under each of its op_ids (Python _integer_wmma):
+ * `op_id` itself for signed A and B, and `op_id` with _u<bits>_i<bits> (A
+ * unsigned), _i<bits>_u<bits> (B unsigned) or _u<bits>_u<bits> appended. */
+#define ROCKE_INTEGER_WMMA(op_id, bits, call)                                                \
+    {op_id, call}, {op_id "_u" #bits "_i" #bits, call}, {op_id "_i" #bits "_u" #bits, call}, \
+    {                                                                                        \
+        op_id "_u" #bits "_u" #bits, call                                                    \
+    }
 
 /* gfx12 16-bit-output WMMA (Python _GFX12_16BIT_OUT_ARGS): (A, B, C, op_sel),
  * op_sel 0. */
@@ -131,46 +153,79 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
      cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.fp8.bf8", k_fp8_x8, reg("f32", 16))},
     {"mfma_f32_32x32x16_bf8_fp8",
      cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8", k_fp8_x8, reg("f32", 16))},
+    /* gfx11 i8 -> i32: sixteen i8 per lane in four words; i4 -> i32: sixteen
+     * i4 per lane in two words. */
+    ROCKE_INTEGER_WMMA("wmma_i32_16x16x16_iu8",
+                       8,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
+                            k_gfx11_integer_wmma_args,
+                            reg("i32", 4),
+                            reg("i32", 8),
+                            "wmma.i32.16x16x16.iu8")),
+    ROCKE_INTEGER_WMMA("wmma_i32_16x16x16_iu4",
+                       4,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
+                            k_gfx11_integer_wmma_args,
+                            reg("i32", 2),
+                            reg("i32", 8),
+                            "wmma.i32.16x16x16.iu4")),
     /* gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words. */
     {"wmma_gfx12_f32_16x16x16_fp8_fp8",
-     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32",
-                k_gfx12_wmma_args,
-                reg("i32", 2),
-                reg("f32", 8))},
+     wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.fp8.v8f32.v2i32",
+          k_gfx12_wmma_args,
+          reg("i32", 2),
+          reg("f32", 8))},
     {"wmma_gfx12_f32_16x16x16_fp8_bf8",
-     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32",
-                k_gfx12_wmma_args,
-                reg("i32", 2),
-                reg("f32", 8))},
+     wmma("llvm.amdgcn.wmma.f32.16x16x16.fp8.bf8.v8f32.v2i32",
+          k_gfx12_wmma_args,
+          reg("i32", 2),
+          reg("f32", 8))},
     {"wmma_gfx12_f32_16x16x16_bf8_fp8",
-     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32",
-                k_gfx12_wmma_args,
-                reg("i32", 2),
-                reg("f32", 8))},
+     wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32",
+          k_gfx12_wmma_args,
+          reg("i32", 2),
+          reg("f32", 8))},
     {"wmma_gfx12_f32_16x16x16_bf8_bf8",
-     gfx12_wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32",
-                k_gfx12_wmma_args,
-                reg("i32", 2),
-                reg("f32", 8))},
+     wmma("llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32",
+          k_gfx12_wmma_args,
+          reg("i32", 2),
+          reg("f32", 8))},
     /* gfx12 i8 -> i32: eight i8 per lane in two words. */
-    {"wmma_gfx12_i32_16x16x16_iu8",
-     gfx12_wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
-                k_gfx12_iu8_args,
-                reg("i32", 2),
-                reg("i32", 8))},
+    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x16_iu8",
+                       8,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
+                            k_integer_wmma_args,
+                            reg("i32", 2),
+                            reg("i32", 8))),
+    /* gfx12 i4 -> i32: eight i4 per lane in one word (K 16), sixteen in two
+     * words (K 32). */
+    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x16_iu4",
+                       4,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32",
+                            k_integer_wmma_args,
+                            reg("i32", 0),
+                            reg("i32", 8))),
+    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x32_iu4",
+                       4,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32",
+                            k_integer_wmma_args,
+                            reg("i32", 2),
+                            reg("i32", 8))),
     /* gfx12 f16 -> f16 and bf16 -> bf16: eight 16-bit values per lane; the
      * bf16 form takes and returns them as <8 x i16>. */
     {"wmma_gfx12_f16_16x16x16_f16",
-     gfx12_wmma("llvm.amdgcn.wmma.f16.16x16x16.f16.v8f16.v8f16",
-                k_gfx12_16bit_out_args,
-                reg("f16", 8),
-                reg("f16", 8))},
+     wmma("llvm.amdgcn.wmma.f16.16x16x16.f16.v8f16.v8f16",
+          k_gfx12_16bit_out_args,
+          reg("f16", 8),
+          reg("f16", 8))},
     {"wmma_gfx12_bf16_16x16x16_bf16",
-     gfx12_wmma("llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16",
-                k_gfx12_16bit_out_args,
-                reg("i16", 8),
-                reg("i16", 8))},
+     wmma("llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16",
+          k_gfx12_16bit_out_args,
+          reg("i16", 8),
+          reg("i16", 8))},
 };
+
+#undef ROCKE_INTEGER_WMMA
 
 const rocke_matrix_call_entry_t* rocke_matrix_calls(int* out_count)
 {
@@ -354,6 +409,14 @@ void rocke_matrix_call_check(const rocke_matrix_call_t* call)
             check_immediate(arg);
             continue;
         }
+        if(arg.kind == ROCKE_MATRIX_ARG_SIGNEDNESS)
+        {
+            if(arg.operand != ROCKE_MATRIX_ARG_A && arg.operand != ROCKE_MATRIX_ARG_B)
+                throw ValueError(
+                    format_error("a signedness flag precedes the A or B operand, got %s",
+                                 arg.operand == ROCKE_MATRIX_ARG_C ? "C" : "(not an operand)"));
+            continue;
+        }
         seen[arg.kind] += 1;
         got += got.empty() ? "'" : ", '";
         got += k_operand_names[arg.kind];
@@ -395,9 +458,9 @@ const char* rocke_matrix_call_declaration(const rocke_matrix_call_t* call,
         const rocke_matrix_arg_t& arg = call->args[i];
         if(i)
             text += ", ";
-        if(arg.kind == ROCKE_MATRIX_ARG_IMM)
+        if(arg.kind == ROCKE_MATRIX_ARG_IMM || arg.kind == ROCKE_MATRIX_ARG_SIGNEDNESS)
         {
-            text += arg.imm_type;
+            text += arg.kind == ROCKE_MATRIX_ARG_IMM ? arg.imm_type : "i1";
             if(arg.immarg)
                 text += " immarg";
             continue;

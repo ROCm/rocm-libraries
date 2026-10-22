@@ -40,13 +40,20 @@ from rocke.core.ir import (
 )
 from rocke.core.isa import backend as isa_backend
 from rocke.core.isa.matrix_call_lowering import emit_matrix_call
-from rocke.core.isa.matrix_calls import MATRIX_CALLS, Imm, MatrixCall, MatrixOperand
+from rocke.core.isa.matrix_calls import (
+    MATRIX_CALLS,
+    Imm,
+    MatrixCall,
+    MatrixOperand,
+    Signedness,
+)
 from rocke.core.isa.matrix_operand_forms import AsIs, EvenHalves, FlavorType, ZeroPadded
 from rocke.core.lower_llvm import (
     LLVM_FLAVOR_LLVM20,
     LLVM_FLAVOR_LLVM22,
     LLVM_FLAVOR_LLVM23,
     LLVM_FLAVORS,
+    ArchDomainWarning,
     _decls_for_flavor,
     _llvm_type,
     _Lowerer,
@@ -440,6 +447,53 @@ def test_an_immediate_is_a_fitting_integer():
         Imm(I1, 2)
 
 
+def test_a_signedness_flag_follows_the_catalog_rows_operand_dtype():
+    """1 before a signed (i8, i4) operand, 0 before an unsigned (u8, u4) one,
+    read from the row the op_id names; the declaration says only i1."""
+    gfx12 = ArchTarget.from_gfx("gfx12-generic").mma
+    signed = gfx12.by_op_id("wmma_gfx12_i32_16x16x16_iu8")
+    mixed = gfx12.by_op_id("wmma_gfx12_i32_16x16x32_iu4_u4_i4")
+    assert Signedness(A).argument(signed) == "i1 1"
+    assert Signedness(B).argument(signed) == "i1 1"
+    assert Signedness(A).argument(mixed) == "i1 0"
+    assert Signedness(B).argument(mixed) == "i1 1"
+    assert Signedness(A).parameter() == "i1 immarg"
+    assert Signedness(A, immarg=False).parameter() == "i1"
+
+
+def test_a_signedness_flag_precedes_a_or_b_and_needs_an_integer_operand():
+    with pytest.raises(
+        ValueError, match=r"^a signedness flag precedes the A or B operand, got C$"
+    ):
+        Signedness(C)
+    f16 = ArchTarget.from_gfx("gfx12-generic").mma.by_op_id(
+        "wmma_gfx12_f32_16x16x16_f16"
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"^tile.wmma_gfx12_f32_16x16x16_f16 operand a is fp16; a signedness "
+        r"flag is derived from an integer operand \(i4, i8, u4, u8, i16, i32, i64\)$",
+    ):
+        Signedness(A).argument(f16)
+
+
+def test_a_signedness_flag_is_refused_where_the_catalog_does_not_list_the_op():
+    """The flag needs the target's row for the op_id; a target without one
+    refuses the call with the catalog error, before any flag is printed. (The
+    declaration it registers first draws the target's arch-domain warning.)"""
+    call = MATRIX_CALLS["wmma_gfx12_i32_16x16x16_iu8"]
+    i32x2, i32x8 = VectorType(I32, 2), VectorType(I32, 8)
+    op = _mma_op("wmma_gfx12_i32_16x16x16_iu8", i32x2, i32x2, i32x8, i32x8)
+    with pytest.warns(
+        ArchDomainWarning, match=r"not available on gfx1151"
+    ), pytest.raises(
+        NotImplementedError,
+        match=r"^tile.wmma_gfx12_i32_16x16x16_iu8 is not available on gfx1151: "
+        r"its MMA catalog does not list it$",
+    ):
+        emit_matrix_call(_lowerer("gfx1151"), op, call)
+
+
 def test_every_description_is_hashable():
     """Calls are table values and dictionary keys elsewhere; a field that
     cannot be hashed would break both."""
@@ -447,6 +501,8 @@ def test_every_description_is_hashable():
         hash(call)
         for operand in (A, B, C):
             hash(call.form(operand))
+        for arg in call.args:
+            hash(arg)
 
 
 def test_a_table_entry_must_match_the_hand_written_declaration_it_names():
@@ -483,7 +539,6 @@ def _hand_written_op_ids() -> set[str]:
     }
     for table in (
         isa_backend._RDNA_WMMA,
-        isa_backend._RDNA_WMMA_INT,
         isa_backend._RDNA_GFX12_WMMA,
         isa_backend._GFX1250_WMMA,
         isa_backend._GFX1250_WMMA_FP8,
@@ -558,7 +613,11 @@ def test_every_entry_lowers_to_its_declaration_in_both_engines(op_id, flavor):
         (
             arg.llvm_type.name
             if isinstance(arg, Imm)
-            else _llvm_type(call.form(arg).register_type_at(flavor))
+            else (
+                "i1"
+                if isinstance(arg, Signedness)
+                else _llvm_type(call.form(arg).register_type_at(flavor))
+            )
         )
         for arg in call.args
     ]

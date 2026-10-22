@@ -3914,10 +3914,12 @@ void case_wmma_result_count()
             }
             else
             {
+                /* The integer WMMA is a matrix call, which names its op_id. */
                 char expected[80];
                 snprintf(expected,
                          sizeof(expected),
-                         "tile.mma: expected exactly one result, got %d",
+                         "%s: expected exactly one result, got %d",
+                         integer ? "tile.wmma_i32_16x16x16_iu8" : "tile.mma",
                          count);
                 if(status != ROCKE_ERR_VALUE || out || strcmp(err, expected) != 0)
                     fail("malformed WMMA did not return its result-count error", __LINE__);

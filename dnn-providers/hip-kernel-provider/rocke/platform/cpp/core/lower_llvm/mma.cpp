@@ -460,22 +460,6 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
 /* tile.mma routing (Python _op_tile_mma -> ISABackend.emit_mma)          */
 /* ====================================================================== */
 
-/* Refuse op_id unless the target's MMA catalog lists it (Python
- * ISABackend._require_catalog_lists, same text). */
-static void _require_catalog_lists(rocke_lower_t* L, const char* op_id)
-{
-    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
-    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
-    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, op_id))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "tile.%s is not available on %s: its MMA catalog does not list it",
-                      op_id,
-                      gfx ? gfx : "(unknown)");
-    }
-}
-
 /* op_id -> handler. Mirrors the Python CDNA emit_mma which rebuilds the legacy
  * ``tile.<op_id>`` op and re-dispatches it to the matching _op_tile_<op_id>
  * method. We dispatch directly to the file-static handler to keep the emitted
@@ -535,7 +519,7 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
      * hand-written handler below. */
     if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
     {
-        _require_catalog_lists(L, op_id);
+        rocke_ll_require_catalog_op(L, op_id);
         rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;
     }
@@ -647,7 +631,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     op_name = concrete_name;
     /* Admitted on any target whose MMA catalog lists the atom (Python
      * ISABackend.emit_scaled_wmma), never by the target's name. */
-    _require_catalog_lists(L, spec->op_id);
+    rocke_ll_require_catalog_op(L, spec->op_id);
     if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
@@ -851,63 +835,6 @@ static const _wmma_spec_t WMMA_SPECS[] = {
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
-/* Integer WMMA spec table (Python _RDNA_WMMA_INT). Integer WMMA differs from
- * the float path: operands/accumulator are i32 vectors (A/B packed, C/D the i32
- * accumulator), and the intrinsic signature carries i1 signedness flags before
- * each matrix operand and a trailing i1 clamp. A and B are passed as <N x i32>;
- * packed bytes of the same width (for example <16 x i8>) are reinterpreted with
- * one bitcast (mma_operand). Quantized data is signed and within i32
- * range, so the flags are (signedA=1, signedB=1, clamp=0). */
-typedef struct _wmma_int_spec
-{
-    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key; /* _need() key                                   */
-    const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    int op_vec; /* A/B operand vector width                      */
-    int acc_vec; /* accumulator/result vector width               */
-} _wmma_int_spec_t;
-
-static const _wmma_int_spec_t WMMA_INT_SPECS[] = {
-    {"wmma_i32_16x16x16_iu8",
-     "wmma.i32.16x16x16.iu8",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-     4,
-     8},
-    {"wmma_i32_16x16x16_iu4",
-     "wmma.i32.16x16x16.iu4",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-     2,
-     8},
-};
-static const int WMMA_INT_SPECS_N = (int)(sizeof(WMMA_INT_SPECS) / sizeof(WMMA_INT_SPECS[0]));
-
-/* Emit an integer WMMA (iu8/iu4) call (Python _emit_wmma_int). The signature is
- * (i1 signedA, <N x i32> A, i1 signedB, <N x i32> B, <8 x i32> C, i1 clamp) with
- * an <8 x i32> result. Both signedness flags are 1 (signed quant data); clamp
- * is 0 (values stay within i32 range). */
-static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_int_spec_t* spec)
-{
-    const rocke_value_t* c = op->operands[2];
-    rocke_ll_need(L, spec->decl_key);
-    const rocke_type_t* register_type = mma_register_vector(L, rocke_i32(), spec->op_vec);
-    const char* a_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_A, register_type);
-    const char* b_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_B, register_type);
-    rocke_ll_emitf(L,
-                   "  %s = call <%d x i32> @%s("
-                   "i1 1, <%d x i32> %s, "
-                   "i1 1, <%d x i32> %s, "
-                   "<%d x i32> %s, i1 0)",
-                   mma_result_name(L, op),
-                   spec->acc_vec,
-                   spec->intrinsic,
-                   spec->op_vec,
-                   a_arg,
-                   spec->op_vec,
-                   b_arg,
-                   spec->acc_vec,
-                   rocke_ll_operand(L, c));
-}
-
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
 {
     const _wmma_spec_t* spec = NULL;
@@ -925,17 +852,6 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
             L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name ? op->name : "tile.mma");
     }
 
-    /* Integer WMMA (iu8/iu4) is checked first, mirroring
-     * Gfx11RdnaBackend.emit_wmma (int_spec lookup precedes the float table). */
-    for(i = 0; i < WMMA_INT_SPECS_N; i++)
-    {
-        if(strcmp(WMMA_INT_SPECS[i].op_id, op_id) == 0)
-        {
-            _emit_wmma_int(L, op, &WMMA_INT_SPECS[i]);
-            return;
-        }
-    }
-
     for(i = 0; i < WMMA_SPECS_N; i++)
     {
         if(strcmp(WMMA_SPECS[i].op_id, op_id) == 0)
@@ -946,10 +862,10 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     }
     if(spec == NULL)
     {
-        /* WMMA_SPECS / WMMA_INT_SPECS above cover exactly the Python
-         * _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA (gfx12), _RDNA_WMMA_INT and
-         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 op_ids -- the full set reachable
-         * on every WMMA backend rocke_ll_backend_for resolves. */
+        /* WMMA_SPECS above covers exactly the Python _RDNA_WMMA (gfx11),
+         * _RDNA_GFX12_WMMA (gfx12) and _GFX1250_WMMA / _GFX1250_WMMA_FP8
+         * op_ids -- the full set of hand-written WMMAs reachable on every
+         * WMMA backend rocke_ll_backend_for resolves. */
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "unsupported RDNA WMMA op 'tile.%s' for %s",
