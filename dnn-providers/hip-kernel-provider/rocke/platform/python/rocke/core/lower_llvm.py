@@ -1790,6 +1790,8 @@ class _Lowerer:
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
+        # Byte size of each allocation placed in the pool.
+        self._smem_sizes: Dict[str, int] = {}
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
@@ -1801,7 +1803,7 @@ class _Lowerer:
         # waits vmcnt(0) first; with them it waits only for DMA into the
         # read's own allocation.
         self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
-        self._smem_sizes: Dict[str, int] = {}
+        # i64 LDS address value name -> the allocation it points into.
         self._lds_prov: Dict[str, str] = {}
         self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
@@ -5135,7 +5137,7 @@ class _Lowerer:
         raw = self._fresh("tr.raw")
         self._current().emit(
             f"  {raw} = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
-            f"ptr addrspace(3) {base})"
+            f"ptr addrspace(3) {base}){self._lds_aa_suffix(gname)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
@@ -6322,6 +6324,7 @@ class _Lowerer:
             f"i32 {self._operand(soffset)}, "
             f"i32 0, "
             f"i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_ptr.name))}"
         )
 
     def _op_tile_buffer_load_lds_async(self, op: Op) -> None:
