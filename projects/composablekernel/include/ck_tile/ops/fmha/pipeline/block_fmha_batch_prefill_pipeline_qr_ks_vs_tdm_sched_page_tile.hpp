@@ -30,7 +30,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                   "supported pages satisfy P % N == 0 or N % P == 0");
     static_assert(Problem::kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT);
     static_assert(Problem::kKVLookupTable ==
-                  BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
+                      BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D ||
+                  Problem::kKVLookupTable ==
+                      BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D);
     static_assert(Problem::kPadSeqLenQ && Problem::kPadSeqLenK);
     static_assert(!Problem::kPadHeadDimQ && !Problem::kPadHeadDimV);
     static_assert(std::is_same_v<typename Base::QDataType, bf16_t> &&

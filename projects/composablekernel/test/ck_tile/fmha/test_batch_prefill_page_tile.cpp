@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // gfx1250 batch-prefill kernel with a physical page size independent of the logical N128 tile.
-// One binary per (page size, head dimension, mask) tuple, each compiling exactly one kernel so the
+// One binary per (page size, head dimension, mask[, page table]) tuple, each compiling exactly one
+// kernel so the
 // tested code object matches a single-kernel library build of the same tuple. Covered:
 //   - the host launch contract (dynamic LDS residency request and CheckLaunch refusals; no GPU),
 //   - forward accuracy against the independent FP32 reference over identity, permuted and aliased
@@ -37,6 +38,11 @@
     !defined(CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM) || !defined(CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL)
 #error "the page size, head dimension and mask of the tested tuple must be defined"
 #endif
+// 0: vLLM 2D block table (default); 1: SGLang 1D page list (kv_indptr / kv_page_indices /
+// kv_last_page_lens), built from the same per-sequence pages.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG
+#define CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG 0
+#endif
 
 namespace {
 
@@ -46,8 +52,13 @@ using Data = ck_tile::bf16_t;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 128 || kPage == 256 || kPage == 1024);
+constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
+constexpr auto kLookupTable =
+    kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
+            : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
 
-// BF16, vLLM 2D block table, linear [num_pages, P, Hkv, D] K/V pool, group mode, M128/N128.
+// BF16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group mode,
+// M128/N128.
 template <index_t HeadDim, bool Causal>
 struct Model
 {
@@ -75,7 +86,7 @@ struct Model
             false,
             static_cast<int>(kPage),
             ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
-            ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D,
+            kLookupTable,
             ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>;
     using Problem = ck_tile::BlockFmhaBatchPrefillPipelineProblem<
         typename TypeConfig::QDataType,
@@ -119,24 +130,28 @@ struct ModelNames
     static std::string GetName(int)
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
-               (M::kCausal ? "Causal" : "Dense");
+               (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "");
     }
 };
 
 // Pointers are only stored in Kargs; the contract test passes addresses it never dereferences.
 struct Pointers
 {
-    const void* q           = nullptr;
-    const void* k           = nullptr;
-    const void* v           = nullptr;
-    void* o                 = nullptr;
-    const void* seqstart_q  = nullptr;
-    const void* seqlen_k    = nullptr;
-    const void* block_table = nullptr;
+    const void* q                 = nullptr;
+    const void* k                 = nullptr;
+    const void* v                 = nullptr;
+    void* o                       = nullptr;
+    const void* seqstart_q        = nullptr;
+    const void* seqlen_k          = nullptr;
+    const void* block_table       = nullptr; // vLLM block table, or the SGLang kv_page_indices
+    const void* kv_indptr         = nullptr;
+    const void* kv_last_page_lens = nullptr;
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
-// [num_pages, P, Hkv, D]; one int32 block-table row of table_stride entries per sequence.
+// [num_pages, P, Hkv, D]; one int32 block-table row of table_stride entries per sequence. The
+// SGLang lists hold the same pages: sequence b owns kv_page_indices[kv_indptr[b], kv_indptr[b+1])
+// and its last page holds kv_last_page_lens[b] tokens.
 struct Layout
 {
     int q_heads         = 0;
@@ -146,6 +161,9 @@ struct Layout
     std::vector<int32_t> seqstart_q;
     std::vector<int32_t> seqlen_k;
     std::vector<int32_t> block_table;
+    std::vector<int32_t> kv_indptr;
+    std::vector<int32_t> kv_page_indices;
+    std::vector<int32_t> kv_last_page_lens;
 
     int batch() const { return static_cast<int>(seqlen_k.size()); }
     int q_length(int b) const { return seqstart_q[b + 1] - seqstart_q[b]; }
@@ -168,7 +186,9 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d)
     a.o_ptr                    = d.o;
     a.seqstart_q_ptr           = d.seqstart_q;
     a.kv_page_indices          = const_cast<void*>(d.block_table);
-    a.seqlen_k_ptr             = const_cast<void*>(d.seqlen_k);
+    a.seqlen_k_ptr             = kSglang ? nullptr : const_cast<void*>(d.seqlen_k);
+    a.kv_indptr                = const_cast<void*>(d.kv_indptr);
+    a.kv_last_page_lens        = const_cast<void*>(d.kv_last_page_lens);
     a.batch                    = l.batch();
     a.seqlen_q                 = max_q;
     a.seqlen_k                 = max_k;
@@ -180,7 +200,7 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d)
     a.num_total_pages          = l.num_total_pages;
     a.page_block_size          = kPage;
     a.kv_memory_layout         = ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
-    a.kv_lookup_table          = ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
+    a.kv_lookup_table          = kLookupTable;
     a.batch_stride_block_table = l.table_stride;
     a.scale_s                  = 1.0f / std::sqrt(static_cast<float>(D));
     a.stride_q                 = l.q_heads * D;
@@ -253,7 +273,9 @@ TYPED_TEST(PageTileContract, CheckLaunch)
                      fake(0x40000),
                      fake(0x50000),
                      fake(0x70000),
-                     fake(0x60000)};
+                     fake(0x60000),
+                     fake(0x80000),
+                     fake(0x90000)};
     const auto [base, grids] =
         fmha_batch_prefill_create_kargs_and_grids<Kernel>(MakeArgs<TypeParam>(l, d));
     const index_t need = Kernel::GetLaunchDynamicSmemSize();
@@ -291,10 +313,25 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     expect_refused("hdim_q differs", need, [](Kargs& k) { k.hdim_q += 64; });
     expect_refused("hdim_v differs", need, [](Kargs& k) { k.hdim_v += 64; });
     expect_refused("nhead_ratio_qk must be positive", need, [](Kargs& k) { k.nhead_ratio_qk = 0; });
-    expect_refused(
-        "seqlen_k_ptr is null", need, [](Kargs& k) { k.page_table.seqlen_k_ptr = nullptr; });
-    expect_refused(
-        "block_table_ptr is null", need, [](Kargs& k) { k.page_table.block_table_ptr = nullptr; });
+    if constexpr(kSglang)
+    {
+        expect_refused(
+            "kv_indptr is null", need, [](Kargs& k) { k.page_table.kv_indptr = nullptr; });
+        expect_refused("kv_page_indices is null", need, [](Kargs& k) {
+            k.page_table.kv_page_indices = nullptr;
+        });
+        expect_refused("kv_last_page_lens is null", need, [](Kargs& k) {
+            k.page_table.kv_last_page_lens = nullptr;
+        });
+    }
+    else
+    {
+        expect_refused(
+            "seqlen_k_ptr is null", need, [](Kargs& k) { k.page_table.seqlen_k_ptr = nullptr; });
+        expect_refused("block_table_ptr is null", need, [](Kargs& k) {
+            k.page_table.block_table_ptr = nullptr;
+        });
+    }
     expect_refused("seqstart_q_ptr is null", need, [](Kargs& k) { k.seqstart_q_ptr = nullptr; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_k = k.stride_k; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
@@ -324,8 +361,11 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     // The checked launch path builds the functor for valid arguments (nothing is launched)
     // and refuses invalid ones before a functor exists.
     EXPECT_NO_THROW((void)Kernel::MakeCheckedKernel(base, grids));
-    Kargs bad                   = base;
-    bad.page_table.seqlen_k_ptr = nullptr;
+    Kargs bad = base;
+    if constexpr(kSglang)
+        bad.page_table.kv_indptr = nullptr;
+    else
+        bad.page_table.seqlen_k_ptr = nullptr;
     EXPECT_THROW((void)Kernel::MakeCheckedKernel(bad, grids), std::invalid_argument);
 }
 
@@ -465,6 +505,18 @@ HostProblem MakeProblem(const Case& s,
     for(int b = 0, next = 0; b < batch; ++b)
         for(int page = 0; page * kPage < l.seqlen_k[b]; ++page)
             l.block_table[b * l.table_stride + page] = physical[next++];
+    // The SGLang lists name the same pages. The spare entries follow the last sequence: a read
+    // past a sequence's pages lands on the next sequence's pages, or on the spares after the last.
+    l.kv_indptr = {0};
+    for(int b = 0; b < batch; ++b)
+    {
+        const int pages = (l.seqlen_k[b] + kPage - 1) / kPage;
+        for(int page = 0; page < pages; ++page)
+            l.kv_page_indices.push_back(l.block_table[b * l.table_stride + page]);
+        l.kv_indptr.push_back(static_cast<int32_t>(l.kv_page_indices.size()));
+        l.kv_last_page_lens.push_back(pages > 0 ? l.seqlen_k[b] - (pages - 1) * kPage : 0);
+    }
+    l.kv_page_indices.insert(l.kv_page_indices.end(), table.spare_entries, spare);
 
     const std::size_t row      = static_cast<std::size_t>(l.kv_heads) * head_dim;
     const std::size_t pool_len = static_cast<std::size_t>(l.num_total_pages) * kPage * row;
@@ -508,7 +560,13 @@ HostProblem MakeProblem(const Case& s,
 
 struct DeviceProblem
 {
-    ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table;
+    ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens;
+
+    // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
+    static const std::vector<int32_t>& Pages(const Layout& l)
+    {
+        return kSglang ? l.kv_page_indices : l.block_table;
+    }
 
     explicit DeviceProblem(const HostProblem& h)
         : q(h.q.size() * sizeof(Data)),
@@ -517,14 +575,21 @@ struct DeviceProblem
           o(h.q.size() * sizeof(Data)),
           seqstart_q(h.layout.seqstart_q.size() * sizeof(int32_t)),
           seqlen_k(h.layout.seqlen_k.size() * sizeof(int32_t)),
-          block_table(h.layout.block_table.size() * sizeof(int32_t))
+          block_table(std::max<std::size_t>(Pages(h.layout).size(), 1) * sizeof(int32_t)),
+          kv_indptr(h.layout.kv_indptr.size() * sizeof(int32_t)),
+          kv_last_page_lens(std::max<std::size_t>(h.layout.kv_last_page_lens.size(), 1) *
+                            sizeof(int32_t))
     {
         q.ToDevice(h.q.data());
         k.ToDevice(h.k.data());
         v.ToDevice(h.v.data());
         seqstart_q.ToDevice(h.layout.seqstart_q.data());
         seqlen_k.ToDevice(h.layout.seqlen_k.data());
-        block_table.ToDevice(h.layout.block_table.data());
+        if(!Pages(h.layout).empty())
+            block_table.ToDevice(Pages(h.layout).data());
+        kv_indptr.ToDevice(h.layout.kv_indptr.data());
+        if(!h.layout.kv_last_page_lens.empty())
+            kv_last_page_lens.ToDevice(h.layout.kv_last_page_lens.data());
     }
 
     Pointers pointers()
@@ -535,7 +600,9 @@ struct DeviceProblem
                 o.GetDeviceBuffer(),
                 seqstart_q.GetDeviceBuffer(),
                 seqlen_k.GetDeviceBuffer(),
-                block_table.GetDeviceBuffer()};
+                block_table.GetDeviceBuffer(),
+                kv_indptr.GetDeviceBuffer(),
+                kv_last_page_lens.GetDeviceBuffer()};
     }
 };
 
@@ -666,8 +733,8 @@ TYPED_TEST(PageTileForward, MatchesReference)
                 const auto o       = Run<TypeParam>(h, d);
                 const auto metrics = CompareWithReference(h, o, TypeParam::kCausal);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
-                          << (TypeParam::kCausal ? " causal " : " dense ") << name
-                          << " rows=" << metrics.checked_rows
+                          << (TypeParam::kCausal ? " causal " : " dense ")
+                          << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
                           << " min_cos=" << metrics.min_row_cosine
                           << " nonfinite=" << metrics.nonfinite_output_count
@@ -722,8 +789,9 @@ TYPED_TEST(PageTileForward, SpareTableEntries)
             const auto o       = Run<TypeParam>(h, d);
             const auto metrics = CompareWithReference(h, o, TypeParam::kCausal);
             std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
-                      << (TypeParam::kCausal ? " causal " : " dense ") << name
-                      << " rows=" << metrics.checked_rows << " max_abs=" << metrics.max_abs_error
+                      << (TypeParam::kCausal ? " causal " : " dense ") << (kSglang ? "sglang " : "")
+                      << name << " rows=" << metrics.checked_rows
+                      << " max_abs=" << metrics.max_abs_error
                       << " min_cos=" << metrics.min_row_cosine
                       << " nonfinite=" << metrics.nonfinite_output_count
                       << " passed=" << metrics.passed << '\n';

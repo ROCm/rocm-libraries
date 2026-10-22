@@ -16,8 +16,9 @@
 
 namespace ck_tile {
 
-// Batch prefill over a vLLM 2D page table with a physical page size independent of the
-// logical N128 KV tile; reads vLLM page IDs while preserving the QR M128/N128 compute layout.
+// Batch prefill over a paged KV cache with a physical page size independent of the logical N128
+// KV tile; reads page IDs from a vLLM 2D block table or an SGLang 1D page list while preserving
+// the QR M128/N128 compute layout.
 //
 // Experimental, gfx1250 only: BF16, group mode, linear [page, token, kv_head, dim] K/V pools,
 // D64/V64 or D128/V128, dense or bottom-right causal (no sliding window), no LSE, sink,
@@ -53,7 +54,10 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static constexpr index_t kBlockSize  = Base::kBlockSize;
 
     static_assert(kIsGroupMode);
-    static_assert(kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
+    static constexpr bool kSglangTable =
+        kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
+    static_assert(kSglangTable ||
+                  kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
     // The physical allocation page may differ from the logical N128 tile.
     static_assert(FmhaPipeline::kPageBlockSize == 16 || FmhaPipeline::kPageBlockSize == 128 ||
                   FmhaPipeline::kPageBlockSize == 256 || FmhaPipeline::kPageBlockSize == 1024);
@@ -165,8 +169,17 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         require(kargs.nhead_ratio_qk > 0, "nhead_ratio_qk must be positive");
         require(kargs.stride_k >= kargs.hdim_q && kargs.stride_v >= kargs.hdim_v,
                 "K/V token stride smaller than the head dimension");
-        require(kargs.page_table.seqlen_k_ptr != nullptr, "seqlen_k_ptr is null");
-        require(kargs.page_table.block_table_ptr != nullptr, "block_table_ptr is null");
+        if constexpr(kSglangTable)
+        {
+            require(kargs.page_table.kv_indptr != nullptr, "kv_indptr is null");
+            require(kargs.page_table.kv_page_indices != nullptr, "kv_page_indices is null");
+            require(kargs.page_table.kv_last_page_lens != nullptr, "kv_last_page_lens is null");
+        }
+        else
+        {
+            require(kargs.page_table.seqlen_k_ptr != nullptr, "seqlen_k_ptr is null");
+            require(kargs.page_table.block_table_ptr != nullptr, "block_table_ptr is null");
+        }
         require(kargs.seqstart_q_ptr != nullptr, "seqstart_q_ptr is null");
         require(static_cast<long_index_t>(kargs.batch_stride_k) >=
                         static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.stride_k &&
@@ -214,20 +227,58 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         if(kargs.seqlen_q <= i_m0)
             return;
 
-        kargs.seqlen_k             = kargs.page_table.seqlen_k_ptr[i_batch];
-        const long_index_t kv_head = i_nhead / kargs.nhead_ratio_qk;
-        const long_index_t first_page =
-            static_cast<long_index_t>(i_batch) * kargs.page_table.batch_stride_block_table;
-        const int32_t* page_row = kargs.page_table.block_table_ptr + first_page;
-        if(kargs.seqlen_k > 0)
+        // This sequence's page ids (page_row) and, for the SGLang list, how many it has. The vLLM
+        // path keeps its original statement order (its code objects are compared bit for bit).
+        const int32_t* page_row = nullptr;
+        index_t sglang_pages    = 0;
+        if constexpr(kSglangTable)
         {
-            const index_t page_count = (kargs.seqlen_k - 1) / FmhaPipeline::kPageBlockSize + 1;
-            if(kargs.stride_k <= 0 || kargs.stride_v <= 0 || kargs.batch_stride_k <= 0 ||
-               kargs.batch_stride_v <= 0 || kargs.page_table.batch_stride_block_table <= 0 ||
-               kargs.num_total_pages <= 0 ||
-               page_count > kargs.page_table.batch_stride_block_table || first_page < 0)
+            // kv_page_indices[kv_indptr[b], kv_indptr[b + 1]) are the pages of sequence b; its last
+            // page holds kv_last_page_lens[b] tokens.
+            const int32_t page_start = kargs.page_table.kv_indptr[i_batch];
+            sglang_pages             = kargs.page_table.kv_indptr[i_batch + 1] - page_start;
+            kargs.seqlen_k           = 0;
+            if(sglang_pages > 0)
+            {
+                const int32_t last_page_len = kargs.page_table.kv_last_page_lens[i_batch];
+                if(page_start < 0 || last_page_len <= 0 ||
+                   last_page_len > FmhaPipeline::kPageBlockSize || kargs.stride_k <= 0 ||
+                   kargs.stride_v <= 0 || kargs.batch_stride_k <= 0 || kargs.batch_stride_v <= 0 ||
+                   kargs.num_total_pages <= 0)
+                    __builtin_trap();
+                kargs.seqlen_k = (sglang_pages - 1) * FmhaPipeline::kPageBlockSize + last_page_len;
+            }
+            else if(sglang_pages < 0)
                 __builtin_trap();
+            page_row = kargs.page_table.kv_page_indices + page_start;
         }
+        else
+        {
+            kargs.seqlen_k = kargs.page_table.seqlen_k_ptr[i_batch];
+        }
+        const long_index_t kv_head = i_nhead / kargs.nhead_ratio_qk;
+        if constexpr(!kSglangTable)
+        {
+            const long_index_t first_page =
+                static_cast<long_index_t>(i_batch) * kargs.page_table.batch_stride_block_table;
+            page_row = kargs.page_table.block_table_ptr + first_page;
+            if(kargs.seqlen_k > 0)
+            {
+                const index_t page_count = (kargs.seqlen_k - 1) / FmhaPipeline::kPageBlockSize + 1;
+                if(kargs.stride_k <= 0 || kargs.stride_v <= 0 || kargs.batch_stride_k <= 0 ||
+                   kargs.batch_stride_v <= 0 || kargs.page_table.batch_stride_block_table <= 0 ||
+                   kargs.num_total_pages <= 0 ||
+                   page_count > kargs.page_table.batch_stride_block_table || first_page < 0)
+                    __builtin_trap();
+            }
+        }
+        // Table entries the window may index for this sequence.
+        const index_t page_capacity = [&]() {
+            if constexpr(kSglangTable)
+                return sglang_pages;
+            else
+                return kargs.page_table.batch_stride_block_table;
+        }();
         const auto* q_ptr = reinterpret_cast<const QDataType*>(kargs.q_ptr) +
                             query_start * kargs.stride_q +
                             static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q;
@@ -268,7 +319,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             kargs.stride_k,
             page_row,
             static_cast<long_index_t>(kargs.batch_stride_k),
-            kargs.page_table.batch_stride_block_table,
+            page_capacity,
             kargs.num_total_pages,
             {},
             {0, 0}};
@@ -283,7 +334,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             kargs.stride_v,
             page_row,
             static_cast<long_index_t>(kargs.batch_stride_v),
-            kargs.page_table.batch_stride_block_table,
+            page_capacity,
             kargs.num_total_pages,
             {},
             {0, 0}};
