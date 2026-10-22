@@ -26,7 +26,7 @@ The 80% coverage number is a goal, not a merge requirement. Local [coverage targ
 
 ## Tested GPUs and supported GPUs
 
-- A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock CI](../../../../.github/workflows/therock-ci.yml), [Linux test workflow](../../../../.github/workflows/therock-ci-linux.yml), and [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
+- A configured build does not prove that tests ran on a physical GPU. Some Linux targets are build-only, and external runner settings choose the actual hardware. See [TheRock Multi-Arch CI](../../../../.github/workflows/therock-multi-arch-ci.yml) and the [superbuild workflow](../../../../.github/workflows/hipdnn-superbuild-ci.yml).
 - Passing CI on one GPU does not prove support for every GPU. Support can depend on the operation, engine, build options, libraries, and runtime checks. Use [hipDNN operation support](../OperationSupport.md) and provider documentation for support claims.
 
 ## Automated performance checks
