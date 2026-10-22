@@ -274,6 +274,34 @@ jobs:
         if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
         run: python "${SCRIPTS_DIR}/rocjitsu_check_suite.py" --report-dir "${REPORT_DIR}"
 
+      # TEMPORARY diagnostic: the ductile tests fail here but pass locally, and
+      # Tensile prints its fatal message to stdout, which xdist workers drop.
+      # Rerun the failed ones without xdist so the message reaches the log.
+      - name: Rerun failed ductile tests without xdist
+        if: ${{ !cancelled() && steps.tests.conclusion == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          mapfile -t failed < <(python - "${REPORT_DIR}/progress.json" <<'PY'
+          import json, sys
+          tests = json.load(open(sys.argv[1])).get("tests", {})
+          print("\n".join(n for n, t in tests.items()
+                          if "/ductile/" in n and t.get("outcome") == "failed"))
+          PY
+          )
+          if (( ${#failed[@]} == 0 )); then echo "No failed ductile tests"; exit 0; fi
+          cd "${TENSILELITE_ROOT}"
+          mirage run --profile "${MIRAGE_PROFILE}" --in-process \
+              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
+            python -m pytest "${failed[@]}" \
+              --gpu-targets="${ROCJITSU_TARGET}" -v -s --timeout=600 \
+              -p no:cacheprovider --basetemp="${RUNNER_TEMP}/ductile-rerun" \
+              --prebuilt-client="${TENSILELITE_CLIENT}" \
+              --global-parameters="LibraryFormat='msgpack'" \
+              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
+            2>&1 | tee "${REPORT_DIR}/ductile-rerun.log"
+
       - name: Upload test reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
