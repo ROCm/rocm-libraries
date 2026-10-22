@@ -9,8 +9,8 @@ answer exactly with `fast_check`
 
 It needs only an installed hipBLASLt with its test client (`bin/hipblaslt-test`,
 `bin/hipblaslt_common.yaml`, `lib/hipblaslt/library/<arch>/`), such as a TheRock build or the
-artifacts `install_rocm_from_artifacts.py --blas --tests` fetches. Nothing is rebuilt, and no
-C++ changes are involved.
+artifacts of a TheRock CI run. Nothing is rebuilt, so the results describe the exact binaries
+that CI built.
 
 ## How it works
 
@@ -34,14 +34,22 @@ C++ changes are involved.
 
 ## Running
 
+The harness itself needs Python 3.9 or later and `msgpack` (`pip install msgpack`). To test a
+CI build, take the GitHub Actions run ID of a TheRock or rocm-libraries multi-arch CI run and
+fetch its artifacts with TheRock's `install_rocm_from_artifacts.py`, from a TheRock checkout
+with its `requirements.txt` installed:
+
 ```bash
-# Fetch a TheRock CI build (artifact group multi-arch-release for multi-arch CI runs).
+# In a TheRock checkout. Multi-arch CI runs use the multi-arch-release artifact group.
 python build_tools/install_rocm_from_artifacts.py --run-id <run-id> \
     --artifact-group multi-arch-release --amdgpu-targets gfx90a --blas --tests \
     --output-dir rocm-gfx90a
 
-clients/scripts/kernel_corpus/run.py --rocm-dir rocm-gfx90a --out corpus-gfx90a
+# In this directory, on a machine with a gfx90a GPU.
+./run.py --rocm-dir rocm-gfx90a --out corpus-gfx90a
 ```
+
+When it finishes, `corpus-gfx90a/summary.md` lists the outcome counts and every failing case.
 
 The architecture comes from the device. `--index-range lo:hi`, `--problem-filter` (a regex on
 the problem-type key, such as `Half/Half`), `--per-type N` (the first N solutions of each
@@ -65,7 +73,8 @@ even a basic GEMM, and 0 otherwise.
 | `skip` | hipblaslt-test skipped the case |
 | `unsupported` | fast_check cannot check this configuration (complex data, an exactness limit); hipblaslt-test reports these as failures, and the runner sets them apart |
 | `deferred` | the problem type needs an epilogue or input the smoke profile does not build yet (grouped GEMM, gradients, E, swizzled inputs, MX) |
-| `unreachable` | the solution requires a CU count this device does not have |
+| `unreachable` | the solution requires a CU count or PCI chip ID this device does not have; a result from another device of the same architecture replaces it |
+| `harness_error` | hipblaslt-test ran none of the chunk's cases twice in a row, for example because it rejected the generated YAML; retried on the next run |
 
 To reproduce a failure, run its YAML from `repro/` with
 `hipblaslt-test --yaml <file> --gtest_filter='*pre_checkin_kc_*'`, or the `bench_cmd` from
@@ -73,10 +82,14 @@ To reproduce a failure, run its YAML from `repro/` with
 
 ## Scope
 
-The smoke profile is a first pass aimed at finding defects quickly. It does not yet cover
-epilogues, scale factors, MX formats, large buffers, 4 GiB placement or repeated launches, and
-it tests only TensileLite solutions: hand-written extension ops and rocRoller kernels have no
-entries in the TensileLibrary files. Running the CPU-only tests:
+The smoke profile is a first pass aimed at finding defects quickly. It sets the scaleA, scaleB,
+scaleC and scaleD inputs a problem type requires, but it does not yet cover epilogues (bias,
+activation, gradients), MX formats, problem-size edges, large buffers, 4 GiB placement or
+repeated launches. It tests only TensileLite solutions: hand-written extension ops and rocRoller
+kernels have no entries in the TensileLibrary files.
+
+The CPU-only unit tests do not run in CI yet; they move into CI with the corpus lanes
+([AIHPBLAS-3894](https://amd-hub.atlassian.net/browse/AIHPBLAS-3894)). Run them with:
 
 ```bash
 python -m unittest discover -s clients/scripts/kernel_corpus

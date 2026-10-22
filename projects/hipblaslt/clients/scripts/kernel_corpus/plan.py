@@ -7,8 +7,8 @@ Each case pins one solution with algo_method 2 and an explicit solution_index, s
 own predicate check decides whether the kernel accepts the problem, and the public C API packs
 the arguments the way a user's call would. fast_check with integer_exact data is the oracle.
 
-A profile names the problems built for each kernel. Phase 1 has one, `smoke`: shapes derived
-from the kernel's own macro tile, DepthU and split-K, honoring its size predicates.
+A profile names the problems built for each kernel. The only profile so far is `smoke`: shapes
+derived from the kernel's own macro tile, DepthU and split-K, honoring its size predicates.
 """
 
 from __future__ import annotations
