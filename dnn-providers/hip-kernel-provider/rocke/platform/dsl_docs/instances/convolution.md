@@ -5,6 +5,9 @@ This page covers:
 - `library/kernels/common/conv_implicit_gemm.py`
 - `library/kernels/common/conv_direct_grouped.py`
 - `library/kernels/common/conv_direct_nongrouped.py`
+- `library/kernels/common/conv_direct_wgrad_tiled.py`,
+  `library/kernels/common/conv_direct_dw_wgrad.py`,
+  `library/kernels/common/conv_direct_wgrad_gather.py` (direct wgrad)
 - `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
@@ -767,6 +770,54 @@ C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
+
+## Direct Wgrad Kernels
+
+Sources: `library/kernels/common/conv_direct_wgrad_tiled.py`,
+`conv_direct_dw_wgrad.py`, `conv_direct_wgrad_gather.py`. Weight-gradient
+kernels of the direct-conv AOT sweep (`--directions wgrad`), gfx950; all take
+the `conv_direct_arg_names("wgrad")` kernargs (dY on A, X on B) and accumulate
+in fp32.
+
+| Spec | Serves | Output |
+|---|---|---|
+| `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg`/`kpg` multiples of 8 | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]` |
+| `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3, stride 1/2 | partial slots `ws[part][tap][c]` |
+| `DwWgradColsSpec` | depthwise, `C <= 8` (stem layers), any filter | partial slots `ws[part][tap][c]` |
+| `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride | partial slots `ws[part][(r, s, c)][k]` |
+| `DwWgradFoldSpec` | the fold after a partial-slot pass | `dW` written whole (no zeroing) |
+
+- **Tiled.** A wave owns `wave_k16*16 x wave_c16*16` channels for all taps;
+  the block DMAs input rows of a 32-column strip into LDS ring buffers
+  (`buffer_load ... lds`, `prefetch` rows in flight) with an XOR chunk swizzle
+  that `pick_swizzle` picks at build time so the `ds_read_b64_tr_b16` fragment
+  reads are bank-conflict free. `unfold_n` packs several images into one strip;
+  `q_groups=2` (+`pingpong`) runs two wave groups half a row apart.
+- **Partial slots + fold.** Same-address fp32 atomics serialize, and a
+  depthwise `dW` has only a few thousand addresses, so the depthwise and gather
+  kernels store one partial slot per partition with plain stores and
+  `DwWgradFoldSpec` sums the partitions. In the sweep they are two-step plans:
+  the pass writes the scratch `ws`, the fold reads it (kernargs `A, D, A_bytes,
+  D_bytes, parts, channels`).
+- All four row-streaming kernels set the kernel attr `lds_alias_scopes`: every
+  smem allocation gets its own alias scope, so the waitcnt pass does not drain
+  the in-flight LDS DMA before each `ds_read`.
+- The validators gate on `lds_bytes()`, which counts what the builder
+  allocates: ring slots rounded up to whole DMA instructions of every wave
+  (plus the gather's 16-element transpose tail) and the reduction buffers.
+  The LDS-DMA kernels (tiled, `DwWgradLdsSpec`, gather) also require a wave64
+  target with 16-byte `buffer_load ... lds` (`async_lds_max_dwords >= 4`).
+
+C++ engine twins: `rocke_build_direct_wgrad_tiled` (`cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
+also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
+(`conv_direct_dw_wgrad.cpp`), `rocke_build_direct_wgrad_gather`
+(`conv_direct_wgrad_gather.cpp`); byte-identity gated by
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 95+), Python IR
+golden `conv_direct_wgrad/*` in `tests/instances/rocke_ir_parity_harness.py`.
+On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
+`library/tests/test_direct_conv_correctness.py` (built on the cache probe,
+launched on other shapes); the two-step plans:
+`library/tests/test_direct_kernel_cache.py`.
 
 ## Img2Col
 

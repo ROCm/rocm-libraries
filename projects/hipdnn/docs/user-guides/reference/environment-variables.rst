@@ -147,10 +147,83 @@ Both are read once, at the calling module's first backend call.
   That first call caches the outcome, failure included, and closes the setter before it starts searching.
   After a failed load, ``setBackendLibraryPath_ext()`` returns ``false`` and stores nothing, so trying a different directory requires a new process.
 
+.. _engine-selection-variables:
+
+Engine selection
+================
+
+``HIPDNN_HEUR_RANKING_METRIC``
+------------------------------
+
+Selects the ranking metric the prediction-based engine selection policies
+(``HeuristicMode::A`` and ``HeuristicMode::B``) order engines by, and that the chosen
+engine then picks its kernel by:
+
+- ``tflops``: calibrated throughput in TFLOPS; higher is better (default)
+- ``time``: predicted execution time in milliseconds; lower is better
+
+When set, it overrides the metric an application requested with
+``Graph::set_ranking_metric()`` (``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``); when
+unset or empty, that request applies, and ``tflops`` when there is none. It is read
+each time an engine heuristic descriptor is finalized, and applies only to heuristic
+selection: a prediction or engine configuration that names its own metric is
+unaffected. A value that is not a registered metric is logged as an error and ignored,
+as if the variable were unset. An engine with
+no model for the selected metric is ranked after the engines that have one.
+
+.. code:: bash
+
+  export HIPDNN_HEUR_RANKING_METRIC=time
+
+.. _descriptor-root-variables:
+
+Kernel ingestor descriptors
+===========================
+
+Providers built with ``HIPDNN_ENABLE_KERNEL_INGESTOR``, such as hip-kernel-provider, build engines from descriptor trees: JSON descriptors and the model artifacts they name.
+A process reads these variables once, the first time the provider discovers its descriptors.
+The provider loads its own tree first and then any additional roots, in the order listed below.
+Within one root, two files that define the same descriptor id with different contents are both ignored.
+An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+
+``HIPDNN_DESCRIPTOR_DIR``
+-------------------------
+
+Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
+
+- Unset: the provider uses the ``arch_content/hip-kernel-provider`` directory beside the loaded provider library, or the configure-time install location when that directory does not exist.
+- ``<path>``: the provider loads this directory instead of its own tree.
+
+A value that is not an existing directory is ignored with a warning, and the default tree is used.
+
+``HIPDNN_DESCRIPTOR_RUNTIME_DIR``
+---------------------------------
+
+An additional descriptor root, loaded after the provider's tree (or ``HIPDNN_DESCRIPTOR_DIR``).
+It adds descriptors beside the shipped ones and never replaces them.
+A value that is not an existing directory is ignored with a warning.
+
+``HIPDNN_DESCRIPTOR_PATH``
+--------------------------
+
+A list of additional descriptor roots, loaded in order after ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``.
+Entries are separated by ``:`` on Linux and ``;`` on Windows, and empty entries are skipped.
+Like ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``, it is additive.
+Entries are not checked for existence: an entry that does not exist on this machine contributes nothing, without a warning.
+
+.. code:: bash
+
+  export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
+  export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
+
+On Linux, all three variables are ignored in a secure execution environment, because a descriptor can name a shared library for the provider to load (see :ref:`secure-execution-variables`).
+
+.. _secure-execution-variables:
+
 Secure execution
 ================
 
-On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
+On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, ``HIPDNN_HEURISTIC_PLUGIN_DIR``, and the kernel ingestor descriptor roots ``HIPDNN_DESCRIPTOR_DIR``, ``HIPDNN_DESCRIPTOR_RUNTIME_DIR``, and ``HIPDNN_DESCRIPTOR_PATH`` (a descriptor can name a shared library for the provider to load).
 Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath_ext()`` override before the system loader's hardened search.
 Variables that do not select code, such as the logging variables above, are unaffected.
-Windows has no equivalent execution mode, so these three variables are always honored there.
+Windows has no equivalent execution mode, so these variables are always honored there.

@@ -85,7 +85,7 @@ KERNEL_NAMES = [
     name for name in getAllCustomKernelNames() if not _rocRollerDeclaresNoStagger(name)
 ]
 
-# Assembling and disassembling all 119 kernels is a few seconds of wall time
+# Assembling and disassembling the custom kernels is a few seconds of wall time
 # spread over a thread pool, so no separate slow marker: this stays in the unit
 # suite where a change to a custom kernel will actually run it.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
@@ -501,6 +501,29 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # human rather than joining the exception quietly.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
+        # W4A16: SupportCustomStaggerU: True, and they unpack StaggerU from the
+        # packed GSU/StaggerU argument like the gfx950 kernels below.
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x112x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x128x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x256x64_W16_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x96x64_W8_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x112x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x128x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x32x64_W4_gfx1151",
+        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x96x64_W4_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        # gfx950
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",

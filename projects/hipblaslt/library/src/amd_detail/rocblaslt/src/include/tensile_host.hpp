@@ -239,6 +239,20 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+/**
+ * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
+ * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries
+ * return fewer: in their order, skipping indexes the array already holds and
+ * algorithms prob does not support. Returns whether those libraries could be read.
+ */
+bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
+                                       RocblasltContractionProblem&      prob,
+                                       std::shared_ptr<void>             gemmData,
+                                       rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                       int*                              returnAlgoCount,
+                                       int                               requestedAlgoCount,
+                                       size_t                            maxWorkSpaceBytes);
+
 namespace TensileLite
 {
     class ProblemOverride;
@@ -302,8 +316,8 @@ int tuningLastLaunchedIndexForTest();
 /**
  * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
  * enumeration, 3 throws after the first measured candidate, 4 stops the search
- * after the first measured candidate the way an expiring budget does; 0
- * restores normal behaviour.
+ * after the first measured candidate the way an expiring budget does, 5 makes
+ * a configured budget read as already spent; 0 restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 
@@ -328,6 +342,17 @@ size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
                                 int32_t                            hotIters,
                                 uint64_t*                          values,
                                 size_t                             count);
+
+/**
+ * The indexes tune mode would measure for prob, in order and before the
+ * baseline is moved to the front; the first count go to indexes. Returns how
+ * many there are, 0 when they cannot be enumerated.
+ */
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

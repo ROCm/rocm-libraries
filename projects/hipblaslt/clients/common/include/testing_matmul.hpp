@@ -45,6 +45,8 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
+// Ungated: generateW4A16Input is used even without the MX data generator.
+#include "w4a16_datagen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
 #include "ulp.hpp"
@@ -71,7 +73,7 @@
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
 size_t elementsToBytes(size_t numElements, hipDataType dtype)
 {
-    if(static_cast<int>(dtype) == HIP_R_4F_E2M1)
+    if(static_cast<int>(dtype) == HIP_R_4F_E2M1 || dtype == HIP_R_4I)
         return numElements / 2;
     return numElements * realDataTypeSize(dtype);
 }
@@ -1888,6 +1890,40 @@ void testing_matmul(const Arguments& arg)
         }
     }
 
+    // Require K-contiguous A, unbatched scales, and shapes supported without a tail loop.
+    if(isW4A16Scaling(arg.scaleA))
+    {
+        const int   groupSize = w4a16GroupSize(arg.scaleA);
+        const char* why       = nullptr;
+        if(arg.a_type != HIP_R_4I)
+            why = "requires --a_type i4_r";
+        else if(tiB != HIP_R_16BF && tiB != HIP_R_16F)
+            why = "requires a bf16 or f16 B";
+        else if(arg.c_type != tiB || arg.d_type != tiB)
+            why = "requires C and D to have B's type";
+        else if(arg.transA != 'T' || arg.transB != 'N')
+            why = "requires TN (--transA T --transB N)";
+        else if(arg.grouped_gemm > 0)
+            why = "does not support grouped GEMM";
+        else if(arg.batch_count > 1)
+            why = "does not support batch_count > 1 (the scale tensor has no batch dimension)";
+        else if(arg.lda[0] < arg.K[0] || arg.lda[0] % 8 != 0)
+            why = "requires lda >= K and lda % 8 == 0";
+        else if(arg.K[0] % groupSize != 0)
+            why = "requires K to be a multiple of the scale group size";
+        else if(arg.K[0] % 8 != 0)
+            why = "requires K to be a multiple of 8 (one dword of int4 per global load)";
+        if(why)
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << "w4a16 " << why;
+#else
+            hipblaslt_cout << "Skipping w4a16: " << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     // for all f8/bf8 cases including mix mode
     if((realDataTypeSize(tiA) == 1 || realDataTypeSize(tiB) == 1) && tc != HIP_R_32I)
     {
@@ -2087,9 +2123,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_A[i] = stride_a[i] == 0        ? lda[i] * A_col[i] * num_batches[i]
-                        : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i]
-                                                : lda[i] * A_col[i];
+            size_A[i] = hipblaslt_bench::rotating_tensor_elements(
+                lda[i], A_col[i], num_batches[i], stride_a[i]);
         }
         else
         {
@@ -2119,9 +2154,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_B[i] = stride_b[i] == 0        ? ldb[i] * B_col[i] * num_batches[i]
-                        : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i]
-                                                : ldb[i] * B_col[i];
+            size_B[i] = hipblaslt_bench::rotating_tensor_elements(
+                ldb[i], B_col[i], num_batches[i], stride_b[i]);
         }
         else
         {
@@ -2150,15 +2184,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_C[i] = stride_c[i] == 0        ? ldc[i] * N[i] * num_batches[i]
-                        : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i]
-                                                : ldc[i] * N[i];
-            size_D[i] = stride_d[i] == 0        ? ldd[i] * N[i] * num_batches[i]
-                        : ldd[i] <= stride_d[i] ? stride_d[i] * num_batches[i]
-                                                : ldd[i] * N[i];
-            size_E[i] = arg.use_e ? (stride_e[i] == 0        ? lde[i] * N[i] * num_batches[i]
-                                     : lde[i] <= stride_e[i] ? stride_e[i] * num_batches[i]
-                                                             : lde[i] * N[i])
+            size_C[i] = hipblaslt_bench::rotating_tensor_elements(
+                ldc[i], N[i], num_batches[i], stride_c[i]);
+            size_D[i] = hipblaslt_bench::rotating_tensor_elements(
+                ldd[i], N[i], num_batches[i], stride_d[i]);
+            size_E[i] = arg.use_e ? hipblaslt_bench::rotating_tensor_elements(
+                                        lde[i], N[i], num_batches[i], stride_e[i])
                                   : 0;
         }
         else
@@ -2182,6 +2213,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleAVec[i] = 1;
             else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                 size_scaleAVec[i] = M[i];
+            else if(isW4A16Scaling(arg.scaleA))
+            {
+                // Byte count for scales of B's type and optional packed zero-points.
+                size_scaleAVec[i] = w4a16::scaleBytes(
+                    M[i], (K[i] + w4a16GroupSize(arg.scaleA) - 1) / w4a16GroupSize(arg.scaleA),
+                    isW4A16ZeroPoint(arg.scaleA));
+            }
             else if(isBlockScaling(arg.scaleA))
                 size_scaleAVec[i] = blockScaleBufferSize(
                     A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_use_rocroller);
@@ -2230,10 +2268,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(arg.bias_source == hipblaslt_bias_source::b)
                     size_bias[i] = N[i];
 
-                if(arg.bias_stride > 0)
-                {
-                    size_bias[i] = arg.bias_stride * num_batches[i];
-                }
+                size_bias[i] = hipblaslt_bench::rotating_bias_elements(
+                    size_bias[i], arg.bias_stride, num_batches[i]);
             }
             else
             {
@@ -2244,29 +2280,22 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             size_bias[i] = 0;
         }
-        auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
-        int64_t sizeC    = get_computeInterface(h_beta[i], Tc) == 0 ? 0 : size_C[i] * sizeof(To);
-        if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-        {
-            totalRotatingSizeNeeded
-                += size_dA[i] * realDataTypeSize(TiA) + size_dB[i] * realDataTypeSize(TiB) + sizeC
-                   + size_D[i] * realDataTypeSize(To) + size_E[i] * realDataTypeSize(To) + biasSize
-                   + size_scaleAlphaVec[i] * realDataTypeSize(Talpha)
-                   + size_scaleAVec[i] * realDataTypeSize(Talpha)
-                   + size_scaleBVec[i] * realDataTypeSize(Talpha);
-        }
-        else
-        {
-            // For General Batched GEMM, the Matrices aren't stored in a continuous buffer across batches.
-            // Hence size_dA doesn't account for all batches.
-            totalRotatingSizeNeeded += size_dA[i] * realDataTypeSize(TiA) * num_batches[i]
-                                       + size_dB[i] * realDataTypeSize(TiB) * num_batches[i]
-                                       + sizeC * num_batches[i]
-                                       + size_D[i] * realDataTypeSize(To) * num_batches[i]
-                                       + biasSize + size_scaleAlphaVec[i] * realDataTypeSize(Talpha)
-                                       + size_scaleAVec[i] * realDataTypeSize(Talpha)
-                                       + size_scaleBVec[i] * realDataTypeSize(Talpha);
-        }
+        hipblaslt_bench::RotatingTensors tensors;
+        tensors.a               = size_dA[i] * realDataTypeSize(TiA);
+        tensors.b               = size_dB[i] * realDataTypeSize(TiB);
+        tensors.c               = size_C[i] * sizeof(To);
+        tensors.d               = size_D[i] * realDataTypeSize(To);
+        tensors.e               = size_E[i] * realDataTypeSize(To);
+        tensors.bias            = size_bias[i] * realDataTypeSize(Tbias);
+        tensors.scale_alpha_vec = size_scaleAlphaVec[i] * realDataTypeSize(Talpha);
+        tensors.scale_a         = size_scaleAVec[i] * realDataTypeSize(Talpha);
+        tensors.scale_b         = size_scaleBVec[i] * realDataTypeSize(Talpha);
+        tensors.reads_c         = get_computeInterface(h_beta[i], Tc) != 0;
+        // For General Batched GEMM, the Matrices aren't stored in a continuous buffer across batches.
+        // Hence size_dA doesn't account for all batches.
+        tensors.general_batched = batchMode != HIPBLASLT_BATCH_MODE_STRIDED;
+        tensors.num_batches     = num_batches[i];
+        totalRotatingSizeNeeded += hipblaslt_bench::rotating_block_bytes(tensors);
     }
 
     gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
@@ -2824,7 +2853,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 dScaleA.emplace_back(Talpha, size_scaleAVec[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
-            else if(isBlockScaling(arg.scaleA))
+            else if(isBlockScaling(arg.scaleA) || isW4A16Scaling(arg.scaleA))
             {
                 // For MX format, use uint8_t for the scale (E8M0), allocate for all batches. A
                 // placed scale buffer is typed int8 so its poison windows hold 0x28, which E8M0
@@ -2910,7 +2939,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 hScaleA.emplace_back(Talpha, size_scaleAVec[i]);
             }
-            else if(isBlockScaling(arg.scaleA))
+            else if(isBlockScaling(arg.scaleA) || isW4A16Scaling(arg.scaleA))
             {
                 hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i]);
             }
@@ -3095,7 +3124,22 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
-        if(isBlockScaling(arg.scaleA))
+        if(isW4A16Scaling(arg.scaleA))
+        {
+            // Keep dequantized A for the reference GEMM.
+            refA.emplace_back(generateW4A16Input(hA[i].buf(),
+                                                 hScaleA[i].buf(),
+                                                 TiB,
+                                                 M[i],
+                                                 K[i],
+                                                 lda[i],
+                                                 w4a16GroupSize(arg.scaleA),
+                                                 isW4A16ZeroPoint(arg.scaleA),
+                                                 arg.int4_encoding));
+            CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
+            CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+        }
+        else if(isBlockScaling(arg.scaleA))
         {
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
             if(arg.initialization != hipblaslt_initialization::hpl
@@ -3747,6 +3791,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                 }
+                else if(isW4A16Scaling(arg.scaleA))
+                {
+                    // Client scale values match the public API enum.
+                    mode = static_cast<hipblasLtMatmulMatrixScale_t>(arg.scaleA);
+                    CHECK_HIPBLASLT_ERROR(
+                        hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                        HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                        &arg.int4_encoding,
+                                                        sizeof(arg.int4_encoding)));
+                }
 
                 if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
                 {
@@ -4306,6 +4360,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                         case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                         default:
+                            // Client scale values match the public API enum.
+                            if(isW4A16Scaling(f))
+                                return static_cast<hipblasLtMatmulMatrixScale_t>(f);
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                         }
                     };
@@ -4358,6 +4415,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         extproblemtype.setTypeC(arg.c_type);
         extproblemtype.setTypeD(arg.d_type);
         extproblemtype.setTypeCompute(arg.compute_type);
+        if(isW4A16Scaling(arg.scaleA))
+            extproblemtype.setInt4EncodingA(
+                static_cast<hipblasLtInt4Encoding_t>(arg.int4_encoding));
 
         if(do_swizzle_a)
         {
@@ -5336,7 +5396,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             void* scaleDValue = arg.scaleD ? hScaleD[gemmIdx].buf() : (void*)(&scale);
             void* scaleEValue = arg.scaleE ? hScaleE[gemmIdx].buf() : (void*)(&scale);
 
-            bool const isScaleAMXFormat = isBlockScaling(arg.scaleA);
+            // Reference A is already dequantized; do not apply its scale again.
+            bool const isScaleAMXFormat = isBlockScaling(arg.scaleA) || isW4A16Scaling(arg.scaleA);
             bool const isScaleBMXFormat = isBlockScaling(arg.scaleB);
 
             for(int batchIdx = 0; batchIdx < num_batches[gemmIdx]; batchIdx++)
@@ -6926,10 +6987,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(h)
                 (void)hipblasLtMatmulDescDestroy(h);
 
-    // Before ROCm 7.1, destroying a stream with unsynchronized work leaks its last command,
-    // which keeps that command's buffers alive. A leaked placed buffer leaves a stale VA
-    // reservation that breaks a later hipMemAddressFree at the same address.
-    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));

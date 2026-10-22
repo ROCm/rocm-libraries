@@ -13,6 +13,7 @@ readable assembly that sets BufferOOB by name, and pre-assembled kernels
 stored as raw `.long` instruction words.
 """
 
+import fnmatch
 import functools
 import importlib.util
 import pathlib
@@ -20,7 +21,7 @@ import re
 
 import pytest
 
-from Tensile.resources import custom_kernel_names, custom_kernel_text
+from tensilelite.resources import custom_kernel_names, custom_kernel_text
 
 pytestmark = pytest.mark.unit
 
@@ -143,6 +144,9 @@ NO_BUFFER_OOB_KERNELS = {
     "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
 }
+# HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
+# mask against the free size taken at entry.
+NO_BUFFER_OOB_GLOB = "RuntimeGroup_Decode_*"
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
 _STORE_SRD_NUM_RECORDS = re.compile(
@@ -159,7 +163,7 @@ _VOP1_MOV_LITERAL_MASK, _VOP1_MOV_LITERAL = 0xFE01FFFF, 0x7E0002FF
 
 @functools.lru_cache(maxsize=None)
 def generator_buffer_oob():
-    spec = importlib.util.find_spec("Tensile.KernelWriterAssembly")
+    spec = importlib.util.find_spec("tensilelite.KernelWriterAssembly")
     source = pathlib.Path(spec.origin).read_text(encoding="utf-8")
     match = re.search(r'ValueSet\(\s*"BufferOOB"\s*,\s*(0x[0-9a-fA-F]+|\d+)', source)
     assert match, "KernelWriterAssembly.py no longer emits BufferOOB through ValueSet"
@@ -257,7 +261,8 @@ def test_every_kernel_without_a_recognized_store_bound_is_listed():
         checked, _ = store_bound_findings(_kernel_text(name), generator_buffer_oob())
         if not any("BufferOOB" in kind or "num_records" in kind for kind in checked):
             unrecognized.add(name)
-    listed = set(NO_BUFFER_OOB_KERNELS)
+    listed = set(NO_BUFFER_OOB_KERNELS) | set(
+        fnmatch.filter(custom_kernel_names(), NO_BUFFER_OOB_GLOB))
     assert unrecognized == listed, (
         f"no store bound recognized, not listed: {sorted(unrecognized - listed)}; "
         f"listed, but a store bound is recognized or the kernel is gone: "

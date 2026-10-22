@@ -226,8 +226,9 @@ same way on those shapes.
 
 By default every kernel that can run the problem is measured, not just the ones the selection
 heuristic ranks highest, because the fastest kernel is not always inside that ranked prefix. Setting
-``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the top ``HIPBLASLT_TUNING_MAX_CANDIDATES``
-ranked kernels instead, which is faster but can miss the best one.
+``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the first ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+kernels ``hipblasLtMatmulAlgoGetHeuristic`` returns, in its order, which is faster but can miss the
+best one.
 
 Tuning one shape this thoroughly takes time. An exhaustive search over several hundred candidates
 takes minutes, and it is paid once per shape in the first process that runs with ``tune``.
@@ -275,11 +276,12 @@ answer regardless of its duration.
 
 The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate from the tuner's
 measurement, so the two can disagree between kernels that are within noise of each other. Both run
-the same measurement code, but on different buffers: the tuner rotates copies of your tensors in
-memory it owns, leaves the scale vectors and a forward bias unrotated, and rotates ``C`` even when
-``beta`` is zero. The tuner always times with HIP events; ``hipblaslt-bench`` times with HIP events
-only with ``--use_gpu_timer`` and otherwise uses a synchronized CPU timer. Treat
-``hipblaslt-bench``'s benchmark as the reference when a shape matters enough to check by hand.
+the same measurement code and size their rotation by the same rules, but on different buffers: the
+tuner rotates copies of your tensors in memory it owns, and leaves block-scaled and w4a16 scales in
+place, since only their caller knows their layout. The tuner always times with HIP events;
+``hipblaslt-bench`` times with HIP events only with ``--use_gpu_timer`` and otherwise uses a
+synchronized CPU timer. Treat ``hipblaslt-bench``'s benchmark as the reference when a shape matters
+enough to check by hand.
 
 Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
 the purpose, and only the winner runs on the real output.
@@ -341,8 +343,9 @@ Limitations
 * Tuning happens on the C API execution path. Callers of the C++ extension API can replay a cache but
   do not tune.
 * Grouped GEMM is not served from the cache, and neither is a pointer-array batch called with
-  ``algo=nullptr``. Grouped GEMM, pointer-array batch, rocRoller and HIP graph capture are excluded
-  from tuning.
+  ``algo=nullptr``. Grouped GEMM, pointer-array batch, rocRoller, fused all-to-all calls and HIP graph
+  capture are excluded from tuning. A fused all-to-all call writes to its peer ranks, which its
+  candidates would do too, and the ranks do not coordinate a search.
 * Calls dispatched to rocRoller bypass direct cache replay when ``algo=nullptr``. This includes
   calls using ``HIPBLASLT_USE_ROCROLLER=1`` and block-scaled calls selected for rocRoller by default.
   Cache rows currently accept only nonnegative Tensile solution indexes; rocRoller uses negative

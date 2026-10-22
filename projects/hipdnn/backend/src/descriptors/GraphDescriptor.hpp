@@ -149,6 +149,8 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    /// Returns the graph id, or std::nullopt if the graph has no id yet.
+    virtual std::optional<std::array<uint8_t, 16>> getGraphId() const;
     virtual bool isOverrideShapeEnabled() const;
 
     virtual bool hasRaggedTensors() const;

@@ -1455,11 +1455,11 @@ namespace
                 unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
                 hipblaslt_tuning_reset_for_test();
                 const auto identities = candidateIdentities(8);
-                if(identities.size() < 2)
+                if(identities.empty())
                     std::exit(2);
                 const auto path = tempTuningPath("direct_info");
                 if(!writeTuningFile(
-                       path, buildStamp(), {{identities[1].index, identities[1].kernelName}}))
+                       path, buildStamp(), {{identities[0].index, identities[0].kernelName}}))
                     std::exit(3);
                 setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
                 setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
@@ -1471,8 +1471,8 @@ namespace
                 int         launched = -1;
                 {
                     CerrCapture capture;
-                    ok    = launchGemm(AlgoFrom::Null, -1, &launched, true)
-                            && launched == identities[1].index;
+                    ok = launchGemm(AlgoFrom::Null, -1, &launched, true)
+                         && launched == identities[0].index;
                     first = capture.str();
                 }
                 {

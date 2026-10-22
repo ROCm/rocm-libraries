@@ -395,6 +395,43 @@ TEST(CandidateSearch_pre_checkin, MeasuredCanRuleOutACandidate)
     EXPECT_EQ(host.count(entry("measuring", 1)), 1);
 }
 
+// Validation after measurement can fail the test. Stop before selecting that
+// candidate or running another one, even if the callback also returns false.
+TEST(CandidateSearch_pre_checkin, AFailureAfterMeasurementEndsTheSearch)
+{
+    for(bool eligible : {false, true})
+    {
+        SCOPED_TRACE(eligible);
+        bool   failed             = false;
+        size_t prepared           = 0;
+        size_t measured           = 0;
+        FakeClock::now_us         = 0.0;
+        FakeClock::fail_next_read = false;
+
+        const auto result = hipblaslt_bench::search_candidates<FakeClock>(
+            2,
+            {},
+            cpu_timing(1),
+            nullptr,
+            nullptr,
+            nullptr,
+            hipblaslt_bench::search_callbacks()
+                .prepare([&](size_t) { ++prepared; })
+                .launch([&](size_t, int64_t) { FakeClock::now_us += 10.0; })
+                .measured([&](size_t, hipblaslt_bench::TimingResult&) {
+                    ++measured;
+                    failed = true;
+                    return eligible;
+                }),
+            [&] { return failed; });
+
+        EXPECT_TRUE(result.aborted);
+        EXPECT_EQ(prepared, 1u);
+        EXPECT_EQ(measured, 1u);
+        EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
+    }
+}
+
 // should_stop is asked before each candidate; the search ends at the first yes and
 // reports so, keeping the best of the candidates it reached.
 TEST(CandidateSearch_pre_checkin, ShouldStopEndsTheSearchBetweenCandidates)

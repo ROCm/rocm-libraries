@@ -63,6 +63,7 @@ extern "C" size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
                                                          const void* B,
                                                          const void* C,
                                                          void*       D,
+                                                         float       beta,
                                                          size_t      workspaceBytes,
                                                          size_t      rotatingBytes,
                                                          size_t      capBytes,
@@ -70,6 +71,15 @@ extern "C" size_t hipblaslt_tuning_scratch_plan_for_test(void*       handle,
                                                          int32_t     hotIters,
                                                          uint64_t*   values,
                                                          size_t      count);
+extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
+                                                       void*  matmulDesc,
+                                                       void*  matA,
+                                                       void*  matB,
+                                                       void*  matC,
+                                                       void*  matD,
+                                                       size_t workspaceBytes,
+                                                       int*   indexes,
+                                                       size_t count);
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -773,6 +783,96 @@ namespace
         return ok;
     }
 
+    // The fp16 problem runGemm and runGemmWith launch, described with their
+    // workspace limit.
+    struct Fp16Problem
+    {
+        hipblasLtHandle_t           handle  = nullptr;
+        hipblasLtMatrixLayout_t     layoutA = nullptr;
+        hipblasLtMatrixLayout_t     layoutB = nullptr;
+        hipblasLtMatrixLayout_t     layoutC = nullptr;
+        hipblasLtMatmulDesc_t       desc    = nullptr;
+        hipblasLtMatmulPreference_t pref    = nullptr;
+        uint64_t                    maxWs   = 32 * 1024 * 1024;
+        bool                        ok      = false;
+
+        Fp16Problem(int64_t m, int64_t n, int64_t k)
+        {
+            ok = hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceSetAttribute(
+                        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        ~Fp16Problem()
+        {
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            for(auto layout : {layoutA, layoutB, layoutC})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(handle)
+                hipblasLtDestroy(handle);
+        }
+
+        Fp16Problem(const Fp16Problem&)            = delete;
+        Fp16Problem& operator=(const Fp16Problem&) = delete;
+
+        // The solution indexes the heuristic offers, up to `requested`, in its order.
+        std::vector<int> offered(int requested) const
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(requested);
+            int                                           returned = 0;
+            std::vector<int>                              indexes;
+            if(ok
+               && hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  desc,
+                                                  layoutA,
+                                                  layoutB,
+                                                  layoutC,
+                                                  layoutC,
+                                                  pref,
+                                                  requested,
+                                                  heuristic.data(),
+                                                  &returned)
+                      == HIPBLAS_STATUS_SUCCESS)
+                for(int i = 0; i < returned; i++)
+                    indexes.push_back(hipblaslt_ext::getIndexFromAlgo(heuristic[i].algo));
+            return indexes;
+        }
+
+        // The solution indexes tune mode would measure under the current
+        // settings, in order and before the baseline is moved to the front.
+        std::vector<int> tuningCandidates() const
+        {
+            if(!ok)
+                return {};
+            std::vector<int> indexes(hipblaslt_tuning_candidates_for_test(
+                handle, desc, layoutA, layoutB, layoutC, layoutC, maxWs, nullptr, 0));
+            hipblaslt_tuning_candidates_for_test(handle,
+                                                 desc,
+                                                 layoutA,
+                                                 layoutB,
+                                                 layoutC,
+                                                 layoutC,
+                                                 maxWs,
+                                                 indexes.data(),
+                                                 indexes.size());
+            return indexes;
+        }
+    };
+
     std::vector<std::string> readLines(const std::string& path)
     {
         std::vector<std::string> lines;
@@ -1240,6 +1340,27 @@ namespace
 
         ASSERT_TRUE(runGemm(64, 64, 64));
         ASSERT_GT(valueRowCount(m_path), 0u) << "exhaustive tuning recorded nothing";
+    }
+
+    // A ranked search measures the list hipblasLtMatmulAlgoGetHeuristic returns,
+    // in its order, including what it adds from the size-independent libraries
+    // when the ranked ones return fewer than asked for, so tune mode and
+    // hipblaslt-bench search the same candidates.
+    TEST_F(TuningTune_pre_checkin, RankedCandidatesAreTheHeuristicsList)
+    {
+        const Fp16Problem problem(1024, 512, 1024);
+        ASSERT_TRUE(problem.ok);
+        enterMode("tune", m_path);
+        for(int cap : {1, 16, 256})
+        {
+            SCOPED_TRACE(cap);
+            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(cap).c_str(), 1);
+            hipblaslt_tuning_reset_for_test();
+
+            const auto offered = problem.offered(cap);
+            ASSERT_FALSE(offered.empty());
+            EXPECT_EQ(problem.tuningCandidates(), offered);
+        }
     }
 
     // The winner has to actually run on the caller's buffers and be right.
@@ -1747,9 +1868,9 @@ namespace
             << "the partial search did not start with the caller's algo";
     }
 
-    // The same for an algo outside the ranked prefix the tuner searches, such as
-    // one the heuristic's all-solutions fallback hands a caller. It is not among
-    // the candidates at all, so it has to be added to them, at the front.
+    // The same for an algo past the candidates the tuner searches, such as one
+    // far down the list the heuristic hands a caller. It is not among the
+    // candidates at all, so it has to be added to them, at the front.
     TEST_F(TuningTune_pre_checkin, PartialSearchMeasuresAnAlgoOutsideTheRankedCandidates)
     {
         // The fixture searches the top sixteen, so take one well past them.
@@ -1802,23 +1923,20 @@ namespace
     TEST_F(TuningTune_pre_checkin, BudgetExhaustedShapeIsNotRetried)
     {
         enterMode("tune", m_path);
-
-        // A ceiling this small stops the search either before the first
-        // candidate is measured or just after, and which one is a matter of how
-        // long setup happened to take. Both are correct, and they end
-        // differently: nothing measured is a skip that records no row, whereas
-        // one candidate measured is a partial winner that records exactly one.
-        // What must hold either way is that it happened once.
         setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
         hipblaslt_tuning_reset_for_test();
+        // Read as spent at once, however quickly this machine runs the search,
+        // so it stops before measuring anything: a skip that records no row.
+        hipblaslt_tuning_inject_failure_for_test(5);
 
         for(int i = 0; i < 3; i++)
             ASSERT_TRUE(runGemm(1024, 512, 1024));
 
         const auto c = counters();
-        EXPECT_EQ(c.skipped + c.tuned, 1u)
+        EXPECT_EQ(c.skipped, 1u)
             << "the shape re-tuned after its budget ran out, so every call pays the ceiling";
-        EXPECT_LE(valueRowCount(m_path), 1u) << "a truncated search appended more than one row";
+        EXPECT_EQ(c.tuned, 0u);
+        EXPECT_EQ(valueRowCount(m_path), 0u) << "a search stopped before measuring recorded a row";
     }
 
     // One stale row is met three times in a tune-mode call: the heuristic
@@ -2120,8 +2238,15 @@ namespace
         int64_t strideA = -1, strideB = -1, strideC = -1, strideD = -1;
 
         bool                inPlace    = false;
+        float               beta       = 0.0f;
         hipblasLtEpilogue_t epilogue   = HIPBLASLT_EPILOGUE_DEFAULT;
         int32_t             biasStride = 0;
+        int64_t             auxStride  = -1;
+        int64_t             auxLD      = 0;
+
+        // A scaled by an M vector and B by an N vector, and alpha a vector.
+        bool vectorScales = false;
+        bool alphaVector  = false;
 
         size_t  workspaceBytes = 0;
         size_t  rotatingBytes  = 0;
@@ -2135,7 +2260,8 @@ namespace
         bool     usable = false;
         uint64_t blocks = 0, total = 0;
         uint64_t bytesA = 0, bytesB = 0, bytesC = 0, bytesD = 0, bytesInPlaceC = 0, bytesE = 0,
-                 bytesBias = 0;
+                 bytesBias = 0, bytesBiasIn = 0, copyBiasIn = 0, bytesScaleA = 0, bytesScaleB = 0,
+                 bytesScaleAlphaVec = 0;
     };
 
     bool planFor(const PlanCase& c, Plan* plan)
@@ -2168,12 +2294,15 @@ namespace
         };
 
         // Only compared, never dereferenced, so any distinct addresses do.
-        static char    buffers[5];
-        const void*    A    = &buffers[0];
-        const void*    B    = &buffers[1];
-        const void*    C    = &buffers[2];
-        void*          D    = c.inPlace ? &buffers[2] : &buffers[3];
-        void*          bias = &buffers[4];
+        static char    buffers[8];
+        const void*    A      = &buffers[0];
+        const void*    B      = &buffers[1];
+        const void*    C      = &buffers[2];
+        void*          D      = c.inPlace ? &buffers[2] : &buffers[3];
+        void*          bias   = &buffers[4];
+        void*          aux    = &buffers[5];
+        void*          scaleA = &buffers[6];
+        void*          scaleB = &buffers[7];
         const bool     nA   = c.opA == HIPBLAS_OP_N;
         const bool     nB   = c.opB == HIPBLAS_OP_N;
         const int32_t  opA = c.opA, opB = c.opB;
@@ -2208,7 +2337,50 @@ namespace
                                                     sizeof(c.biasStride))
                         == HIPBLAS_STATUS_SUCCESS;
 
-        uint64_t v[10] = {};
+        if(ok
+           && (c.epilogue == HIPBLASLT_EPILOGUE_DGELU || c.epilogue == HIPBLASLT_EPILOGUE_GELU_AUX))
+        {
+            const int64_t ld     = c.auxLD ? c.auxLD : c.m;
+            const int64_t stride = c.auxStride >= 0 ? c.auxStride : ld * c.n;
+            ok                   = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &aux, sizeof(aux))
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &ld, sizeof(ld))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(desc,
+                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE,
+                                                    &stride,
+                                                    sizeof(stride))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        if(ok && c.vectorScales)
+        {
+            const int32_t vector = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+            ok                   = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                     == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &vector, sizeof(vector))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &vector, sizeof(vector))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        if(ok && c.alphaVector)
+        {
+            const int32_t mode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
+            ok                 = hipblasLtMatmulDescSetAttribute(
+                     desc, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &mode, sizeof(mode))
+                 == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        uint64_t v[15] = {};
         ok             = ok
              && hipblaslt_tuning_scratch_plan_for_test(handle,
                                                        desc,
@@ -2220,16 +2392,31 @@ namespace
                                                        B,
                                                        C,
                                                        D,
+                                                       c.beta,
                                                        c.workspaceBytes,
                                                        c.rotatingBytes,
                                                        c.cap,
                                                        c.coldIters,
                                                        c.hotIters,
                                                        v,
-                                                       10)
-                    >= 10;
+                                                       15)
+                    >= 15;
         if(ok)
-            *plan = {v[0] != 0, v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]};
+            *plan = {v[0] != 0,
+                     v[1],
+                     v[2],
+                     v[3],
+                     v[4],
+                     v[5],
+                     v[6],
+                     v[7],
+                     v[8],
+                     v[9],
+                     v[10],
+                     v[11],
+                     v[12],
+                     v[13],
+                     v[14]};
 
         if(desc)
             hipblasLtMatmulDescDestroy(desc);
@@ -2313,6 +2500,25 @@ namespace
         }
     }
 
+    TEST_F(TuningScratchPlan_pre_checkin, GradientAuxiliaryOverlapDoesNotCopyAnExpandedSpan)
+    {
+        PlanCase c;
+        c.batch     = 2;
+        c.auxLD     = c.m + 8;
+        c.auxStride = c.m * c.n;
+        c.epilogue  = HIPBLASLT_EPILOGUE_DGELU;
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_FALSE(plan.usable);
+        c.auxStride = c.auxLD * c.n;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_TRUE(plan.usable);
+        c.auxStride = c.m * c.n;
+        c.epilogue  = HIPBLASLT_EPILOGUE_GELU_AUX;
+        ASSERT_TRUE(planFor(c, &plan));
+        EXPECT_TRUE(plan.usable) << "Writable forward auxiliary scratch can be expanded";
+    }
+
     // A gradient epilogue writes the bias, as long as the longer side of D,
     // once per batch at the bias batch stride.
     TEST_F(TuningScratchPlan_pre_checkin, GradientBiasCoversEveryBatchAtItsStride)
@@ -2340,13 +2546,12 @@ namespace
         ASSERT_TRUE(full.usable);
         ASSERT_GE(full.blocks, 4u);
 
-        // Every tensor rotates in step, each aligned as the layout aligns it.
-        auto           aligned  = [](uint64_t v) { return (v + 255) / 256 * 256; };
-        const uint64_t perBlock = aligned(full.bytesA) + aligned(full.bytesB) + aligned(full.bytesC)
-                                  + aligned(full.bytesD);
+        // hipblaslt-bench's footprint for this dense problem: A, B and D, as a
+        // zero beta leaves C unread.
+        const uint64_t footprint = full.bytesA + full.bytesB + full.bytesD;
 
         PlanCase threeBlocks      = c;
-        threeBlocks.rotatingBytes = 3 * perBlock;
+        threeBlocks.rotatingBytes = 3 * footprint;
         Plan three;
         ASSERT_TRUE(planFor(threeBlocks, &three));
         ASSERT_EQ(three.blocks, 3u);
@@ -2369,6 +2574,66 @@ namespace
         EXPECT_TRUE(plan.usable);
         EXPECT_EQ(plan.blocks, 1u);
         EXPECT_GT(plan.total, capped.cap);
+    }
+
+    // The block count is hipblaslt-bench's for the same problem. A zero beta
+    // leaves C unread, so with C and D apart, fp16 1024^3 and a 512 MiB budget
+    // the bench plans 86 blocks of A, B and D, and 64 once beta reads C.
+    TEST_F(TuningScratchPlan_pre_checkin, BlockCountFollowsTheBenchFootprint)
+    {
+        PlanCase c;
+        c.m = c.n = c.k = 1024;
+        c.rotatingBytes = size_t(512) << 20;
+
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 86u) << "512 MiB over 6 MiB, rounded up";
+
+        c.beta = 1.0f;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 64u) << "512 MiB over 8 MiB";
+    }
+
+    // A bias the epilogue reads, vector scales and the alpha vector rotate with
+    // the tensors and count toward the block count, as hipblaslt-bench's do.
+    // Only the caller's extent of the bias is copied into its block.
+    TEST_F(TuningScratchPlan_pre_checkin, ReadVectorsRotateWithTheTensors)
+    {
+        PlanCase c;
+        c.epilogue     = HIPBLASLT_EPILOGUE_BIAS;
+        c.vectorScales = true;
+        c.alphaVector  = true;
+
+        Plan bare;
+        ASSERT_TRUE(planFor(c, &bare));
+        ASSERT_TRUE(bare.usable);
+        EXPECT_EQ(bare.bytesBias, 0u) << "a read bias took a written one's block";
+        EXPECT_EQ(bare.bytesBiasIn, std::max(c.m, c.n) * sizeof(float));
+        EXPECT_EQ(bare.copyBiasIn, c.m * sizeof(float)) << "a bias added along D is M long";
+        EXPECT_EQ(bare.bytesScaleA, c.m * sizeof(float));
+        EXPECT_EQ(bare.bytesScaleB, c.n * sizeof(float));
+        EXPECT_EQ(bare.bytesScaleAlphaVec, c.m * sizeof(float));
+
+        // A, B and D, then the bias, the two scales and the alpha vector.
+        const uint64_t footprint
+            = bare.bytesA + bare.bytesB + bare.bytesD + (3 * c.m + c.n) * sizeof(float);
+        c.rotatingBytes = 20 * footprint;
+        Plan plan;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.blocks, 20u);
+
+        // Once per batch at its stride, or a single vector when that is zero.
+        c.batch = 2;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.copyBiasIn, c.m * sizeof(float));
+        c.biasStride = 80;
+        ASSERT_TRUE(planFor(c, &plan));
+        ASSERT_TRUE(plan.usable);
+        EXPECT_EQ(plan.copyBiasIn, (80 + c.m) * sizeof(float));
     }
 
     // Every block shares one workspace, so however large the caller's limit,

@@ -211,10 +211,54 @@ static rocke_status_t rocke_h_op_arith_constant_vec(rocke_h_lowerer_t* lw, const
 
 /* ----------------------------- arith: int binary --------------------------- */
 
-/* def _op_arith_add(self, op): self._binary(op, "+") */
+/* def _op_arith_add(self, op): "nsw" (the default) is self._binary(op, "+");
+ * "nuw" adds as unsigned and casts back, because a signed a + b that passes
+ * the signed maximum is undefined behaviour in C++ (clang emits it nsw). */
 static rocke_status_t rocke_h_op_arith_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_binary(lw, op, "+");
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", wrap_error);
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    if(wrap == NULL || strcmp(wrap, "nsw") == 0)
+    {
+        h_binary(lw, op, "+");
+        return lw->status;
+    }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
+    if(!unsigned_t)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
+    }
+    rocke_h_emitf(lw,
+                  "%s %s = (int%s_t)((%s)%s + (%s)%s);",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  r->type->name + 1,
+                  unsigned_t,
+                  rocke_h_name(lw, a),
+                  unsigned_t,
+                  rocke_h_name(lw, b));
+    return lw->status;
+}
+
+/* def _op_arith_assume_range(self, op): a range marker is a copy of its
+ * first operand. */
+static rocke_status_t rocke_h_op_arith_assume_range(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, op->operands[0]));
     return lw->status;
 }
 
@@ -263,6 +307,22 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     if(!pred)
     {
         pred = "lt";
+    }
+    if(strcmp(pred, "ult") == 0)
+    {
+        const char* unsigned_t = rocke_h_unsigned_int_type(a->type);
+        if(!unsigned_t)
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", a->type->name);
+        }
+        rocke_h_emitf(lw,
+                      "bool %s = (%s)%s < (%s)%s;",
+                      rocke_h_name(lw, r),
+                      unsigned_t,
+                      rocke_h_name(lw, a),
+                      unsigned_t,
+                      rocke_h_name(lw, b));
+        return lw->status;
     }
     if(strcmp(pred, "lt") == 0)
     {
@@ -520,7 +580,9 @@ static rocke_status_t rocke_h_op_arith_fneg(rocke_h_lowerer_t* lw, const rocke_o
 /* def _op_arith_fabs(self, op):
  *     (v,) = op.operands
  *     ty = _type_to_hip(op.result.type)
- *     _reject_f64(op, op.result.type.name)
+ *     if op.result.type.name == "f64":
+ *         self._emit(f"{ty} {_name(op.result)} = fabs({_name(v)});")
+ *         return
  *     helper = {"f32":"fabsf","f16":"__builtin_fabsf","bf16":"__builtin_fabsf"}
  *              .get(op.result.type.name, "fabsf")
  *     self._emit(f"{ty} {_name(op.result)} = ({ty}){helper}((float){_name(v)});") */
@@ -530,7 +592,13 @@ static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
     const char* tname = r->type->name;
-    rocke_h_reject_f64(lw, op, tname);
+    if(tname && strcmp(tname, "f64") == 0)
+    {
+        /* The double overload stays in double; the float helper below would
+         * round the value to f32. */
+        rocke_h_emitf(lw, "%s %s = fabs(%s);", ty, rocke_h_name(lw, r), rocke_h_name(lw, v));
+        return lw->status;
+    }
     const char* helper = "fabsf";
     if(tname && (strcmp(tname, "f16") == 0 || strcmp(tname, "bf16") == 0))
     {
@@ -868,6 +936,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_CONSTANT, rocke_h_op_arith_constant},
         {ROCKE_OP_ARITH_CONSTANT_VEC, rocke_h_op_arith_constant_vec},
         {ROCKE_OP_ARITH_ADD, rocke_h_op_arith_add},
+        {ROCKE_OP_ARITH_ASSUME_RANGE, rocke_h_op_arith_assume_range},
         {ROCKE_OP_ARITH_SUB, rocke_h_op_arith_sub},
         {ROCKE_OP_ARITH_MUL, rocke_h_op_arith_mul},
         {ROCKE_OP_ARITH_DIV, rocke_h_op_arith_div},
