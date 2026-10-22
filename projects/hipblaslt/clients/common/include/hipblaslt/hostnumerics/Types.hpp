@@ -43,6 +43,8 @@ namespace hipblaslt::hostnumerics
         {
         case HIP_R_8U:
             return ScalarType::UInt8;
+        case HIP_R_4I:
+            return ScalarType::Int4;
         case HIP_R_8I:
             return ScalarType::Int8;
         case HIP_R_16U:

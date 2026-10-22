@@ -1126,7 +1126,7 @@ namespace TensileLite
             }
 
             if(m_mxDataGenerator == 1)
-                std::cout << "MX data generator: on, A/B come from mxDataGenerator for MX and "
+                std::cout << "Coordinated MX generation: on for MX and "
                              "non-MX FP8/BF8 inputs"
                           << std::endl;
             else if(m_mxDataGenerator == 0)
@@ -1902,11 +1902,12 @@ namespace TensileLite
                         return std::span<uint8_t>(static_cast<uint8_t*>(buffer) + offset, capacity);
                     };
 
-                auto dataInitMode           = m_vdata[dataTensorEnum].init;
-                auto scaleInitMode          = m_vdata[scaleTensorEnum].init;
-                auto effectiveScaleInitMode = canDecoupleMXScaleInit(dataInitMode, scaleInitMode)
-                                                  ? scaleInitMode
-                                                  : dataInitMode;
+                auto dataInitMode  = m_vdata[dataTensorEnum].init;
+                auto scaleInitMode = m_vdata[scaleTensorEnum].init;
+                auto effectiveScaleInitMode
+                    = abFromInitArray || canDecoupleMXScaleInit(dataInitMode, scaleInitMode)
+                          ? scaleInitMode
+                          : dataInitMode;
 
                 if(scaleDesc.totalAllocatedBytes() != 0)
                 {
@@ -1997,7 +1998,8 @@ namespace TensileLite
                                                                mxBlock,
                                                                dataInitMode,
                                                                effectiveScaleInitMode,
-                                                               operandSeed + seedBatch);
+                                                               operandSeed + seedBatch,
+                                                               abFromInitArray);
                     dataOutput.copyLogicalElementsFrom(generated.data);
                     auto scales = generated.scales;
                     if(mxBlockFree > 1)
@@ -2156,6 +2158,56 @@ namespace TensileLite
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
             }
         }
+        void DataInitialization::initNonMXSideWithMXGenerator(int dataTensorEnum,
+                                                              int scaleTensorEnum,
+                                                              TensorDescriptor const& dataDesc,
+                                                              bool                    transposed,
+                                                              bool                    isMatrixA)
+        {
+            if(dataDesc.dataType() != rocisa::DataType::Float8
+               && dataDesc.dataType() != rocisa::DataType::BFloat8)
+                throw std::runtime_error(
+                    "mx-data-generator=1 supports only Float8/BFloat8 non-MX A/B, got "
+                    + TensileLite::ToString(dataDesc.dataType()));
+            auto& pristine = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
+            if(pristine.initDescriptor[0] == dataDesc)
+                return;
+            const size_t   batchCount = dataDesc.sizes().size() > 2 ? dataDesc.sizes()[2] : 1;
+            const size_t   batchBytes = batchCount > 1 ? multiplyElementSize(dataDesc.strides()[2],
+                                                                           dataDesc.elementBytes())
+                                                       : 0;
+            const auto     layout     = hostnumericsLayout(dataDesc);
+            const size_t   blockAxis  = isMatrixA ? (transposed ? 0 : 1) : (transposed ? 1 : 0);
+            const uint64_t seed       = m_initializationSeed
+                                  + stableDataInitializationStream(m_vdata[dataTensorEnum].name);
+            for(size_t batch = 0; batch < batchCount; ++batch)
+            {
+                const auto generated = hostnumerics::detail::generateMxData(
+                    dataDesc.dataType(),
+                    rocisa::DataType::E8,
+                    roc::hostnumerics::Shape{dataDesc.sizes()[0], dataDesc.sizes()[1]},
+                    dataDesc.strides()[1],
+                    blockAxis,
+                    // Match MXBlockA/B=32 so paired MX/non-MX runs get the same data.
+                    32,
+                    m_vdata[dataTensorEnum].init,
+                    m_vdata[scaleTensorEnum].init,
+                    seed + (batchBytes == 0 ? 0 : batch));
+                auto* output
+                    = static_cast<std::byte*>(pristine.cpuInput.valid.get()) + batch * batchBytes;
+                const auto destination
+                    = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
+                        generated.data.type(),
+                        roc::hostnumerics::Layout(generated.data.shape(),
+                                                  {layout.stride(0), layout.stride(1)}),
+                        pristine.cpuInput.valid,
+                        std::span<std::byte>(output,
+                                             dataDesc.totalAllocatedBytes() - batch * batchBytes));
+                destination.copyLogicalElementsFrom(generated.data);
+            }
+            pristine.initDescriptor[0] = dataDesc;
+        }
+
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
         {
             // Update constants if needed

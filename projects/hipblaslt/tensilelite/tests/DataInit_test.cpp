@@ -1414,3 +1414,184 @@ TEST(CopyTensorVoid, CopiesSource)
 
     EXPECT_EQ(dst, src);
 }
+
+TEST(TensileMxGenerationTranslation, IndependentDataMatchesOrdinaryInitialization)
+{
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Float4})
+        for(size_t blockAxis : {0u, 1u})
+            for(auto scaleMode : {InitMode::Two, InitMode::SerialDim0, InitMode::SerialDim1})
+            {
+                const auto             generated = dt::generateMxData(type,
+                                                          rocisa::DataType::E8,
+                                                          Shape{8, 12},
+                                                          16,
+                                                          blockAxis,
+                                                          4,
+                                                          InitMode::SerialDim1,
+                                                          scaleMode,
+                                                          17,
+                                                          true);
+                const TensorDescriptor descriptor("A", type, {8, 12}, {1, 16});
+                std::vector<std::byte> expected(descriptor.totalAllocatedBytes());
+                initializeHostBufferWithHostNumerics(
+                    type, InitMode::SerialDim1, expected.data(), descriptor, {17, 0});
+                const auto ordinary = Tensor::copyEncodedBackingStorage(
+                    toHostNumericsScalarType(type), generated.data.layout(), expected);
+                const size_t           scaleRows = blockAxis == 0 ? 2 : 8;
+                const size_t           scaleCols = blockAxis == 0 ? 12 : 3;
+                const TensorDescriptor scaleDescriptor(
+                    "MXSA", rocisa::DataType::E8, {scaleRows, scaleCols}, {1, scaleRows});
+                std::vector<std::byte> expectedScale(scaleDescriptor.totalAllocatedBytes());
+                initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                                     scaleMode,
+                                                     expectedScale.data(),
+                                                     scaleDescriptor,
+                                                     {17, 0});
+                const auto ordinaryScale = Tensor::copyEncodedBackingStorage(
+                    toHostNumericsScalarType(rocisa::DataType::E8),
+                    Layout(Shape{scaleRows, scaleCols}, {1, static_cast<ptrdiff_t>(scaleRows)}),
+                    expectedScale);
+                for(size_t row = 0; row < 8; ++row)
+                    for(size_t col = 0; col < 12; ++col)
+                    {
+                        const float  data     = generated.data.loadAs<float>({row, col});
+                        const size_t scaleRow = blockAxis == 0 ? row / 4 : row;
+                        const size_t scaleCol = blockAxis == 0 ? col : col / 4;
+                        const float  scale    = ordinaryScale.loadAs<float>({scaleRow, scaleCol});
+                        EXPECT_EQ(data, ordinary.loadAs<float>({row, col}));
+                        EXPECT_EQ(generated.scales.loadAs<float>({scaleCol, scaleRow}), scale);
+                        EXPECT_EQ(generated.reference.loadAs<float>({row, col}), data * scale);
+                    }
+            }
+}
+
+TEST(TensileMxGenerationTranslation, NonMxSwitchUsesCoordinatedBytesForBothOperands)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{8, 12, 2, 64}});
+        setOption(args, "mx-data-generator", 1);
+        setOption(args, "init-seed", 17u);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::RandomNarrow);
+        for(const char* name : {"init-mx-a", "init-mx-b", "init-alpha", "init-beta"})
+            setOption(args, name, InitMode::One);
+        ClientProblemFactory factory(args);
+        DataInitialization   dataInit(args, factory);
+        const auto&          problem
+            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto& descriptor = matrixA ? problem.a() : problem.b();
+            const auto  storage    = std::span<const std::byte>(
+                static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                descriptor.totalAllocatedBytes());
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type), hostnumericsLayout(descriptor), storage);
+            const size_t blockAxis
+                = matrixA ? (problem.transA() ? 0 : 1) : (problem.transB() ? 1 : 0);
+            for(size_t batch = 0; batch < 2; ++batch)
+            {
+                const auto generated = dt::generateMxData(
+                    type,
+                    rocisa::DataType::E8,
+                    Shape{descriptor.sizes()[0], descriptor.sizes()[1]},
+                    descriptor.strides()[1],
+                    blockAxis,
+                    32,
+                    InitMode::RandomNarrow,
+                    InitMode::Zero,
+                    17 + stableDataInitializationStream(descriptor.getName()) + batch);
+                for(size_t row = 0; row < descriptor.sizes()[0]; ++row)
+                    for(size_t col = 0; col < descriptor.sizes()[1]; ++col)
+                        EXPECT_EQ(observed.loadAs<float>({row, col, batch}),
+                                  generated.data.loadAs<float>({row, col}));
+            }
+        }
+    }
+}
+
+TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatternsAndPadding)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Float4})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{8, 12, 1, 64}});
+        setOption(args, "mx-data-generator", 0);
+        setOption(args, "init-seed", 17u);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"mx-a-block", "mx-b-block"})
+            setOption(args, name, 32);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::SerialDim1);
+        for(const char* name : {"init-mx-a", "init-mx-b"})
+            setOption(args, name, InitMode::SerialDim0);
+        ClientProblemFactory factory(args);
+        DataInitialization   dataInit(args, factory);
+        const auto&          problem
+            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto&            descriptor = matrixA ? problem.a() : problem.b();
+            std::vector<std::byte> expected(descriptor.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(
+                type, InitMode::SerialDim1, expected.data(), descriptor, {17, 0});
+            const auto layout   = hostnumericsLayout(descriptor);
+            const auto ordinary = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type), layout, expected);
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type),
+                layout,
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                    expected.size()));
+            const auto& scaleDescriptor = matrixA ? problem.mxsa() : problem.mxsb();
+            const auto  scaleLayout     = hostnumericsLayout(scaleDescriptor);
+            const auto  scales          = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(rocisa::DataType::E8),
+                scaleLayout,
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->mxsa : inputs->mxsb),
+                    scaleDescriptor.totalAllocatedBytes()));
+            const size_t blockAxis
+                = matrixA ? (problem.transA() ? 0 : 1) : (problem.transB() ? 1 : 0);
+            const size_t blocks = descriptor.sizes()[blockAxis] / 32;
+            for(size_t row = 0; row < descriptor.sizes()[0]; ++row)
+                for(size_t col = 0; col < descriptor.sizes()[1]; ++col)
+                    EXPECT_EQ(observed.loadAs<float>({row, col, 0}),
+                              ordinary.loadAs<float>({row, col, 0}));
+            std::vector<std::byte> expectedScales(scaleDescriptor.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                                 InitMode::SerialDim0,
+                                                 expectedScales.data(),
+                                                 scaleDescriptor,
+                                                 {17, 0});
+            const auto ordinaryScales = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(rocisa::DataType::E8), scaleLayout, expectedScales);
+            for(size_t row = 0; row < scaleDescriptor.sizes()[0]; ++row)
+                for(size_t col = 0; col < scaleDescriptor.sizes()[1]; ++col)
+                {
+                    const bool padding = (blockAxis == 0 ? row : col) >= blocks;
+                    EXPECT_EQ(scales.loadAs<float>({row, col, 0}),
+                              padding ? 0.0f : ordinaryScales.loadAs<float>({row, col, 0}));
+                }
+        }
+    }
+}

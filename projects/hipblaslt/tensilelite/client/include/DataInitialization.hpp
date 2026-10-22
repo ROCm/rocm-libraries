@@ -784,7 +784,8 @@ namespace TensileLite
             ContractionSolution const*    m_currentSolution    = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
-            int                                                     m_mxScaleFormat = 0;
+            int                                                     m_mxDataGenerator = -1;
+            int                                                     m_mxScaleFormat   = 0;
             roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout m_mxScaleLayout
                 = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
             // Set by initializeMXData when a preswizzled scale was uploaded

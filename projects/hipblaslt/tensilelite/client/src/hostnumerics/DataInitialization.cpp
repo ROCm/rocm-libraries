@@ -5,6 +5,7 @@
 // product-independent HostNumerics generation recipes.
 
 #include "DataInitialization.hpp"
+#include <TensileLite/Client/hostnumerics/DataInitializationHelpers.hpp>
 
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <roc/hostnumerics/generation.hpp>
@@ -405,6 +406,35 @@ namespace TensileLite::Client
                                           {static_cast<std::byte*>(array), bytes},
                                           true,
                                           key);
+    }
+
+    void hostnumerics::detail::initializeMxDataIndependently(
+        rocisa::DataType                   dataType,
+        rocisa::DataType                   scaleType,
+        InitMode                           dataInitialization,
+        InitMode                           scaleInitialization,
+        uint64_t                           seed,
+        const roc::hostnumerics::MxTensor& generated)
+    {
+        initializeStorageWithHostNumerics(generated.data.type(),
+                                          dataType,
+                                          dataInitialization,
+                                          generated.data.layout(),
+                                          generated.data.rawEncodedBackingStorage(),
+                                          true,
+                                          {seed, 0});
+        // Natural MX scale coordinates reverse the operand's dimension order.
+        const auto scales = generated.scales.shareStorageWithLayout(roc::hostnumerics::Layout(
+            roc::hostnumerics::Shape{generated.scales.shape()[1], generated.scales.shape()[0]},
+            {generated.scales.layout().stride(1), generated.scales.layout().stride(0)}));
+        initializeStorageWithHostNumerics(scales.type(),
+                                          scaleType,
+                                          scaleInitialization,
+                                          scales.layout(),
+                                          scales.rawEncodedBackingStorage(),
+                                          true,
+                                          {seed, 0});
+        generated.refreshReference();
     }
 
     double hostnumericsDoubleValue(InitMode mode, DataInitializationKey key, double freeValue)

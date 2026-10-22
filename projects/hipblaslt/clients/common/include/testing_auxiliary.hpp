@@ -467,12 +467,10 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     // for HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (w4a16 weight encoding)
     int32_t enc_r = -1;
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
-                                                          &enc_r,
-                                                          sizeof(enc_r),
-                                                          &sizeWritten),
-                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(enc_r == HIPBLASLT_INT4_ENCODING_SIGNED_EXT); // default
     ASSERT_TRUE(sizeWritten == sizeof(int32_t));
 
@@ -484,16 +482,19 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_SUCCESS);
         enc_r = -1;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulDescGetAttribute(
-                matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
+            hipblasLtMatmulDescGetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                            &enc_r,
+                                            sizeof(enc_r),
+                                            &sizeWritten),
             HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(enc_r == enc);
     }
 
     // Out of range and undersized buffers are rejected, and a rejected set
     // leaves the previously stored value alone.
-    const int32_t encLast    = HIPBLASLT_INT4_ENCODING_END_EXT - 1;
-    const int32_t encBad[]   = {-1, HIPBLASLT_INT4_ENCODING_END_EXT, 99};
+    const int32_t encLast  = HIPBLASLT_INT4_ENCODING_END_EXT - 1;
+    const int32_t encBad[] = {-1, HIPBLASLT_INT4_ENCODING_END_EXT, 99};
     for(int32_t bad : encBad)
     {
         EXPECT_HIPBLAS_STATUS(
@@ -502,11 +503,10 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_INVALID_VALUE);
     }
     int8_t encTooSmall = 0;
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
-                                                          &encTooSmall,
-                                                          sizeof(encTooSmall)),
-                          HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &encTooSmall, sizeof(encTooSmall)),
+        HIPBLAS_STATUS_INVALID_VALUE);
     enc_r = -1;
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescGetAttribute(

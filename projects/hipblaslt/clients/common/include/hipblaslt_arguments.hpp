@@ -206,22 +206,22 @@ struct Arguments
     hipblaslt_scaling_format scaleB;
     // hipblasLtInt4Encoding_t for the w4a16 path; ignored unless scaleA is a
     // w4a16 group-scale mode.
-    int32_t                  int4_encoding;
-    bool                     scaleC;
-    bool                     scaleD;
-    bool                     scaleE;
-    bool                     scaleAlpha_vector;
-    bool                     amaxScaleA;
-    bool                     amaxScaleB;
-    bool                     amaxD;
-    bool                     c_equal_d;
-    bool                     HMM;
-    bool                     use_e;
-    bool                     gradient;
-    bool                     norm_check_assert;
-    bool                     swizzle_a;
-    bool                     swizzle_b;
-    bool                     dump_matrix;
+    int32_t int4_encoding;
+    bool    scaleC;
+    bool    scaleD;
+    bool    scaleE;
+    bool    scaleAlpha_vector;
+    bool    amaxScaleA;
+    bool    amaxScaleB;
+    bool    amaxD;
+    bool    c_equal_d;
+    bool    HMM;
+    bool    use_e;
+    bool    gradient;
+    bool    norm_check_assert;
+    bool    swizzle_a;
+    bool    swizzle_b;
+    bool    dump_matrix;
 
     // API related
     bool    use_ext;
