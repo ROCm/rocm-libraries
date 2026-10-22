@@ -28,6 +28,8 @@ engine:
   - tile_size
   - num_warps
   - block_m_per_warp
+  - use_mfma_32x32
+  - use_transposed_qk_32x32
   heuristic: native
 kmd_fields:
 - name: dtype
@@ -65,7 +67,8 @@ kmd_fields:
 - name: num_seqs
   type: int
   default_value: 511
-# Geometry, also public engine knobs.
+# Geometry, also public engine knobs: the tile, the CTA and the MFMA codepath (wide32 and
+# transposed32 share t/nw/mw, so the two flags are what tells them apart).
 - name: tile_size
   type: int
   default_value: 64
@@ -334,8 +337,10 @@ launch_surface:
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the batch exceeds the candidate's capacity, or the
       candidate's geometry is one gfx950 does not build. The metadata's seqlen shape is
-      not a build input of this kernel and is not carried. score() ranks the applicable
-      baseline geometry first, then ascending (tile_size, num_warps, block_m_per_warp).
+      not a build input of this kernel and is not carried. graph_match leaves decode
+      (seqlen_q 1) whose GQA group divides 16 to hipkernel:Gfx950AttentionUnified3D. score()
+      ranks the applicable baseline geometry first, then ascending (tile_size, num_warps,
+      block_m_per_warp).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DMatchers.cpp
 
   - name: kernargs

@@ -113,9 +113,32 @@ TEST(TestGfx950AttentionUnified2DMatchers, AcceptsAQueryAsLongAsOrShorterThanThe
     equal.seqLenKv = 256;
     EXPECT_TRUE(graphMatches(equal));
     GraphSpec shorter;
-    shorter.seqLenQ = 1;
+    shorter.seqLenQ = 2;
     shorter.seqLenKv = 4096;
     EXPECT_TRUE(graphMatches(shorter));
+}
+
+/// Decode (seqlen_q 1) is the split-KV Unified3D engine's wherever its segment kernel builds
+/// the GQA group (a divisor of 16); a group it cannot build stays here, so no decode shape
+/// loses both engines.
+TEST(TestGfx950AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineWhereItBuildsTheGroup)
+{
+    GraphSpec decode;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 4096;
+    for(const auto& [hq, hkv] :
+        std::vector<std::pair<int64_t, int64_t>>{{8, 8}, {8, 2}, {16, 1}, {32, 4}})
+    {
+        decode.numQueryHeads = hq;
+        decode.numKvHeads = hkv;
+        EXPECT_FALSE(graphMatches(decode)) << "Hq " << hq << " Hkv " << hkv;
+    }
+    for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{{40, 8}, {12, 1}})
+    {
+        decode.numQueryHeads = hq;
+        decode.numKvHeads = hkv;
+        EXPECT_TRUE(graphMatches(decode)) << "Hq " << hq << " Hkv " << hkv;
+    }
 }
 
 // =============================================================================
@@ -560,7 +583,7 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchBoundsTheBatchByTheBakedCa
 TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchServesAnySequenceLengthsForOneConfiguration)
 {
     for(const auto& [sq, skv] :
-        std::vector<std::pair<int64_t, int64_t>>{{1, 16}, {16, 16}, {100, 4096}, {2048, 2048}})
+        std::vector<std::pair<int64_t, int64_t>>{{2, 16}, {16, 16}, {100, 4096}, {2048, 2048}})
     {
         GraphSpec spec;
         spec.seqLenQ = sq;
