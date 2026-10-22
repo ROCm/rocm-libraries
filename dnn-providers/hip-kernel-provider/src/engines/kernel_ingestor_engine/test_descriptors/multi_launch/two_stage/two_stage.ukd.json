@@ -1,12 +1,20 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "id": "8acc1edb-8d0a-4aae-a912-a370661b18af",
   "name": "two_stage.f32",
-  "kernel_source": {
-    "kind": "hip",
-    "source": "TwoStage.cpp",
-    "entry": "MultiLaunchProduce",
-    "build": {}
+  "sources": {
+    "produce": {
+      "kind": "hip",
+      "source": "TwoStage.cpp",
+      "entry": "MultiLaunchProduce",
+      "build": {}
+    },
+    "consume": {
+      "kind": "hip",
+      "source": "TwoStage.cpp",
+      "entry": "MultiLaunchConsume",
+      "build": {}
+    }
   },
   "metadata": {
     "dtype": "FLOAT"

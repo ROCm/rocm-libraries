@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -20,7 +19,6 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -60,12 +58,11 @@
  *        a real engine: loaded from a descriptor tree, matched, sized, planned and executed on
  *        device.
  *
- * hkp_pack cannot pack a hip `sources` kernel, so the packed set under
- * test_descriptors/multi_launch/ holds the single-launch form of it: one kernel descriptor,
- * whose code object also exports the second kernel. These cases copy that packed shard into a
- * scratch tree and rewrite its kernel descriptor into the two-launch form, which is the form
- * the loader and a native dispatch handler see in production. That tree is the only content
- * of the engine under test, and nothing a Container loads names it.
+ * The packed set under test_descriptors/multi_launch/ is authored as a hip `sources` kernel,
+ * two launches of one translation unit, and hkp_pack packs it as it is. These cases copy that
+ * packed shard into a scratch tree and load it unchanged, so the loader and a native dispatch
+ * handler see what the packer wrote. That tree is the only content of the engine under test,
+ * and nothing a Container loads names it.
  *
  * The device case runs the two launches through a handler of the cases' own, registered under a
  * symbol no production code registers. The first launch writes the workspace from the input and
@@ -91,11 +88,9 @@ constexpr const char* SCRATCH_LABEL = "multilaunch";
 constexpr const char* ENGINE_NAME = "hipkernel:multi_launch_probe";
 constexpr const char* GRAPH_MATCH_SYMBOL = "hipkernel.test.multi_launch.graph_match";
 constexpr const char* DISPATCH_SYMBOL = "hipkernel.test.multi_launch.dispatch";
-constexpr const char* UKD_FILE = "two_stage.ukd.json";
 
-/// The two entry points the fixture's translation unit exports, which must match
-/// test_descriptors/multi_launch/two_stage/TwoStage.cpp. Only the first is named by a
-/// descriptor; the second shares its code object.
+/// The two entry points the fixture's translation unit exports and its descriptor names, which
+/// must match test_descriptors/multi_launch/two_stage/.
 constexpr const char* PRODUCE_SYMBOL = "MultiLaunchProduce";
 constexpr const char* CONSUME_SYMBOL = "MultiLaunchConsume";
 
@@ -310,52 +305,16 @@ public:
         _scope.add(DISPATCH_SYMBOL, &_handler);
     }
 
-    /// Copies @p shard into the tree and rewrites its kernel descriptor from the single-launch
-    /// form the packer wrote into the two-launch form: one entry per kernel the code object
-    /// exports, each the packed source with its own symbol. Fatal assertions: call through
+    /// Copies @p shard into the tree as the packer wrote it. Fatal assertions: call through
     /// ASSERT_NO_FATAL_FAILURE.
-    void writeTree(const PackedShard& shard) const
+    void copyShard(const PackedShard& shard) const
     {
-        const std::filesystem::path shardCopy = _tree.path() / shard.arch;
         std::error_code failed;
-        std::filesystem::copy(
-            shard.directory, shardCopy, std::filesystem::copy_options::recursive, failed);
+        std::filesystem::copy(shard.directory,
+                              _tree.path() / shard.arch,
+                              std::filesystem::copy_options::recursive,
+                              failed);
         ASSERT_FALSE(failed) << "could not copy " << shard.directory << ": " << failed.message();
-
-        std::filesystem::path descriptor;
-        for(const auto& entry : std::filesystem::recursive_directory_iterator(shardCopy))
-        {
-            if(entry.is_regular_file() && entry.path().filename() == UKD_FILE)
-            {
-                descriptor = entry.path();
-                break;
-            }
-        }
-        ASSERT_FALSE(descriptor.empty()) << UKD_FILE << " is missing under " << shardCopy;
-
-        nlohmann::json document;
-        {
-            std::ifstream in(descriptor);
-            ASSERT_TRUE(in.good()) << "could not open " << descriptor;
-            ASSERT_NO_THROW(document = nlohmann::json::parse(in)) << descriptor;
-        }
-        ASSERT_TRUE(document.contains("kernel_source")) << descriptor;
-
-        const nlohmann::json produce = document.at("kernel_source");
-        ASSERT_EQ(produce.at("symbol").get<std::string>(), PRODUCE_SYMBOL)
-            << "the packed descriptor describes a different entry point than the fixture's";
-        nlohmann::json consume = produce;
-        consume["symbol"] = CONSUME_SYMBOL;
-
-        document.erase("kernel_source");
-        document["version"] = "1.1";
-        document["sources"] = nlohmann::json::object();
-        document["sources"][CONSUME_LAUNCH] = consume;
-        document["sources"][PRODUCE_LAUNCH] = produce;
-
-        std::ofstream out(descriptor);
-        ASSERT_TRUE(out.good()) << "could not write " << descriptor;
-        out << document.dump(2);
     }
 
     std::vector<ValidatedSet<Handle>> load() const
@@ -371,11 +330,35 @@ private:
     ScopedDirectory _tree;
 };
 
-/// How many kernels @p validated offers a pointwise graph on a device of architecture @p arch.
-size_t keptKernels(const ValidatedSet<Handle>& validated, const std::string& arch)
+/// The kernels @p validated offers a pointwise graph on a device of architecture @p arch.
+std::vector<KernelDefinition> keptDefinitions(const ValidatedSet<Handle>& validated,
+                                              const std::string& arch)
 {
     const GraphFixture fixture(buildPointwiseGraph(), devicePropertiesFor(arch));
-    return validated.stateManager->unsortedDefinitions(fixture.context()).size();
+    return validated.stateManager->unsortedDefinitions(fixture.context());
+}
+
+/// What the packer wrote for the fixture's two launches: one source each, with its own symbol,
+/// and both in one code object of one archive. The symbols differ and the key does not, so a
+/// packer that gave both launches one kernel's symbol, or packed the one translation unit
+/// twice, fails here. Fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+void expectLaunchesShareOneCodeObject(const KernelDefinition& kernel)
+{
+    ASSERT_EQ(kernel.sources.size(), 2U);
+    const auto produce = kernel.sources.find(PRODUCE_LAUNCH);
+    const auto consume = kernel.sources.find(CONSUME_LAUNCH);
+    ASSERT_NE(produce, kernel.sources.end());
+    ASSERT_NE(consume, kernel.sources.end());
+
+    EXPECT_EQ(produce->second.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(consume->second.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(produce->second.symbol, PRODUCE_SYMBOL);
+    EXPECT_EQ(consume->second.symbol, CONSUME_SYMBOL);
+    EXPECT_FALSE(produce->second.tocKey.empty());
+    EXPECT_EQ(produce->second.tocKey, consume->second.tocKey);
+    EXPECT_FALSE(produce->second.library.empty());
+    EXPECT_EQ(produce->second.library, consume->second.library);
+    EXPECT_EQ(produce->second.sha256, consume->second.sha256);
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +380,7 @@ TEST(TestMultiLaunchLaunchSet, KeepsAKernelWhoseLaunchesItsHandlerLaunches)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const MultiLaunchHarness harness({PRODUCE_LAUNCH, CONSUME_LAUNCH});
-    ASSERT_NO_FATAL_FAILURE(harness.writeTree(shard));
+    ASSERT_NO_FATAL_FAILURE(harness.copyShard(shard));
 
     const auto validated = harness.load();
     ASSERT_EQ(validated.size(), 1U);
@@ -405,7 +388,9 @@ TEST(TestMultiLaunchLaunchSet, KeepsAKernelWhoseLaunchesItsHandlerLaunches)
 
     // The control for the case below: the same tree, the same graph and the same device, with
     // a handler that declares what the kernel carries.
-    EXPECT_EQ(keptKernels(validated[0], shard.arch), 1U);
+    const auto kept = keptDefinitions(validated[0], shard.arch);
+    ASSERT_EQ(kept.size(), 1U);
+    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(kept[0]));
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "carries the launches"))
         << recorder.getRecordedLogsAsString();
 }
@@ -426,7 +411,7 @@ TEST(TestMultiLaunchLaunchSet, DropsAKernelWhoseLaunchesItsHandlerDoesNotLaunch)
 
     // The handler launches one of the kernel's two launches.
     const MultiLaunchHarness harness({PRODUCE_LAUNCH});
-    ASSERT_NO_FATAL_FAILURE(harness.writeTree(shard));
+    ASSERT_NO_FATAL_FAILURE(harness.copyShard(shard));
 
     const auto validated = harness.load();
 
@@ -436,7 +421,7 @@ TEST(TestMultiLaunchLaunchSet, DropsAKernelWhoseLaunchesItsHandlerDoesNotLaunch)
 
     // The tree holds nothing else, so the engine offers no kernel for a graph its matcher
     // accepts and a device its kernel was packed for.
-    EXPECT_EQ(keptKernels(validated[0], shard.arch), 0U);
+    EXPECT_EQ(keptDefinitions(validated[0], shard.arch).size(), 0U);
 
     // And the drop says why, naming both launch sets and the kernel.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "two_stage.f32"))
@@ -508,19 +493,18 @@ TEST(TestMultiLaunchEndToEnd, RunsBothLaunchesInOrderOverOneWorkspace)
     }
 
     const MultiLaunchHarness harness({PRODUCE_LAUNCH, CONSUME_LAUNCH});
-    ASSERT_NO_FATAL_FAILURE(harness.writeTree(shard));
+    ASSERT_NO_FATAL_FAILURE(harness.copyShard(shard));
 
     auto validated = harness.load();
     ASSERT_EQ(validated.size(), 1U);
     ASSERT_EQ(validated[0].set.engine.name, ENGINE_NAME);
 
     // The one kernel the tree holds survived the handler's launch-set check, and it is the
-    // two-launch one.
+    // two-launch one the packer wrote.
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto kept = validated[0].stateManager->unsortedDefinitions(fixture.context());
     ASSERT_EQ(kept.size(), 1U);
-    EXPECT_FALSE(kept[0].sources.empty());
-    EXPECT_EQ(kept[0].sources.size(), 2U);
+    ASSERT_NO_FATAL_FAILURE(expectLaunchesShareOneCodeObject(kept[0]));
 
     const auto engine = makeEngine<Handle, Settings, Context>(
         validated[0].set, std::move(validated[0].stateManager), deviceResolver());

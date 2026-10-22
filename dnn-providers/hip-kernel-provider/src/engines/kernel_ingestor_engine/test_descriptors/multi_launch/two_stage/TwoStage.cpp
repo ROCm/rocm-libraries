@@ -5,15 +5,14 @@
 // launches them as the two launches of one multi-launch kernel can tell from the output
 // alone that both ran, in order, against the same workspace.
 //
-// MultiLaunchProduce is the one kernel a descriptor names: the packer can pack a single-launch
-// `hip` kernel and cannot pack a `sources` map, so the packed descriptor describes this symbol
-// and the test builds the two-launch form from the archive. MultiLaunchConsume is named by no
-// descriptor. It shares this translation unit so that both land in one code object under one
-// toc_key, which is how the launches of one rocKE kernel are packed. Deleting it as dead code
-// deletes the test's second launch.
+// The descriptor is a multi-launch kernel: its `sources` map names MultiLaunchProduce as the
+// launch `produce` and MultiLaunchConsume as the launch `consume`, both from this translation
+// unit with one build. The packer compiles the unit once, so both launches land in one code
+// object under one toc_key, each with its own symbol and the signature read from the code
+// object. Deleting either kernel as dead code deletes a launch.
 //
-// Both take the same argument list, because the packer records the signature of the described
-// kernel only and the test reuses that list for the other.
+// Both take the same argument list, because the handler under test marshals one list for
+// both launches.
 //
 //   MultiLaunchProduce:  ws[i] = 2 * x[i] + 1
 //   MultiLaunchConsume:  y[i]  = 3 * ws[i] + x[i]

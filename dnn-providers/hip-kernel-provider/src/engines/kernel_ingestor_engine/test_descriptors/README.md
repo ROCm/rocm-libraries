@@ -109,12 +109,12 @@ Two rules follow for a test author:
 ## `multi_launch/`
 
 The inputs of the end-to-end case for a multi-launch kernel, `TestMultiLaunchEndToEnd.cpp`.
-A multi-launch kernel is a UKD 1.1 whose `sources` map names each of its launches. The
-packer cannot pack that form from a `hip` descriptor, so this set holds the single-launch
-form of it: one `hip` UKD whose translation unit exports two kernels. The UKD describes
-`MultiLaunchProduce`. `MultiLaunchConsume` is named by no descriptor and is in the same code
-object, as the launches of one rocKE kernel are. Keep it undescribed: a descriptor of its own
-would pack it under a second toc_key and into a second archive entry.
+A multi-launch kernel is a UKD 1.1 whose `sources` map names each of its launches. This set
+authors that form directly: one UKD whose `sources` map holds two `hip` entries, `produce`
+and `consume`. Both name `TwoStage.cpp` with the same `build` and differ in `entry`, so
+`hkp_pack` compiles the unit once. The two launches pack under one toc_key into one archive
+entry, each with its own symbol and the signature read from the code object. Keep the two
+`source` and `build` values equal: a difference would pack the launches under two toc_keys.
 
 The set stages to `multi_launch/<arch>/` beside the `unit` and `integration` roots rather than
 into either. Its engine, `hipkernel:multi_launch_probe`, names a dispatch symbol and a graph
@@ -123,11 +123,10 @@ engine at load. The set therefore sits where no Container looks, and the engine 
 binaries do not change. The unit binary reaches the staged folder through a path relative to
 itself and gives the case the packed archive, the toc_key and the digest.
 
-The case copies one packed architecture folder into a scratch tree and rewrites the packed
-UKD into the two-launch form. It builds a `sources` map with one launch per exported kernel,
-and each launch is the packed source with its own `symbol`. Both kernels take the same four
-arguments, so the signature the packer recorded for the described kernel stands in for the
-other.
+The case copies one packed architecture folder into a scratch tree, so that the tree holds
+one architecture and nothing else, and loads the packed UKD as the packer wrote it. It asserts
+that the loaded kernel has two sources that share one toc_key and one archive. Both kernels
+take the same four arguments, so one marshalled argument list serves both launches.
 
 `MultiLaunchProduce` writes `2x + 1` to the workspace. `MultiLaunchConsume` reads the
 workspace and writes `3 * ws + x` to the output. The output is `7x + 3` only when both ran,

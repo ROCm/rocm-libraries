@@ -119,7 +119,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
-| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
+| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke`, `hip` or `hsaco` entries (one kind per map) and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; mixed-kind maps; composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -1339,8 +1339,8 @@ rules for drop-in packages.
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
 source; a multi-launch UKD supplies one per Launch. The initial variants (at runtime a `sources`
-entry is a `kpack` source; authored entries are `rocke`, and `hip` and `hsaco` entries follow in a
-later change, [§15.1](#151-several-kernels-for-one-operation)):
+entry is a `kpack` source; authored entries are `rocke`, `hip` or `hsaco`, one kind per map,
+[§15.1](#151-several-kernels-for-one-operation)):
 
 ```jsonc
 "kernel_source": {
@@ -2177,15 +2177,23 @@ may carry a `sources` map keyed by launch name in place of `kernel_source`:
 - **Shape.** At least two entries. A launch name is a lowercase identifier,
   `^[a-z][a-z0-9_]*$`. Each entry is a complete `kpack` kernel source. One kernel may appear under
   two launch names, for a stage that runs one kernel twice with different arguments.
-- **Authoring.** Authored entries are `rocke` sources; `hip` and `hsaco` entries are a later
-  change. `embedded_source` is never packed, so it cannot be a `sources` entry, and an
+- **Authoring.** Authored entries are `rocke`, `hip` or `hsaco` sources, and one map holds one
+  kind. A `hip` entry has the shape of a single-launch `hip` source (`source`, `entry`, `build`),
+  where `entry` is the launch's kernel symbol. An `hsaco` entry has the shape of a single-launch
+  `hsaco` source (`file`, `symbol`), and the UKD must name its `arch`. `role` belongs to `rocke`
+  entries only. `embedded_source` is never packed, so it cannot be a `sources` entry, and an
   already-packed `kpack` entry is not pack input. The loader accepts any `kpack` entry.
-- **Consumer agreement.** The UKD has one consumer metadata declaration. Each declared field must be
+- **Consumer agreement.** Rocke-only evidence. A `hip` or `hsaco` `sources` UKD carries none, as a
+  single-launch one carries none, and its consumer declaration may not list `metadata_fields`. For
+  `rocke` entries: the UKD has one consumer metadata declaration. Each declared field must be
   reported by at least one launch, and every launch that reports it must match the metadata
   value; a launch whose spec lacks the attribute does not report it. A single-launch UKD keeps the
   strict rule: its one spec must report every declared field.
 - **Compile once.** Entries with the same source, builder, spec and target compile once and share a
-  library, toc key and digest.
+  library, toc key and digest. So do `hip` entries with the same `source` and `build`, which differ
+  in `entry` and so name different kernels of one code object, and `hsaco` entries with the same
+  `file`. Each launch keeps its own symbol and the signature read from the code object for it. A
+  `hip` translation unit may export kernels that no launch names.
 - **Launch set.** All kernels of one pack declare the same launch names, the set the pack's
   handler declares.
 
