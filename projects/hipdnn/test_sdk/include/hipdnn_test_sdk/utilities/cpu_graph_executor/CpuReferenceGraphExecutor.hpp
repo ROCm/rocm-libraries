@@ -26,6 +26,8 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -190,7 +192,18 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
             return detail::BlockScaleQuantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
+        {
+            // A node with any ragged primary is keyed as ragged. A partly ragged node is declined
+            // either way: the ragged plan needs all four primaries ragged, and the dense plan
+            // rejects any ragged tensor.
+            const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
+            if(sdpaAttributes != nullptr
+               && detail::hasRaggedSdpaPrimary(*sdpaAttributes, tensorMap))
+            {
+                return detail::SdpaRaggedFwdSignatureKey(node, tensorMap);
+            }
             return detail::SdpaFwdSignatureKey(node, tensorMap);
+        }
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
             return detail::SdpaBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes:

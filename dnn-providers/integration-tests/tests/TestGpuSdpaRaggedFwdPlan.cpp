@@ -19,6 +19,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -709,7 +711,7 @@ using Fp8Builder = GpuSdpaRaggedFwdPlanBuilder<DataType::FP8_E4M3,
                                                DataType::BFLOAT16>;
 
 // One fp8 descale. One value is a scalar [1]. B * H_kv values are a per-KV-head [B, H_kv, 1, 1]
-// descale, DEVICE storage only.
+// descale, TENSOR storage only.
 struct DescaleCase
 {
     OperandStorage storage;
@@ -781,7 +783,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
     auto offQ = makeRaggedOffset({seqLen, seqLen}, seqStride);
     auto offKv = makeRaggedOffset({seqLen, seqLen}, seqStride);
 
-    // Device copies feed the direct reference and any DEVICE plan operands.
+    // Device copies feed the direct reference and any TENSOR plan operands.
     const auto makeDeviceDescale = [&](const DescaleCase& c) {
         Tensor<float> t(descaleDims(c));
         std::copy(c.values.begin(), c.values.end(), t.memory().hostData());
@@ -805,7 +807,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
         {RAGGED_OFFSET_KV_UID, offKv.memory().deviceData()},
     };
     const auto bind = [&](int64_t uid, const DescaleCase& c, Tensor<float>& device, float& host) {
-        if(c.storage == OperandStorage::DEVICE)
+        if(c.storage == OperandStorage::TENSOR)
         {
             variantPack.emplace(uid, device.memory().deviceData());
         }
@@ -854,8 +856,8 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8BakedDescaleNotInVariantPack)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
-                           {OperandStorage::DEVICE, {0.25f}},
-                           {OperandStorage::DEVICE, {2.0f}});
+                           {OperandStorage::TENSOR, {0.25f}},
+                           {OperandStorage::TENSOR, {2.0f}});
 }
 
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8RuntimePassByValueDescales)
@@ -872,7 +874,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MixedDescaleStorage)
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
                            {OperandStorage::RUNTIME_PASS_BY_VALUE, {0.25f}},
-                           {OperandStorage::DEVICE, {1.5f, 2.0f, 2.5f, 3.0f}});
+                           {OperandStorage::TENSOR, {1.5f, 2.0f, 2.5f, 3.0f}});
 }
 
 // Host-stored descales (baked or pass-by-value) must be scalars.
@@ -1082,7 +1084,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
         scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
         if(source == ScaleSource::DEVICE_TENSOR)
         {
-            scale.storage = OperandStorage::DEVICE;
+            scale.storage = OperandStorage::TENSOR;
         }
         else if(source == ScaleSource::BAKED_TENSOR)
         {
