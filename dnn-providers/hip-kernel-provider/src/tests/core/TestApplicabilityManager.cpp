@@ -58,8 +58,8 @@ std::atomic<int> threadCreationsAllowed{-1};
 /// process at its thread limit does. Transparent unless a test arms it.
 // The parameter names are glibc's own: readability-inconsistent-declaration-parameter-name
 // reports a definition whose names differ at the declaration in <pthread.h>, where no NOLINT can
-// reach it, and they are reserved identifiers.
-// NOLINTBEGIN(bugprone-reserved-identifier)
+// reach it. They are reserved identifiers and break the parameter naming style.
+// NOLINTBEGIN(bugprone-reserved-identifier, readability-identifier-naming)
 extern "C" int pthread_create(pthread_t* __restrict __newthread,
                               const pthread_attr_t* __restrict __attr,
                               void* (*__start_routine)(void*),
@@ -82,7 +82,7 @@ extern "C" int pthread_create(pthread_t* __restrict __newthread,
     }
     return s_real(__newthread, __attr, __start_routine, __arg);
 }
-// NOLINTEND(bugprone-reserved-identifier)
+// NOLINTEND(bugprone-reserved-identifier, readability-identifier-naming)
 #endif
 
 namespace
