@@ -60,6 +60,7 @@ test_categories:
       # CTestTestfile.cmake. See tools/CMakeLists.txt.
       - "hipdnn_list_engines_smoke"
       - "hipdnn_validate_descriptors_smoke"
+      - "hipdnn_validate_descriptors_smoke_multi_launch"
       - "hipdnn_validate_descriptors_l2_static_order"
       - "hipdnn_validate_descriptors_l2_dynamic_features"
       - "hipdnn_validate_descriptors_l1_static_order"

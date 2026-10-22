@@ -292,6 +292,9 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
   baseline "$EMITTED_ROOT"
 ```
 
+The gate checks every launch of a multi-launch (`sources`) descriptor; a failure names
+its launch.
+
 Exactly one assignment must be live. Both commented passes an empty root, which the
 descriptor index expands as the recursive glob `/**/*.json` — a walk of the whole
 filesystem.
@@ -633,6 +636,9 @@ drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
 the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
 `--provenance-root DIR` mirroring its `--tree`.
+
+A multi-launch descriptor is checked per launch (spec, symbol and code object); a failure
+names the launch.
 
 Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes
