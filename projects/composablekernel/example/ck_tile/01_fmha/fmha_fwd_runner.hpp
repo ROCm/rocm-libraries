@@ -125,8 +125,9 @@ auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 
 int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
 {
-    // If we have enough to almost fill the SMs, then just use 1 split
-    if(batch_nhead_mblocks >= 0.8f * num_SMs)
+    // If we have enough to almost fill the SMs, then just use 1 split.
+    // num_SMs counts 4 blocks per CU, so 0.5f cuts over at 2 workgroups per CU.
+    if(batch_nhead_mblocks >= 0.5f * num_SMs)
     {
         return 1;
     }
@@ -156,8 +157,13 @@ int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
     return 1;
 }
 
-int override_num_splits_if_necessary(
-    int batch, int nhead, int max_seqlen_q, int hdim_v, float p_drop, int num_splits)
+int override_num_splits_if_necessary(int batch,
+                                     int nhead,
+                                     int max_seqlen_q,
+                                     int max_seqlen_k,
+                                     int hdim_v,
+                                     float p_drop,
+                                     int num_splits)
 {
     (void)hdim_v;
     int device;
@@ -183,8 +189,17 @@ int override_num_splits_if_necessary(
     {
         // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
         const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
-        return num_splits_heuristic(
-            batch * nhead * num_m_blocks, props.multiProcessorCount * num_blocks_per_SM, 128);
+
+        // Cap the split count so every split keeps enough KV tiles to amortise
+        // its prologue and the combine pass. kN0 matches generate.py, as kM0 does.
+        constexpr int kN0               = 64;
+        constexpr int kMinTilesPerSplit = 8;
+        const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
+        const int max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
+
+        return num_splits_heuristic(batch * nhead * num_m_blocks,
+                                    props.multiProcessorCount * num_blocks_per_SM,
+                                    max_splits);
     }
 
     return num_splits;
@@ -697,7 +712,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
         }
         num_splits = override_num_splits_if_necessary(
-            batch, nhead_merged, max_seqlen_q_merged, hdim_v, p_drop, num_splits);
+            batch, nhead_merged, max_seqlen_q_merged, max_seqlen_k, hdim_v, p_drop, num_splits);
     }
     if(128 < num_splits)
     {
