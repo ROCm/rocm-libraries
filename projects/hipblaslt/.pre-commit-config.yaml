@@ -49,14 +49,6 @@ repos:
     hooks:
       - id: yamlfmt
         files: *newTensileliteTree
-  # Make docstrings PEP 257 compliant.
-  - repo: https://github.com/PyCQA/docformatter
-    rev: eb1df347edd128b30cd3368dddc3aa65edcfac38
-    hooks:
-      - id: docformatter
-        # Disable wrap-summaries to avoid rewording many docstrings.
-        args: ["--in-place", "--wrap-summaries=0"]
-        files: *newTensileliteTree
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v20.1.6
     hooks:
