@@ -1,4 +1,13 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:AttentionPagedUnified": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

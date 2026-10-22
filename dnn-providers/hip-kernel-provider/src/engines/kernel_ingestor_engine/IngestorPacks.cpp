@@ -65,6 +65,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx950ConvDgradAot",
          &registerGfx950ConvDgradAotSymbols,
          &resetGfx950ConvDgradAotModuleCache},
+        {ATTENTION_PAGED_UNIFIED_ENGINE_NAME,
+         &registerAttentionPagedUnifiedSymbols,
+         &resetAttentionPagedUnifiedModuleCache},
     };
     return s_packs;
 }

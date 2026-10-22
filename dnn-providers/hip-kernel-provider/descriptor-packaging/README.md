@@ -111,8 +111,9 @@ too. Two answers decide which engine-pinned tests are registered:
 - **Per-arch registrations** (the census, and the external and gpu_ref integration
   checks) install into a gfx-specific shard and are gated on
   `hkp_product_ships_engine_for_arch()`, which reads what the shard for that arch
-  ships. The single-arch rocKE attention engines pinned against the SdpaFwd bundles
-  are registered from one table, `HKP_PINNED_ATTENTION_ENGINES` in `src/CMakeLists.txt`.
+  ships. The rocKE attention engines pinned against the SdpaFwd bundles are registered
+  from one table, `HKP_PINNED_ATTENTION_ENGINES` in `src/CMakeLists.txt`, one row per
+  engine and architecture.
 - **Host-side sources that pin an engine**, such as the attention knob suites, are gated
   on `hkp_product_offers_engine()`, which reads what the product root carries for any
   arch under this build's filters. It never reads `GPU_TARGETS`: the host libraries and

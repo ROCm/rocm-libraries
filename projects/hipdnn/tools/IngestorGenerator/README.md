@@ -843,6 +843,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/attention_paged_unified.yaml` | The shipped `hipkernel:AttentionPagedUnified` catalog: packaged rocKE tiled 2D `runtime_layout` kernels for gfx942 and gfx950 under `rocKE/attention_paged_unified` |
 
 ## Generated variant sets: `variants`
 

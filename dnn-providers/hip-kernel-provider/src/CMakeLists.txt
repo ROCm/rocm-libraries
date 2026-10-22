@@ -179,7 +179,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # Bundle filters for the attention engines' external integration checks below and
     # their GPU-reference targets in integration_tests/. Under YAML categorization the
     # checks' CTest suites select from each engine's
-    # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
+    # ../hipkernel_*Attention*_test_categories_integration.yaml instead, and
     # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
     string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
         "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
@@ -188,12 +188,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # output Gfx942AttentionDense serves.
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
         "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+    # Every SdpaFwd bundle: AttentionPagedUnified's support claims pick the paged bundles
+    # it must pass, and it declines (skips) the rest.
+    string(JOIN ":" HKP_SDPA_FWD_ALL_GTEST_FILTER
+        "quick_SdpaFwd_*.*" "standard_SdpaFwd_*.*"
+        "comprehensive_SdpaFwd_*.*" "full_SdpaFwd_*.*")
 
     # The engine-pinned attention engines, each with an external integration check below,
     # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
     # engine: <arch> <snake slug> <engine local name> <bundle filter variable>, then its
     # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
     # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
+    # An engine that ships for several architectures takes one row per architecture, each
+    # TOML skipping the others so a package carrying several shards runs its bundles once.
     set(HKP_PINNED_ATTENTION_ENGINES
         gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
@@ -210,6 +217,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         gfx942 dense Gfx942AttentionDense HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
             hipkernel_Gfx942AttentionDense.toml
             HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
+        gfx942 paged_unified AttentionPagedUnified HKP_SDPA_FWD_ALL_GTEST_FILTER
+            hipkernel_AttentionPagedUnified_gfx942.toml
+            HIPKERNELPROVIDER_ATTENTION_PAGED_UNIFIED_INTEGRATION_CATEGORIES_YAML
+        gfx950 paged_unified AttentionPagedUnified HKP_SDPA_FWD_ALL_GTEST_FILTER
+            hipkernel_AttentionPagedUnified_gfx950.toml
+            HIPKERNELPROVIDER_ATTENTION_PAGED_UNIFIED_INTEGRATION_CATEGORIES_YAML
     )
 
     add_subdirectory(tests)

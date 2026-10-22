@@ -26,6 +26,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvDgradNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionPagedUnifiedNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp
 )
