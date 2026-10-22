@@ -89,7 +89,30 @@ get_filename_component(PROJECT_BINARY_DIR "${PROJECT_BINARY_DIR}"
 get_filename_component(CMAKE_MATRICES_DIR "${CMAKE_MATRICES_DIR}"
                        ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
 
+# SuiteSparse archives tracked by DVC, present after dvc pull
+get_filename_component(ROCSPARSE_DVC_MATRICES_DIR "${CMAKE_CURRENT_LIST_DIR}/../clients/matrices" ABSOLUTE)
+
+set(missing_matrices)
+foreach(m IN LISTS TEST_MATRICES)
+  get_filename_component(mat "${m}" NAME)
+  if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr"
+     AND NOT ROCSPARSE_MTX_DIR
+     AND NOT EXISTS "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
+    list(APPEND missing_matrices "${mat}")
+  endif()
+endforeach()
+
+if(missing_matrices AND NOT ALLOW_FETCH_DEPS)
+  list(JOIN missing_matrices ", " missing_matrices)
+  message(FATAL_ERROR
+    "Test matrices not found: ${missing_matrices}.  Pull them with "
+    "'dvc pull -R projects/rocsparse/clients/matrices' from the rocm-libraries root, point "
+    "CMAKE_MATRICES_DIR at a directory with the converted .csr files, or configure with "
+    "-DALLOW_FETCH_DEPS=ON to download them from SuiteSparse.")
+endif()
+
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR})
+file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
 
 # Set relative RUNPATH to the executable
 ## determine separator for rpath argument
@@ -119,35 +142,18 @@ foreach(i RANGE 0 ${len1})
   list(GET sep_m 0 dir)
   list(GET sep_m 1 mat)
 
-  # Download test matrices if not already downloaded
+  # Extract or download test matrices if not already converted
   if(NOT EXISTS "${CMAKE_MATRICES_DIR}/${mat}.csr")
     if(NOT ROCSPARSE_MTX_DIR)
-      # First try user specified mirror, if available
-      if(DEFINED ENV{ROCSPARSE_TEST_MIRROR} AND NOT $ENV{ROCSPARSE_TEST_MIRROR} STREQUAL "")
-        message("-- Downloading and extracting test matrix ${m}.tar.gz from user specified test mirror: $ENV{ROCSPARSE_TEST_MIRROR}")
-        file(DOWNLOAD $ENV{ROCSPARSE_TEST_MIRROR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
-             INACTIVITY_TIMEOUT 10
-             STATUS DL)
-
-        list(GET DL 0 stat)
-        list(GET DL 1 msg)
-
-        if(NOT stat EQUAL 0)
-          message(FATAL_ERROR "-- Timeout has been reached, specified test mirror is not reachable: ${msg}")
-        endif()
+      set(archive "${ROCSPARSE_DVC_MATRICES_DIR}/${mat}.tar.gz")
+      if(EXISTS "${archive}")
+        message("-- Extracting test matrix ${m}.tar.gz from ${ROCSPARSE_DVC_MATRICES_DIR}")
       else()
-        message("-- Downloading and extracting test matrix ${m}.tar.gz")
-        file(DOWNLOAD https://sparse.tamu.edu/MM/${m}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
-             INACTIVITY_TIMEOUT 10
-             STATUS DL)
-
-        list(GET DL 0 stat)
-        list(GET DL 1 msg)
-
-        if(NOT stat EQUAL 0)
-          message("-- Timeout has been reached, trying mirror ...")
-          # Try again using ufl links
-          file(DOWNLOAD https://www.cise.ufl.edu/research/sparse/MM/${m}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
+        set(archive "${CMAKE_MATRICES_DIR}/${mat}.tar.gz")
+        # First try user specified mirror, if available
+        if(DEFINED ENV{ROCSPARSE_TEST_MIRROR} AND NOT $ENV{ROCSPARSE_TEST_MIRROR} STREQUAL "")
+          message("-- Downloading and extracting test matrix ${m}.tar.gz from user specified test mirror: $ENV{ROCSPARSE_TEST_MIRROR}")
+          file(DOWNLOAD $ENV{ROCSPARSE_TEST_MIRROR}/${mat}.tar.gz ${archive}
                INACTIVITY_TIMEOUT 10
                STATUS DL)
 
@@ -155,20 +161,43 @@ foreach(i RANGE 0 ${len1})
           list(GET DL 1 msg)
 
           if(NOT stat EQUAL 0)
-            message(FATAL_ERROR "${msg}")
+            message(FATAL_ERROR "-- Timeout has been reached, specified test mirror is not reachable: ${msg}")
+          endif()
+        else()
+          message("-- Downloading and extracting test matrix ${m}.tar.gz")
+          file(DOWNLOAD https://sparse.tamu.edu/MM/${m}.tar.gz ${archive}
+               INACTIVITY_TIMEOUT 10
+               STATUS DL)
+
+          list(GET DL 0 stat)
+          list(GET DL 1 msg)
+
+          if(NOT stat EQUAL 0)
+            message("-- Timeout has been reached, trying mirror ...")
+            # Try again using ufl links
+            file(DOWNLOAD https://www.cise.ufl.edu/research/sparse/MM/${m}.tar.gz ${archive}
+                 INACTIVITY_TIMEOUT 10
+                 STATUS DL)
+
+            list(GET DL 0 stat)
+            list(GET DL 1 msg)
+
+            if(NOT stat EQUAL 0)
+              message(FATAL_ERROR "${msg}")
+            endif()
           endif()
         endif()
       endif()
 
       # Check MD5 hash before continuing
-      file(MD5 ${CMAKE_MATRICES_DIR}/${mat}.tar.gz hash)
+      file(MD5 ${archive} hash)
 
       # Compare hash
       if(NOT hash STREQUAL md5)
-        message(FATAL_ERROR "${mat}.tar.gz is corrupted")
+        message(FATAL_ERROR "${archive} is corrupted")
       endif()
 
-      execute_process(COMMAND tar xf ${mat}.tar.gz
+      execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${archive}
         WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
         COMMAND_ERROR_IS_FATAL ANY)
 

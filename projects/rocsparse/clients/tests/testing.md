@@ -42,6 +42,8 @@ What a developer does between making a change and getting it merged.
 ```bash
 cd projects/rocsparse
 # -c builds samples + tests + benchmarks; -d installs distro build dependencies (not googletest)
+# Pull the SuiteSparse test matrices once, from the rocm-libraries root:
+#   dvc pull -R projects/rocsparse/clients/matrices
 ./install.sh -dc -a gfx942
 # equivalently, out-of-source from this directory:
 cmake -B build/release -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
@@ -51,9 +53,9 @@ cmake --build build/release --parallel
 
 Out-of-source builds land in `build/<release|debug|release-debug>/clients/staging/`.
 
-The functional suites that read `.csr` inputs need the SuiteSparse test matrices, but you don't need a separate step to get them: the build above downloads and converts them automatically into `build/<release|debug|release-debug>/clients/matrices`.
+The functional suites that read `.csr` inputs need the SuiteSparse test matrices. The `.tar.gz` archives are stored with DVC in `clients/matrices/` (remote `sparse-matrices`); after `dvc pull -R projects/rocsparse/clients/matrices`, the build above converts them into `build/<release|debug|release-debug>/clients/matrices`. If they're missing, configuration fails unless you configure with `-DALLOW_FETCH_DEPS=ON`, which downloads them from SuiteSparse.
 
-> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
+> **Note:** If you already have the converted matrices in a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them on a rebuild. `--matrices-dir` and `--matrices-dir-install` download any missing matrices that aren't pulled with DVC:
 >
 > ```bash
 > ./install.sh -c -a gfx942 --matrices-dir <path_to_matrix_folder>
@@ -205,8 +207,11 @@ at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should fin
 > below).
 
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
-matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`) downloaded and MD5-verified by
-`cmake/ClientMatrices.cmake` (mirror overridable via `ROCSPARSE_TEST_MIRROR`). The runtime matrix
+matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`), MD5-verified and converted by
+`cmake/ClientMatrices.cmake`. The `.tar.gz` archives are stored with DVC in `clients/matrices/`
+(remote `sparse-matrices`; run `dvc pull -R projects/rocsparse/clients/matrices`). Only with
+`ALLOW_FETCH_DEPS=ON` are missing archives downloaded from SuiteSparse (mirror overridable via
+`ROCSPARSE_TEST_MIRROR`). The runtime matrix
 directory is set with `--matrices-dir` or `ROCSPARSE_CLIENTS_MATRICES_DIR`.
 
 **What requires GPU hardware:** all numerical-correctness and conversion cases.
