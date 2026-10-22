@@ -130,14 +130,21 @@ dimension must be reduced.
 |---------|--------------|---------------|
 | Log-sum-exp `stats` output | Supported | Required input |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported |
-| Dropout | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | - |
+| Dropout (including `dropout_probability` alone) | Not supported | Not supported |
+| ALiBi / padding mask | Not supported | Not supported |
+| Bias gradient (`dbias` output) | - | Not supported |
 | Paged KV cache, block-sparse attention | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Ragged tensors | - | Rejected |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |
 
+"Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
 FP8 forward is registered for `FP8_E4M3` and `FP8_E4M3_FNUZ` inputs with `BFP16` output.
+
+The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
+FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).
+A row with no live key produces O = 0 and LSE = -inf in forward and contributes zero to every gradient in
+backward.
 
 ### Resample Modes
 

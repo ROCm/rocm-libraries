@@ -230,6 +230,12 @@ public:
                 tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
         }
 
+        // Unsupported mask modes
+        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
+        {
+            return false;
+        }
+
         // Unsupported: variable sequence lengths
         if(nodeAttributes->seq_len_q_tensor_uid().has_value()
            || nodeAttributes->seq_len_kv_tensor_uid().has_value())
@@ -237,8 +243,16 @@ public:
             return false;
         }
 
+        // Unsupported: bias gradient. The reference does not compute dBias, so a graph asking
+        // for it would otherwise leave the output unwritten and unchecked.
+        if(nodeAttributes->dbias_tensor_uid().has_value())
+        {
+            return false;
+        }
+
         // Unsupported: dropout
-        if(nodeAttributes->seed_tensor_uid().has_value()
+        if(nodeAttributes->dropout_probability().has_value()
+           || nodeAttributes->seed_tensor_uid().has_value()
            || nodeAttributes->offset_tensor_uid().has_value()
            || nodeAttributes->dropout_mask_tensor_uid().has_value()
            || nodeAttributes->dropout_scale_tensor_uid().has_value()

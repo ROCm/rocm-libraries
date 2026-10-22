@@ -550,6 +550,54 @@ TEST(TestSdpaBwdPlanMask, MaskTensorWithUnsetDtypeIsNotApplicable)
                  CpuReferenceNotApplicableError);
 }
 
+// Attributes the backward reference does not implement must make the graph not applicable rather
+// than be ignored: an ignored attribute lets a provider that also ignores it pass validation.
+struct UnsupportedBwdAttributeCase
+{
+    const char* name;
+    void (*apply)(SdpaBackwardAttributesT&);
+};
+
+class TestSdpaBwdPlanUnsupportedAttribute : public TestWithParam<UnsupportedBwdAttributeCase>
+{
+};
+
+TEST(TestSdpaBwdPlan, RawBaselineGraphIsApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST_P(TestSdpaBwdPlanUnsupportedAttribute, IsNotApplicable)
+{
+    SdpaBackwardAttributesT attrs;
+    GetParam().apply(attrs);
+    auto graphBuilder = makeRawSdpaBwdGraph(attrs);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    EXPECT_THROW(executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), {}),
+                 CpuReferenceNotApplicableError);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaBwdPlanUnsupportedAttribute,
+    Values(UnsupportedBwdAttributeCase{"AlibiMask",
+                                       [](SdpaBackwardAttributesT& a) { a.alibi_mask = true; }},
+           UnsupportedBwdAttributeCase{"PaddingMask",
+                                       [](SdpaBackwardAttributesT& a) { a.padding_mask = true; }},
+           // Only the probability is set: no seed/offset/mask tensors accompany it.
+           UnsupportedBwdAttributeCase{
+               "DropoutProbability",
+               [](SdpaBackwardAttributesT& a) { a.dropout_probability = 0.1F; }},
+           // The uid need not resolve: requesting the output is what must be declined.
+           UnsupportedBwdAttributeCase{
+               "DbiasOutput", [](SdpaBackwardAttributesT& a) { a.dbias_tensor_uid = 11; }}),
+    [](const TestParamInfo<UnsupportedBwdAttributeCase>& info) { return info.param.name; });
+
 TEST(TestSdpaBwdPlanMask, DanglingMaskUidIsNotApplicable)
 {
     SdpaBackwardAttributesT attrs;
