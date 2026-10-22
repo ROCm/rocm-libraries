@@ -74,8 +74,13 @@ def _skipped(p: Path) -> bool:
 
 
 def _all_files() -> list[Path]:
+    # is_file() drops dangling symlinks such as Emacs's `.#<name>.py` lock files:
+    # vulture exits on a path that does not exist, and radon cannot read one.
     return sorted(
-        p for tree in TREES for p in (ROCKE / tree).rglob("*.py") if not _skipped(p)
+        p
+        for tree in TREES
+        for p in (ROCKE / tree).rglob("*.py")
+        if p.is_file() and not _skipped(p)
     )
 
 
@@ -98,8 +103,11 @@ def _rocke_files(paths: list[str]) -> list[Path]:
 def run_pyright(files: list[Path], whole: bool) -> None:
     cmd = [sys.executable, "-m", "pyright", "--project", str(ROCKE), "--outputjson"]
     if not whole:
-        cmd += [str(f) for f in files]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+        # rocke-relative: shorter than the repo-relative names pre-commit sized
+        # this batch for. Absolute names overflow Windows' 32,767-character
+        # command line on a full batch (e.g. --all-files).
+        cmd += [str(f.relative_to(ROCKE)) for f in files]
+    proc = subprocess.run(cmd, cwd=ROCKE, capture_output=True, text=True)
     try:
         report = json.loads(proc.stdout)
     except json.JSONDecodeError:  # pyright failed before analysing; show why
@@ -122,34 +130,30 @@ def run_pyright(files: list[Path], whole: bool) -> None:
 
 
 def run_vulture(files: list[Path], whole: bool) -> None:
+    from vulture import Vulture
+
     # Always scan ALL of rocke in one pass, so a platform method called only
     # from library code (or a helper used only by tests) is not reported as
     # dead; then report just the requested files. Tests count as uses but are
     # not reported on: pytest fixtures and test_* functions look unused by design.
-    every = [f.relative_to(ROCKE).as_posix() for f in _all_files()]
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "vulture",
-            "--min-confidence",
-            str(VULTURE_MIN_CONFIDENCE),
-            *every,
-        ],
-        cwd=ROCKE,
-        capture_output=True,
-        text=True,
-    )
-    if proc.stderr:
-        print(proc.stderr, end="")
-    wanted = None if whole else {f.relative_to(ROCKE).as_posix() for f in files}
+    scanned = _all_files()
+    # In-process, not `python -m vulture <every file>`: that command line is
+    # ~62,000 characters, past Windows' 32,767 limit, so the scan could never start.
+    vulture = Vulture()
+    vulture.scavenge(scanned)
+    reported = {
+        f
+        for f in (scanned if whole else files)
+        if "tests" not in f.relative_to(ROCKE).parts
+    }
     shown = 0
-    for line in proc.stdout.splitlines():
-        rel = line.split(":", 1)[0]
-        if "tests" in Path(rel).parts or (wanted is not None and rel not in wanted):
-            continue
-        print(_show(ROCKE / rel) + line[len(rel) :])
-        shown += 1
+    for item in vulture.get_unused_code(min_confidence=VULTURE_MIN_CONFIDENCE):
+        if item.filename in reported:
+            print(
+                f"{_show(item.filename)}:{item.first_lineno}: {item.message}"
+                f" ({item.confidence}% confidence)"
+            )
+            shown += 1
     print(f"vulture: {shown} finding(s)")
 
 
@@ -264,7 +268,8 @@ def main() -> int:
         RUNNERS[args.tool](files, whole)
     except ImportError as e:
         print(f"{args.tool}: not installed for {sys.executable} ({e}); skipped")
-    except Exception as e:  # advisory: a broken tool must never block a push
+    except (Exception, SystemExit) as e:  # advisory: never block a push
+        # SystemExit too: vulture's scavenge() calls sys.exit() for a vanished file.
         print(f"{args.tool}: crashed ({type(e).__name__}: {e}); skipped")
     return 0
 

@@ -250,9 +250,9 @@ repos:
         entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py pyright
         language: python
         # torch is deliberately absent (multi-GB); pyright treats it as Unknown.
-        # radon: so pyright can type-check advisory_checks.py's own imports.
+        # radon, vulture: so pyright can type-check advisory_checks.py's own imports.
         additional_dependencies:
-          ["pyright==1.1.414", "numpy", "pytest", "ml_dtypes", "radon==6.0.1"]
+          ["pyright==1.1.414", "numpy", "pytest", "ml_dtypes", "radon==6.0.1", "vulture==2.16"]
         files: &rocke_py '^dnn-providers/hip-kernel-provider/rocke/.*\.py$'
         stages: [pre-push]
         require_serial: true
