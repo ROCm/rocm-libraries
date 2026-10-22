@@ -10,7 +10,10 @@
 #include <tensilelite/codegen/Target.hpp>
 
 #include "code.hpp"
+#include "instruction/mem.hpp"
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,10 +26,20 @@ enum class KernelArgumentKind {
   globalPointer,
   /// A scalar copied into the kernarg segment (value_kind by_value).
   byValue,
+  /// Hidden arguments the runtime fills from the launch (code object v5+ value
+  /// kinds). The block count is the number of workgroups in that dimension.
+  hiddenBlockCountX,
+  hiddenBlockCountY,
+  hiddenBlockCountZ,
+  /// The group size is the workgroup size in that dimension.
+  hiddenGroupSizeX,
+  hiddenGroupSizeY,
+  hiddenGroupSizeZ,
 };
 
 /// One argument in the kernarg segment.
 struct KernelArgument {
+  /// Empty for hidden arguments.
   std::string name;
   KernelArgumentKind kind;
   /// Size in bytes.
@@ -50,6 +63,12 @@ public:
   /// Throws std::invalid_argument for other sizes and for bad names, as
   /// addPointer does.
   int addScalar(std::string_view name, int size);
+  /// Appends a hidden argument, which the runtime fills, and returns its
+  /// offset. Block counts take 4 bytes; group sizes take 2 bytes as LLVM emits
+  /// them, or 4; with a 4-byte slot only the low 16 bits are defined. Throws
+  /// std::invalid_argument if kind is not hidden, size is not allowed for it,
+  /// or kind was already added.
+  int addHidden(KernelArgumentKind kind, int size);
 
   const std::vector<KernelArgument> &arguments() const { return args; }
   /// End of the last argument rounded up to segmentAlignment; 0 without
@@ -57,7 +76,8 @@ public:
   int segmentSize() const;
 
 private:
-  int add(std::string_view name, KernelArgumentKind kind, int size);
+  int addExplicit(std::string_view name, KernelArgumentKind kind, int size);
+  int append(std::string name, KernelArgumentKind kind, int size);
 
   std::vector<KernelArgument> args;
 };
@@ -94,10 +114,35 @@ public:
   const RegisterRange &kernargSegmentPtr() const { return kernargPtr; }
   /// Workgroup id x in s2, the first system SGPR after the user SGPRs.
   const RegisterRange &workgroupIdX() const { return workgroupIdXReg; }
+  /// Enables the workgroup ids y and z, which the hardware places in the
+  /// system SGPRs right after workgroup id x in x, y, z order (s3 and s4 when
+  /// both are enabled). Call it before allocating SGPRs so those indices are
+  /// free. Throws std::invalid_argument if neither is requested or a register
+  /// is in use, and std::logic_error if called twice.
+  void enableWorkgroupIds(bool y, bool z);
+  bool hasWorkgroupIdY() const { return workgroupIdYReg.has_value(); }
+  bool hasWorkgroupIdZ() const { return workgroupIdZReg.has_value(); }
+  /// Workgroup id y; throws std::logic_error unless enabled.
+  const RegisterRange &workgroupIdY() const;
+  /// Workgroup id z; throws std::logic_error unless enabled.
+  const RegisterRange &workgroupIdZ() const;
   /// Workitem id in v0. On gfx90a and later the ids are packed: x is bits
   /// [9:0] (y [19:10] and z [29:20] are not enabled), so mask with 0x3ff
   /// before using it as the x id.
   const RegisterRange &workitemId() const { return workitemIdReg; }
+
+  /// Sets the LDS bytes the kernel allocates (group_segment_fixed_size); 0 by
+  /// default. Throws std::invalid_argument unless 0 <= bytes <=
+  /// target().maxLdsSize().
+  void setLdsSize(int bytes);
+  int ldsSize() const { return ldsBytes; }
+
+  /// Emits an s_load of dst.count dwords (1, 2 or 4) from the kernarg segment
+  /// at byte offset, such as one returned by the signature. The caller emits
+  /// the wait. Throws std::invalid_argument if dst is not SGPRs aligned to its
+  /// count, or the load is misaligned or outside the segment.
+  std::shared_ptr<rocisa::SMemLoadInstruction> loadArgument(RegisterRef dst,
+                                                            int offset);
 
   /// Returns the complete assembly file: target and code object version
   /// directives, the kernel symbol and body, the kernel descriptor and the
@@ -111,6 +156,8 @@ private:
   Target kernelTarget;
   std::string kernelName;
   int maxWorkgroupSize;
+  int ldsBytes = 0;
+  bool workgroupIdsEnabled = false;
   CodeObjectVersion version;
   KernelSignature kernelSignature;
   RegisterAllocator registers;
@@ -119,6 +166,8 @@ private:
   RegisterRange kernargPtr;
   RegisterRange workgroupIdXReg;
   RegisterRange workitemIdReg;
+  std::optional<RegisterRange> workgroupIdYReg;
+  std::optional<RegisterRange> workgroupIdZReg;
 };
 
 } // namespace rocm::tensilelite::codegen

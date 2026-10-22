@@ -48,6 +48,8 @@ public:
   /// Size of the unified register file that a kernel's arch VGPRs, rounded up
   /// to the accum offset, and its AGPRs share.
   int maxUnifiedVgpr() const { return maxUnifiedVgprs; }
+  /// Largest LDS allocation per workgroup in bytes (rocisa's DeviceLDS).
+  int maxLdsSize() const { return maxLdsBytes; }
 
 private:
   Target(IsaVersion isa, int wavefront, std::string_view arch,
@@ -61,6 +63,7 @@ private:
   int maxSgprs = 0;
   int maxAgprs = 0;
   int maxUnifiedVgprs = 0;
+  int maxLdsBytes = 0;
 };
 
 } // namespace rocm::tensilelite::codegen

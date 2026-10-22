@@ -247,4 +247,212 @@ TEST_F(KernelTest, ExceedingRegisterLimitThrows) {
   EXPECT_THROW(kernel.toAssembly(), std::runtime_error);
 }
 
+void addReferenceGemmExplicitArguments(KernelSignature &signature) {
+  for (const char *name : {"a", "b", "c", "d", "e", "f"})
+    signature.addPointer(name);
+  for (const char *name : {"s0", "s1", "s2", "s3", "s4", "s5", "s6"})
+    signature.addScalar(name, 4);
+}
+
+TEST_F(KernelTest, ReplicatesReferenceGemmArgumentLayout) {
+  Kernel kernel(target, "gemm", 256);
+  KernelSignature &signature = kernel.signature();
+  addReferenceGemmExplicitArguments(signature);
+  EXPECT_EQ(signature.arguments()[5].offset, 40);
+  EXPECT_EQ(signature.arguments()[6].offset, 48);
+  EXPECT_EQ(signature.arguments()[12].offset, 72);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4), 76);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeY, 4), 80);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeZ, 4), 84);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 4), 88);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountY, 4), 92);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountZ, 4), 96);
+  EXPECT_EQ(signature.segmentSize(), 104);
+  EXPECT_TRUE(signature.arguments().back().name.empty());
+  kernel.builder().createEndProgram();
+
+  std::string assembly = kernel.toAssembly();
+  EXPECT_NE(assembly.find("        .value_kind: by_value\n"
+                          "      - .size: 4\n"
+                          "        .offset: 76\n"
+                          "        .value_kind: hidden_group_size_x\n"
+                          "      - .size: 4\n"
+                          "        .offset: 80\n"
+                          "        .value_kind: hidden_group_size_y\n"
+                          "      - .size: 4\n"
+                          "        .offset: 84\n"
+                          "        .value_kind: hidden_group_size_z\n"
+                          "      - .size: 4\n"
+                          "        .offset: 88\n"
+                          "        .value_kind: hidden_block_count_x\n"
+                          "      - .size: 4\n"
+                          "        .offset: 92\n"
+                          "        .value_kind: hidden_block_count_y\n"
+                          "      - .size: 4\n"
+                          "        .offset: 96\n"
+                          "        .value_kind: hidden_block_count_z\n"
+                          "...\n"),
+            std::string::npos)
+      << assembly;
+  EXPECT_TRUE(hasLine(assembly, "  .amdhsa_kernarg_size 104")) << assembly;
+}
+
+TEST_F(KernelTest, ReplicatesReferenceSplitkReduceArgumentLayout) {
+  Kernel kernel(target, "splitk_reduce", 256);
+  KernelSignature &signature = kernel.signature();
+  signature.addPointer("a");
+  signature.addPointer("b");
+  for (const char *name : {"s0", "s1", "s2", "s3"})
+    signature.addScalar(name, 4);
+  EXPECT_EQ(signature.arguments()[2].offset, 16);
+  EXPECT_EQ(signature.arguments()[5].offset, 28);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4), 32);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeY, 4), 36);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeZ, 4), 40);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 4), 44);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountY, 4), 48);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountZ, 4), 52);
+  EXPECT_EQ(signature.segmentSize(), 56);
+  kernel.builder().createEndProgram();
+
+  std::string assembly = kernel.toAssembly();
+  EXPECT_NE(assembly.find("        .value_kind: by_value\n"
+                          "      - .size: 4\n"
+                          "        .offset: 32\n"
+                          "        .value_kind: hidden_group_size_x\n"),
+            std::string::npos)
+      << assembly;
+  EXPECT_NE(assembly.find("        .offset: 52\n"
+                          "        .value_kind: hidden_block_count_z\n...\n"),
+            std::string::npos)
+      << assembly;
+}
+
+TEST_F(KernelTest, AcceptsLlvmGroupSizeWidth) {
+  KernelSignature signature;
+  signature.addPointer("p");
+  signature.addScalar("n", 4);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 2), 12);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenGroupSizeY, 2), 14);
+  EXPECT_EQ(signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 4), 16);
+  EXPECT_EQ(signature.segmentSize(), 24);
+}
+
+TEST_F(KernelTest, RejectsInvalidHiddenArguments) {
+  KernelSignature signature;
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::byValue, 4),
+               std::invalid_argument);
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::globalPointer, 8),
+               std::invalid_argument);
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 2),
+               std::invalid_argument);
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 8),
+               std::invalid_argument);
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 8),
+               std::invalid_argument);
+  EXPECT_EQ(std::ssize(signature.arguments()), 0);
+
+  signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4);
+  EXPECT_THROW(signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4),
+               std::invalid_argument);
+  EXPECT_THROW(signature.addScalar("n", 4), std::invalid_argument);
+  EXPECT_THROW(signature.addPointer("p"), std::invalid_argument);
+  EXPECT_EQ(std::ssize(signature.arguments()), 1);
+}
+
+TEST_F(KernelTest, EnablesWorkgroupIds) {
+  {
+    Kernel kernel(target, "none", 64);
+    EXPECT_THROW(kernel.workgroupIdY(), std::logic_error);
+    EXPECT_THROW(kernel.workgroupIdZ(), std::logic_error);
+    std::string assembly = kernel.toAssembly();
+    EXPECT_EQ(assembly.find("workgroup_id_y"), std::string::npos) << assembly;
+    EXPECT_EQ(assembly.find("workgroup_id_z"), std::string::npos) << assembly;
+  }
+  {
+    Kernel kernel(target, "both", 64);
+    kernel.enableWorkgroupIds(true, true);
+    EXPECT_EQ(kernel.workgroupIdY().start(), 3);
+    EXPECT_EQ(kernel.workgroupIdZ().start(), 4);
+    EXPECT_EQ(kernel.builder().allocateSgpr(1).start(), 5);
+    std::string assembly = kernel.toAssembly();
+    expectLinesInOrder(assembly, {".amdhsa_system_sgpr_workgroup_id_x 1",
+                                  ".amdhsa_system_sgpr_workgroup_id_y 1",
+                                  ".amdhsa_system_sgpr_workgroup_id_z 1",
+                                  ".amdhsa_system_vgpr_workitem_id 0"});
+    EXPECT_THROW(kernel.enableWorkgroupIds(true, false), std::logic_error);
+  }
+  {
+    Kernel kernel(target, "both_empty", 64);
+    kernel.enableWorkgroupIds(true, true);
+    EXPECT_TRUE(hasLine(kernel.toAssembly(), "  .amdhsa_next_free_sgpr 5"));
+  }
+  {
+    Kernel kernel(target, "z_only", 64);
+    kernel.enableWorkgroupIds(false, true);
+    EXPECT_EQ(kernel.workgroupIdZ().start(), 3);
+    EXPECT_THROW(kernel.workgroupIdY(), std::logic_error);
+    std::string assembly = kernel.toAssembly();
+    EXPECT_EQ(assembly.find("workgroup_id_y"), std::string::npos) << assembly;
+    EXPECT_TRUE(hasLine(assembly, "  .amdhsa_system_sgpr_workgroup_id_z 1"))
+        << assembly;
+  }
+}
+
+TEST_F(KernelTest, RejectsInvalidWorkgroupIdRequests) {
+  Kernel none(target, "none", 64);
+  EXPECT_THROW(none.enableWorkgroupIds(false, false), std::invalid_argument);
+
+  Kernel busy(target, "busy", 64);
+  RegisterRange held = busy.builder().allocateSgpr(1);
+  ASSERT_EQ(held.start(), 3);
+  EXPECT_THROW(busy.enableWorkgroupIds(true, false), std::invalid_argument);
+}
+
+TEST_F(KernelTest, SetsLdsSize) {
+  Kernel kernel(target, "lds", 64);
+  EXPECT_EQ(kernel.ldsSize(), 0);
+  kernel.setLdsSize(4096);
+  EXPECT_EQ(kernel.ldsSize(), 4096);
+  std::string assembly = kernel.toAssembly();
+  EXPECT_TRUE(hasLine(assembly, "  .amdhsa_group_segment_fixed_size 4096"))
+      << assembly;
+  EXPECT_TRUE(hasLine(assembly, "    .group_segment_fixed_size: 4096"))
+      << assembly;
+  EXPECT_THROW(kernel.setLdsSize(-1), std::invalid_argument);
+  EXPECT_THROW(kernel.setLdsSize(163841), std::invalid_argument);
+  EXPECT_EQ(kernel.ldsSize(), 4096);
+  EXPECT_NO_THROW(kernel.setLdsSize(163840));
+}
+
+TEST_F(KernelTest, LoadsArguments) {
+  Kernel kernel(target, "loads", 64);
+  KernelSignature &signature = kernel.signature();
+  signature.addPointer("p");
+  signature.addScalar("n", 4);
+  signature.addHidden(KernelArgumentKind::hiddenGroupSizeX, 4);
+  signature.addHidden(KernelArgumentKind::hiddenBlockCountX, 4);
+  IRBuilder &builder = kernel.builder();
+  RegisterRange regs = builder.allocateSgpr(8, 4);
+  kernel.loadArgument(regs.ref(0, 1), 8);
+  kernel.loadArgument(regs.ref(2, 2), 8);
+  kernel.loadArgument(regs.ref(4, 4), 0);
+  expectLinesInOrder(kernel.toAssembly(),
+                     {"s_load_dword s4, s[0:1], 8",
+                      "s_load_dwordx2 s[6:7], s[0:1], 8",
+                      "s_load_dwordx4 s[8:11], s[0:1], 0"});
+
+  RegisterRange vgpr = builder.allocateVgpr(1);
+  EXPECT_THROW(kernel.loadArgument(vgpr.ref(), 0), std::invalid_argument);
+  EXPECT_THROW(kernel.loadArgument(regs.ref(0, 3), 0), std::invalid_argument);
+  EXPECT_THROW(kernel.loadArgument(regs.ref(1, 2), 0), std::invalid_argument);
+  EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), 2), std::invalid_argument);
+  EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), -4), std::invalid_argument);
+  int end = signature.segmentSize();
+  EXPECT_NO_THROW(kernel.loadArgument(regs.ref(0, 1), end - 4));
+  EXPECT_THROW(kernel.loadArgument(regs.ref(0, 1), end), std::invalid_argument);
+  EXPECT_THROW(kernel.loadArgument(regs.ref(0, 2), end - 4),
+               std::invalid_argument);
+}
+
 } // namespace

@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 using namespace rocm::tensilelite;
 using namespace rocm::tensilelite::codegen;
@@ -40,6 +41,39 @@ bool isIdentifier(std::string_view text) {
     if (!isAlpha(c) && !(c >= '0' && c <= '9'))
       return false;
   return true;
+}
+
+bool isHidden(KernelArgumentKind kind) {
+  return kind != KernelArgumentKind::globalPointer &&
+         kind != KernelArgumentKind::byValue;
+}
+
+std::string_view valueKindName(KernelArgumentKind kind) {
+  switch (kind) {
+  case KernelArgumentKind::globalPointer:
+    return "global_buffer";
+  case KernelArgumentKind::byValue:
+    return "by_value";
+  case KernelArgumentKind::hiddenBlockCountX:
+    return "hidden_block_count_x";
+  case KernelArgumentKind::hiddenBlockCountY:
+    return "hidden_block_count_y";
+  case KernelArgumentKind::hiddenBlockCountZ:
+    return "hidden_block_count_z";
+  case KernelArgumentKind::hiddenGroupSizeX:
+    return "hidden_group_size_x";
+  case KernelArgumentKind::hiddenGroupSizeY:
+    return "hidden_group_size_y";
+  case KernelArgumentKind::hiddenGroupSizeZ:
+    return "hidden_group_size_z";
+  }
+  throw std::invalid_argument("unknown kernel argument kind");
+}
+
+bool isGroupSize(KernelArgumentKind kind) {
+  return kind == KernelArgumentKind::hiddenGroupSizeX ||
+         kind == KernelArgumentKind::hiddenGroupSizeY ||
+         kind == KernelArgumentKind::hiddenGroupSizeZ;
 }
 
 int roundUp(int value, int multiple) {
@@ -123,10 +157,14 @@ std::string emitDescriptor(const Kernel &kernel, const RegisterCounts &counts) {
       << "  .amdhsa_accum_offset " << counts.accumOffset << "\n"
       << "  .amdhsa_next_free_vgpr " << counts.nextFreeVgpr << "\n"
       << "  .amdhsa_next_free_sgpr " << counts.nextFreeSgpr << "\n"
-      << "  .amdhsa_group_segment_fixed_size 0\n"
+      << "  .amdhsa_group_segment_fixed_size " << kernel.ldsSize() << "\n"
       << "  .amdhsa_private_segment_fixed_size 0\n"
-      << "  .amdhsa_system_sgpr_workgroup_id_x 1\n"
-      << "  .amdhsa_system_vgpr_workitem_id 0\n"
+      << "  .amdhsa_system_sgpr_workgroup_id_x 1\n";
+  if (kernel.hasWorkgroupIdY())
+    out << "  .amdhsa_system_sgpr_workgroup_id_y 1\n";
+  if (kernel.hasWorkgroupIdZ())
+    out << "  .amdhsa_system_sgpr_workgroup_id_z 1\n";
+  out << "  .amdhsa_system_vgpr_workitem_id 0\n"
       << "  .amdhsa_float_denorm_mode_32 3\n"
       << "  .amdhsa_float_denorm_mode_16_64 3\n"
       << ".end_amdhsa_kernel\n";
@@ -139,13 +177,15 @@ std::string emitArguments(const KernelSignature &signature) {
   std::ostringstream out;
   out << "    .args:\n";
   for (const KernelArgument &arg : signature.arguments()) {
-    bool isPointer = arg.kind == KernelArgumentKind::globalPointer;
-    out << "      - .name: " << arg.name << "\n"
-        << "        .size: " << arg.size << "\n"
-        << "        .offset: " << arg.offset << "\n"
-        << "        .value_kind: " << (isPointer ? "global_buffer" : "by_value")
-        << "\n";
-    if (isPointer)
+    // Hidden arguments have no name, so the size field opens the entry.
+    if (isHidden(arg.kind))
+      out << "      - .size: " << arg.size << "\n";
+    else
+      out << "      - .name: " << arg.name << "\n"
+          << "        .size: " << arg.size << "\n";
+    out << "        .offset: " << arg.offset << "\n"
+        << "        .value_kind: " << valueKindName(arg.kind) << "\n";
+    if (arg.kind == KernelArgumentKind::globalPointer)
       out << "        .address_space: global\n";
   }
   return out.str();
@@ -165,7 +205,7 @@ std::string emitMetadata(const Kernel &kernel, const RegisterCounts &counts) {
       << "\n"
       << "    .kernarg_segment_align: " << KernelSignature::segmentAlignment
       << "\n"
-      << "    .group_segment_fixed_size: 0\n"
+      << "    .group_segment_fixed_size: " << kernel.ldsSize() << "\n"
       << "    .private_segment_fixed_size: 0\n"
       << "    .max_flat_workgroup_size: " << kernel.workgroupSize() << "\n"
       << "    .wavefront_size: " << kernel.target().wavefrontSize() << "\n"
@@ -181,8 +221,11 @@ std::string emitMetadata(const Kernel &kernel, const RegisterCounts &counts) {
 
 } // namespace
 
-int KernelSignature::add(std::string_view name, KernelArgumentKind kind,
-                         int size) {
+int KernelSignature::addExplicit(std::string_view name, KernelArgumentKind kind,
+                                 int size) {
+  if (!args.empty() && isHidden(args.back().kind))
+    throw std::invalid_argument(
+        "explicit kernel arguments must precede hidden ones");
   if (!isIdentifier(name))
     throw std::invalid_argument("invalid kernel argument name: '" +
                                 std::string(name) + "'");
@@ -190,20 +233,37 @@ int KernelSignature::add(std::string_view name, KernelArgumentKind kind,
     if (arg.name == name)
       throw std::invalid_argument("duplicate kernel argument name: '" +
                                   std::string(name) + "'");
+  return append(std::string(name), kind, size);
+}
+
+int KernelSignature::append(std::string name, KernelArgumentKind kind,
+                            int size) {
   int end = args.empty() ? 0 : args.back().offset + args.back().size;
   int offset = roundUp(end, size);
-  args.push_back({std::string(name), kind, size, offset});
+  args.push_back({std::move(name), kind, size, offset});
   return offset;
 }
 
 int KernelSignature::addPointer(std::string_view name) {
-  return add(name, KernelArgumentKind::globalPointer, 8);
+  return addExplicit(name, KernelArgumentKind::globalPointer, 8);
 }
 
 int KernelSignature::addScalar(std::string_view name, int size) {
   if (size != 4 && size != 8)
     throw std::invalid_argument("scalar kernel argument size must be 4 or 8");
-  return add(name, KernelArgumentKind::byValue, size);
+  return addExplicit(name, KernelArgumentKind::byValue, size);
+}
+
+int KernelSignature::addHidden(KernelArgumentKind kind, int size) {
+  if (!isHidden(kind))
+    throw std::invalid_argument("kernel argument kind is not hidden");
+  bool sizeAllowed = size == 4 || (size == 2 && isGroupSize(kind));
+  if (!sizeAllowed)
+    throw std::invalid_argument("invalid hidden kernel argument size");
+  for (const KernelArgument &arg : args)
+    if (arg.kind == kind)
+      throw std::invalid_argument("duplicate hidden kernel argument");
+  return append({}, kind, size);
 }
 
 int KernelSignature::segmentSize() const {
@@ -225,6 +285,68 @@ Kernel::Kernel(const Target &target, std::string_view name, int workgroupSize,
           registers.reserve(RegisterKind::sgpr, 2, 1, "workgroup_id_x")),
       workitemIdReg(
           registers.reserve(RegisterKind::vgpr, 0, 1, "workitem_id")) {}
+
+void Kernel::enableWorkgroupIds(bool y, bool z) {
+  if (!y && !z)
+    throw std::invalid_argument("no workgroup id requested");
+  if (workgroupIdsEnabled)
+    throw std::logic_error("workgroup ids already enabled");
+  // The hardware packs the enabled ids right after workgroup id x.
+  int next = 3;
+  if (y)
+    workgroupIdYReg.emplace(
+        registers.reserve(RegisterKind::sgpr, next++, 1, "workgroup_id_y"));
+  if (z)
+    workgroupIdZReg.emplace(
+        registers.reserve(RegisterKind::sgpr, next, 1, "workgroup_id_z"));
+  workgroupIdsEnabled = true;
+}
+
+const RegisterRange &Kernel::workgroupIdY() const {
+  if (!workgroupIdYReg)
+    throw std::logic_error("workgroup id y is not enabled");
+  return *workgroupIdYReg;
+}
+
+const RegisterRange &Kernel::workgroupIdZ() const {
+  if (!workgroupIdZReg)
+    throw std::logic_error("workgroup id z is not enabled");
+  return *workgroupIdZReg;
+}
+
+void Kernel::setLdsSize(int bytes) {
+  if (bytes < 0 || bytes > kernelTarget.maxLdsSize())
+    throw std::invalid_argument("lds size must be in [0, " +
+                                std::to_string(kernelTarget.maxLdsSize()) +
+                                "] bytes");
+  ldsBytes = bytes;
+}
+
+std::shared_ptr<rocisa::SMemLoadInstruction>
+Kernel::loadArgument(RegisterRef dst, int offset) {
+  if (dst.kind != RegisterKind::sgpr)
+    throw std::invalid_argument("kernel argument load needs SGPRs");
+  if (dst.count != 1 && dst.count != 2 && dst.count != 4)
+    throw std::invalid_argument(
+        "kernel argument load must be 1, 2 or 4 dwords");
+  if (dst.start % dst.count != 0)
+    throw std::invalid_argument(
+        "kernel argument load destination is misaligned");
+  if (offset < 0 || offset % 4 != 0)
+    throw std::invalid_argument("kernel argument offset must be a non-negative "
+                                "multiple of 4");
+  if (offset + 4 * dst.count > kernelSignature.segmentSize())
+    throw std::invalid_argument("kernel argument load is outside the segment");
+  std::shared_ptr<rocisa::RegisterContainer> base = kernargPtr.container();
+  switch (dst.count) {
+  case 1:
+    return irBuilder.create<rocisa::SLoadB32>(dst.container(), base, offset);
+  case 2:
+    return irBuilder.create<rocisa::SLoadB64>(dst.container(), base, offset);
+  default:
+    return irBuilder.create<rocisa::SLoadB128>(dst.container(), base, offset);
+  }
+}
 
 std::string Kernel::toAssembly() const {
   registers.checkLimits();
