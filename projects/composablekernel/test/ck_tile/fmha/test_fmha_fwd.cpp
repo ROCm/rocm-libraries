@@ -435,23 +435,27 @@ std::pair<int, int> PingPongGrid(mode_enum mode, int nhead)
 
 class QrTdmPingPong
     : public TestWithParam<
-          std::tuple<mode_enum, int, int, int, const char*, const char*, bool, const char*>>
+          std::tuple<mode_enum, int, int, int, const char*, const char*, bool, const char*, bool>>
 {
 };
 
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QrTdmPingPong,
-    // mode, nhead (group mode: from the grid), seqlen_q, seqlen_k, mask, bias, lse, name part
-    Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_"},
-           std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_"},
-           std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_"},
-           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_"},
-           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_"},
-           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_"},
-           std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_"},
-           std::tuple{mode_enum::batch, 8, 100, 100, "2", "n", false, "_mc_"},
-           std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, ""}));
+    // mode, nhead (group mode: from the grid), seqlen_q, seqlen_k, mask, bias, lse, name part,
+    // BHSD (i_perm/o_perm; BSHD otherwise)
+    Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_", false},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_", false},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_", false},
+           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_", false},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_", false},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_", false},
+           std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_", false},
+           std::tuple{mode_enum::batch, 8, 100, 100, "2", "n", false, "_mc_", false},
+           std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, "", false},
+           std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_", true},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_", true},
+           std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, "", true}));
 
 TEST_P(QrTdmPingPong, DataTypeConfig)
 {
@@ -460,7 +464,8 @@ TEST_P(QrTdmPingPong, DataTypeConfig)
         if(!ck_tile::is_gfx125_supported())
             GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
 
-        auto [mode, nhead_hint, seqlen_q, seqlen_k, mask_str, bias_str, lse, tag] = GetParam();
+        auto [mode, nhead_hint, seqlen_q, seqlen_k, mask_str, bias_str, lse, tag, perm] =
+            GetParam();
         const auto [batch, nhead] = PingPongGrid(mode, nhead_hint);
 
         std::string selected_kernel;
@@ -478,8 +483,8 @@ TEST_P(QrTdmPingPong, DataTypeConfig)
                                                    {},
                                                    {},
                                                    0,
-                                                   false,
-                                                   false,
+                                                   perm,
+                                                   perm,
                                                    0,
                                                    0,
                                                    true,
