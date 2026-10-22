@@ -226,6 +226,32 @@ if(CK_GFX12_ONLY_BUILD)
   endif()
 endif()
 
+# Plain masked/plain gfx1250 bf16 d128 TDM training instances benefit
+# from latency-oriented pre-RA scheduling with this pipelined implementation.
+# Exclude decode, short-sequence overrides, other precisions and architectures:
+# those cases use different code and require separate measurements.
+option(FMHA_BWD_GFX1250_D128_BF16_MAX_ILP
+  "use max-ilp for plain gfx1250 bf16 d128 TDM training instances" ON)
+if(FMHA_BWD_GFX1250_D128_BF16_MAX_ILP AND "gfx1250" IN_LIST INST_TARGETS)
+  check_cxx_compiler_flag("-mllvm -amdgpu-sched-strategy=max-ilp"
+    HAS_FMHA_BWD_MAX_ILP)
+  if(HAS_FMHA_BWD_MAX_ILP)
+    foreach(bwd_blob IN LISTS FMHA_BWD_GEN_BLOBS)
+      get_filename_component(bwd_blob_name "${bwd_blob}" NAME)
+      if(bwd_blob_name MATCHES "^fmha_bwd_d128_bf16_batch_.*_maxq0_tdm_npad_nbias_ndbias_(nmask|mask)_ndropout_ndeterministic_ntrload_gfx125\\.cpp$")
+        set_property(SOURCE "${bwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
+          "-mllvm" "-amdgpu-sched-strategy=max-ilp")
+        if(bwd_blob_name MATCHES "_nmask_")
+          # Compiler-managed SCHED_MODE=2: LLVM inserts the required
+          # s_wait_alu VA_VDST/VM_VSRC waits; no manual hazard removal.
+          set_property(SOURCE "${bwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
+            "-mllvm" "-amdgpu-expert-scheduling-mode" "-mllvm" "-amdgpu-hard-clause-length-limit=1")
+        endif()
+      endif()
+    endforeach()
+  endif()
+endif()
+
 # Per-kernel VGPR/SGPR/LDS/scratch/spill and occupancy remarks, on stderr at
 # compile time. Must hang off the instance targets: the generated blobs are
 # LANGUAGE HIP, so they take CMAKE_HIP_FLAGS and never see CMAKE_CXX_FLAGS.

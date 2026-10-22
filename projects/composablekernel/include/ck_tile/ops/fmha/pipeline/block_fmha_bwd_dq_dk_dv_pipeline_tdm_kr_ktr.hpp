@@ -172,6 +172,19 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         return dq_out;
     }
 
+    template <index_t MSlice, typename Window, typename Tensor>
+    CK_TILE_DEVICE static void AtomicPendingQGradSlice([[maybe_unused]] Window& window, const Tensor& x, int32x4_t rsrc, index_t col)
+    {
+        static_for<0, 2, 1>{}([&](auto h) {
+            const index_t addr = ((MSlice * 16 + h * 8) * 128 + col) * sizeof(AccDataType);
+            static_for<0, 8, 1>{}([&](auto e) {
+                const float value = x.get_thread_buffer()[number<(MSlice * 2 + h) * 8 + e>{}];
+                // Device scope is required for cross-CU dQ accumulation.
+                llvm_amdgcn_raw_buffer_atomic_add_fp32(value, rsrc, addr + e * 128 * 4, 0, 16);
+            });
+        });
+    }
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -741,14 +754,24 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             }
         };
 
-        // Issue tile `tile` into slot `j`. The issue order Q, LSE, dO, D is
-        // fixed: TENSORcnt retires in order, so reordering these four changes
-        // what a given wait count means.
+        // Issue a complete four-transfer tile into slot j. TENSORcnt retires
+        // in order, and all ring waits release complete tiles. Permuting
+        // operands within a tile does not change those wait thresholds.
         auto issue_qdo_tile = [&](auto j, index_t tile) {
+            if constexpr(FmhaMask::IsMasking)
+            {
+            load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
+            load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
+            load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
+            load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
+            }
+            else
+            {
             load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
             load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
             load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
             load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
+            }
             advance_qdo_windows(tile + 1);
         };
 
@@ -802,29 +825,50 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         // tuple: taking the address of a tuple element makes the windows
         // addressable, which stops them being scrubbed into registers and puts
         // every descriptor back in scratch.
-        auto pick_slot = [&](auto& tup, index_t j) -> auto& {
+        auto pick_slot = [&](auto& tup, index_t j, auto slot_off) -> decltype(auto) {
             if constexpr(kQDOSlots == 1)
-            {
-                ignore = j;
-                return tup.at(number<0>{});
-            }
+                return (tup.at(number<0>{}));
             else if constexpr(kQDOSlots == 2)
-            {
-                // Two slots select with a single ternary on two named
-                // windows. A chain over three or four would make all of them
-                // addressable and put their descriptors back in scratch.
-                return j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{});
-            }
+                return (j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{}));
             else
             {
-                auto* p = &tup.at(number<0>{});
-                static_for<1, kQDOSlots, 1>{}([&](auto k) {
-                    if(j == k)
-                    {
-                        p = &tup.at(k);
-                    }
-                });
-                return *p;
+            auto view = tup.at(number<0>{}).get_bottom_tensor_view();
+            // Select scalar LDS byte offsets; never dynamically address a
+            // tuple element. The slot windows have identical descriptors.
+            index_t off = slot_off(number<0>{});
+            static_for<1, kQDOSlots, 1>{}([&](auto k) {
+                off = j == k ? slot_off(k) : off;
+            });
+            using Ptr = decltype(view.get_buffer_view().p_data_);
+            view.get_buffer_view().p_data_ = static_cast<Ptr>(
+                static_cast<void*>(static_cast<char*>(smem_ptr) + off));
+            using W = remove_cvref_t<decltype(tup.at(number<0>{}))>;
+            if constexpr(is_tile_window_with_static_distribution_v<W>)
+                return make_tile_window(view,
+                    tup.at(number<0>{}).get_window_lengths(),
+                    tup.at(number<0>{}).get_window_origin(),
+                    tup.at(number<0>{}).get_tile_distribution());
+            else
+                return make_tile_window(view,
+                    tup.at(number<0>{}).get_window_lengths(),
+                    tup.at(number<0>{}).get_window_origin());
+            }
+        };
+
+        auto pending_dq = make_static_distributed_tensor<AccDataType>(
+            Policy::template MakeQGradStoreBlockDistribution<Problem>());
+        clear_tile(pending_dq);
+        bool pending_dq_valid = false;
+        auto flush_pending_dq = [&]() {
+            if(pending_dq_valid)
+            {
+                if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                             memory_operation_enum::set)
+                    store_tile(dq_dram_window, pending_dq);
+                else
+                    update_tile(dq_dram_window, pending_dq);
+                move_tile_window(dq_dram_window, {kM0, 0});
+                pending_dq_valid = false;
             }
         };
 
@@ -859,9 +903,67 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             // STAGE 1, Q@K Gemm0
             auto s_acc = SPBlockTileType{};
 
-            s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+            decltype(load_tile_transpose(dot_rd_cur)) dot_reg_tensor{};
+            if constexpr(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 &&
+                         kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
+                         BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
+                         BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
+                         !kPadHeadDimQ && !kIsDeterministic &&
+                         !FmhaDropout::IsDropout &&
+                         decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                             memory_operation_enum::atomic_add)
+            {
+        const auto& view = dq_dram_window.get_bottom_tensor_view();
+        const auto off = view.get_tensor_descriptor().calculate_offset(dq_dram_window.get_window_origin());
+        auto rsrc = make_wave_buffer_resource(view.get_buffer_view().p_data_ + off,
+            (view.get_buffer_view().buffer_size_ - off) * sizeof(AccDataType));
+        rsrc[0] = amd_wave_read_first_lane(rsrc[0]);
+        rsrc[1] = amd_wave_read_first_lane(rsrc[1]);
+        rsrc[2] = amd_wave_read_first_lane(rsrc[2]);
+        rsrc[3] = amd_wave_read_first_lane(rsrc[3]);
+        const index_t col = get_warp_id() * 32 + get_lane_id();
 
-            auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
+                clear_tile(s_acc);
+                static_for<0, 4, 1>{}([&](auto k) {
+                    gemm_0.template RunKSlice<k>(s_acc, q_reg_tensor, k_reg_tensor);
+                    if constexpr(k == 1)
+                    {
+                        dot_reg_tensor = load_tile_transpose(dot_rd_cur);
+                        __builtin_amdgcn_sched_barrier(0);
+                    }
+                    if(pending_dq_valid)
+                        AtomicPendingQGradSlice<k>(dq_dram_window, pending_dq, rsrc, col);
+                    if constexpr(!FmhaMask::IsMasking && kQDOSlots >= 3)
+                    {
+                    __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
+                    __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
+                    }
+                    else
+                    {
+                    __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
+                    __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
+                    }
+                });
+                if(pending_dq_valid)
+                    move_tile_window(dq_dram_window, {kM0, 0});
+                pending_dq_valid = false;
+            }
+            else
+            {
+                s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+                flush_pending_dq();
+            }
+
+
+            if constexpr(!(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 &&
+                         kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
+                         BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
+                         BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
+                         !kPadHeadDimQ && !kIsDeterministic &&
+                         !FmhaDropout::IsDropout &&
+                         decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                             memory_operation_enum::atomic_add))
+                dot_reg_tensor = load_tile_transpose(dot_rd_cur);
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -972,12 +1074,21 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 }
             }();
 
+            decltype(load_tile_transpose(qt_rd_cur)) qt_reg_tensor{};
             // STAGE 3, P^T@OGrad^T Gemm1
             Policy::template PTFromGemm0CToGemm1A<Problem>(pt_reg_tensor, p_gemm);
             {
                 if constexpr(kDVInReg)
                 {
-                    gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
+                    if constexpr(decltype(gemm_1)::KPerSubTile == 2)
+                    {
+                        gemm_1.template RunKSlice<0>(dv_acc, pt_reg_tensor, dot_reg_tensor);
+                        qt_reg_tensor = load_tile_transpose(qt_rd_cur);
+                        __builtin_amdgcn_sched_barrier(0);
+                        gemm_1.template RunKSlice<1>(dv_acc, pt_reg_tensor, dot_reg_tensor);
+                    }
+                    else
+                        gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
                 }
                 else
                 {
@@ -987,7 +1098,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 }
             }
 
-            auto qt_reg_tensor = load_tile_transpose(qt_rd_cur);
+            if constexpr(!(kDVInReg && decltype(gemm_1)::KPerSubTile == 2))
+                qt_reg_tensor = load_tile_transpose(qt_rd_cur);
 
             // STAGE 4, OGrad@V Gemm2
             auto dp_acc = SPGradBlockTileType{};
@@ -1056,24 +1168,47 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
-            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-
             if constexpr(kHasBiasGrad)
             {
-                // SGrad and BiasGrad use the same address in LDS.
                 block_sync_lds();
             }
+            if constexpr(FmhaMask::IsMasking)
+            {
             store_tile(ds_lds_window, dst_reg_tensor);
-
+            // Both LDS producers retire before any wave signals arrival.
+            s_wait_tensorcnt<kTdmWaitCnt>();
+            s_waitcnt<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, 0>();
+            __builtin_amdgcn_s_barrier_signal(-1);
+            __builtin_amdgcn_sched_barrier(0);
+            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            else
+                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier_wait(-1);
+            // No cross-wave LDS consumer is allowed above the completed join.
+            }
+            else
+            {
+            store_tile(ds_lds_window, dst_reg_tensor);
+            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            else
+                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            // TDM retirement, then DS retirement plus a single WG join.
+            s_wait_tensorcnt<kTdmWaitCnt>();
             block_sync_lds();
-
-            // Release tile i+1 only, leaving kQDOSlots - 2 tiles in flight:
-            // each transfer gets kQDOSlots - 1 iterations of compute to hide
-            // behind.
-            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
+            }
             auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
+            if constexpr(!FmhaMask::IsMasking)
+            {
             q_reg_tensor       = load_tile(q_rd_dst);
             lse                = load_tile(lse_rd_dst);
+            }
+            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                __builtin_amdgcn_sched_barrier(0);
+            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                gemm_3.template RunKSlice<1>(dk_acc, dst_reg_tensor, qt_reg_tensor);
             // STAGE7 SGrad@K^T Gemm4
             auto dq_acc = QGradBlockTileType{};
             clear_tile(dq_acc);
@@ -1087,11 +1222,31 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                       sequence<0, i_k4 * kK4>{},
                                       sequence<kM0, (i_k4 + 1) * kK4>{}),
                        kt_reg_tensor_slice);
+                if constexpr(FmhaMask::IsMasking && i_k4 == 1)
+                {
+                    q_reg_tensor = load_tile(q_rd_dst);
+                    lse = load_tile(lse_rd_dst);
+                    __builtin_amdgcn_sched_barrier(0);
+                }
+                if constexpr(i_k4 == (FmhaMask::IsMasking ? 1 : 0))
+                {
+                    do_reg_tensor = load_tile(do_rd_dst);
+                    d = load_tile(d_rd_dst);
+                    __builtin_amdgcn_sched_barrier(0);
+                }
             });
 
-            do_reg_tensor = load_tile(do_rd_dst);
-            d             = load_tile(d_rd_dst);
+            if constexpr(k4_loops <= (FmhaMask::IsMasking ? 1 : 0))
+            {
+                do_reg_tensor = load_tile(do_rd_dst);
+                d = load_tile(d_rd_dst);
+            }
 
+            if constexpr(FmhaMask::IsMasking && k4_loops <= 1)
+            {
+                q_reg_tensor = load_tile(q_rd_dst);
+                lse = load_tile(lse_rd_dst);
+            }
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
             {
@@ -1102,17 +1257,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             {
                 tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
             }
-            const auto dq_out = FoldQGradForAtomic(dq_acc);
-            if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
-                         memory_operation_enum::set)
-            {
-                store_tile(dq_dram_window, dq_out);
-            }
-            else
-            {
-                update_tile(dq_dram_window, dq_out);
-            }
-            move_tile_window(dq_dram_window, {kM0, 0});
+            pending_dq = FoldQGradForAtomic(dq_acc);
+            pending_dq_valid = true;
 
             i_total_loops += 1;
             seqlen_q_step += kM0;
@@ -1187,6 +1333,27 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                         : lse_lds_read_windows.at(number<kB>{}),
                     sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
                     [&] {
+                        if constexpr(FmhaMask::IsMasking)
+                        {
+                        load_tile_tdm(tdm_config_lse,
+                                      sec ? lse_lds_write_windows.at(number<0>{})
+                                          : lse_lds_write_windows.at(number<kB>{}),
+                                      lse_dram_window);
+                        load_tile_tdm(tdm_config_d,
+                                      sec ? d_lds_write_windows.at(number<0>{})
+                                          : d_lds_write_windows.at(number<kB>{}),
+                                      d_dram_window);
+                        load_tile_tdm(tdm_config_q,
+                                      sec ? q_lds_windows.at(number<0>{})
+                                          : q_lds_windows.at(number<kB>{}),
+                                      q_dram_window);
+                        load_tile_tdm(tdm_config_do,
+                                      sec ? do_lds_windows.at(number<0>{})
+                                          : do_lds_windows.at(number<kB>{}),
+                                      do_dram_window);
+                        }
+                        else
+                        {
                         load_tile_tdm(tdm_config_q,
                                       sec ? q_lds_windows.at(number<0>{})
                                           : q_lds_windows.at(number<kB>{}),
@@ -1203,6 +1370,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                       sec ? d_lds_write_windows.at(number<0>{})
                                           : d_lds_write_windows.at(number<kB>{}),
                                       d_dram_window);
+                        }
                         advance_qdo_windows(i_total_loops + kIssueAhead + 1);
                     });
                 phase = !phase;
@@ -1219,6 +1387,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         auto s_acc = SPBlockTileType{};
 
         // STAGE 1, Q@K Gemm0
+        flush_pending_dq();
         s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
         // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
@@ -1327,8 +1496,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
         Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor), decltype(p_gemm)>(
             pt_reg_tensor, p_gemm);
-        auto& dot_rd_tail = pick_slot(dot_lds_read_windows, i_tail_slot);
-        auto& qt_rd_tail  = pick_slot(qt_lds_read_windows, i_tail_slot);
+        decltype(auto) dot_rd_tail = pick_slot(dot_lds_read_windows, i_tail_slot, do_slot_off);
+        decltype(auto) qt_rd_tail  = pick_slot(qt_lds_read_windows, i_tail_slot, q_slot_off);
 
         auto dot_reg_tensor = load_tile_transpose(dot_rd_tail);
         {
