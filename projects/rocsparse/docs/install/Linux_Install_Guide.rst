@@ -49,8 +49,9 @@ by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 
 The tests need 24 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/rocsparse/clients/matrices`` from the root of the rocm-libraries repository.
-With a sparse checkout, first add the DVC configuration using ``git sparse-checkout add .dvc``.
 Reading from the DVC storage doesn't require credentials.
+In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
+``git sparse-checkout add .dvc`` first.
 Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.csr`` files,
 or configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
@@ -74,14 +75,15 @@ Use the following commands for a sparse checkout:
 .. note::
 
    To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
-   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas .dvc``.
+   The ``.dvc`` directory is needed to download the test matrices with ``dvc pull``.
 
 .. code-block:: shell
 
    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries
    git sparse-checkout init --cone
-   git sparse-checkout set projects/rocsparse
+   git sparse-checkout set projects/rocsparse .dvc
    git checkout develop # or use the branch you want to work with
 
 To download the develop branch for all projects in rocm-libraries, use these commands. This process takes
@@ -134,6 +136,14 @@ Using install.sh to build rocSPARSE with dependencies and clients
 The clients contain example code, unit tests, and benchmarks. Common use cases of ``install.sh`` to build
 the library, dependencies, and clients are listed in the table below.
 
+.. note::
+
+   The tests need the SuiteSparse test matrices. Before running these commands, pull them with
+   ``dvc pull -R clients/matrices`` from the ``projects/rocsparse`` directory.
+   ``install.sh`` downloads missing matrices only when you pass ``--matrices-dir`` or ``--matrices-dir-install``.
+   The clients also need GoogleTest, which ``-d`` doesn't install. Install it first, for example the
+   ``libgtest-dev`` or ``gtest-devel`` package.
+
 .. csv-table::
    :header: "Command","Description"
    :widths: 40, 90
@@ -141,7 +151,7 @@ the library, dependencies, and clients are listed in the table below.
    "``./install.sh -h``", "Print the help information."
    "``./install.sh -dc``", "Install the build dependencies using the distribution package manager, then build the library and client in your local directory. The ``-d`` flag doesn't install GoogleTest, which the client requires. The ``-d`` flag only needs to be used once."
    "``./install.sh -c``", "Build the library and client in your local directory. The script assumes the dependencies are available."
-   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -idc``", "Install the build dependencies, build the library and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The ``-d`` flag doesn't install GoogleTest, which the client requires. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic``", "Build the library and client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -idc -a gfx908``", "Install the build dependencies, build the library specifically for the gfx908 architecture and build the client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic -a gfx908``", "Build the library specifically for the gfx908 architecture, build the client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
@@ -184,8 +194,12 @@ You can build rocSPARSE with the dependencies and clients using the following co
 
    GoogleTest is required to build rocSPARSE clients. Install it, for example the ``libgtest-dev`` or
    ``gtest-devel`` package, or configure with ``-DALLOW_FETCH_DEPS=ON`` to download it.
+   ``-DALLOW_FETCH_DEPS=ON`` also downloads the test matrices from SuiteSparse instead of the ``dvc pull`` step.
 
 .. code-block:: shell
+
+   # Pull the test matrices
+   dvc pull -R clients/matrices
 
    # Create and change to build directory
    mkdir -p build/release ; cd build/release
