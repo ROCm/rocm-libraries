@@ -2,3 +2,19 @@
 leak:rocr::AMD::
 leak:hsaKmt
 leak:libhsa-runtime64.so
+
+# ROCM-30418: streams retained by testing_spmm early returns.
+# ROCM-30419: gate/residual descriptor clones retained by testing_spmm calls.
+# https://amd-hub.atlassian.net/browse/ROCM-30418
+# https://amd-hub.atlassian.net/browse/ROCM-30419
+# Matches all testing_spmm template variants and all leak types beneath them.
+# Review by 2026-11-22; remove when both tickets are fixed.
+leak:testing_spmm<
+
+# ROCM-31146: stream/events retained by testing_matmul_with_bias early returns.
+# https://amd-hub.atlassian.net/browse/ROCM-31146
+# ROCM-33540: InProcessAssembler retains its COMGR executable data reference.
+# https://amd-hub.atlassian.net/browse/ROCM-33540
+# Matches all leak types beneath testing_matmul_with_bias, including new ones.
+# Review by 2026-11-22; remove after the cleanup and COMGR ownership fixes.
+leak:^testing_matmul_with_bias(

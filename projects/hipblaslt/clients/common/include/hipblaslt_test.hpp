@@ -26,6 +26,17 @@
 
 #pragma once
 
+#if defined(__SANITIZE_ADDRESS__)
+#define IS_ASAN_BUILD 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define IS_ASAN_BUILD 1
+#endif
+#endif
+#ifndef IS_ASAN_BUILD
+#define IS_ASAN_BUILD 0
+#endif
+
 #ifdef GOOGLE_TEST
 #include <gtest/gtest.h>
 #endif
