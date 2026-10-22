@@ -154,7 +154,8 @@ endfunction()
 # flatc's Python output is a package tree with one module per declared type, so the outputs
 # cannot be derived from the schema name; this drives a stamp file instead.
 # flatc_flags.txt is not applied (its flags are C++-only); --gen-object-api is explicit
-# because the Python writers use the object API.
+# because the Python writers use the object API. Each generated module is then opened with
+# `# fmt: off` (MarkGeneratedPython.cmake), as scripts/run_flatc.py does.
 function(hipdnn_generate_flatbuffer_python)
     set(_options "")
     set(_one_value_args TARGET SCHEMAS_DIR OUTPUT_DIR NAME)
@@ -191,6 +192,8 @@ function(hipdnn_generate_flatbuffer_python)
                 -o "${ARG_OUTPUT_DIR}"
                 -I "${ARG_SCHEMAS_DIR}"
                 ${_schema_paths}
+        COMMAND ${CMAKE_COMMAND} -DOUTPUT_DIR=${ARG_OUTPUT_DIR}
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/MarkGeneratedPython.cmake"
         COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
         DEPENDS ${_depends}
         COMMENT "Generating ${ARG_NAME} FlatBuffers Python bindings"
