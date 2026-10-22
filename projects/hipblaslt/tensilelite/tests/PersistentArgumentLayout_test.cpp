@@ -982,3 +982,41 @@ TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
     EXPECT_EQ(fixed.grid, 1u);
     EXPECT_EQ(fixed.clusterSchedule.physicalGrid, 8u);
 }
+
+TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
+{
+    for(bool clustered : {false, true})
+    for(size_t k : {4096, 4097})
+    for(bool capability : {false, true})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, 2, 1);
+        if(!clustered)
+        {
+            solution.sizeMapping.clusterDim = {1, 1, 1};
+            solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        }
+        solution.internalArgsSupport.perTileExtraIters = capability;
+        const auto problem = clusterProblem(256, 256, k, 1);
+        const auto device = persistentDevice(8);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
+        ASSERT_EQ(active, capability && k == 4097);
+        if(!active)
+            continue;
+        const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;
+        const size_t iters = (k + 63) / 64;
+        size_t previousEnd = 0;
+        for(size_t w = 0; w < launch.grid; ++w)
+        {
+            const auto range = streamKWorkgroupIterRange(w, blocks, iters, launch.grid, true, true);
+            EXPECT_EQ(range.start, previousEnd);
+            ASSERT_GT(range.end, range.start);
+            EXPECT_EQ(range.start / iters, (range.end - 1) / iters);
+            previousEnd = range.end;
+        }
+        EXPECT_EQ(previousEnd, blocks * iters);
+    }
+}

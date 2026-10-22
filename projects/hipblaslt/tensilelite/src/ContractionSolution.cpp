@@ -1098,7 +1098,9 @@ namespace TensileLite
                || tiles <= 1 || launch.grid <= tiles || launch.grid % tiles != 0)
                 return false;
             const size_t factor = launch.grid / tiles;
-            return factor <= itersPerTile && itersPerTile % factor != 0;
+            return factor <= itersPerTile && itersPerTile % factor != 0
+                   && (!solution.usesStreamKSpatialCluster()
+                       || launch.clusterSchedule.split.skTiles == tiles);
         }
 
         template <typename KA>

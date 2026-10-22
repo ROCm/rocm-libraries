@@ -2334,7 +2334,10 @@ class Solution(collections.abc.Mapping):
     # runtime selector". It is fully derived here, overriding whatever the
     # solution YAML said, because only the generator knows what it just emitted.
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
-        (_supportStreamKPerTileExtraIters(state) and not isStreamKSpatialCluster(state))
+        (_supportStreamKPerTileExtraIters(state)
+         and (not isStreamKSpatialCluster(state)
+              or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
+                  and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
