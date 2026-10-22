@@ -345,7 +345,7 @@ jobs:
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
 
   rocjitsu_random_gemms_gfx950:
-    name: rocjitsu random GEMMs (gfx950, 100 cases)
+    name: rocjitsu GEMM race checks (gfx950, 100 cases)
     needs: [ci-env, configure, setup, linux_build_and_test]
     if: >-
       ${{
