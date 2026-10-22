@@ -1009,10 +1009,6 @@ def get_fwd_splitkv_blobs(
                 # them.
                 if (tile.F_occupancy != -1) != (pipeline.tag == "qr_tdm"):
                     continue
-                # Group mode is not covered yet for the TDM copy (gappy paged
-                # kv and per-batch seqlen offsets are untested on the TDM path).
-                if pipeline.tag == "qr_tdm" and mode == "group":
-                    continue
                 # Drop the qr instances qr_tdm shadows. Both tiles are bm0 64, so
                 # seqtune gives both the unconditional fallback and every other
                 # dispatch predicate matches too -- qr would never be reached for

@@ -1528,7 +1528,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                void* smem_ptr,
                float sink_v) const
     {
-        static_assert(!kIsGroupMode, "qr_tdm split-kv is batch mode only");
         static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                       "qr_tdm split-kv does not implement bias");
         static_assert(!kQuantized, "qr_tdm split-kv does not implement quantization");
