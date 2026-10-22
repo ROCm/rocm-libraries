@@ -28,8 +28,8 @@
 #include <hip/hip_runtime_api.h>
 #include <iostream>
 
-// Teardown must not throw: a destructor that throws while another exception is
-// unwinding calls std::terminate. Log the status and keep going.
+// Teardown must not throw: destructors are implicitly noexcept, so an exception
+// escaping one calls std::terminate. Log the status and keep going.
 inline void rocsparse_clients_log_hip_error(const char* call, hipError_t status) noexcept
 {
     if(status != hipSuccess)
