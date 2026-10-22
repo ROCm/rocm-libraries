@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -88,11 +89,35 @@ namespace local_kernel_test
         return id;
     }
 
-    // Whether a shard serves the GPU with this PCI device id. Shards of an
-    // architecture split by chip (gfx950) end in "_ID<id>[-<id>...]_<arch>";
-    // the others (gfx942) have no such suffix and serve every chip.
-    inline bool shardServesDevice(std::string const& name, std::string const& pciId)
+    // Compute unit count of the current GPU as the library's hardware
+    // predicates see it, or 0 if unreadable.
+    inline int deviceCuCount()
     {
+        int device = 0, count = 0;
+        if(hipGetDevice(&device) != hipSuccess
+           || hipDeviceGetAttribute(&count, hipDeviceAttributePhysicalMultiProcessorCount, device)
+                  != hipSuccess)
+            return 0;
+        return count;
+    }
+
+    // Whether a shard serves the GPU with this PCI device id and compute unit
+    // count. Shards built for one compute unit count carry "_CU<count>", and
+    // shards of an architecture split by chip (gfx950) "_ID<id>[-<id>...]";
+    // a shard without them serves every GPU of its architecture.
+    inline bool shardServesDevice(std::string const& name, std::string const& pciId, int cuCount)
+    {
+        auto const cuAt = name.rfind("_CU");
+        if(cuCount > 0 && cuAt != std::string::npos)
+        {
+            auto end = cuAt + 3;
+            while(end < name.size() && std::isdigit(static_cast<unsigned char>(name[end])))
+                ++end;
+            if(end > cuAt + 3 && (end == name.size() || name[end] == '_')
+               && std::stoi(name.substr(cuAt + 3, end - cuAt - 3)) != cuCount)
+                return false;
+        }
+
         auto const idAt = name.rfind("_ID");
         if(pciId.empty() || idAt == std::string::npos)
             return true;
@@ -135,7 +160,8 @@ namespace local_kernel_test
     // shards are more likely to hold a usable kernel.
     inline std::vector<std::string> candidatePayloads()
     {
-        const std::string pciId = devicePciId();
+        const std::string pciId   = devicePciId();
+        const int         cuCount = deviceCuCount();
 
         std::vector<std::pair<uintmax_t, std::string>> found;
         std::error_code                                ec;
@@ -154,7 +180,7 @@ namespace local_kernel_test
                     if(name.find("_Alik_Bljk_") == std::string::npos)
                         continue;
 
-                    if(!shardServesDevice(name, pciId))
+                    if(!shardServesDevice(name, pciId, cuCount))
                         continue;
 
                     // Pass the bare ".dat" name; the loader finds ".dat.zlib".
