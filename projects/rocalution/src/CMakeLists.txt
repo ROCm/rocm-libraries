@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -164,6 +164,12 @@ endif()
 list(APPEND CMAKE_HOST_FLAGS "-O3")
 target_compile_options(rocalution PRIVATE ${CMAKE_HOST_FLAGS})
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(rocalution PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rocalution PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocalution PRIVATE ${ROCALUTION_PROFILE_RUNTIME})
+endif()
+
 # Create rocALUTION hip library
 if(SUPPORT_HIP)
   # Flag source file as a hip source file
@@ -173,11 +179,19 @@ if(SUPPORT_HIP)
     set_source_files_properties(${HIP_SOURCES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT TRUE)
   endif()
 
+  # Coverage instruments host code only. Device-side coverage makes the HIP
+  # runtime abort while dumping the profile at process exit (AISPARSE-778).
   if(USE_HIPCXX)
     add_library(rocalution_hip ${HIP_SOURCES})
     # If CPU optimizations for local machine is actived
     if(BUILD_OPTCPU)
       target_compile_options(rocalution_hip PRIVATE "-march=native")
+    endif()
+    if(BUILD_CODE_COVERAGE)
+      target_compile_options(rocalution_hip PRIVATE
+        -fprofile-instr-generate -fcoverage-mapping
+        "SHELL:-Xarch_device -fno-profile-instr-generate"
+        "SHELL:-Xarch_device -fno-coverage-mapping")
     endif()
   else()
     # HIP flags workaround while target_compile_options do not work
@@ -195,6 +209,11 @@ if(SUPPORT_HIP)
     foreach(target ${GPU_TARGETS})
       list(APPEND HIP_HIPCC_FLAGS "--offload-arch=${target}")
     endforeach()
+    if(BUILD_CODE_COVERAGE)
+      list(APPEND HIP_HIPCC_FLAGS "-fprofile-instr-generate -fcoverage-mapping")
+      list(APPEND HIP_HIPCC_FLAGS "-Xarch_device -fno-profile-instr-generate")
+      list(APPEND HIP_HIPCC_FLAGS "-Xarch_device -fno-coverage-mapping")
+    endif()
 
     # Create rocALUTION HIP library
     if(WIN32)
@@ -211,6 +230,11 @@ if(SUPPORT_HIP)
 
   if(BUILD_SUPPORT_COMPLEX)
     target_compile_definitions(rocalution_hip PRIVATE SUPPORT_COMPLEX)
+  endif()
+
+  if(BUILD_CODE_COVERAGE)
+    target_link_options(rocalution_hip PRIVATE -u__llvm_profile_runtime)
+    target_link_libraries(rocalution_hip PRIVATE ${ROCALUTION_PROFILE_RUNTIME})
   endif()
 
   rocm_set_soversion(rocalution_hip "1.0.0")
