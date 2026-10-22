@@ -136,15 +136,19 @@ arch: gfx950
 provider_root: dnn-providers/hip-kernel-provider
 source: kernels/gfx950/attention_tiled_2d.py
 builder: build_unified_attention_2d_tiled
-kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}.gfx950
+# The geometry is t/nw/mw plus the MFMA codepath (narrow 16x16, wide32, transposed32),
+# so every pinned section's kernels have distinct names.
+kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32}{use_transposed_qk_32x32}.gfx950
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
-  # One geometry: the narrow 16x16 llvm path, 4 warps x 16 rows (BLOCK_M 64), KV tile 4
-  # pages (T = 64 at block_size 16). The sweep-widened geometries are a follow-up that
-  # needs measurements.
+  # The baseline geometry: the narrow 16x16 llvm path, 4 warps x 16 rows (BLOCK_M 64), KV
+  # tile 4 pages (T = 64 at block_size 16). Its kernels are each cell's default (floor);
+  # the `also` sections add one geometry per further codepath. Only llvm candidates are
+  # pinned: hkp_pack compiles every spec through the LLVM path, so a `_hipcc` twin would
+  # ship the identical kernel.
   pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_narrow_nw4_mw16_t4xb_llvm}
   # Request fields every cell shares. `batch` is the batch capacity the binaries serve
   # (num_seqs in the spec): 511 -> 9 binary-search iterations -> up to 511 sequences.
@@ -191,22 +195,84 @@ enumerate:
     - fields: [mask_type]
       values: [NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
   sweep_level: production
-  space: slice
-  # Nothing varies away from the geometry's own default spec yet.
-  free_fields: []
-  spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
-  # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 198
+  # Full space per geometry: every production sweep spec sharing the cell's feature
+  # fields. The codegen flag stacks and waves_per_eu are held at the registry default
+  # (reduction.fields.ignored), so each geometry contributes its default spec per cell and
+  # variant reduction chooses among the geometries.
+  space: full
+  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
+  # Every section crosses the primary's cells (the same 198), so each cell has one kernel
+  # per geometry and one default (the primary's).
+  also:
+    # A smaller CTA on the narrow path: 2 warps x 16 rows (BLOCK_M 32), 2-page KV tile.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_narrow_nw2_mw16_t2xb_llvm}
+      fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+      cells: &cells
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values: &head_cells
+            - [64, 64, 8, 1]
+            - [64, 64, 8, 8]
+            - [64, 64, 10, 10]
+            - [64, 64, 12, 12]
+            - [64, 64, 16, 2]
+            - [64, 64, 16, 16]
+            - [64, 64, 20, 20]
+            - [64, 64, 32, 4]
+            - [64, 64, 32, 8]
+            - [64, 64, 32, 32]
+            - [64, 64, 64, 8]
+            - [64, 64, 128, 128]
+            - [128, 128, 24, 24]
+            - [128, 128, 4, 4]
+            - [128, 128, 8, 1]
+            - [128, 128, 8, 2]
+            - [128, 128, 8, 8]
+            - [128, 128, 9, 9]
+            - [128, 128, 16, 2]
+            - [128, 128, 16, 16]
+            - [128, 128, 28, 4]
+            - [128, 128, 32, 4]
+            - [128, 128, 32, 8]
+            - [128, 128, 32, 32]
+            - [128, 128, 40, 8]
+            - [128, 128, 40, 10]
+            - [128, 128, 40, 40]
+            - [128, 128, 48, 8]
+            - [128, 128, 64, 4]
+            - [128, 128, 64, 8]
+            - [128, 128, 64, 64]
+            - [128, 128, 96, 8]
+            - [128, 128, 128, 8]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type]
+          values: [NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
+      spec_fields: *spec_fields
+    # The 32x32 MFMA path with a wide (row-major) QK tile: 4 warps x 32 rows, 4-page tile.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_wide32_nw4_mw32_t4xb_llvm}
+      fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+      cells: *cells
+      spec_fields: *spec_fields
+    # The 32x32 MFMA path with the transposed QK tile: 4 warps x 32 rows, 4-page tile.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_transposed32_nw4_mw32_t4xb_llvm}
+      fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+      cells: *cells
+      spec_fields: *spec_fields
 
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, mask_type, sliding_window, block_size, num_seqs]
+    # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, num_seqs]
+    # The geometry: constant within a section, so variant reduction compares sections.
     performance:
       - {name: tile_size}
       - {name: num_warps}
       - {name: block_m_per_warp}
-      - {name: waves_per_eu}
-    ignored: []
+      - {name: use_mfma_32x32}
+      - {name: use_transposed_qk_32x32}
+    # Codegen flag stacks and the occupancy hint the production sweep varies inside one
+    # geometry; held at the registry default (agreed at the knob checkpoint, 2026-10-22).
+    ignored: [waves_per_eu, use_v_double_buffer, use_staggered_iter_wait, use_sched_barrier, sched_barrier_mask, use_register_pv, use_early_v_schedule, kv_ring_depth, use_kq_lds_pad, kq_lds_pad_halves, use_transposed_scalar_state, use_transposed_invariant_hoist, use_transposed_mask_once, use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_transposed_mask_limit, use_grouped_kv2_softmax, use_agpr_alloc_zero, use_k_single_buffer, use_q_direct_reg, use_softmax_mfma_interleave, softmax_interleave_mode, use_mask_phase_split]
   aot_budget_per_arch: 1000
 
 ground_truth:
@@ -225,7 +291,7 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
     kmd_fields: [num_warps, block_m_per_warp, num_query_heads, num_kv_heads]
     guard: >
-      gfx950AttentionUnified2DGeometry() throws HipdnnPluginException for non-positive
+      gfx950Unified2DLaunchGeometry() throws HipdnnPluginException for non-positive
       dimensions, num_queries_per_kv outside 1..16 or a non-dividing GQA ratio. Grid is
       (Hkv, total_q // block_q + batch, 1) with block_q = block_m / (Hq / Hkv).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
@@ -243,7 +309,7 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
     kmd_fields: [num_seqs]
     guard: >
-      gfx950AttentionUnified2DBatchCapacity() restates max(1, ceil(log2(num_seqs + 1)))
+      gfx950Unified2DBatchCapacity() restates max(1, ceil(log2(num_seqs + 1)))
       iterations and the 2^iters - 1 sequence bound; kernel_match declines a graph whose
       batch exceeds it, and prepare() refuses one.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DGeometry.cpp
@@ -253,7 +319,7 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp
     kmd_fields: [block_size]
     guard: >
-      gfx950AttentionUnified2DWorkspaceLayout() lays out the identity block_tables
+      gfx950Unified2DWorkspaceLayout() lays out the identity block_tables
       [B, Skv / block_size], seq_lens [B] and query_start_len [B + 1] (int32, each 256-byte
       aligned) the kernel reads as paged-KV metadata; it throws for a Skv that block_size
       does not divide.

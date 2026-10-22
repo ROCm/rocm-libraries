@@ -4,7 +4,8 @@
 # compacted with tools/factorise_config.py:
 #     python tools/registry_enumerator.py --manifest configs/gfx950_attention_unified_2d.engine.yaml --out <scratch>/config.yaml
 #     python tools/factorise_config.py --config <scratch>/config.yaml --out configs/gfx950_attention_unified_2d.yaml \
-#         --knobs tile_size,num_warps,block_m_per_warp --vocabulary 'dtype:bf16=BF16,fp16=FP16'
+#         --knobs tile_size,num_warps,block_m_per_warp,use_mfma_32x32,use_transposed_qk_32x32 \
+#         --vocabulary 'dtype:bf16=BF16,fp16=FP16'
 #
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_unified_2d/
@@ -22,9 +23,11 @@
 # descriptors/rocKE/gfx950_attention_unified_2d/artifacts/ and run `dvc add artifacts`,
 # not `git add`. See the descriptors README ("Large rocKE files live in DVC").
 #
-# One geometry per cell: narrow 16x16 MFMA, 4 warps x 16 rows (BLOCK_M 64), KV tile of 4
-# pages (T = 64 at block_size 16), llvm backend. `num_seqs` (511) is the batch capacity
-# the binary serves, not a shape: see the manifest.
+# Four geometries per cell, one per pinned registry candidate (llvm backend): the narrow
+# 16x16 MFMA baseline (4 warps x 16 rows, 4-page KV tile; the cell's default), narrow
+# 2 x 16 with a 2-page tile, and the 32x32 wide and transposed paths (4 x 32, 4-page
+# tile). `num_seqs` (511) is the batch capacity the binary serves, not a shape: see the
+# manifest.
 #
 dialect: packaged
 authored_subpath: rocKE/gfx950_attention_unified_2d
@@ -133,7 +136,8 @@ reduction:
     - head_size
     - num_query_heads
     - num_kv_heads
-    - mask_type
+    - causal_top_left
+    - right_bound
     - sliding_window
     - block_size
     - num_seqs
@@ -141,8 +145,32 @@ reduction:
     - name: tile_size
     - name: num_warps
     - name: block_m_per_warp
-    - name: waves_per_eu
-    ignored: []
+    - name: use_mfma_32x32
+    - name: use_transposed_qk_32x32
+    ignored:
+    - waves_per_eu
+    - use_v_double_buffer
+    - use_staggered_iter_wait
+    - use_sched_barrier
+    - sched_barrier_mask
+    - use_register_pv
+    - use_early_v_schedule
+    - kv_ring_depth
+    - use_kq_lds_pad
+    - kq_lds_pad_halves
+    - use_transposed_scalar_state
+    - use_transposed_invariant_hoist
+    - use_transposed_mask_once
+    - use_transposed_half_local_pv
+    - use_mfma32_skip_legacy_qreg
+    - use_transposed_mask_limit
+    - use_grouped_kv2_softmax
+    - use_agpr_alloc_zero
+    - use_k_single_buffer
+    - use_q_direct_reg
+    - use_softmax_mfma_interleave
+    - softmax_interleave_mode
+    - use_mask_phase_split
   aot_budget_per_arch: 1000
 packs:
 - name: gfx950_attention_unified_2d
@@ -153,19 +181,645 @@ packs:
     source: kernels/gfx950/attention_tiled_2d.py
     builder: build_unified_attention_2d_tiled
   variants:
-  - name: attention_unified_{tag}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_t64_nw4.gfx950
+  - name: attention_unified_{tag}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_t{tile_size}_nw{num_warps}_mw16_x00.gfx950
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
     spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
     vocabulary:
       dtype:
         bf16: BF16
         fp16: FP16
-    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 511, use_mfma_32x32: false, use_transposed_qk_32x32: false, use_i64_kv_addr: false}
+    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 511, use_i64_kv_addr: false}
     knob_sets:
       knobs0:
-      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, tag: 2d.bf16, default: true}
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, tag: 2d.bf16, default: true}
       knobs1:
-      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, tag: 2d.fp16, default: true}
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, tag: 2d.fp16, default: true}
+      knobs2:
+      - {tile_size: 32, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, tag: 2d.bf16}
+      knobs3:
+      - {tile_size: 32, num_warps: 2, block_m_per_warp: 16, use_mfma_32x32: false, use_transposed_qk_32x32: false, tag: 2d.fp16}
+    shapes:
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs2, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs2, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs2, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs3, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs3, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs3, resolved: {mask_type: 2}}
+  - name: attention_unified_{tag}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_t64_nw4_mw32_x10.gfx950
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 511, use_i64_kv_addr: false}
+    knob_sets:
+      knobs0:
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: false, tag: 2d.bf16}
+      knobs1:
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: false, tag: 2d.fp16}
+    shapes:
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 10, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 12, num_kv_heads: 12, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 20, num_kv_heads: 20, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 64, num_query_heads: 128, num_kv_heads: 128, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 24, num_kv_heads: 24, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 4, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 1, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 8, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 9, num_kv_heads: 9, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 2, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 16, num_kv_heads: 16, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 28, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 32, num_kv_heads: 32, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 10, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 40, num_kv_heads: 40, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 48, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 4, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 64, num_kv_heads: 64, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 96, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: bf16, causal_top_left: false, right_bound: 0, knobs: knobs0, resolved: {mask_type: 2}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
+    - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+  - name: attention_unified_{tag}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_t64_nw4_mw32_x11.gfx950
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 511, use_i64_kv_addr: false}
+    knob_sets:
+      knobs0:
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, tag: 2d.bf16}
+      knobs1:
+      - {tile_size: 64, num_warps: 4, block_m_per_warp: 32, use_mfma_32x32: true, use_transposed_qk_32x32: true, tag: 2d.fp16}
     shapes:
     - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: false, right_bound: -1, knobs: knobs0, resolved: {mask_type: 0}}
     - {head_size: 64, num_query_heads: 8, num_kv_heads: 1, dtype: bf16, causal_top_left: true, right_bound: 0, knobs: knobs0, resolved: {mask_type: 1}}
