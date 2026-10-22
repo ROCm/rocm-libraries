@@ -403,10 +403,13 @@ if(ROCKE_INSTALL_TESTS)
 
     endblock()
 
-    # This GPU test lives alongside its benchmark helpers in the Python package.
-    # Stage it under tests/ so rocke_pytest collects it in both install layouts.
+    # These tests live alongside their benchmark helpers in the Python package:
+    # the multi-GPU GEMM test, and the occupancy test that checks the estimate
+    # against the local compiler. Stage them under tests/ so rocke_pytest
+    # collects them in both install layouts.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/benchmark/perf/tests/test_occupancy.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/benchmark")
   endif()
 
