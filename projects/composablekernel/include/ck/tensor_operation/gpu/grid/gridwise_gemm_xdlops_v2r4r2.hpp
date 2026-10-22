@@ -41,7 +41,8 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                                          const BElementwiseOperation b_element_op,
                                          const CElementwiseOperation c_element_op)
 {
-#if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx12__)
+#if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx12__) || \
+    defined(__gfx117__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         constexpr index_t shared_size =
