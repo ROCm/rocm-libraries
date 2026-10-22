@@ -90,12 +90,9 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             hdim = int(trait.split("<", 1)[1].split(",", 1)[0])
             self.assertIn(f"(a.hdim_q == {hdim}) && (a.hdim_v == {hdim})", cond)
             if "SimplifiedGenericAttentionMask<true>" in trait:
-                self.assertIn(
-                    "(t.mask_type == mask_enum::mask_top_left || "
-                    "t.mask_type == mask_enum::mask_bottom_right) && "
-                    "a.window_size_left < 0 && a.window_size_right == 0",
-                    cond,
-                )
+                # Any window from either corner: no window clause in the arm.
+                self.assertIn("t.mask_type != mask_enum::no_mask", cond)
+                self.assertNotIn("window_size", cond)
             else:
                 self.assertIn("t.mask_type == mask_enum::no_mask", cond)
         # Head-dim cases ascend, so a D64 problem is not captured by the D128 case.

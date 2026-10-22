@@ -21,7 +21,8 @@ namespace ck_tile {
 // the QR M128/N128 compute layout.
 //
 // Experimental, gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] K/V
-// pools, D64/V64 or D128/V128, dense or causal (top-left or bottom-right; no sliding window),
+// pools, D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
+// bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
 // optional LSE output, no sink, dropout or bias. Build each instance in its own translation unit
 // with the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
 // -fgpu-flush-denormals-to-zero): the launch contract below rests on measurements of that generated
@@ -197,13 +198,10 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                 "K/V token stride not a multiple of the vector alignment");
         if constexpr(FmhaMask::IsMasking)
         {
-            // Causal aligned to either corner; only the causal window (left unbounded, right 0)
-            // is supported.
-            require(kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT ||
-                        kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
-                    "only top-left or bottom-right causal masks are supported");
-            require(kargs.window_size_left < 0 && kargs.window_size_right == 0,
-                    "only the causal window (left < 0, right == 0) is supported");
+            // Any left/right window (a negative size is unbounded); the corner follows
+            // mask_type as in the existing batch prefill kernel (top-left, else bottom-right).
+            require(kargs.mask_type != GenericAttentionMaskEnum::NO_MASK,
+                    "a masked instance needs a mask type");
         }
     }
 
