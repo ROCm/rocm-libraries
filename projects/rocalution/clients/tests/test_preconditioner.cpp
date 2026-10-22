@@ -112,3 +112,47 @@ INSTANTIATE_TEST_CASE_P(preconditioner,
                         parameterized_preconditioner,
                         testing::Combine(testing::ValuesIn(preconditioner_size),
                                          testing::ValuesIn(preconditioner_type)));
+
+typedef std::tuple<std::string, TriSolverAlg> repeated_move_tuple;
+
+std::string  repeated_move_solver[] = {"GS", "SGS", "ILU", "ILUT", "ItILU0", "LU"};
+TriSolverAlg repeated_move_alg[]    = {TriSolverAlg_Default, TriSolverAlg_Iterative};
+
+class parameterized_repeated_move : public testing::TestWithParam<repeated_move_tuple>
+{
+protected:
+    parameterized_repeated_move() {}
+    virtual ~parameterized_repeated_move() {}
+    virtual void SetUp() override
+    {
+        if(is_any_env_var_set({"ROCALUTION_EMULATION_SMOKE",
+                               "ROCALUTION_EMULATION_REGRESSION",
+                               "ROCALUTION_EMULATION_EXTENDED"}))
+        {
+            GTEST_SKIP();
+        }
+    }
+
+    virtual void TearDown() {}
+};
+
+#define TEST_P_REPEATED_MOVE_CASE(type)                                                           \
+    set_device_rocalution(0);                                                                     \
+    init_rocalution();                                                                            \
+    testing_preconditioner_repeated_move<type>(std::get<0>(GetParam()), std::get<1>(GetParam())); \
+    stop_rocalution();
+
+TEST_P(parameterized_repeated_move, device_float)
+{
+    TEST_P_REPEATED_MOVE_CASE(float);
+}
+
+TEST_P(parameterized_repeated_move, device_double)
+{
+    TEST_P_REPEATED_MOVE_CASE(double);
+}
+
+INSTANTIATE_TEST_CASE_P(preconditioner,
+                        parameterized_repeated_move,
+                        testing::Combine(testing::ValuesIn(repeated_move_solver),
+                                         testing::ValuesIn(repeated_move_alg)));

@@ -114,6 +114,7 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyseClear);
             this->lu_.MoveToHost();
             DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyse);
         }
@@ -126,6 +127,7 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyseClear);
             this->lu_.MoveToAccelerator();
             DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyse);
         }
