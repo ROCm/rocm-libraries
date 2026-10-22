@@ -36,6 +36,19 @@
           ]
         }
       }
+    ],
+    "hipkernel:Gfx950AttentionUnified3D": [
+      {
+        "cases": [
+          "2_16_1_128_bfp16_nhwc_decode_hkv2_skv384_causal_br",
+          "4_8_1_64_bfp16_nhwc_decode_hkv1_skv256_nomask"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
