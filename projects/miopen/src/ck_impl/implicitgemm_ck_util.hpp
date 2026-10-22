@@ -1018,8 +1018,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
-    static_assert(!PlainFwdSetOutput || (NativeForwardWorkspace && !ZeroOutputs &&
-                                         std::is_same_v<CastType, miopen::conv::DataInvokeParams>));
+    static_assert(!PlainFwdSetOutput ||
+                  (!ZeroOutputs && std::is_same_v<CastType, miopen::conv::DataInvokeParams>));
 
     ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1090,7 +1090,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                     [](int pad) { return pad == 0; }) &&
         (problem.IsBfp16() || problem.IsFp16() ||
          (problem.IsFp32() && problem.Is3d() &&
-          problem.GetDirection() == miopen::conv::Direction::BackwardData &&
+          (problem.IsDirectionForward() ||
+           problem.GetDirection() == miopen::conv::Direction::BackwardData) &&
           ctx.GetStream().GetDeviceName() == "gfx1250")) &&
         !problem.HasNonPackedTensors() && problem.GetAlphaBetaCase() == DEFAULT &&
         problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f;

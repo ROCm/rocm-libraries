@@ -523,10 +523,18 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
     }
     if(problem.Is3d())
     {
+        if(problem.IsDirectionForward())
+        {
+            // No-D unmerged XDL-v3 writes every logical E with a Set epilogue.
+            // Exact prefixes exclude DirectLoad, Large_Tensor and MergedGroups.
+            return !split_k && ends_with(">") &&
+                   (starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<") ||
+                    starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<"));
+        }
         // The registered 3D default XDL-v1 backward-data instances have no D tensor.
         // Their bare IDs use CK's implicit split-1 argument and clear the full
-        // packed E before the residue GEMMs. Other directions, explicit splits,
-        // fused instances and v3 have no selected 3D proof here.
+        // packed E before the residue GEMMs. Weight-gradient, explicit splits,
+        // fused instances and backward-data v3 have no selected 3D proof here.
         return problem.GetDirection() == miopen::conv::Direction::BackwardData && !split_k &&
                starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<") &&
                (selected_id.find(", Default,") != std::string::npos ||
