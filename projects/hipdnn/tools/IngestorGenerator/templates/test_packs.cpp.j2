@@ -203,6 +203,21 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
     {
         for(const auto& kernel : pack.kernels)
         {
+{% if config.launch_names %}
+            // A multi-launch kernel keeps a default `source`; the kinds it ships are its
+            // `sources` entries'.
+            if(!kernel.sources.empty())
+            {
+                for(const auto& [launch, source] : kernel.sources)
+                {
+                    EXPECT_EQ(source.kind, EXPECTED_SOURCE_KIND)
+                        << "kernel '" << kernel.name << "' launch '" << launch
+                        << "' reached the loader as a different source kind than this "
+                        << "bundle ships";
+                }
+                continue;
+            }
+{% endif %}
             EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)
                 << "kernel '" << kernel.name << "' reached the loader as a different "
                 << "source kind than this bundle ships";

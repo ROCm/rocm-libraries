@@ -287,6 +287,25 @@ endforeach()
         )
         set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
 
+        # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
+        # kernels and one naming a kernel under both launch names. It has its own engine,
+        # and the same driver script. A validator that stopped declaring the pack's launch
+        # names drops this engine and fails here, which the single-launch root cannot show.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
+            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
+        )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE "hipkernel:ValidateFixtureMultiLaunch")
+        add_test(
+            NAME hipdnn_validate_descriptors_smoke_multi_launch
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT}"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE}"
+                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        )
+        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
+
         # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
