@@ -22,6 +22,7 @@ from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
     DIRECT_DGRAD_WMMA,
+    DIRECT_FWD_WMMA,
     DIRECT_WAVE_PARAMETRIC,
     direct_mfma_knobs_reason,
     direct_spec_for_problem,
@@ -31,7 +32,8 @@ from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
-_WAVE32_ONLY = {DIRECT_DGRAD_WMMA}
+_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA}
+_WAVE32_ONLY = {DIRECT_DGRAD_WMMA} | _WAVE32_ONLY_FWD
 
 
 @pytest.fixture(scope="module")
@@ -159,11 +161,34 @@ def test_wave32_only_capability_rows_are_built_on_gfx1250():
     built = {
         (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
         for j in jobs
-        if j.identity.algorithm in _WAVE32_ONLY
+        if j.identity.algorithm == DIRECT_DGRAD_WMMA
     }
-    for variant in _WAVE32_ONLY:
-        for c in dks.DIRECT_CAPABILITIES[variant][1]:
-            assert (variant, c.KH, c.PAD) in built, (variant, c)
+    for c in dks.DIRECT_CAPABILITIES[DIRECT_DGRAD_WMMA][1]:
+        assert (DIRECT_DGRAD_WMMA, c.KH, c.PAD) in built, c
+
+
+def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():
+    jobs = dks.enumerate_direct_jobs(
+        arch="gfx1250",
+        target=ArchTarget.from_gfx("gfx1250"),
+        directions=("fwd",),
+    )
+    built = {
+        (
+            j.identity.algorithm,
+            j.identity.filter_h,
+            j.identity.pad_h,
+            j.identity.stride_h,
+            j.identity.cpg,
+            j.identity.dilation_h,
+            j.identity.dilation_w,
+        )
+        for j in jobs
+        if j.identity.algorithm == DIRECT_FWD_WMMA
+    }
+    for c in dks.DIRECT_CAPABILITIES[DIRECT_FWD_WMMA][1]:
+        key = (DIRECT_FWD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.dil_h, c.dil_w)
+        assert key in built, c
 
 
 def test_identities_are_unique(jobs):
@@ -1627,8 +1652,11 @@ def wave32_jobs():
 
 def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_jobs):
     """The MFMA variants are wave64 and drop out; the depthwise ones are built
-    at wave_size 32, which the identity records and the spec carries."""
-    assert {j.identity.algorithm for j in wave32_jobs} == DIRECT_WAVE_PARAMETRIC
+    at wave_size 32, which the identity records and the spec carries. The
+    wave32-only WMMA forward kernel is built too."""
+    assert {j.identity.algorithm for j in wave32_jobs} == (
+        DIRECT_WAVE_PARAMETRIC | _WAVE32_ONLY_FWD
+    )
     for job in wave32_jobs:
         assert job.identity.wave_size == 32
         variant = job.identity.algorithm
@@ -1669,7 +1697,8 @@ def test_legacy_wave32_entries_are_not_launched(tmp_path, wave32_jobs):
     built at the wave64 spec default under a wave32 identity: launching it with
     the identity's geometry would leave half of every channel tile unwritten,
     so it is rejected with a rebuild hint rather than offered."""
-    c = _wave32_cache(tmp_path, wave32_jobs, None)
+    jobs = [j for j in wave32_jobs if j.identity.algorithm in DIRECT_WAVE_PARAMETRIC]
+    c = _wave32_cache(tmp_path, jobs, None)
     problem = _problem(H=56, W=56, groups=192, cpg=1, kpg=1)
     plans, rejected = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
     assert plans == []
