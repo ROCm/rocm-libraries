@@ -621,3 +621,192 @@ def test_prefill_feature_matches_reference(case, dtype):
             np.testing.assert_allclose(
                 got[fin], want[fin], rtol=0, atol=lse_tol, err_msg=f"sequence {bi}"
             )
+
+
+# A paged cache past 4 GiB: (page size, block_n, head dim, fp8 K/V). Pages that
+# hold whole key tiles take a per-tile resource based at the page; smaller ones
+# take 64-bit addressed loads per row.
+_FAR_CASES = {
+    "tile_paged32_d128": (32, 32, 128, False),
+    "tile_paged64_bn64_d64": (64, 64, 64, False),
+    "row_paged16_d128": (16, 32, 128, False),
+    "row_paged16_d256": (16, 32, 256, False),
+    "row_paged32_bn64_d64": (32, 64, 64, False),
+    "row_paged16_fp8_d128": (16, 32, 128, True),
+}
+_FAR_BYTES = (4 << 30) + (512 << 20)  # per cache
+
+
+@pytest.mark.gpu
+@_NEEDS_RDNA
+@pytest.mark.parametrize("case", sorted(_FAR_CASES))
+def test_paged_cache_past_4gib(case):
+    """Pages above 2 GiB and 4 GiB of each cache, among low ones, against the
+    float64 reference. Every other page holds NaN (0xFF bytes): a page term
+    truncated to 32 bits reads one of those and poisons the output."""
+    ps, bn, dq, fp8 = _FAR_CASES[case]
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+    npdt = ml_dtypes.bfloat16
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        WmmaFmhaFwdV2Spec,
+        build_wmma_fmha_fwd_v2,
+        wmma_fmha_fwd_v2_grid,
+        wmma_fmha_fwd_v2_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    Hq, Hk = 4, 2
+    lens_q, lens_k = (37, 1, 64), (300, 129, 64)
+    B, max_q, max_k = len(lens_q), max(lens_q), max(lens_k)
+    opt = dict(mask="causal", br=1, wl=-1, wr=0, flags="")
+    scale = dq**-0.5
+    spec = WmmaFmhaFwdV2Spec(
+        dtype="bf16",
+        head_dim=dq,
+        head_dim_v=dq,
+        mask="causal",
+        layout="paged",
+        page_block_size=ps,
+        kv_dtype="fp8e4m3" if fp8 else "",
+        block_n=bn,
+    )
+    rng = np.random.default_rng(29)
+
+    def rnd(*shape):
+        return rng.standard_normal(shape, dtype=np.float32) * 0.5
+
+    qs = [rnd(n, Hq, dq).astype(npdt) for n in lens_q]
+    if fp8:
+        f8 = ml_dtypes.float8_e4m3fn
+        ks8 = [(rnd(n, Hk, dq) / _K_SCALE).astype(f8) for n in lens_k]
+        vs8 = [(rnd(n, Hk, dq) / _V_SCALE).astype(f8) for n in lens_k]
+        ks = [x.astype(np.float64) * _K_SCALE for x in ks8]
+        vs = [x.astype(np.float64) * _V_SCALE for x in vs8]
+        ks_dev, vs_dev = [x.view(np.uint8) for x in ks8], [
+            x.view(np.uint8) for x in vs8
+        ]
+        kv_np = np.uint8
+    else:
+        ks_dev = [rnd(n, Hk, dq).astype(npdt) for n in lens_k]
+        vs_dev = [rnd(n, Hk, dq).astype(npdt) for n in lens_k]
+        ks, vs, kv_np = ks_dev, vs_dev, npdt
+    refs, ref_lses = [], []
+    for bi in range(B):
+        o, l = _reference_seq(
+            qs[bi].astype(np.float64),
+            np.asarray(ks[bi], np.float64),
+            np.asarray(vs[bi], np.float64),
+            scale,
+            opt,
+            sinks=None,
+            slopes=None,
+            qq=None,
+            bias_fn=None,
+        )
+        refs.append(o)
+        ref_lses.append(l)
+
+    page_elems = ps * Hk * dq
+    page_bytes = page_elems * np.dtype(kv_np).itemsize
+    n_pages = -(-_FAR_BYTES // page_bytes)
+    pages = [-(-n // ps) for n in lens_k]
+    # Physical pages: a few low ones, then pages past 2 GiB and past 4 GiB,
+    # shuffled across the sequences.
+    two, four = (2 << 30) // page_bytes, (4 << 30) // page_bytes
+    pool = np.concatenate(
+        [np.arange(1, 4), np.arange(two + 1, two + 4), np.arange(four + 1, n_pages)]
+    )
+    phys_ids = rng.permutation(pool)[: sum(pages)]
+    assert (phys_ids >= four).any() and (phys_ids >= two).any()
+    table = np.full((B, max(pages)), -1, np.int32)
+
+    rt = Runtime()
+    dev = _Dev(rt)
+    module = None
+    caches = []
+    try:
+        for _ in range(2):
+            ptr = rt.alloc(n_pages * page_bytes)
+            caches.append(ptr)
+            rt.memset(ptr, 0xFF, n_pages * page_bytes)
+        nxt = 0
+        for bi, n in enumerate(lens_k):
+            for pg in range(pages[bi]):
+                phys = int(phys_ids[nxt])
+                nxt += 1
+                table[bi, pg] = phys
+                t0, t1 = pg * ps, min(n, (pg + 1) * ps)
+                for ptr, src in zip(caches, (ks_dev[bi], vs_dev[bi])):
+                    page = np.full((ps, Hk, dq), 0x7F if fp8 else np.nan, kv_np)
+                    page[: t1 - t0] = src[t0:t1]
+                    rt.memcpy_h2d(
+                        ptr + phys * page_bytes, _host_bytes(page), page_bytes
+                    )
+        cu_q = np.concatenate([[0], np.cumsum(lens_q)]).astype(np.int32)
+        total_q = int(cu_q[-1])
+        o_like = np.zeros((total_q, Hq, dq), npdt)
+        lse_like = np.zeros((Hq, total_q), np.float32)
+        values = dict(
+            scale_log2=scale * _LOG2E, batch=B, seqlen_q=max_q, seqlen_k=max_k,
+            num_query_heads=Hq, num_kv_heads=Hk, num_v_heads=Hk, head_dim_q=dq,
+            head_dim_v=dq, bottom_right=1, window_left=-1, window_right=0,
+            write_lse=1, Q=dev.put(np.concatenate(qs)), K=caches[0], V=caches[1],
+            cu_seqlens_q=dev.put(cu_q), seqused_k=dev.put(np.array(lens_k, np.int32)),
+            block_table=dev.put(table), block_table_stride=table.shape[1],
+            stride_k_block=page_elems, stride_v_block=page_elems, num_blocks=n_pages,
+        )  # fmt: skip
+        values["O"] = o_ptr = dev.put(np.full_like(o_like, np.nan))
+        values["LSE"] = lse_ptr = dev.put(lse_like)
+        strides = {
+            "q": (0, Hq * dq, dq),
+            "k": (0, Hk * dq, dq),
+            "v": (0, Hk * dq, dq),
+            "o": (0, Hq * dq, dq),
+            "lse": (0, 1, total_q),
+        }
+        for t, (sb, st, sh) in strides.items():
+            values.update(
+                {
+                    f"stride_{t}_batch": sb,
+                    f"stride_{t}_token": st,
+                    f"stride_{t}_head": sh,
+                }
+            )
+        if fp8:
+            values.update(k_scale=_K_SCALE, v_scale=_V_SCALE)
+        artifact = compile_kernel(
+            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
+        )
+        module = rt.load_module(artifact.hsaco)
+        grid, block = wmma_fmha_fwd_v2_grid(
+            spec, batch=B, seqlen_q=max_q, num_query_heads=Hq
+        )
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            grid,
+            block,
+            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
+        )
+        rt.sync()
+        out = dev.get(o_ptr, o_like).astype(np.float64)
+        got_lse = dev.get(lse_ptr, lse_like)
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        dev.free()
+        for ptr in caches:
+            rt.free(ptr)
+
+    for bi in range(B):
+        o = out[cu_q[bi] : cu_q[bi + 1]]
+        assert np.isfinite(o).all(), f"sequence {bi}: non-finite output"
+        np.testing.assert_allclose(
+            o, refs[bi], rtol=0, atol=4e-2, err_msg=f"sequence {bi}"
+        )
+        np.testing.assert_allclose(
+            got_lse[:, cu_q[bi] : cu_q[bi + 1]], ref_lses[bi], rtol=0, atol=2e-2,
+            err_msg=f"sequence {bi}",
+        )  # fmt: skip

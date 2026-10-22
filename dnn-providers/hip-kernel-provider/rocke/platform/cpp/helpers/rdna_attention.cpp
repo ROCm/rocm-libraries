@@ -272,7 +272,7 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             const char* name;
             bool need;
             int count;
-            rocke_value_t* vals[5];
+            rocke_value_t* vals[7];
         } groups[] = {
             {"softcap", cfg->softcap, 1, {p->softcap}},
             {"sinks", cfg->sinks, 1, {p->sink_log2}},
@@ -284,9 +284,15 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             {"kv_fp8", cfg->kv_fp8, 2, {p->k_scale, p->v_scale}},
             {"paged",
              paged,
-             5,
-             {p->block_table, p->table_row, p->stride_k_block, p->stride_v_block, p->num_blocks}},
-            {"dense K/V", !paged, 2, {p->k_bytes, p->v_bytes}},
+             7,
+             {p->block_table,
+              p->table_row,
+              p->stride_k_block,
+              p->stride_v_block,
+              p->num_blocks,
+              p->k_ptr,
+              p->v_ptr}},
+            {"dense K/V", !paged, 4, {p->k_rsrc, p->v_rsrc, p->k_bytes, p->v_bytes}},
         };
         std::string missing;
         for(const auto& g : groups)
@@ -512,6 +518,7 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     const int ps = cfg->page_block_size;
     const bool row_paged = paged && ps % BN != 0;
     const bool fp8 = cfg->kv_fp8;
+    const int kv_eb = fp8 ? 1 : 2;
 
     /* K / V element offset -> byte offset. */
     auto kv_byte = [&](Val x) -> Val {
@@ -533,6 +540,10 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     const int tot_k = BN * cpr_k;
     const int nk = (tot_k + NT - 1) / NT;
     Vals k_goff, k_loff, k_valid, k_rows;
+    /* Row-paged chunks keep their in-row byte offset and its validity apart:
+     * their loads are 64-bit addressed, with no out-of-range offset to mask
+     * to. */
+    Vals k_cok, v_cok;
     for(int i = 0; i < nk; ++i)
     {
         Val ti = ci(i * NT);
@@ -561,7 +572,13 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         Val ok = rocke_b_cmp_lt(b, d0, p->head_dim_q);
         if(valid != NULL)
             ok = rocke_b_land(b, ok, valid);
-        k_goff.push_back(masked_off(off, ok));
+        if(row_paged)
+        {
+            k_goff.push_back(off);
+            k_cok.push_back(ok);
+        }
+        else
+            k_goff.push_back(masked_off(off, ok));
         Val tks = ci(KS);
         Val rk = rocke_b_mul(b, r, tks);
         k_loff.push_back(rocke_b_add(b, rk, d0));
@@ -611,10 +628,11 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
                 Val s = rocke_b_add(b, rsv, d0);
                 off = kv_byte(s);
             }
-            offs.push_back(masked_off(off, ok));
+            offs.push_back(row_paged ? off : masked_off(off, ok));
             rows.push_back(row);
         }
         v_goff.push_back(offs);
+        v_cok.push_back(ok);
         Val tvs = ci(VS);
         Val m1 = rocke_b_mul(b, d0, tvs);
         Val tG = ci(G);
@@ -626,12 +644,15 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     Val tile_k_bytes = NULL, tile_v_bytes = NULL;
     if(!paged)
     {
-        const int kv_eb = fp8 ? 1 : 2;
         Val tk = ci(BN * kv_eb);
         tile_k_bytes = rocke_b_mul(b, p->stride_k, tk);
         Val tv = ci(BN * kv_eb);
         tile_v_bytes = rocke_b_mul(b, p->stride_v, tv);
     }
+    const int kv_dwords = fp8 ? 2 : 4;
+    Val kv_zero = NULL;
+    if(row_paged)
+        kv_zero = rocke_b_zero_vec(b, rocke_i32(), kv_dwords);
 
     /* Paged K / V: rows past the sequence (or of an invalid tile) read
      * nothing; their block-table index is clamped to 0. A page id outside
@@ -640,6 +661,15 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         Val ge = rocke_b_cmp_ge(b, phys, c0);
         Val lt = rocke_b_cmp_lt(b, phys, p->num_blocks);
         return rocke_b_land(b, ge, lt);
+    };
+    /* `ptr` advanced to page `phys`: the page term is 64-bit. */
+    auto page_base = [&](Val ptr, Val phys, Val stride_blk) {
+        Val p64 = rocke_b_zext(b, phys, rocke_i64());
+        Val s64 = rocke_b_zext(b, stride_blk, rocke_i64());
+        Val m = rocke_b_mul(b, p64, s64);
+        Val te = rocke_b_const_i64(b, kv_eb);
+        Val off = rocke_b_mul(b, m, te);
+        return rocke_b_global_ptr_add(b, ptr, off);
     };
     auto issue_paged_loads = [&](Val t, Val valid, Vals* kr, std::vector<Vals>* vr) {
         int lps = 0;
@@ -659,7 +689,9 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         vr->clear();
         if(!row_paged)
         {
-            /* The whole tile sits in one page: one lookup per tile. */
+            /* The whole tile sits in one page: one lookup per tile, and one
+             * resource per tile based at its page (a dead page has no live
+             * rows, so its resource is never read). */
             Val blk;
             {
                 Val tl = ci(lps);
@@ -680,31 +712,34 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
                 Val tm = ci(ps - 1);
                 in_page = rocke_b_land(b, tok0, tm);
             }
-            auto tile_off = [&](Val stride_blk, Val stride_tok) {
-                Val m1 = rocke_b_mul(b, phys, stride_blk);
-                Val m2 = rocke_b_mul(b, in_page, stride_tok);
-                Val a = rocke_b_add(b, m1, m2);
-                return kv_byte(a);
+            auto page_rsrc = [&](Val ptr, Val stride_blk) {
+                Val base = page_base(ptr, phys, stride_blk);
+                Val all = ci(0x7FFFFFFF);
+                return rocke_b_buffer_rsrc(b, base, all);
             };
-            Val tk = tile_off(p->stride_k_block, p->stride_k);
-            Val tv = tile_off(p->stride_v_block, p->stride_v);
+            Val k_page = page_rsrc(p->k_ptr, p->stride_k_block);
+            Val v_page = page_rsrc(p->v_ptr, p->stride_v_block);
+            Val tk = kv_byte(rocke_b_mul(b, in_page, p->stride_k));
+            Val tv = kv_byte(rocke_b_mul(b, in_page, p->stride_v));
             auto at_tile = [&](Val o, Val r, Val off) {
                 Val live = rocke_b_cmp_lt(b, r, rem);
                 Val a = rocke_b_add(b, o, off);
                 return rocke_b_select(b, live, a, oob);
             };
             for(size_t i = 0; i < k_goff.size(); ++i)
-                kr->push_back(load_kv(p->k_rsrc, at_tile(k_goff[i], k_rows[i], tk)));
+                kr->push_back(load_kv(k_page, at_tile(k_goff[i], k_rows[i], tk)));
             for(size_t u = 0; u < v_goff.size(); ++u)
             {
                 Vals out;
                 for(size_t rr = 0; rr < v_goff[u].size(); ++rr)
-                    out.push_back(load_kv(p->v_rsrc, at_tile(v_goff[u][rr], v_rows[u][rr], tv)));
+                    out.push_back(load_kv(v_page, at_tile(v_goff[u][rr], v_rows[u][rr], tv)));
                 vr->push_back(out);
             }
             return;
         }
-        auto at_row = [&](Val o, Val r, Val stride_blk, Val stride_tok) {
+        /* One chunk of key row `r` from its page, 64-bit addressed. A dead
+         * chunk reads this head's first element and yields zeros. */
+        auto row_load = [&](Val ptr, Val o, Val cok, Val r, Val stride_blk, Val stride_tok) {
             Val tok = rocke_b_add(b, tok0, r);
             Val ok = rocke_b_cmp_lt(b, r, rem);
             Val blk;
@@ -720,33 +755,41 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             }
             {
                 Val in_cache = page_ok(phys);
-                ok = rocke_b_land(b, ok, in_cache);
+                Val a = rocke_b_land(b, ok, in_cache);
+                ok = rocke_b_land(b, a, cok);
             }
             Val in_page;
             {
                 Val tm = ci(ps - 1);
                 in_page = rocke_b_land(b, tok, tm);
             }
-            Val m1 = rocke_b_mul(b, phys, stride_blk);
-            Val m2 = rocke_b_mul(b, in_page, stride_tok);
-            Val row = rocke_b_add(b, m1, m2);
-            Val rb = kv_byte(row);
-            Val a = rocke_b_add(b, o, rb);
-            return rocke_b_select(b, ok, a, oob);
+            Val within;
+            {
+                Val m = rocke_b_mul(b, in_page, stride_tok);
+                Val mb = kv_byte(m);
+                Val a = rocke_b_add(b, o, mb);
+                within = rocke_b_select(b, ok, a, c0);
+            }
+            Val page = rocke_b_select(b, ok, phys, c0);
+            Val base = page_base(ptr, page, stride_blk);
+            Val w64 = rocke_b_zext(b, within, rocke_i64());
+            Val addr = rocke_b_global_ptr_add(b, base, w64);
+            Val raw = rocke_b_global_load_vN(b, addr, c0, rocke_i32(), kv_dwords, 4);
+            return rocke_b_select(b, ok, raw, kv_zero);
         };
         for(size_t i = 0; i < k_goff.size(); ++i)
-        {
-            Val off = at_row(k_goff[i], k_rows[i], p->stride_k_block, p->stride_k);
-            kr->push_back(load_kv(p->k_rsrc, off));
-        }
+            kr->push_back(
+                row_load(p->k_ptr, k_goff[i], k_cok[i], k_rows[i], p->stride_k_block, p->stride_k));
         for(size_t u = 0; u < v_goff.size(); ++u)
         {
             Vals out;
             for(size_t rr = 0; rr < v_goff[u].size(); ++rr)
-            {
-                Val off = at_row(v_goff[u][rr], v_rows[u][rr], p->stride_v_block, p->stride_v);
-                out.push_back(load_kv(p->v_rsrc, off));
-            }
+                out.push_back(row_load(p->v_ptr,
+                                       v_goff[u][rr],
+                                       v_cok[u],
+                                       v_rows[u][rr],
+                                       p->stride_v_block,
+                                       p->stride_v));
             vr->push_back(out);
         }
     };

@@ -33,7 +33,9 @@ packed layout -- ragged (``cu_seqlens_q``, ``cu_seqlens_k``) or paged
 (``cu_seqlens_q``, ``seqused_k``, ``block_table``, ``block_table_stride``,
 ``stride_k_block``, ``stride_v_block``, ``num_blocks`` (the caches' page count;
 a ``block_table`` entry outside ``[0, num_blocks)`` reads as zero K / V rows);
-power-of-two ``page_block_size``) --
+power-of-two ``page_block_size``; the head and page terms are 64-bit, so a
+cache may pass 4 GiB, while one page's rows of one head must span less than
+2 GiB) --
 and OCP E4M3FN K/V (``k_scale``, ``v_scale``). Packed layouts take Q / O as
 [total_q, Hq, D] and LSE per packed row; ``batch`` is the sequence count and
 ``seqlen_q`` / ``seqlen_k`` are the maxima (they size the grid; the
@@ -525,18 +527,21 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
         nbytes = b.select(live, nbytes, c0)
         return b.buffer_rsrc(sliced, nbytes), nbytes
 
-    def page_rsrc(ptr, tensor, head_idx):
-        """Paged K / V: the whole cache at this head (the binding bounds the
-        cache to I32 bytes; dead rows are masked per load)."""
-        off = b.mul(b.mul(head_idx, p[f"stride_{tensor}_head"]), ci(kv_eb))
-        return b.buffer_rsrc(b.global_ptr_add(ptr, off), ci(0x7FFFFFFF))
+    def page_head(ptr, tensor, head_idx):
+        """Paged K / V: the cache at this head, 64-bit; the body addresses
+        each page from it in 64 bits too, so the cache may pass 4 GiB."""
+        h64 = b.zext(head_idx, I64)
+        s64 = b.zext(p[f"stride_{tensor}_head"], I64)
+        off = b.mul(b.mul(h64, s64), b.const_i64(kv_eb))
+        return b.global_ptr_add(ptr, off)
 
     hdq, hdv = p["head_dim_q"], p["head_dim_v"]
     kv_eb = 1 if spec.kv_dtype else 2
     q_rsrc, _ = slice_rsrc(p["Q"], "q", head, sq, hdq, 2, row0=q_row0)
+    k_rsrc = v_rsrc = k_bytes = v_bytes = k_ptr = v_ptr = None
     if spec.layout == "paged":
-        k_rsrc, k_bytes = page_rsrc(p["K"], "k", kv_head), None
-        v_rsrc, v_bytes = page_rsrc(p["V"], "v", v_head), None
+        k_ptr = page_head(p["K"], "k", kv_head)
+        v_ptr = page_head(p["V"], "v", v_head)
     else:
         k_rsrc, k_bytes = slice_rsrc(p["K"], "k", kv_head, sk, hdq, kv_eb, row0=k_row0)
         v_rsrc, v_bytes = slice_rsrc(p["V"], "v", v_head, sk, hdv, kv_eb, row0=k_row0)
@@ -640,6 +645,8 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
         stride_k_block=p.get("stride_k_block"),
         stride_v_block=p.get("stride_v_block"),
         num_blocks=p.get("num_blocks"),
+        k_ptr=k_ptr,
+        v_ptr=v_ptr,
     )
     b.ret()
     return b.kernel

@@ -83,8 +83,8 @@ int rocke_rdna_attention_lds_bytes(const rocke_rdna_attn_config_t* cfg);
  * absent (lse_rsrc / stride_lse together; the causal class needs
  * diag_offset, window_left and window_right; a bias needs bias_rsrc and
  * stride_bias_q, and a Q-dtype bias also bias_lead and bias_bytes; each
- * feature needs its operands, see the Python docstring; k_bytes / v_bytes are
- * NULL for paged K / V). */
+ * feature needs its operands, see the Python docstring; paged K / V take
+ * k_ptr / v_ptr, and k_rsrc / v_rsrc / k_bytes / v_bytes are NULL). */
 typedef struct rocke_rdna_attn_params
 {
     rocke_value_t* q_rsrc;
@@ -127,6 +127,8 @@ typedef struct rocke_rdna_attn_params
     rocke_value_t* stride_k_block;
     rocke_value_t* stride_v_block;
     rocke_value_t* num_blocks;
+    rocke_value_t* k_ptr;
+    rocke_value_t* v_ptr;
 } rocke_rdna_attn_params_t;
 
 /* rdna_attention_fwd_body(b, cfg, **params): emit the K loop and epilogue of

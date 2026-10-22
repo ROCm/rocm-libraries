@@ -492,17 +492,17 @@ rocke_status_t
     };
 
     const int kv_eb = v2_fp8(spec) ? 1 : 2;
-    /* Paged K / V: the whole cache at this head (the binding bounds the cache
-     * to I32 bytes; dead rows are masked per load). */
-    auto page_rsrc = [&](const char* ptr, const char* tensor, rocke_value_t* head_idx) {
+    /* Paged K / V: the cache at this head, 64-bit; the body addresses each
+     * page from it in 64 bits too, so the cache may pass 4 GiB. */
+    auto page_head = [&](const char* ptr, const char* tensor, rocke_value_t* head_idx) {
         char sh[32];
         snprintf(sh, sizeof(sh), "stride_%s_head", tensor);
-        rocke_value_t* mh = rocke_b_mul(b, head_idx, param(sh));
-        rocke_value_t* te = ci(kv_eb);
-        rocke_value_t* off = rocke_b_mul(b, mh, te);
-        rocke_value_t* sliced = rocke_b_global_ptr_add(b, param(ptr), off);
-        rocke_value_t* all = ci(0x7FFFFFFF);
-        return rocke_b_buffer_rsrc(b, sliced, all);
+        rocke_value_t* h64 = rocke_b_zext(b, head_idx, rocke_i64());
+        rocke_value_t* s64 = rocke_b_zext(b, param(sh), rocke_i64());
+        rocke_value_t* m = rocke_b_mul(b, h64, s64);
+        rocke_value_t* te = rocke_b_const_i64(b, kv_eb);
+        rocke_value_t* off = rocke_b_mul(b, m, te);
+        return rocke_b_global_ptr_add(b, param(ptr), off);
     };
 
     rocke_value_t* hdq = param("head_dim_q");
@@ -512,8 +512,8 @@ rocke_status_t
     p.q_rsrc = slice_rsrc("Q", "q", head, sq, hdq, 2, NULL, q_row0, NULL);
     if(v2_layout_is(spec, "paged"))
     {
-        p.k_rsrc = page_rsrc("K", "k", kv_head);
-        p.v_rsrc = page_rsrc("V", "v", v_head);
+        p.k_ptr = page_head("K", "k", kv_head);
+        p.v_ptr = page_head("V", "v", v_head);
     }
     else
     {
