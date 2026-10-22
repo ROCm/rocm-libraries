@@ -48,7 +48,7 @@ from kernels.common._attention_bwd_caps import (
     check_asm_tail_nop,
     mfma_result_wait_states,
 )
-from ._attention_bwd_test_utils import device_arch
+from ._attention_bwd_test_utils import device_arch, skip_where_compiler_refuses_option
 
 ARCH = os.environ.get("ROCKE_BWD_ARCH") or os.environ.get("ROCKE_TEST_ARCH")
 
@@ -109,7 +109,10 @@ def _compile_isa(kernel, arch):
     try:
         from rocke.helpers.compile import compile_kernel
 
-        art = compile_kernel(kernel, arch=arch, capture_ir_text=False, backend="python")
+        with skip_where_compiler_refuses_option():
+            art = compile_kernel(
+                kernel, arch=arch, capture_ir_text=False, backend="python"
+            )
     except (ImportError, OSError) as exc:  # pragma: no cover - environment-dependent
         pytest.skip(f"comgr unavailable: {exc}")
     return disassemble(art.hsaco, arch=arch)
