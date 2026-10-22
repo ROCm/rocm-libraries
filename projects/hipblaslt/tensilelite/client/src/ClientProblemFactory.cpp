@@ -95,6 +95,8 @@ namespace TensileLite
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
             , m_padMXScaleTensorFreeDim(false)
+            , m_mxScaleHostPreSwizzle(args.count("mx-scale-format")
+                                      && args["mx-scale-format"].as<int>() == 1)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
@@ -553,6 +555,7 @@ namespace TensileLite
                             rv.back().setF32XdlMathOp(m_f32XdlMathOp);
                             rv.back().setActivationComputeType(m_activationComputeType);
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
+                            rv.back().setMXScaleHostPreSwizzle(m_mxScaleHostPreSwizzle);
                             if(m_mxBlockA)
                             {
                                 rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
