@@ -617,7 +617,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool criticalMayIssue() const {
         if (activeWmmaNode_ == nullptr || coIssueCyclePos_ >= activeWmmaLatency_) return true;
         if (fillsThisWindow_ < popcount16(activeWmmaNode_->inst->coIssueWindow)) return true;
-        const int windowsLeft = wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_;
+        // Burst windows still ahead take no filler.
+        const int windowsLeft = wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_ -
+                                std::max(0, burstWmmasPlanned_ - burstWmmasIssued_);
         return regionFillerTotal_ - fillersIssuedThisRegion_ >= windowsLeft * regionCoIssueSlots_;
     }
     int regionFillerTotal_ = 0;
@@ -730,6 +732,44 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int wmmaIssuedCountThisRegion_ = 0;
     bool wmmaRefilling_ = false;
     int wmmaRefillLeft_ = 0;
+    // --- Queue fill after a reset ---
+    // A burst is a run of WMMAs issued back to back where the modeled queue starts empty (the
+    // loop header's first WMMA region, after a barrier wait) until it holds wmmaQueueDepth of
+    // them. Bursts are planned per region in WMMA counts; barrier positions stay in those
+    // counts, and only the ds/filler spreads skip the burst WMMAs.
+    int burstLeft_ = 0;  // WMMAs still to issue in the running burst
+    // Planned bursts [start, start + length), sorted by start and disjoint.
+    std::vector<std::pair<int, int>> plannedBursts_;
+    std::unordered_map<const StinkyInstruction*, int> barrierWaitBurst_;
+    int burstWmmasPlanned_ = 0;
+    int burstWmmasIssued_ = 0;
+    bool regionStartBurst_ = false;
+    bool headerBurstPending_ = false;  // per BB: the loop header's first WMMA region is a start
+    bool fillQueueAfterResetOn() const {
+        return wmmaQueueCover() > 0;
+    }
+    // The region's WMMAs outside the bursts: the ones ds_loads and fillers can sit under.
+    int shadowWmmaTotal() const {
+        return wmmaTotalThisRegion_ - burstWmmasPlanned_;
+    }
+    int shadowWmmasIssued() const {
+        return std::max(0, wmmaIssuedCountThisRegion_ - burstWmmasIssued_);
+    }
+    // WMMA count of the k-th shadow WMMA (the bursts are skipped).
+    int shadowToWmmaIndex(int k) const {
+        for (const auto& [start, length] : plannedBursts_) {
+            if (start > k) break;
+            k += length;
+        }
+        return k;
+    }
+    void endBurst() {
+        burstLeft_ = 0;
+        // The refill starts over from the full queue the burst left.
+        wmmaRefilling_ = false;
+        wmmaRefillLeft_ = 0;
+    }
+    void planBursts(std::vector<DsSpreadPacer::Load>& loads, int drainWindows);
     DsSpreadPacer dsSpread_;
     // The region's ds_loads cost more issue cycles than its WMMAs take, so they cannot all hide
     // under a co-issue window: a ds_load the pace has released may issue outside one.
@@ -1541,7 +1581,12 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     wmmaIssuedCountThisRegion_++;
-    if (wmmaRefilling_ && wmmaRefillLeft_ > 0) --wmmaRefillLeft_;
+    if (burstLeft_ > 0) {
+        ++burstWmmasIssued_;
+        if (--burstLeft_ == 0) endBurst();
+    } else if (wmmaRefilling_ && wmmaRefillLeft_ > 0) {
+        --wmmaRefillLeft_;
+    }
     globalReadCounter = 0;
     // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
     // (B) elapse: record the timeline touch for all its operands.
@@ -1597,9 +1642,11 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // behind the ds issue rate its totals imply. Cumulative, so a ratio of 1.19 paces differently
     // from 2.0 -- a per-window integer share truncates both to 1. Counts, not readiness: once the
     // region's last WMMA issues, expectedDs reaches the region total and the relief lifts the gate.
+    // Burst WMMAs take no ds_load, so they count on neither side of the rate.
     const int expectedDs =
-        wmmaTotalThisRegion_ > 0
-            ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
+        shadowWmmaTotal() > 0
+            ? std::min(dsTotalThisRegion_,
+                       dsTotalThisRegion_ * shadowWmmasIssued() / shadowWmmaTotal())
             : 0;
     const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
     const bool warTooClose = !warGateRelief && pipeOpGateBlocks(pickedDS);
@@ -1866,6 +1913,48 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
         return (dsLoadCount * cyclesPerLoad + window - 1) / window;
     }
     return DsSpreadPacer::windowsFor(dsLoadCount, wmmaTotalThisRegion_, dsTotalThisRegion_);
+}
+
+// The region's bursts: one at the region start when the queue starts empty there, one at each
+// barrier wait's planned window. A burst is wmmaQueueDepth WMMAs, cut at the next barrier, and
+// shortened so the ds_loads of the stage it opens still fit (with their drain) before the stage
+// ends. Those loads open after the burst.
+void CDNA5ReadyQueue::planBursts(std::vector<DsSpreadPacer::Load>& loads, int drainWindows) {
+    if (!fillQueueAfterResetOn() || wmmaTotalThisRegion_ <= 0) return;
+    const int total = wmmaTotalThisRegion_;
+    std::vector<int> cuts;
+    for (const auto& [barrier, window] : barrierWmmaThresholds_) cuts.push_back(window);
+    std::sort(cuts.begin(), cuts.end());
+    std::map<int, std::vector<const StinkyInstruction*>> anchors;  // burst start -> its waits
+    if (regionStartBurst_) anchors[0];
+    for (const auto& [barrier, window] : barrierWmmaThresholds_)
+        if (isBarrierWait(*barrier) && window >= 0 && window < total)
+            anchors[window].push_back(barrier);
+    std::vector<int> openAt;  // each load's stage start before any burst moved it
+    for (const DsSpreadPacer::Load& l : loads) openAt.push_back(std::clamp(l.start, 0, total));
+    for (const auto& [start, waits] : anchors) {
+        auto next = std::upper_bound(cuts.begin(), cuts.end(), start);
+        const int segEnd = next == cuts.end() ? total : std::min(total, *next);
+        int length = std::min(wmmaQueueDepth(), segEnd - start);
+        std::map<int, int> loadsByEnd;  // the stage's loads opening here, by stage end
+        for (size_t i = 0; i < loads.size(); ++i)
+            if (openAt[i] == start) ++loadsByEnd[loads[i].end];
+        for (const auto& [end, count] : loadsByEnd) {
+            const int stageEnd = end == INT_MAX ? total : std::min(end, total) - drainWindows;
+            length = std::min(length, stageEnd - start - computeWmmaWindowsNeeded(count));
+        }
+        // At least one shadow WMMA is left for the spreads to divide by.
+        length = std::min(length, total - 1 - burstWmmasPlanned_);
+        PASS_DEBUG(std::cerr << "[CDNA5 fillQueue] burst start=" << start
+                             << " length=" << std::max(0, length) << " segEnd=" << segEnd
+                             << " waits=" << waits.size() << "\n");
+        if (length <= 0) continue;
+        plannedBursts_.emplace_back(start, length);
+        burstWmmasPlanned_ += length;
+        for (const StinkyInstruction* wait : waits) barrierWaitBurst_[wait] = length;
+        for (size_t i = 0; i < loads.size(); ++i)
+            if (openAt[i] == start) loads[i].start = start + length;
+    }
 }
 
 // Lead time per earlier ds_load already priced into the back-to-back drain.
@@ -2391,12 +2480,19 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
              (isCriticalFiller(smallestPickable) && criticalMayIssue()) || memWorkFitsWindow_);
         const bool quotaClosedWindow =
             activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
+        // A burst ends at the first WMMA that is not ready.
+        if (burstLeft_ > 0 && bestLatency > 0) endBurst();
+        // In a burst the WMMA goes ahead of ds_loads and fillers; a tensor_load or prefetch
+        // keeps its own schedule.
+        const bool burstPreempt =
+            burstLeft_ > 0 && !(pickKind == kGlobalRead || pickKind == kPrefetch);
         // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
         // the queue has room (a full queue already covers it, and the wait fits other work).
         const bool refillActive = wmmaRefillActive(bestWMMA->inst->latencyCycles);
         // The refill only hides a stall: a non-WMMA pick that carries no wait issues now, so a
         // ready ds_load at a region start does not wait for the queue to fill.
-        const bool preemptForQueue = refillActive && (!hasPickableNonWmma || pickWait > 0);
+        const bool preemptForQueue =
+            burstPreempt || (refillActive && (!hasPickableNonWmma || pickWait > 0));
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);
@@ -2428,8 +2524,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " credFull=" << dsReadInflight_.full() << " preempt=" << preemptForQueue
             << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
-            << " fills=" << nonWmmaFillsSinceActiveWmma_ << " localReadQ=" << localReadQueue.size()
-            << " nonWmmaMinId="
+            << " burstLeft=" << burstLeft_ << " fills=" << nonWmmaFillsSinceActiveWmma_
+            << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
             << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
@@ -2536,7 +2632,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             updateWMMAStatus(barrier);
             // The stall in front of a barrier wait (s_wait_dscnt / s_wait_tensorcnt, not simulated)
             // lets the queued WMMAs finish: take the WMMA queue as empty.
-            if (isBarrierWait(*barrier->inst)) resetActiveWindow();
+            if (isBarrierWait(*barrier->inst)) {
+                resetActiveWindow();
+                auto burst = barrierWaitBurst_.find(barrier->inst);
+                if (burst != barrierWaitBurst_.end()) {
+                    endBurst();
+                    burstLeft_ =
+                        std::min(burst->second, wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_);
+                }
+            }
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -2624,6 +2728,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
+    headerBurstPending_ = true;
 
     // Per-BB like the PipeOps lanes: the tracker walks the BB's final order from an empty
     // state.
@@ -2778,6 +2883,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
+    burstLeft_ = 0;
+    plannedBursts_.clear();
+    barrierWaitBurst_.clear();
+    burstWmmasPlanned_ = 0;
+    burstWmmasIssued_ = 0;
+    regionStartBurst_ = false;
     barrierWaitsForCover_ = false;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
@@ -2850,10 +2961,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
     }
 
-    // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
-    // 25 / 128), and floor would give a quota of 0 that never closes a window.
-    if (dagFeatures.evenSpreadFillers && wmmaTotalThisRegion_ > 0)
-        fillQuotaPerWindow_ = (regionFillerCount + wmmaTotalThisRegion_ - 1) / wmmaTotalThisRegion_;
+    // The queue is empty at a region start: the loop header's first WMMA region and a region cut
+    // by a barrier wait fill it first. The loop-head deferral wins over the burst.
+    if (fillQueueAfterResetOn() && hasWMMAInRegion_) {
+        const bool headerStart =
+            headerBurstPending_ && loop && loop->headerBB == blockBegin->getParent();
+        bool afterWait = false;
+        if (regionStart != blockBegin) {
+            auto* prev = dyn_cast<StinkyInstruction>(std::prev(regionStart).getNodePtr());
+            afterWait = prev != nullptr && isBarrierWait(*prev);
+        }
+        if (headerStart) headerBurstPending_ = false;
+        regionStartBurst_ = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
+    }
+
     regionFillerTotal_ = regionFillerCount;
     fillersIssuedThisRegion_ = 0;
 
@@ -3406,8 +3527,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         } else if (isTensorLoad(*inst)) {
             auto it = loadPlannedWindow.find(inst);
             if (it != loadPlannedWindow.end()) planned[id] = it->second;
-        } else if (isDSRead(*inst) && dsTotalThisRegion_ > 0) {
-            planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
         }
     }
     dsSpread_.reset();
@@ -3512,15 +3631,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             (static_cast<long long>(batch) * windowCycles * std::max(1, dsReadQueueDepth()) +
              dsReadCreditLifetime() - 1) /
             std::max(1, dsReadCreditLifetime()));
+        planBursts(loads, drainWindows);
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
                        maxPerBatch);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
-                                  static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
+                                  static_cast<long long>(shadowWmmaTotal()) * windowCycles;
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
                              << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch << " drain="
                              << drainWindows << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
+    } else {
+        std::vector<DsSpreadPacer::Load> noLoads;
+        planBursts(noLoads, 0);
+    }
+    if (regionStartBurst_ && !plannedBursts_.empty() && plannedBursts_.front().first == 0)
+        burstLeft_ = plannedBursts_.front().second;
+
+    // Ceil, not floor: a typical loop has far fewer fillers than WMMAs (e.g.
+    // 25 / 128), and floor would give a quota of 0 that never closes a window.
+    // Burst windows take no filler.
+    if (dagFeatures.evenSpreadFillers && shadowWmmaTotal() > 0)
+        fillQuotaPerWindow_ = (regionFillerCount + shadowWmmaTotal() - 1) / shadowWmmaTotal();
+    // A ds_load is planned at its ordinal's even-spread window over the shadow WMMAs.
+    for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+        if (isDSRead(*deps.dag.nodes[id].inst) && dsTotalThisRegion_ > 0)
+            planned[id] = shadowToWmmaIndex(dsOrdinal++ * shadowWmmaTotal() / dsTotalThisRegion_);
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

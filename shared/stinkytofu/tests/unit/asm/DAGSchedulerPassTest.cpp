@@ -2614,3 +2614,110 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
     EXPECT_EQ(shapes[0], shapes[1]);
     EXPECT_EQ(shapes[0], "WddWWWWWWWdddddd");
 }
+
+// The loop header's first WMMAs fill the empty queue (depth 8) before the ready ds_loads and
+// the loop-close compare go into their shadow.
+TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadFillsTheQueueFirst) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+    for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+    createSCbranchReadingScc(bb);
+    const int beforeCount = countStinkyInstructions(*bb);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape.substr(0, 9), "WWWWWWWWd") << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'W'), 16) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 8) << shape;
+}
+
+// A ds-dense header stage leaves no window for the burst: it is shortened so the stage's
+// ds_loads still fit before the stage ends.
+TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_KeepDsWindowsShortensTheBurst) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 24; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+    for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+    createSCbranchReadingScc(bb);
+    const int beforeCount = countStinkyInstructions(*bb);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadCyclesPerLoad = 6;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_NE(shape.substr(0, 8), "WWWWWWWW") << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 24) << shape;
+}
+
+// The loop-head deferral wins: when the latch ends in a WMMA and the header region is cut from
+// the block start, its first WMMA waits for other work, and no burst runs there.
+TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_LoopHeadDeferralWins) {
+    bb->addSuccessor(bb);
+    {
+        // A non-movable barrier (no LDS pseudo-reg) cuts the header's first region.
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* cut = builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch));
+        cut->addSrcReg(StinkyRegister(-1));
+    }
+    for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+    for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+    createSCbranchReadingScc(bb);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_NE(shape.substr(1, 2), "WW") << shape;
+}
+
+// After a barrier wait the queue starts empty: the WMMAs behind it fill the queue before the
+// ds_loads go into their shadow. Here the wait carries no LDS pseudo-reg, so it cuts the region
+// and the region after it starts with the burst.
+TEST_F(DAGSchedulerPassTest, QueueStartWmmaBurst_BarrierWaitFillsTheQueueFirst) {
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+    {
+        AsmIRBuilder builder(*bb, arch);
+        builder.create(getMCIDByUOp(GFX::s_barrier_signal, arch))->addSrcReg(StinkyRegister(-1));
+        builder.create(getMCIDByUOp(GFX::s_barrier_wait, arch))->addSrcReg(StinkyRegister(-1));
+    }
+    for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+    for (int i = 8; i < 24; i++) createWmmaF32_16x16x16_bf16(8 * i, 300 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const int waitPos = lastBarrierWaitPosition(*bb);
+    ASSERT_GE(waitPos, 0);
+    const std::string shape = wdShape(mnemonicSequence(*bb)).substr(waitPos + 1);
+    EXPECT_EQ(shape.substr(0, 9), "WWWWWWWWd") << shape;
+}
