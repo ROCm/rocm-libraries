@@ -10,7 +10,7 @@ UED, referenced KMD, dispatch, optional heuristic, shared/per-pack matchers, KDP
 inline/standalone UKDs. Resolve by UUID, not filename — pointwise ADD/MUL/SUB share a
 KMD whose filename does not follow the individual packs.
 
-Take the installed half with `tools/inventory.py` from the IngestorGenerator: kernels per
+Take the installed half with `projects/hipdnn/tools/IngestorGenerator/tools/inventory.py`: kernels per
 KDP (from `kernelDescriptors`), source kinds, distinct metadata tuples (`--group-by
 <fields>`, for attention `head_size,num_query_heads,num_kv_heads`), the catalog digest
 RUNBOOK stage 8 uses, and the `hipdnn_validate_descriptors` verdict:
@@ -43,7 +43,7 @@ copy of a scratch descriptor directory, replaces shared objects, retained UUIDs 
 hand-filled bodies. An extension therefore copies only reviewed additions and explicitly
 changed references, never the whole scratch tree or an entire CMake list.
 
-`tools/splice_additions.py --scratch <scratch bundle dir> --live <live bundle dir>` does
+`projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py --scratch <scratch bundle dir> --live <live bundle dir>` does
 this for descriptors: it maps every scratch UUID to its live twin (documents by file
 name, kernel entries by `name`), refuses and writes nothing if any retained document or
 kernel differs beyond that map or is missing from scratch, and appends only new kernel
@@ -92,7 +92,7 @@ The one registration a generated engine needs is the **kernel source**, and only
 | Group | Kinds | What happens |
 |---|---|---|
 | Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
-| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory; see [hsaco kernels and `arch`](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch). |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory; see "hsaco kernels and `arch`" in `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`. |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
 | Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 

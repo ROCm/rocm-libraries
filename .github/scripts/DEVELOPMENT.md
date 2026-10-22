@@ -51,9 +51,6 @@ from the standard library plus the packages above.
 │   ├── pr_merge_sync_patches.py        ← generate patch + push to sub-repo
 │   │
 │   ├── # TheRock / multi-arch CI
-│   ├── resolve_therock_ref.py          ← pin TheRock commit for a PR/push event
-│   ├── therock_configure_ci.py         ← select build flags and tests from subtrees
-│   ├── therock_matrix.py               ← subtree → TheRock project mapping table
 │   ├── component_ci.py                 ← per-component CI trigger flags
 │   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
 │   │
@@ -71,12 +68,8 @@ from the standard library plus the packages above.
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
-│       ├── resolve_therock_ref_test.py
-│       ├── test_notify_teams.py
 │       ├── test_pr_detect_changed_subtrees.py
-│       ├── test_pr_merge_sync_patches.py
-│       ├── therock_configure_ci_test.py
-│       └── therock_matrix_test.py
+│       └── test_pr_merge_sync_patches.py
 │
 ├── repos-config.json                   ← subtree → sub-repo mapping (read by config_loader)
 └── requirements.txt                    ← pydantic, requests
@@ -92,13 +85,10 @@ from the standard library plus the packages above.
 |---|---|
 | `pr-merge-sync-patches.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
 | `pr-merge-sync-patches-manual.yml` | `pr_detect_changed_subtrees.py`, `pr_merge_sync_patches.py` |
-| `therock-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
-| `therock-multi-arch-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
 | `component-ci.yml` | `component_ci.py` |
-| `therock-ci-nightly.yml` | `check_wheel_freshness.py` |
+| `hipdnn-superbuild-ci.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
-| `libraries-pr-bot.yml` | `notify_teams.py` |
 | `merge-codeowners.yml` | `merge-codeowners.py` |
 | `merge-submodules.yml` | `merge-submodules.py` |
 
@@ -121,8 +111,7 @@ pytest . -v
 pytest tests/test_pr_merge_sync_patches.py -v
 ```
 
-`tests/conftest.py` automatically stubs out modules that are only available
-in CI (such as `amdgpu_family_matrix` from a TheRock checkout), so `pytest .`
+Each test file puts `.github/scripts/` on `sys.path` itself, so `pytest .`
 works locally without any extra setup.
 
 > **Note:** there is currently no CI job that runs these tests automatically.
@@ -264,27 +253,6 @@ git -C /tmp/test-apply apply /tmp/mylib.patch
 
 ---
 
-### TheRock CI — `resolve_therock_ref.py`, `therock_configure_ci.py`, `therock_matrix.py`
-
-`resolve_therock_ref.py` pins the TheRock commit that a multi-arch CI run
-builds against. The resolution policy (merge-base for PRs, live tip for
-pushes) is documented in the module docstring.
-
-`therock_configure_ci.py` reads the `SUBTREES` environment variable and
-selects which build flags and tests to run. It imports from `therock_matrix.py`
-(the static subtree → project mapping) and from `pr_detect_changed_subtrees.py`.
-
-All three have test coverage in `tests/`:
-
-```bash
-pytest tests/resolve_therock_ref_test.py tests/therock_configure_ci_test.py tests/therock_matrix_test.py -v
-```
-
-These tests use an in-process `FakeClient` that stubs out all HTTP calls —
-follow the same pattern for any new tests.
-
----
-
 ### PR Automation — `pr_category_label.py`, `apply-labels.py`, `collect-labels.py`
 
 These scripts apply category labels to PRs based on changed file paths.
@@ -336,6 +304,8 @@ python .github/scripts/notify_teams.py \
   --component-name miopen \
   --dry-run
 ```
+
+Sample logs for local runs live in `test/team_notification_fixtures/`.
 
 ---
 

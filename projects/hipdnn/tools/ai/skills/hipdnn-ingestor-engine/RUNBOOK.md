@@ -292,6 +292,9 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
   baseline "$EMITTED_ROOT"
 ```
 
+The gate checks every launch of a multi-launch (`sources`) descriptor; a failure names
+its launch.
+
 Exactly one assignment must be live. Both commented passes an empty root, which the
 descriptor index expands as the recursive glob `/**/*.json` — a walk of the whole
 filesystem.
@@ -307,7 +310,7 @@ after packing.
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
 Extensions remap scratch references and copy only additions per [extend.md](extend.md),
 including consumer IDs in shared KDP or per-UKD specialization declarations. For
-descriptors, `tools/splice_additions.py` does this and refuses any change to a retained
+descriptors, `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` does this and refuses any change to a retained
 entry:
 
 ```bash
@@ -330,7 +333,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
 | `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
-| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `tools/splice_additions.py` |
+| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
@@ -633,6 +636,9 @@ drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
 the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
 `--provenance-root DIR` mirroring its `--tree`.
+
+A multi-launch descriptor is checked per launch (spec, symbol and code object); a failure
+names the launch.
 
 Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes

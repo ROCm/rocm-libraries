@@ -66,6 +66,10 @@ class TestTraitRules(unittest.TestCase):
             self.assertFalse(_trait_ok(pipeline, pad=not pad), pipeline)
             self.assertFalse(_trait_ok(pipeline, pad=pad, pad_m=not pad), pipeline)
 
+    def test_unwired_tdm_pipeline_rejected(self):
+        # comp_tdm_pc is a gemm_universal TDM pipeline with no preshuffle kernel.
+        self.assertFalse(_trait_ok("comp_tdm_pc"))
+
     def test_preshufflev2_unchanged(self):
         for arch in ("gfx942", "gfx950", "gfx1250"):
             self.assertTrue(_trait_ok("preshufflev2", gpu_target=arch))
