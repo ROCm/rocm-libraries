@@ -927,7 +927,7 @@ def receipt_accepts(receipt, dtype: str, mode: str, pipeline: FmhaFwdPipeline) -
 
 class PageTileFactoryGfx125:
     """gfx125x page-tile kernel: BF16/FP16, D64/D128, linear K/V pool, vLLM 2D or SGLang 1D page
-    table, group mode, no mask or causal aligned to either corner, optional LSE."""
+    table, group mode, no mask or a causal/sliding window from either corner, optional LSE."""
 
     arch = GFX125_ARCH
 
@@ -944,17 +944,13 @@ class PageTileFactoryGfx125:
     @staticmethod
     def get_pipelines(dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
         # Simplified masks whatever mask_impl is: the kernel's stored-row mask predicate needs
-        # them. The masked arm takes only the causal window, from either corner.
-        causal = CppConstraint(
-            "(t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
-            " && a.window_size_left < 0 && a.window_size_right == 0"
-        )
+        # them. The masked arm takes any window (causal, sliding, local) from either corner, like
+        # the simplified-mask dispatch of the gfx9 kernels.
         pipelines = []
         for mask, lse, kv_lookup_table in itertools.product(
             ["s_no", "s_mask"], ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
         ):
-            constraint = causal if mask == "s_mask" else CppConstraint()
-            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "no", mask, "f", "linear", kv_lookup_table, constraint))  # fmt: skip
+            pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "no", mask, "f", "linear", kv_lookup_table))  # fmt: skip
         return pipelines
 
 

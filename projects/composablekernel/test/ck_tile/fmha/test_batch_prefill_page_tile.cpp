@@ -185,9 +185,19 @@ struct Layout
     int q_length(int b) const { return seqstart_q[b + 1] - seqstart_q[b]; }
 };
 
-// top_left selects the top-left aligned causal mask (causal models only); bottom-right otherwise.
+// Mask window of a masked model: key k is visible to query q when
+// q + offset - left <= k <= q + offset + right, with offset 0 (top-left) or
+// seqlen_k - seqlen_q (bottom-right); a negative bound is unbounded. The default is the
+// bottom-right causal mask (left unbounded, right 0). Dense models ignore it.
+struct Window
+{
+    bool top_left = false;
+    int left      = -1;
+    int right     = 0;
+};
+
 template <typename M>
-fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, bool top_left = false)
+fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = {})
 {
     int max_q = 0, max_k = 0;
     for(int b = 0; b < l.batch(); ++b)
@@ -233,11 +243,11 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, bool top_le
     a.lse_ptr                  = d.lse;
     a.nhead_stride_lse         = l.seqstart_q.back(); // LSE is [Hq, total_q]
     a.batch_stride_lse         = 0;
-    a.window_size_left         = -1;
-    a.window_size_right        = M::kCausal ? 0 : -1;
+    a.window_size_left         = M::kCausal ? w.left : -1;
+    a.window_size_right        = M::kCausal ? w.right : -1;
     a.mask_type                = static_cast<int>(
         !M::kCausal ? mask_enum::no_mask
-                    : (top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
+                    : (w.top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
     return a;
 }
 
@@ -378,12 +388,18 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     });
     if constexpr(TypeParam::kCausal)
     {
+        // Any window and corner is accepted; only a missing mask type is refused.
         EXPECT_EQ(refusal(need, [](Kargs& k) { SetTopLeft(k); }), "");
-        expect_refused("only top-left or bottom-right causal masks", need, [](Kargs& k) {
-            k.mask_type = ck_tile::GenericAttentionMaskEnum::MASK_GENERIC;
+        EXPECT_EQ(refusal(need,
+                          [](Kargs& k) {
+                              k.mask_type = ck_tile::GenericAttentionMaskEnum::MASK_GENERIC;
+                          }),
+                  "");
+        EXPECT_EQ(refusal(need, [](Kargs& k) { k.window_size_left = 64; }), "");
+        EXPECT_EQ(refusal(need, [](Kargs& k) { k.window_size_right = 1; }), "");
+        expect_refused("a masked instance needs a mask type", need, [](Kargs& k) {
+            k.mask_type = ck_tile::GenericAttentionMaskEnum::NO_MASK;
         });
-        expect_refused("only the causal window", need, [](Kargs& k) { k.window_size_left = 64; });
-        expect_refused("only the causal window", need, [](Kargs& k) { k.window_size_right = 1; });
     }
 
     // The checked launch path builds the functor for valid arguments (nothing is launched)
@@ -663,7 +679,7 @@ struct DeviceProblem
 template <typename M>
 std::vector<Data> Run(const HostProblem& h,
                       DeviceProblem& d,
-                      bool top_left               = false,
+                      Window window               = {},
                       std::vector<float>* lse_out = nullptr,
                       std::int64_t page_shift     = 0)
 {
@@ -678,7 +694,7 @@ std::vector<Data> Run(const HostProblem& h,
     Layout layout = h.layout;
     layout.num_total_pages += static_cast<int>(page_shift);
     const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(
-        MakeArgs<M>(layout, d.pointers(), top_left));
+        MakeArgs<M>(layout, d.pointers(), window));
     ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
                            Kernel::MakeCheckedKernel(kargs, grids));
     EXPECT_EQ(hipGetLastError(), hipSuccess);
@@ -699,7 +715,7 @@ reference::Metrics CompareWithReference(const HostProblem& h,
                                         const std::vector<Data>& o,
                                         bool causal,
                                         const std::vector<std::size_t>& sampled_rows = {},
-                                        bool top_left                                = false,
+                                        Window window                                = {},
                                         const std::vector<float>* lse                = nullptr)
 {
     const auto& l          = h.layout;
@@ -742,10 +758,13 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         s.score_scale     = 1.0f / std::sqrt(static_cast<float>(D));
         if(causal)
         {
-            // Key k is visible to query q when k <= q + alignment.
-            const int alignment = top_left ? 0 : k_len - q_len;
-            s.is_masked         = [alignment](std::size_t query, std::size_t key) {
-                return static_cast<int64_t>(key) > static_cast<int64_t>(query) + alignment;
+            // Key k is visible to query q when q + offset - left <= k <= q + offset + right.
+            const int64_t offset = window.top_left ? 0 : k_len - q_len;
+            s.is_masked          = [offset, window](std::size_t query, std::size_t key) {
+                const int64_t diagonal = static_cast<int64_t>(query) + offset;
+                const int64_t k        = static_cast<int64_t>(key);
+                return (window.left >= 0 && k < diagonal - window.left) ||
+                       (window.right >= 0 && k > diagonal + window.right);
             };
         }
         for(auto r : sampled_rows)
@@ -811,9 +830,9 @@ TYPED_TEST(PageTileForward, MatchesReference)
                     shape, mapping, TypeParam::kHeadDim, TypeParam::kCausal, seed, values);
                 DeviceProblem d(h);
                 std::vector<float> lse;
-                const auto o       = Run<TypeParam>(h, d, false, &lse);
+                const auto o       = Run<TypeParam>(h, d, Window{}, &lse);
                 const auto metrics = CompareWithReference(
-                    h, o, TypeParam::kCausal, {}, false, kLse ? &lse : nullptr);
+                    h, o, TypeParam::kCausal, {}, Window{}, kLse ? &lse : nullptr);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
                           << (TypeParam::kCausal ? " causal " : " dense ")
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
@@ -862,8 +881,8 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
                 SCOPED_TRACE(name);
                 const auto h = MakeProblem(shape, mapping, TypeParam::kHeadDim, false, seed);
                 DeviceProblem d(h);
-                const auto o       = Run<TypeParam>(h, d, true);
-                const auto metrics = CompareWithReference(h, o, true, {}, true);
+                const auto o       = Run<TypeParam>(h, d, Window{true});
+                const auto metrics = CompareWithReference(h, o, true, {}, Window{true});
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " causal "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
@@ -884,6 +903,58 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
                 }
             }
             ++seed;
+        }
+    }
+}
+
+// Sliding and local windows on the masked model, from either corner: windows smaller than,
+// equal to and larger than the N128 tile, a two-sided window, a right lookahead without a left
+// bound and a left bound without a right one. Long keys against short queries make the first
+// key tile of a query tile start past zero (kv_load_start > 0); queries longer than keys leave
+// rows with no visible key.
+TYPED_TEST(PageTileForward, MatchesReferenceWindow)
+{
+    if constexpr(!TypeParam::kCausal)
+        GTEST_SKIP() << "windows apply to the masked model";
+    else
+    {
+        const std::vector<Case> shapes = {
+            {"gqa2", 4, 2, {300, 13, 129, 64}, {2 * kPage + 37, kPage - 3, 129, 384}},
+            {"long", 4, 2, {300, 129}, {3000, 1500}},
+            {"tiny", 4, 2, {1, 130, 128, 200}, {1, 100, 128, 100}},
+        };
+        const std::vector<std::pair<const char*, Window>> windows = {
+            {"diagonal", {false, 0, 0}},
+            {"swa37", {false, 37, 0}},
+            {"swa128", {false, 128, 0}},
+            {"swa200", {false, 200, 0}},
+            {"swa64 top-left", {true, 64, 0}},
+            {"local100+30", {false, 100, 30}},
+            {"lookahead129 top-left", {true, -1, 129}},
+            {"left1000", {false, 1000, -1}},
+        };
+        std::uint32_t seed = 61;
+        for(const auto& shape : shapes)
+        {
+            const auto h =
+                MakeProblem(shape, Mapping::Permuted, TypeParam::kHeadDim, false, seed++);
+            DeviceProblem d(h);
+            for(const auto& [window_name, window] : windows)
+            {
+                const std::string name = std::string(shape.name) + " " + window_name;
+                SCOPED_TRACE(name);
+                const auto o       = Run<TypeParam>(h, d, window);
+                const auto metrics = CompareWithReference(h, o, true, {}, window);
+                std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " window "
+                          << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
+                          << " max_abs=" << metrics.max_abs_error
+                          << " min_cos=" << metrics.min_row_cosine
+                          << " nonfinite=" << metrics.nonfinite_output_count
+                          << " passed=" << metrics.passed << '\n';
+                EXPECT_EQ(metrics.checked_rows, LogicalRows(h.layout));
+                EXPECT_EQ(metrics.nonfinite_output_count, 0u);
+                EXPECT_TRUE(metrics.passed);
+            }
         }
     }
 }
@@ -950,7 +1021,7 @@ TYPED_TEST(PageTileForward, LargePool)
         static_cast<std::size_t>(kPage) * h.layout.kv_heads * TypeParam::kHeadDim * sizeof(Data);
     const std::int64_t shift = static_cast<std::int64_t>((std::size_t{5} << 30) / page_bytes) + 1;
     DeviceProblem large(h, shift);
-    const auto o = Run<TypeParam>(h, large, false, nullptr, shift);
+    const auto o = Run<TypeParam>(h, large, Window{}, nullptr, shift);
     std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
               << (TypeParam::kCausal ? " causal" : " dense") << " large pool: page shift " << shift
               << " (" << static_cast<double>(shift) * page_bytes / (1u << 30) << " GiB)\n";
