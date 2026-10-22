@@ -213,6 +213,36 @@ class TestOccupancyCmd(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(err.getvalue(), "")
 
+    def test_occupancy_arch_in_either_triple_spelling_is_not_a_mismatch(self):
+        # A real code object for the class's processor, with --arch given as a full
+        # ISA name in both spellings compilers write: the command reads the
+        # processor from it and warns about nothing.
+        llc = find_llvm_tool("llc")
+        if llc is None or find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        with _code_object(
+            ".o", llc_code_object(llc, self.ARCH, 64, wave_size=64)
+        ) as path:
+            for arch in (
+                f"amdgcn-amd-amdhsa--{self.ARCH}",
+                f"amdgcn-amd-amdhsa-unknown-{self.ARCH}",
+            ):
+                with self.subTest(arch=arch):
+                    err = io.StringIO()
+                    with redirect_stderr(err):
+                        code, out = _run(["--json", "occupancy", path, "--arch", arch])
+                    self.assertEqual(code, 0)
+                    self.assertEqual(json.loads(out)["target_arch"], self.ARCH)
+                    self.assertEqual(err.getvalue(), "")
+
+    def test_occupancy_refuses_an_arch_that_is_not_a_target_id(self):
+        # --arch is read with the target-note rules, so a malformed value stops
+        # the command with the reason before any code object is modelled.
+        with _code_object(".hsaco", b"\x7fELF fake") as path:
+            with self.assertRaises(SystemExit) as ctx:
+                _run(["occupancy", path, "--arch", f"{self.ARCH}:xnack"])
+        self.assertIn(f"'{self.ARCH}:xnack' is not a target ID", str(ctx.exception))
+
     def test_occupancy_empty_errors(self):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: {}
