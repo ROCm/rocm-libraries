@@ -504,3 +504,40 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
     }
 }
+
+TEST(PersistentArgumentLayout, UnevenUnclusteredSplitsStayInsideTheirOutputTiles)
+{
+    for(size_t k : {4096, 4097})
+    for(bool capability : {false, true})
+    {
+        ContractionSolution solution;
+        configurePersistentSolution(solution, 3, 0);
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workspaceSizePerElemC = 4;
+        solution.internalArgsSupport.perTileExtraIters = capability;
+        auto problem = persistentProblem(256, 256, k, 1);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        auto inputs = persistentInputs();
+        inputs.ws = reinterpret_cast<void*>(uintptr_t{0x10000});
+        inputs.Synchronizer = reinterpret_cast<void*>(uintptr_t{0x20000});
+        const auto launch = solution.resolvePersistentSettings(problem, persistentDevice(8));
+        const auto call = solution.generateSingleCall<true>(
+            problem, inputs, persistentDevice(8), launch, GSUSettings{});
+        const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
+        ASSERT_EQ(active, capability && k == 4097);
+        if(!active)
+            continue;
+        const size_t iters = (k + 63) / 64;
+        size_t previousEnd = 0;
+        for(size_t w = 0; w < launch.grid; ++w)
+        {
+            const auto range = streamKWorkgroupIterRange(
+                w, launch.totalTiles, iters, launch.grid, true, true);
+            EXPECT_EQ(range.start, previousEnd);
+            ASSERT_GT(range.end, range.start);
+            EXPECT_EQ(range.start / iters, (range.end - 1) / iters);
+            previousEnd = range.end;
+        }
+        EXPECT_EQ(previousEnd, launch.totalTiles * iters);
+    }
+}
