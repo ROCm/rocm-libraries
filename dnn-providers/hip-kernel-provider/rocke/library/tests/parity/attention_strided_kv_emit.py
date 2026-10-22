@@ -6,8 +6,6 @@ strided case with swizzled K/V LDS tiles per target (12: gfx942, 13: gfx950)."""
 
 from importlib import import_module
 
-from _emit_common import run_emit
-
 
 def spec_for_index(idx):
     if not 0 <= idx < 14:
@@ -44,6 +42,8 @@ def build(spec, arch):
 
 
 def main() -> int:
+    from _emit_common import run_emit
+
     return run_emit(spec_for_index, build)
 
 
