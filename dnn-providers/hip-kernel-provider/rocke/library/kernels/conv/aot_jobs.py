@@ -1197,6 +1197,43 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
     )
 
 
+# Forward LDS budget per arch for the AOT grid, below the arch's capacity.
+# gfx1250 has 320 KB of LDS per workgroup; its catalog value was a 160 KB
+# placeholder until the WMMA direct dgrad. The forward configurations between
+# the two (256x256 wavelet/cshuffle tiles) have not been run with --verify on
+# gfx1250 yet, so its forward grid stays at the old budget until they have.
+_AOT_FWD_LDS_BUDGET = {"gfx1250": 160 * 1024}
+
+# Configurations that validate but are left out of the AOT grid, per
+# (arch, direction): each entry is matched against the job's spec_kwargs.
+_AOT_EXCLUDED = {
+    # Fails --verify on the C=3 stem dgrad rows: the pre-existing
+    # vector_size_a=8 C=3 implicit-GEMM dgrad bug. The 320 KB gfx1250 LDS
+    # admits this tile; the bug's other configurations predate it.
+    ("gfx1250", "dgrad"): (
+        dict(
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            warp_m=1,
+            warp_n=8,
+            pipeline="wavelet",
+            epilogue="cshuffle",
+            vector_size_a=8,
+            vector_size_b=1,
+            vector_size_c=1,
+        ),
+    ),
+}
+
+
+def _aot_excluded(job: BuildJob, arch: str) -> bool:
+    return any(
+        all(job.spec_kwargs.get(k) == v for k, v in entry.items())
+        for entry in _AOT_EXCLUDED.get((arch, job.direction), ())
+    )
+
+
 def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """Would this configuration build at all?
 
@@ -1205,7 +1242,12 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     so on. Running that check here costs microseconds; discovering it inside
     ``compile_kernel`` costs an LLVM invocation, so the prefilter is the
     difference between a cache build that finishes and one that does not.
+
+    It also applies the grid's own limits on top of spec validity
+    (:data:`_AOT_FWD_LDS_BUDGET`, :data:`_AOT_EXCLUDED`).
     """
+    if _aot_excluded(job, arch):
+        return False
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
     data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
@@ -1214,11 +1256,15 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
         if job.direction == "fwd":
             from kernels.common.conv_implicit_gemm import (
                 ImplicitGemmConvSpec,
+                implicit_gemm_lds_bytes,
                 is_valid_spec,
             )
 
             spec = ImplicitGemmConvSpec(problem=problem, data=data, **job.spec_kwargs)
             spec.validate()
+            budget = _AOT_FWD_LDS_BUDGET.get(arch)
+            if budget is not None and implicit_gemm_lds_bytes(spec)[0] > budget:
+                return False
             return is_valid_spec(spec, arch=arch)[0]
         if job.direction == "wgrad":
             from kernels.common.conv_implicit_gemm_wgrad import (
