@@ -78,7 +78,13 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
-from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.transforms import (
+    DynamicTensorDescriptor,
+    TensorDescriptor,
+    embed,
+    indirect,
+    unmerge,
+)
 
 
 MFMA_M = 16
@@ -494,6 +500,16 @@ class UnifiedAttention2DTiledSpec:
     # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
     # QQ-bias, whose offsets are defined on the causal diagonal.
     right_bound: int = 0
+    # Runtime-layout mode (hipDNN ``AttentionPagedUnified`` / vLLM KV-cache view).
+    # One compiled object serves any head count, window, Q/O/KV strides, dense
+    # or ragged Q and a real paged KV cache: those all become appended kernel
+    # arguments (see ``_RTL_PARAMS``). ``num_query_heads`` / ``num_kv_heads``
+    # then only define the GQA ratio, ``sliding_window`` must be 0 (the window
+    # is a kernarg and its code path is always compiled) and every CTA walks
+    # the q-block grid with a grid-stride loop. The KV block term is addressed
+    # in i64 through a per-block buffer resource. Default False leaves the
+    # kernel unchanged.
+    runtime_layout: bool = False
 
     def __post_init__(self):
         if type(self.use_additive_bias) is not bool:
@@ -510,6 +526,10 @@ class UnifiedAttention2DTiledSpec:
                 "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
                 "(their offsets are defined on the causal diagonal)"
             )
+        if self.runtime_layout:
+            reason = _runtime_layout_reject_reason(self)
+            if reason is not None:
+                raise ValueError(reason)
         if self.num_warps not in (1, 2, 4, 8):
             raise ValueError(
                 f"num_warps must be 1, 2, 4, or 8 (got {self.num_warps}). "
@@ -955,7 +975,143 @@ class UnifiedAttention2DTiledSpec:
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            "rtl" if self.runtime_layout else "",
         )
+
+
+# Kernel arguments appended after the 18 fixed ones when ``runtime_layout`` is
+# set, in order. All i32 except ``seq_lens_q_ptr`` (ptr<i32>). Strides are in
+# elements; ``kv_block_span_bytes`` is the per-block buffer-resource size.
+_RTL_PARAMS = (
+    "seq_lens_q_ptr",
+    "has_seq_lens_q",
+    "q_uniform_len",
+    "num_query_heads",
+    "sliding_window",
+    "q_seq_stride",
+    "q_tok_stride",
+    "q_head_stride",
+    "o_seq_stride",
+    "o_tok_stride",
+    "o_head_stride",
+    "kv_block_stride",
+    "kv_tok_stride",
+    "kv_head_stride",
+    "kv_block_span_bytes",
+    "q_block_grid",
+)
+
+# Fixed-trip binary search over ``off[0..num_seqs]`` in RAGGED mode; covers
+# ``num_seqs <= 65536`` (ceil(log2(65537)) == 17).
+_RTL_SEQ_SEARCH_ITERS = 17
+
+
+def _runtime_layout_reject_reason(spec: "UnifiedAttention2DTiledSpec") -> Optional[str]:
+    """Why ``spec`` cannot use ``runtime_layout`` (``None`` when it can).
+
+    Runtime-layout mode runs only the default 16x16x32 pipeline with one
+    paged block per KV tile; every flag that bakes a layout, a schedule built
+    around a different pipeline, or a feature outside the hipDNN paged SDPA
+    contract is refused.
+    """
+    if spec.num_kv_heads <= 0 or spec.num_query_heads % spec.num_kv_heads != 0:
+        return (
+            "runtime_layout needs num_query_heads to be a multiple of num_kv_heads "
+            f"(got {spec.num_query_heads}/{spec.num_kv_heads})"
+        )
+    if spec.sliding_window != 0:
+        return (
+            "runtime_layout takes the sliding window as a kernarg; "
+            "spec sliding_window must be 0"
+        )
+    features = {
+        "use_sinks": spec.use_sinks,
+        "has_softcap": spec.has_softcap,
+        "use_alibi": spec.use_alibi,
+        "use_qq_bias": spec.use_qq_bias,
+        "use_additive_bias": spec.use_additive_bias,
+        "kv_storage_dtype (fp8 KV)": spec.kv_storage_dtype is not None,
+        "use_fp8_mfma_qk": spec.use_fp8_mfma_qk,
+        "use_fp8_mfma_pv": spec.use_fp8_mfma_pv,
+        "causal_top_left": spec.causal_top_left,
+        "right_bound != 0": spec.right_bound != 0,
+    }
+    for feature, on in features.items():
+        if on:
+            return f"runtime_layout does not support {feature}"
+    pipeline_flags = {
+        "use_mfma_32x32": spec.use_mfma_32x32,
+        "use_transposed_qk_32x32": spec.use_transposed_qk_32x32,
+        "use_fast_paged_kv_desc": spec.use_fast_paged_kv_desc,
+        "use_i64_kv_addr (always 64-bit in runtime_layout)": spec.use_i64_kv_addr,
+        "use_register_pv": spec.use_register_pv,
+        "use_v_double_buffer": spec.use_v_double_buffer,
+        "kv_ring_depth != 2": spec.kv_ring_depth != 2,
+        "use_staggered_iter_wait": spec.use_staggered_iter_wait,
+        "use_early_v_schedule": spec.use_early_v_schedule,
+        "use_k_single_buffer": spec.use_k_single_buffer,
+        "use_grouped_kv2_softmax": spec.use_grouped_kv2_softmax,
+        "use_q_reread": spec.use_q_reread,
+        "use_q_direct_reg": spec.use_q_direct_reg,
+        "use_kq_lds_pad": spec.use_kq_lds_pad,
+        "use_mask_phase_split": spec.use_mask_phase_split,
+        "use_agpr_alloc_zero": spec.use_agpr_alloc_zero,
+        "use_sched_barrier": spec.use_sched_barrier,
+        "use_softmax_mfma_interleave": spec.use_softmax_mfma_interleave,
+    }
+    for flag, on in pipeline_flags.items():
+        if on:
+            return (
+                "runtime_layout runs the default 16x16x32 pipeline; "
+                f"{flag} is not supported"
+            )
+    if spec.block_m_per_warp != 16:
+        return "runtime_layout requires block_m_per_warp=16"
+    if spec.tile_size is not None and spec.tile_size != spec.block_size:
+        return (
+            "runtime_layout requires tile_size == block_size "
+            "(one paged block per KV tile)"
+        )
+    threads = spec.num_warps * 64
+    if (spec.block_size * spec.head_size) % (threads * 8) != 0:
+        return (
+            f"runtime_layout: block_size*head_size={spec.block_size * spec.head_size} "
+            f"must be a multiple of num_warps*512={threads * 8} "
+            "(whole async-DMA calls per tile)"
+        )
+    return None
+
+
+def runtime_layout_num_warps(head_size: int, block_size: int) -> int:
+    """The fixed ``num_warps`` of the runtime-layout catalog geometry.
+
+    Four warps (BLOCK_M=64) whenever one tile holds whole 4-warp async-DMA
+    calls; the single smaller tile (head_size=64, block_size=16) uses two.
+    """
+    for nw in (4, 2, 1):
+        if (head_size * block_size) % (nw * 64 * 8) == 0:
+            return nw
+    raise ValueError(
+        f"no runtime_layout geometry for head_size={head_size}, block_size={block_size}"
+    )
+
+
+def runtime_layout_catalog_spec(
+    *, dtype: str, head_size: int, block_size: int, num_queries_per_kv: int
+) -> "UnifiedAttention2DTiledSpec":
+    """The runtime-layout spec the hipDNN catalog compiles for one combination."""
+    return UnifiedAttention2DTiledSpec(
+        head_size=head_size,
+        block_size=block_size,
+        num_query_heads=num_queries_per_kv,
+        num_kv_heads=1,
+        dtype=dtype,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=runtime_layout_num_warps(head_size, block_size),
+        runtime_layout=True,
+    )
 
 
 def supports_tiled_2d(
@@ -1146,6 +1302,14 @@ def build_unified_attention_2d_tiled(
     NUM_KV = spec.num_kv_heads
     NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
+    # Runtime-layout mode (see the spec field): runtime Hq / window / strides,
+    # dense-or-ragged q-block mapping and a grid-stride q-block loop. The spec
+    # already refused every incompatible flag, so the rest of the builder only
+    # sees the default 16x16x32 pipeline with one paged block per tile.
+    RTL = spec.runtime_layout
+    # The window code paths are compiled whenever a window may be active: a
+    # compile-time window, or always in runtime-layout mode (window kernarg).
+    SW_ACTIVE = SLIDING_WINDOW > 0 or RTL
     USE_SOFTCAP = spec.has_softcap
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
@@ -1299,6 +1463,15 @@ def build_unified_attention_2d_tiled(
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    rtl = {}
+    if RTL:
+        for rtl_name in _RTL_PARAMS:
+            if rtl_name == "seq_lens_q_ptr":
+                rtl[rtl_name] = b.param(
+                    rtl_name, PtrType(I32, "global"), readonly=True, align=4
+                )
+            else:
+                rtl[rtl_name] = b.param(rtl_name, I32)
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
@@ -1316,24 +1489,107 @@ def build_unified_attention_2d_tiled(
         wave_row_base = b.mul(wave_id, b.const_i32(BLOCK_M_PER_WARP))
 
     # ---------------- seq lookup ----------------
-    seq_idx = binary_search_seq_idx(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs_p,
-        block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
-    )
-    cu_q_start = b.global_load_i32(cu_q, seq_idx)
-    cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
-    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
-    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
-    seq_len = b.global_load_i32(seq_lens, seq_idx)
-    if spec.causal_top_left:
-        context_len = b.const_i32(0)
-    else:
+    if RTL:
+        # DENSE (q_uniform_len = L > 0): bps = ceil(L / BLOCK_Q) q-blocks per
+        # sequence, seq = qb / bps, sequence base token sb = seq. RAGGED
+        # (L == 0): ``query_start_len_ptr`` holds token offsets off[0..B];
+        # seq comes from the q-block binary search, sb = off[seq]. DENSE mode
+        # never dereferences the offsets beyond masked index-0 reads.
+        rtl_zero = b.const_i32(0)
+        rtl_one = b.const_i32(1)
+        rtl_bq = b.const_i32(BLOCK_Q)
+        q_uniform_len = rtl["q_uniform_len"]
+        rtl_dense = b.cmp_gt(q_uniform_len, rtl_zero)
+        rtl_ragged = b.cmp_le(q_uniform_len, rtl_zero)
+        rtl_has_slq = b.cmp_ne(rtl["has_seq_lens_q"], rtl_zero)
+        rtl_bps = b.select(
+            rtl_dense,
+            b.div(b.add(q_uniform_len, b.const_i32(BLOCK_Q - 1)), rtl_bq),
+            rtl_one,
+        )
+        rtl_off_total = b.masked_global_load(
+            cu_q, num_seqs_p, rtl_ragged, rtl_zero, dtype=I32, align=4
+        )
+        total_q_blocks = b.select(
+            rtl_dense,
+            b.mul(num_seqs_p, rtl_bps),
+            b.add(b.div(rtl_off_total, rtl_bq), num_seqs_p),
+        )
+        # Grid-stride q-block loop: the body below (through the epilogue) runs
+        # once per q-block ``blockIdx.y + k * q_block_grid``. Entered here and
+        # closed after the epilogue so the long body keeps its indentation.
+        rtl_qb_loop = b.scf_for(
+            q_block_global_idx, total_q_blocks, rtl["q_block_grid"], iv_name="rtl_qb"
+        )
+        q_block_global_idx = rtl_qb_loop.__enter__()
+        # DENSE: right = 0 makes the search a no-op (it reads off[0] only).
+        seq_idx_ragged = binary_search_seq_idx(
+            b,
+            cu_q,
+            q_block_global_idx,
+            b.select(rtl_dense, rtl_zero, num_seqs_p),
+            block_q=BLOCK_Q,
+            iterations=_RTL_SEQ_SEARCH_ITERS,
+        )
+        seq_idx = b.select(
+            rtl_dense, b.div(q_block_global_idx, rtl_bps), seq_idx_ragged
+        )
+        rtl_off_start = b.masked_global_load(
+            cu_q, seq_idx, rtl_ragged, rtl_zero, dtype=I32, align=4
+        )
+        rtl_off_stop = b.masked_global_load(
+            cu_q, b.add(seq_idx, rtl_one), rtl_ragged, rtl_zero, dtype=I32, align=4
+        )
+        rtl_slq = b.masked_global_load(
+            rtl["seq_lens_q_ptr"], seq_idx, rtl_has_slq, rtl_zero, dtype=I32, align=4
+        )
+        q_len_dense = b.select(
+            rtl_has_slq, b.smin(q_uniform_len, rtl_slq), q_uniform_len
+        )
+        q_len_ragged = b.select(
+            rtl_has_slq, rtl_slq, b.sub(rtl_off_stop, rtl_off_start)
+        )
+        cur_batch_q_len = b.select(rtl_dense, q_len_dense, q_len_ragged)
+        q_block_start_idx = b.select(
+            rtl_dense,
+            b.mul(seq_idx, rtl_bps),
+            b.add(b.div(rtl_off_start, rtl_bq), seq_idx),
+        )
+        q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
+        seq_len = b.global_load_i32(seq_lens, seq_idx)
         context_len = b.sub(seq_len, cur_batch_q_len)
+        # Per-sequence Q/O base terms in i64 (ragged offsets times the
+        # multiplier can pass 2^31 elements); within-sequence terms stay i32.
+        rtl_sb64 = b.zext(b.select(rtl_dense, seq_idx, rtl_off_start), I64)
+        rtl_elem_bytes = b.const_i64(2)
+        rtl_q_ptr = b.global_ptr_add(
+            query,
+            b.mul(b.mul(rtl_sb64, b.zext(rtl["q_seq_stride"], I64)), rtl_elem_bytes),
+        )
+        rtl_o_ptr = b.global_ptr_add(
+            output,
+            b.mul(b.mul(rtl_sb64, b.zext(rtl["o_seq_stride"], I64)), rtl_elem_bytes),
+        )
+        cu_q_start = None
+    else:
+        seq_idx = binary_search_seq_idx(
+            b,
+            cu_q,
+            q_block_global_idx,
+            num_seqs_p,
+            block_q=BLOCK_Q,
+            iterations=spec.binary_search_iters,
+        )
+        cu_q_start = b.global_load_i32(cu_q, seq_idx)
+        cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
+        cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
+        q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
+        q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
+        seq_len = b.global_load_i32(seq_lens, seq_idx)
+        if spec.causal_top_left:
+            context_len = b.const_i32(0)
+        else:
+            context_len = b.sub(seq_len, cur_batch_q_len)
 
     # Right bound of the band (see the spec field). ``_upper_ok`` is the per-score
     # compare ``col <= d + right_bound`` (``None`` when unbounded); every site that
@@ -1355,8 +1611,15 @@ def build_unified_attention_2d_tiled(
         return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
-    with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
-        b.ret()
+    if RTL:
+        # Inside the grid-stride loop an empty q-block skips its body instead
+        # of returning. The condition is CTA-uniform, so the barriers inside
+        # stay convergent. Closed after the epilogue.
+        rtl_live_block = b.scf_if(b.cmp_lt(qb_start_pos, cur_batch_q_len))
+        rtl_live_block.__enter__()
+    else:
+        with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
+            b.ret()
 
     # ---------------- LDS layout ----------------
     # Q is loaded once. K and V are double-buffered [2, T, HD] in natural
@@ -1660,7 +1923,7 @@ def build_unified_attention_2d_tiled(
     # stays the same as the default bf16 path -- just softmax_scale /
     # ln(2) -- and we do NOT fold k_scale into qk_scale here.
     pv_fp8_scale = b.fdiv(v_scale_p, b.const_f32(240.0)) if FP8_MFMA_PV else None
-    sw_const = b.const_i32(int(SLIDING_WINDOW))
+    sw_const = rtl["sliding_window"] if RTL else b.const_i32(int(SLIDING_WINDOW))
     z8 = b.zero_vec(dtype, 8)
 
     # ---------------- Q -> LDS (cooperative vec8 chunks) ----------------
@@ -1683,6 +1946,39 @@ def build_unified_attention_2d_tiled(
         lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
     )
+
+    def _num_qh() -> Value:
+        """Query-head bound for the per-row ``qh < Hq`` masks."""
+        return rtl["num_query_heads"] if RTL else b.const_i32(NUM_QH)
+
+    def _q_row_off(pos: Value, head: Value) -> Value:
+        """Element offset of Q row ``(pos, head)`` from ``q_base_ptr``.
+
+        Runtime layout: the per-sequence term is already folded into the i64
+        ``rtl_q_ptr``; the in-sequence terms use the runtime strides.
+        """
+        if RTL:
+            return b.add(
+                b.mul(pos, rtl["q_tok_stride"]), b.mul(head, rtl["q_head_stride"])
+            )
+        off, _ = q_desc.offset(
+            b, token=b.add(cu_q_start, pos), head=head, dim=b.const_i32(0)
+        )
+        return off
+
+    def _o_row_off(pos: Value, head: Value) -> Value:
+        """Element offset of O row ``(pos, head)`` from ``o_base_ptr``."""
+        if RTL:
+            return b.add(
+                b.mul(pos, rtl["o_tok_stride"]), b.mul(head, rtl["o_head_stride"])
+            )
+        off, _ = q_desc.offset(
+            b, token=b.add(cu_q_start, pos), head=head, dim=b.const_i32(0)
+        )
+        return off
+
+    q_base_ptr = rtl_q_ptr if RTL else query
+    o_base_ptr = rtl_o_ptr if RTL else output
     # direct-reg: skip the cooperative Q->LDS staging store entirely.
     # The per-lane Q32 MFMA operand is gathered straight from global in the
     # QK-operand block below (Q_lds is None).
@@ -1696,7 +1992,7 @@ def build_unified_attention_2d_tiled(
         )
         _qmask_inner = b.land(
             b.cmp_lt(q_pos_t, cur_batch_q_len),
-            b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_t, _num_qh()),
         )
         qmask_t = (
             b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
@@ -1705,13 +2001,8 @@ def build_unified_attention_2d_tiled(
         )
         q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
         qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
-        q_off_base, _ = q_desc.offset(
-            b,
-            token=b.add(cu_q_start, q_pos_safe),
-            head=qh_safe,
-            dim=b.const_i32(0),
-        )
-        v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
+        q_off_base = _q_row_off(q_pos_safe, qh_safe)
+        v8 = b.global_load_vN(q_base_ptr, b.add(q_off_base, Q_col), dtype, 8, align=16)
         # When Q is aliased to K_lds (single shared scratch), the store
         # goes through ``[buf, row_in_buf, col]`` indexing of the K_lds
         # 3D buffer. ``buf = Q_row // T`` selects which K_lds slot,
@@ -1750,7 +2041,7 @@ def build_unified_attention_2d_tiled(
         max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
-    if SLIDING_WINDOW > 0:
+    if SW_ACTIVE:
         qpos_hi_raw = b.add(qb_start_pos, b.const_i32(bm1_div_nqk))
         cur_q_minus1 = b.sub(cur_batch_q_len, b.const_i32(1))
         qpos_hi = b.select(
@@ -2085,8 +2376,69 @@ def build_unified_attention_2d_tiled(
     # lookup with the total block-table footprint so OOB lookups
     # return ``0`` (a guaranteed-valid block id). Downstream causal /
     # in_prefix masks already discard the bogus tokens.
-    block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
-    if FAST_PAGED_KV_DESC:
+    if RTL:
+        # Runtime layout: only the entries ``< ceil(seq_len / BS)`` of this
+        # sequence's row are ever read (masked lookups return block 0, whose
+        # loads are then masked off by the per-token voffset guard).
+        block_table_max_idx = b.to_sgpr_u32(
+            b.add(
+                seq_base,
+                b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS)),
+            )
+        )
+    else:
+        block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
+    if RTL:
+        # Runtime-stride paged KV bytes. The block term is i64 (a per-block
+        # buffer base; caches are many GiB); token/head/dim stay in the i32
+        # voffset, bounded by ``kv_block_span_bytes``. K and V share strides.
+        # One paged block per tile (T == BS), so ``tile_idx`` is the logical
+        # block index.
+        paged_kv_desc = DynamicTensorDescriptor.create(
+            "paged_kv_bytes_rtl",
+            coord_names=("physical_block", "token", "kv_head", "dim"),
+            strides=[
+                b.mul(b.zext(rtl["kv_block_stride"], I64), b.const_i64(KV_BYTES)),
+                b.mul(rtl["kv_tok_stride"], b.const_i32(KV_BYTES)),
+                b.mul(rtl["kv_head_stride"], b.const_i32(KV_BYTES)),
+                b.const_i32(KV_BYTES),
+            ],
+        ).transform(
+            indirect(
+                "tile_idx",
+                into="physical_block",
+                table=block_tables,
+                base=seq_base,
+                max_idx=block_table_max_idx,
+            ),
+            unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
+        )
+        rtl_kv_span = rtl["kv_block_span_bytes"]
+
+        def _rtl_kv_call(
+            src: Value, kv_tile_idx: Value, linear_half: Value
+        ) -> Tuple[Value, Value]:
+            """Per-block buffer resource and voffset for one async-DMA call.
+
+            Lanes whose token is at or past ``seq_len`` get an out-of-range
+            voffset, so the DMA writes zeros without touching memory.
+            """
+            base_i64, voff, _ = paged_kv_desc.offset_i64_split(
+                b,
+                "physical_block",
+                tile_idx=kv_tile_idx,
+                linear_half=linear_half,
+                kv_head=kv_head_idx,
+            )
+            tok = b.add(
+                b.mul(kv_tile_idx, b.const_i32(T)),
+                b.div(linear_half, b.const_i32(HD)),
+            )
+            voff = b.select(b.cmp_lt(tok, seq_len), voff, rtl_kv_span)
+            rsrc = b.buffer_rsrc(b.global_ptr_add(src, base_i64), rtl_kv_span)
+            return rsrc, voff
+
+    elif FAST_PAGED_KV_DESC:
         assert (BS, T, HD, NUM_KV, KV_BYTES, NUM_WARPS, kv_calls_per_tile) == (
             32,
             64,
@@ -2212,7 +2564,9 @@ def build_unified_attention_2d_tiled(
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
+                if RTL:
+                    k_rsrc, voff = _rtl_kv_call(key, kv_tile_idx, linear_half)
+                elif I64_KV_ADDR:
                     base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                         b,
                         "physical_block",
@@ -2270,7 +2624,9 @@ def build_unified_attention_2d_tiled(
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
+                if RTL:
+                    v_rsrc, voff = _rtl_kv_call(value, kv_tile_idx, linear_half)
+                elif I64_KV_ADDR:
                     base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                         b,
                         "physical_block",
@@ -3062,7 +3418,7 @@ def build_unified_attention_2d_tiled(
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         _row_ok_inner = b.land(
             b.cmp_lt(qp_r, cur_batch_q_len),
-            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_r, _num_qh()),
         )
         row_ok = (
             b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
@@ -3558,7 +3914,7 @@ def build_unified_attention_2d_tiled(
                                 causal_ok = _upper_ok(col_abs, causal_lim)
                                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                                 m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
-                                if SLIDING_WINDOW > 0:
+                                if SW_ACTIVE:
                                     dist = b.sub(causal_lim, col_abs)
                                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                             s_raw = b.vec_extract(st_regs[n], reg)
@@ -3813,7 +4169,7 @@ def build_unified_attention_2d_tiled(
                     causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                     m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
-                    if SLIDING_WINDOW > 0:
+                    if SW_ACTIVE:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                     s_raw = b.vec_extract(S32_n[n], reg)
@@ -3888,7 +4244,7 @@ def build_unified_attention_2d_tiled(
                     causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                     m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
-                    if SLIDING_WINDOW > 0:
+                    if SW_ACTIVE:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                     s_raw = b.vec_extract(S_n[atom][n], in_atom)
@@ -4697,19 +5053,14 @@ def build_unified_attention_2d_tiled(
     )
     _op_mask_inner = b.land(
         b.cmp_lt(op_pos, cur_batch_q_len),
-        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+        b.cmp_lt(op_qh, _num_qh()),
     )
     op_mask = (
         b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))
         if VALID_ROWS < BLOCK_M
         else _op_mask_inner
     )
-    out_base, _ = q_desc.offset(
-        b,
-        token=b.add(cu_q_start, op_pos),
-        head=op_qh,
-        dim=b.const_i32(0),
-    )
+    out_base = _o_row_off(op_pos, op_qh)
 
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE
@@ -4742,12 +5093,18 @@ def build_unified_attention_2d_tiled(
             out_col = b.add(b.const_i32(stripe * OUT_STRIPE_COLS), col_in_stripe)
             with b.scf_if(op_mask):
                 b.global_store_vN(
-                    output, b.add(out_base, out_col), v8h, OUT_VEC, align=16
+                    o_base_ptr, b.add(out_base, out_col), v8h, OUT_VEC, align=16
                 )
         # ---- stage 3: sync so the next stripe can overwrite Acc_lds ----
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    if RTL:
+        rtl_live_block.__exit__(None, None, None)
+        # Barrier between grid-stride iterations: the next q-block reuses the
+        # same LDS (Q staging aliases K_lds; Acc_lds is rewritten).
+        b.sync()
+        rtl_qb_loop.__exit__(None, None, None)
     return b.kernel
 
 
@@ -4764,8 +5121,13 @@ def supports_tiled_2d_spec(
     on them; the ones the spec carries are forwarded anyway so a later rule on
     them judges the spec, not the defaults. ``use_mfma_32x32x8``,
     ``use_conflict_free_v_store``, ``use_k_sliced_ring`` and ``use_d256_fast`` are
-    not gfx950 spec fields.
+    not gfx950 spec fields. A ``runtime_layout`` spec is additionally held to
+    the runtime-layout restrictions (``_runtime_layout_reject_reason``).
     """
+    if spec.runtime_layout:
+        reason = _runtime_layout_reject_reason(spec)
+        if reason is not None:
+            return False, reason
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
         head_size=spec.head_size,

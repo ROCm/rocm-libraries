@@ -1787,6 +1787,77 @@ class DynamicTensorDescriptor(TensorDescriptor):
             off = b.const_i32(0)
         return off, valid
 
+    def offset_i64_split(
+        self,
+        b: IRBuilder,
+        base_coord: str,
+        **upper_values: Value,
+    ) -> Tuple[Value, Value, Optional[Value]]:
+        """Runtime-stride form of :meth:`TensorDescriptor.offset_i64_split`.
+
+        ``base_coord``'s term is ``zext(coord) * sext(stride)`` in i64 and its
+        coord is pinned to an SGPR (it must be wave-uniform); the other terms
+        are summed in i32.
+        """
+        coords = self._run_chain(b, upper_values)
+        base_i64: Optional[Value] = None
+        within: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride_v in zip(self.base_names, self.dynamic_strides):
+            if name not in coords:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
+                )
+            c = coords[name]
+            valid = _and(b, valid, c.valid)
+            if name == base_coord:
+                base_val = b.to_sgpr_u32(c.value)
+                stride64 = stride_v if stride_v.type == I64 else b.sext(stride_v, I64)
+                base_i64 = b.mul(b.zext(base_val, I64), stride64)
+            else:
+                term = b.mul(c.value, stride_v)
+                within = term if within is None else b.add(within, term)
+        if base_i64 is None:
+            raise ValueError(
+                f"offset_i64_split: base_coord {base_coord!r} not among "
+                f"base coords {list(self.base_names)}"
+            )
+        if within is None:
+            within = b.const_i32(0)
+        return base_i64, within, valid
+
+    def offset_i64(
+        self,
+        b: IRBuilder,
+        i64_coord: str,
+        **upper_values: Value,
+    ) -> Tuple[Value, Optional[Value]]:
+        """Runtime-stride form of :meth:`TensorDescriptor.offset_i64`.
+
+        ``i64_coord``'s term is ``zext(coord) * sext(stride)`` in i64; the
+        other i32 terms are zero-extended and summed in i64. Not scalarised,
+        so the coord may vary per lane.
+        """
+        coords = self._run_chain(b, upper_values)
+        off: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride_v in zip(self.base_names, self.dynamic_strides):
+            if name not in coords:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
+                )
+            c = coords[name]
+            valid = _and(b, valid, c.valid)
+            if name == i64_coord:
+                stride64 = stride_v if stride_v.type == I64 else b.sext(stride_v, I64)
+                term = b.mul(b.zext(c.value, I64), stride64)
+            else:
+                term = b.zext(b.mul(c.value, stride_v), I64)
+            off = term if off is None else b.add(off, term)
+        if off is None:
+            off = b.const_i64(0)
+        return off, valid
+
     @classmethod
     def create(
         cls,
