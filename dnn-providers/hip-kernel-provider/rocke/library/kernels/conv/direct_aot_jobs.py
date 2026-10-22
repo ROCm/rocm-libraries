@@ -28,6 +28,7 @@ from kernels.conv.direct_variants import (
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_wgrad_fold_knobs,
+    dgrad_rtc_vgprs,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
     make_direct_spec as make_spec,
@@ -637,17 +638,6 @@ def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
     return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
-
-
-def dgrad_rtc_vgprs(knobs: dict, KH: int, KW: int) -> int:
-    """Registers per lane the compute pass of a runtime-channel dgrad binary
-    holds in its weights (preloading splits only) and accumulators."""
-    load_vec = 8 if knobs["fold_k32"] else 4
-    acc = (knobs["block_q"] // knobs["waves_q"] // 16) * knobs["m_tiles"] * KH * 4
-    if knobs["waves_k"] == 1:
-        return acc
-    per_wave = knobs["k_atoms"] // knobs["waves_k"]
-    return acc + KH * KW * per_wave * knobs["m_tiles"] * (load_vec // 2)
 
 
 def _knob_grid(

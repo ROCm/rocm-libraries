@@ -19,7 +19,10 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
 from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.conv.direct_variants import direct_mfma_knobs_reason
+from kernels.conv.direct_variants import (
+    direct_mfma_knobs_reason,
+    direct_spec_for_problem,
+)
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
@@ -1100,6 +1103,44 @@ def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
     assert direct_mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
 
 
+def test_dgrad_rtc_grid_skips_wide_q_heavy_preloads(jobs):
+    """Runtime-channel preloading binaries with two Q subtiles per wave past
+    the register cut computed a wrong dX on gfx950; none is built, and the
+    plan check refuses them on an existing cache too."""
+    built = [
+        json.loads(j.identity.knobs)
+        for j in jobs
+        if j.identity.algorithm == "direct_dgrad_mfma_rtc"
+    ]
+    assert any(k["block_q"] == 32 and k["waves_k"] > 1 for k in built)
+    for k in built:
+        if k["block_q"] == 32 and k["waves_k"] > 1:
+            assert dks.dgrad_rtc_vgprs(k, 3, 3) <= 216, k
+
+    # The two binaries that failed verification on a dense 16 -> 512 bf16
+    # dgrad are refused for it; their block_q 16 twins serve it.
+    problem = _problem(groups=1, cpg=16, kpg=512, dtype="bf16")
+    for block_h in (8, 16):
+        knobs = dict(
+            block_q=32,
+            block_groups=1,
+            block_h=block_h,
+            waves_q=1,
+            waves_k=2,
+            runtime_k_loop=False,
+            persistent_grid=False,
+            fold_k32=True,
+            k_atoms=16,
+            m_tiles=1,
+        )
+        assert "wrong dX" in direct_mfma_knobs_reason(problem, knobs)
+        spec, why = direct_spec_for_problem(
+            "direct_dgrad_mfma_rtc", problem, knobs, _ARCH
+        )
+        assert spec is None and "wrong dX" in why
+        assert direct_mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
+
+
 @pytest.mark.parametrize(
     "direction,problem",
     [
@@ -1300,6 +1341,7 @@ def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
             or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
             or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
             or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)
+            or direct_mfma_knobs_reason(problem, knobs)
         )
         assert why, f"JIT config {knobs} has no cached binary"
 

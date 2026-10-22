@@ -84,6 +84,10 @@ _HELPERS = (
 # accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
 # file, leaving the rest for the LDS fragments and addressing.
 _MFMA_PRELOAD_VGPR_BUDGET = 384
+# The same estimate's cut for a runtime-channel preloading binary whose wave
+# covers two 16-column Q subtiles (block_q 32): above it the binary computed a
+# wrong dX on gfx950 (see direct_mfma_knobs_reason).
+_RTC_WIDE_Q_PRELOAD_VGPR_BUDGET = 216
 
 
 def make_direct_spec(variant: str, problem, knobs: dict):
@@ -234,6 +238,17 @@ def make_direct_spec(variant: str, problem, knobs: dict):
     raise ValueError(f"unknown direct conv variant {variant!r}")
 
 
+def dgrad_rtc_vgprs(knobs: dict, KH: int, KW: int) -> int:
+    """Registers per lane the compute pass of a runtime-channel dgrad binary
+    holds in its weights (preloading splits only) and accumulators."""
+    load_vec = 8 if knobs["fold_k32"] else 4
+    acc = (knobs["block_q"] // knobs["waves_q"] // 16) * knobs["m_tiles"] * KH * 4
+    if knobs["waves_k"] == 1:
+        return acc
+    per_wave = knobs["k_atoms"] // knobs["waves_k"]
+    return acc + KH * KW * per_wave * knobs["m_tiles"] * (load_vec // 2)
+
+
 def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
     """Constraints of the MFMA dgrad pipeline that its spec cannot see.
 
@@ -248,6 +263,16 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
     produced a kernel that silently computes the wrong dX (correct at -O1
     and with ``-amdgpu-spill-vgpr-to-agpr=0``). No spec under the budget
     spills, so the cut costs no kernel that runs out of registers cleanly.
+
+    The runtime-channel pipeline (knobs ``k_atoms`` / ``m_tiles``) has a
+    narrower cut where a wave covers two Q subtiles (block_q 32): a
+    verification of every preloading binary of its gfx950 grid, both dtypes,
+    on the dense problem of its tile counts found wrong dX only there, on the
+    binaries above :data:`_RTC_WIDE_Q_PRELOAD_VGPR_BUDGET` -- deterministic,
+    whether or not the binary spills, and gone at -O1 for most of them, so a
+    code generation fault rather than a wrong emission. The block_q 16 binary
+    of the same tile counts was correct everywhere and serves the same
+    problems.
     """
     if knobs["fold_k32"]:
         if problem.kpg % 32:
@@ -276,6 +301,15 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
                 f"preloaded weights ({weights}) + accumulators ({accumulators}) "
                 f"VGPRs > {_MFMA_PRELOAD_VGPR_BUDGET}: the kernel would spill"
             )
+        if "k_atoms" in knobs and q_subtiles > 1:
+            vgprs = dgrad_rtc_vgprs(knobs, problem.KH, problem.KW)
+            if vgprs > _RTC_WIDE_Q_PRELOAD_VGPR_BUDGET:
+                return (
+                    f"runtime-channel preload of {vgprs} VGPRs over "
+                    f"{q_subtiles} Q subtiles > "
+                    f"{_RTC_WIDE_Q_PRELOAD_VGPR_BUDGET}: wrong dX on gfx950 "
+                    "(take block_q 16)"
+                )
     return None
 
 
