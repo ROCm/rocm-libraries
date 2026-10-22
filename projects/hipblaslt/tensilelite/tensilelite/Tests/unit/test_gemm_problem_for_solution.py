@@ -109,7 +109,7 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
     "key,value",
     [
         ("tileProcessingStrategy", "StreamK"),
-        ("tileProcessingStrategy", "Persistent"),
+        ("tileProcessingStrategy", "DataParallel"),
         ("globalSplitU", -1),
         ("adaptiveGemmGSUA", 1),
         ("globalSplitU", 0),
@@ -131,11 +131,43 @@ def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key,
             load_library_metadata(tmp_path, target="gfx942").get_problem(17)
 
 
-@pytest.mark.parametrize("strategy", ["StreamK", "Persistent"])
+@pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
 def test_zero_split_for_deferred_scheduling_is_unsupported(tmp_path, strategy):
     # Packaged persistent solutions use zero to disable fixed split-K.
     record = solution(split=0)
     record["sizeMapping"]["tileProcessingStrategy"] = strategy
+    write_shard(tmp_path, [record])
+    with pytest.raises(UnsupportedSolution) as caught:
+        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"tileProcessingStrategy": "Persistent"},
+        {"tileProcessingStrategy": "Streamk"},
+        {"workAssignment": "typo"},
+        {"tileProcessingStrategy": "DataParallel", "workAssignment": "Hybrid"},
+        {"streamK": 2},
+        {"streamK": 3, "tileProcessingStrategy": "None"},
+    ],
+)
+def test_invalid_execution_policy_is_an_error(tmp_path, mapping):
+    record = solution()
+    record["sizeMapping"].update(mapping)
+    write_shard(tmp_path, [record])
+    with pytest.raises(ValueError, match="Solution 17"):
+        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+
+
+@pytest.mark.parametrize(
+    "mode,force,strategy",
+    [(3, 0, "StreamK"), (4, 0, "StreamK"), (5, 0, "StreamK"), (3, 1, "DataParallel")],
+)
+def test_legacy_persistent_scheduling_is_unsupported(tmp_path, mode, force, strategy):
+    record = solution(split=0)
+    record["sizeMapping"].update(streamK=mode, streamKForceDPOnly=force)
     write_shard(tmp_path, [record])
     with pytest.raises(UnsupportedSolution) as caught:
         load_library_metadata(tmp_path, target="gfx942").get_problem(17)
