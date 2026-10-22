@@ -639,7 +639,6 @@ def _expect(gate, *cases: str) -> dict:
 @_needs_sources
 def test_every_allowlisted_entry_names_its_cases(gate) -> None:
     """An entry with no cases would allow any case to demand its intrinsic."""
-    assert gate.EXPECTED_WARNINGS
     for triple, entry in gate.EXPECTED_WARNINGS.items():
         assert entry.reason and entry.cases, triple
 

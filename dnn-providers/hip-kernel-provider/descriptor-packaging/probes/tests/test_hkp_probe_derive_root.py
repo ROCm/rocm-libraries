@@ -76,13 +76,30 @@ def _embedded(name, ukd_id=None):
     return _ukd(name, ks, ukd_id=ukd_id)
 
 
+# The packer requires these three to be UUIDs: the UED's id, the KMD it names as its
+# metadata, and the UHD its role map binds.
+_UED_ID = "00000000-0000-4000-8000-0000000000e1"
+_KMD_ID = "00000000-0000-4000-8000-0000000000e2"
+_UHD_ID = "00000000-0000-4000-8000-0000000000e3"
+
 # The generic descriptors every KDP of _write_root references.
 _GENERICS = {
     "x.umd.json": {"name": "m", "scope": "kernel", "match_symbol": "m"},
-    "x.ued.json": {"name": "t:e", "heuristic": "uhd", "metadata": "kmd"},
+    "x.ued.json": {
+        "id": _UED_ID,
+        "name": "t:e",
+        "sort_kernel_catalog": {"default": _UHD_ID},
+        "metadata": _KMD_ID,
+    },
     "x.udd.json": {"name": "d", "dispatch_symbol": "d"},
-    "x.uhd.json": {"name": "h", "kind": "native", "payload": "h"},
-    "x.kmd.json": {"name": "k", "fields": []},
+    "x.uhd.json": {
+        "id": _UHD_ID,
+        "name": "h",
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": "h"},
+    },
+    "x.kmd.json": {"id": _KMD_ID, "name": "k", "fields": []},
 }
 
 
@@ -94,7 +111,7 @@ def _write_root(root: Path, ukds, kdp_arch=("gfx950",), kdp_file="x.kdp.json"):
         "name": "x",
         "arch": list(kdp_arch) if kdp_arch is not None else [],
         "matchers": ["umd"],
-        "engine": "ued",
+        "engine": _UED_ID,
         "dispatch": "udd",
         "kernelDescriptors": list(ukds),
     }
@@ -555,7 +572,9 @@ def test_rederive_follows_source_changes(tmp_path):
     (out / "stale_dir").mkdir()
     (out / "stale_dir" / "f.json").write_text("{}")
     _write_root(src, [_rocke("b"), _rocke("0first")])
-    kmd = '{"version": "1.0", "id": "kmd", "name": "k2", "fields": []}\n'
+    kmd = (
+        json.dumps({"version": "1.0", "id": _KMD_ID, "name": "k2", "fields": []}) + "\n"
+    )
     (src / "x.kmd.json").write_text(kmd)
     expect = _derive(src, "gfx950", out)
     assert [e["name"] for e in expect] == ["0first"]

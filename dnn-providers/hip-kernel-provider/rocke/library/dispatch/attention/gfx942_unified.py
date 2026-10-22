@@ -32,6 +32,7 @@ from .common import (
     _selector_matches,
 )
 from .candidate import make_tuning_candidate
+from .tuning_specs import NUM_SEGMENTS
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -81,8 +82,8 @@ def _variants():
     for tile in ("1x", "half"):
         # ``half`` is translated below by the explicit builder through a
         # concrete token; use per-block variants because it is only legal for
-        # block sizes >=32.
-        for segments in (8, 16, 32, 64, 128):
+        # block sizes >=32. Segment count 0 is the dispatcher's split rule's.
+        for segments in NUM_SEGMENTS + (0,):
             yield AttentionGeometryVariant(
                 arch="gfx942",
                 path="3d",
