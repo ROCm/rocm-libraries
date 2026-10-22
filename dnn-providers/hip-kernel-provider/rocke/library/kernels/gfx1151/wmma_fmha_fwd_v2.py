@@ -37,7 +37,9 @@ power-of-two ``page_block_size``) --
 and OCP E4M3FN K/V (``k_scale``, ``v_scale``). Packed layouts take Q / O as
 [total_q, Hq, D] and LSE per packed row; ``batch`` is the sequence count and
 ``seqlen_q`` / ``seqlen_k`` are the maxima (they size the grid; the
-per-sequence lengths come from the offsets). Positions (causal diagonal,
+per-sequence lengths come from the offsets). A paged ``seqused_k`` entry is
+clamped to ``seqlen_k``, which must not exceed the keys one ``block_table``
+row maps (its width times ``page_block_size``). Positions (causal diagonal,
 ALiBi, QQ-bias, the bias query row) are sequence-local.
 
 Two query-side options refine the packed layouts. ``dense_q`` (paged only)
@@ -493,7 +495,10 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
             k_row0 = b.global_load_i32(p["cu_seqlens_k"], batch)
             sk = b.sub(b.global_load_i32(p["cu_seqlens_k"], nxt), k_row0)
         else:
-            sk = b.global_load_i32(p["seqused_k"], batch)
+            # seqlen_k bounds the keys a block_table row maps (the caller passes
+            # a bound <= its width * page); a longer seqused_k is clamped so
+            # the page lookup stays within this sequence's row.
+            sk = b.smin(b.global_load_i32(p["seqused_k"], batch), sk)
 
     def slice_rsrc(
         ptr, tensor, head_idx, rows, width, elem_bytes, enabled=None, row0=None

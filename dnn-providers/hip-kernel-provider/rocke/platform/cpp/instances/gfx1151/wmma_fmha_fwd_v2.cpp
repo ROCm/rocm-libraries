@@ -429,7 +429,13 @@ rocke_status_t
             sk = rocke_b_sub(b, k_end, k_row0);
         }
         else
-            sk = rocke_b_global_load_i32(b, param("seqused_k"), batch, 4);
+        {
+            /* seqlen_k bounds the keys a block_table row maps (the caller passes
+             * a bound <= its width * page); a longer seqused_k is clamped so
+             * the page lookup stays within this sequence's row. */
+            rocke_value_t* used = rocke_b_global_load_i32(b, param("seqused_k"), batch, 4);
+            sk = rocke_b_smin(b, used, sk);
+        }
     }
 
     /* Resource over one (batch, head) slice: (rows - 1) * token stride +
