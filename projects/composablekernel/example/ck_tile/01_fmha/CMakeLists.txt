@@ -238,7 +238,7 @@ if(FMHA_BWD_GFX1250_D128_BF16_MAX_ILP AND "gfx1250" IN_LIST INST_TARGETS)
   if(HAS_FMHA_BWD_MAX_ILP)
     foreach(bwd_blob IN LISTS FMHA_BWD_GEN_BLOBS)
       get_filename_component(bwd_blob_name "${bwd_blob}" NAME)
-      if(bwd_blob_name MATCHES "^fmha_bwd_d128_bf16_batch_.*_maxq0_tdm_npad_nbias_ndbias_(nmask|mask)_ndropout_ndeterministic_ntrload_gfx125\\.cpp$")
+      if(bwd_blob_name MATCHES "^fmha_bwd_d128_bf16_batch_.*_maxq0_tdm_npad_nbias_ndbias_(nmask|mask)_ndropout_ndeterministic_(ntrload|ntl)_gfx125\\.cpp$")
         set_property(SOURCE "${bwd_blob}" APPEND PROPERTY COMPILE_OPTIONS
           "-mllvm" "-amdgpu-sched-strategy=max-ilp")
         if(bwd_blob_name MATCHES "_nmask_")

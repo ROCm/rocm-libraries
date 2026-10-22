@@ -89,6 +89,20 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
+    // The hand-tuned schedule below (deferred dQ atomics, K-sliced gemm_0/1/3,
+    // split dS join, metadata-first TDM issue) was tuned for the unpadded
+    // 64x128 d128 tile without bias/dropout/determinism. Every other instance
+    // (padded head dims such as d80/d96, bias, dropout, ...) keeps the
+    // original schedule: the deferred dQ tile lengthens live ranges there.
+    static constexpr bool kTunedSched =
+        BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN0 == 128 &&
+        BlockFmhaShape::kQKHeaddim == 128 && BlockFmhaShape::kVHeaddim == 128 &&
+        !kPadHeadDimQ && !kPadHeadDimV && !kIsDeterministic &&
+        !FmhaDropout::IsDropout && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+        !kHasBiasGrad;
+    static constexpr bool kMaskTuned   = kTunedSched && FmhaMask::IsMasking;
+    static constexpr bool kNoMaskTuned = kTunedSched && !FmhaMask::IsMasking;
+
     static_assert(!kUseTrLoad, "This pipeline does not use trload!");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
@@ -758,7 +772,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         // in order, and all ring waits release complete tiles. Permuting
         // operands within a tile does not change those wait thresholds.
         auto issue_qdo_tile = [&](auto j, index_t tile) {
-            if constexpr(FmhaMask::IsMasking)
+            if constexpr(kMaskTuned)
             {
             load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
             load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
@@ -908,7 +922,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                          kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
                          BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
                          BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
-                         !kPadHeadDimQ && !kIsDeterministic &&
+                         !kPadHeadDimQ && !kIsDeterministic && kTunedSched &&
                          !FmhaDropout::IsDropout &&
                          decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                              memory_operation_enum::atomic_add)
@@ -959,7 +973,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                          kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
                          BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
                          BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
-                         !kPadHeadDimQ && !kIsDeterministic &&
+                         !kPadHeadDimQ && !kIsDeterministic && kTunedSched &&
                          !FmhaDropout::IsDropout &&
                          decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                              memory_operation_enum::atomic_add))
@@ -1080,7 +1094,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             {
                 if constexpr(kDVInReg)
                 {
-                    if constexpr(decltype(gemm_1)::KPerSubTile == 2)
+                    if constexpr(kTunedSched && decltype(gemm_1)::KPerSubTile == 2)
                     {
                         gemm_1.template RunKSlice<0>(dv_acc, pt_reg_tensor, dot_reg_tensor);
                         qt_reg_tensor = load_tile_transpose(qt_rd_cur);
@@ -1098,7 +1112,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 }
             }
 
-            if constexpr(!(kDVInReg && decltype(gemm_1)::KPerSubTile == 2))
+            if constexpr(!(kTunedSched && kDVInReg && decltype(gemm_1)::KPerSubTile == 2))
                 qt_reg_tensor = load_tile_transpose(qt_rd_cur);
 
             // STAGE 4, OGrad@V Gemm2
@@ -1168,11 +1182,20 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
+            if constexpr(!kTunedSched)
+            {
+            // Original schedule for all non-tuned instances.
+            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
             if constexpr(kHasBiasGrad)
             {
+                // SGrad and BiasGrad use the same address in LDS.
                 block_sync_lds();
             }
-            if constexpr(FmhaMask::IsMasking)
+            store_tile(ds_lds_window, dst_reg_tensor);
+            block_sync_lds();
+            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
+            }
+            else if constexpr(kMaskTuned)
             {
             store_tile(ds_lds_window, dst_reg_tensor);
             // Both LDS producers retire before any wave signals arrival.
@@ -1200,14 +1223,14 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             block_sync_lds();
             }
             auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
-            if constexpr(!FmhaMask::IsMasking)
+            if constexpr(!kMaskTuned)
             {
             q_reg_tensor       = load_tile(q_rd_dst);
             lse                = load_tile(lse_rd_dst);
             }
-            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+            if constexpr(kMaskTuned && decltype(gemm_3)::KPerSubTile == 2)
                 __builtin_amdgcn_sched_barrier(0);
-            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+            if constexpr(kMaskTuned && decltype(gemm_3)::KPerSubTile == 2)
                 gemm_3.template RunKSlice<1>(dk_acc, dst_reg_tensor, qt_reg_tensor);
             // STAGE7 SGrad@K^T Gemm4
             auto dq_acc = QGradBlockTileType{};
@@ -1222,13 +1245,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                       sequence<0, i_k4 * kK4>{},
                                       sequence<kM0, (i_k4 + 1) * kK4>{}),
                        kt_reg_tensor_slice);
-                if constexpr(FmhaMask::IsMasking && i_k4 == 1)
+                if constexpr(kMaskTuned && i_k4 == 1)
                 {
                     q_reg_tensor = load_tile(q_rd_dst);
                     lse = load_tile(lse_rd_dst);
                     __builtin_amdgcn_sched_barrier(0);
                 }
-                if constexpr(i_k4 == (FmhaMask::IsMasking ? 1 : 0))
+                if constexpr(kTunedSched && i_k4 == (kMaskTuned ? 1 : 0))
                 {
                     do_reg_tensor = load_tile(do_rd_dst);
                     d = load_tile(d_rd_dst);
@@ -1236,13 +1259,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 }
             });
 
-            if constexpr(k4_loops <= (FmhaMask::IsMasking ? 1 : 0))
+            if constexpr(!kTunedSched || k4_loops <= (kMaskTuned ? 1 : 0))
             {
                 do_reg_tensor = load_tile(do_rd_dst);
                 d = load_tile(d_rd_dst);
             }
 
-            if constexpr(FmhaMask::IsMasking && k4_loops <= 1)
+            if constexpr(kMaskTuned && k4_loops <= 1)
             {
                 q_reg_tensor = load_tile(q_rd_dst);
                 lse = load_tile(lse_rd_dst);
@@ -1257,8 +1280,25 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             {
                 tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
             }
-            pending_dq = FoldQGradForAtomic(dq_acc);
-            pending_dq_valid = true;
+            if constexpr(kTunedSched)
+            {
+                pending_dq       = FoldQGradForAtomic(dq_acc);
+                pending_dq_valid = true;
+            }
+            else
+            {
+                const auto dq_out = FoldQGradForAtomic(dq_acc);
+                if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                             memory_operation_enum::set)
+                {
+                    store_tile(dq_dram_window, dq_out);
+                }
+                else
+                {
+                    update_tile(dq_dram_window, dq_out);
+                }
+                move_tile_window(dq_dram_window, {kM0, 0});
+            }
 
             i_total_loops += 1;
             seqlen_q_step += kM0;
@@ -1333,7 +1373,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                         : lse_lds_read_windows.at(number<kB>{}),
                     sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
                     [&] {
-                        if constexpr(FmhaMask::IsMasking)
+                        if constexpr(kMaskTuned)
                         {
                         load_tile_tdm(tdm_config_lse,
                                       sec ? lse_lds_write_windows.at(number<0>{})
