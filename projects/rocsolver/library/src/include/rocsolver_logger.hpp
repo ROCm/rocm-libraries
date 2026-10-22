@@ -114,7 +114,10 @@ ROCSOLVER_BEGIN_NAMESPACE
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x * block_.y * block_.z) <= 1024);                                          \
-        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        bool const isvalid_threads = (((long)grid_.x) * ((long)grid_.y) * ((long)grid_.z)           \
+                                          * ((long)block_.x) * ((long)block_.y) * ((long)block_.z)  \
+                                      <= INT32_MAX);                                                \
+        bool const isvalid_config = (isvalid_grid && isvalid_block && isvalid_threads);             \
         if(!isvalid_config)                                                                         \
         {                                                                                           \
             THROW_IF_HIP_ERROR(hipErrorInvalidConfiguration);                                       \
@@ -139,7 +142,10 @@ ROCSOLVER_BEGIN_NAMESPACE
         bool const isvalid_block = (1 <= block_.x) && (block_.x <= 1024) && (1 <= block_.y)         \
             && (block_.y <= 1024) && (1 <= block_.z) && (block_.z <= 1024)                          \
             && ((block_.x * block_.y * block_.z) <= 1024);                                          \
-        bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
+        bool const isvalid_threads = (((long)grid_.x) * ((long)grid_.y) * ((long)grid_.z)           \
+                                          * ((long)block_.x) * ((long)block_.y) * ((long)block_.z)  \
+                                      <= INT32_MAX);                                                \
+        bool const isvalid_config = (isvalid_grid && isvalid_block && isvalid_threads);             \
         if(!isvalid_config)                                                                         \
         {                                                                                           \
             fmt::print(stderr,                                                                      \
