@@ -21,12 +21,13 @@ import shutil
 import pytest
 
 
-def _emit_dual_period_kernel():
+def _emit_dual_period_kernel(plr=0):
     """Build the real dual-period MXFP8 solution and return its assembly text.
 
     Partition-directed PLR (next-partition prefetch, n-major traversal, 2x2
     partition grid) is selected automatically from the dual-period MXFP8 solution
-    parameters -- no environment knobs are required.
+    parameters -- no environment knobs are required.  ``plr`` only reaches the
+    solution; the schedule pins its own base, so it cannot change the assembly.
     """
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.Common.Capabilities import makeIsaInfoMap
@@ -55,7 +56,7 @@ def _emit_dual_period_kernel():
           "Batched": True, "StridedBatched": True, "MXBlockA": 32, "MXBlockB": 32}
     params = {"ProblemType": pt, "ISA": isa, "MatrixInstruction": mi,
         "WorkGroup": [16, 16, 1], "WavefrontSize": 64, "DepthU": 128,
-        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
         "ScheduleIterAlg": 3, "StaggerU": 0, "GlobalSplitU": 1, "InnerUnroll": 1,
         "LdsPadA": -1, "LdsPadB": -1, "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1,
         "1LDSBuffer": 0, "VectorWidthA": -1, "VectorWidthB": -1, "StoreVectorWidth": -1,
@@ -166,3 +167,18 @@ def test_vgpr_within_two_wave_slot_budget(dual_src):
     vgpr = int(m.group(1))
     assert vgpr <= 128, (
         "architectural VGPR %d exceeds the two-wave-slot budget (128)" % vgpr)
+
+
+def test_prefetch_local_read_is_name_only(dual_src):
+    """PrefetchLocalRead never reaches the dual-period schedule.
+
+    The partition-directed prefetch pins its own plr=0 base, the same way
+    ForceUnrollSubIter pins numItersPLR/numVgprBuffer for non-subtile kernels,
+    so the declared value survives only in the kernel name.  Comments are
+    stripped because they quote scheduler state that is allowed to mention the
+    declared value.
+    """
+    def instructions(src):
+        return [ln.split("//")[0].rstrip() for ln in _mainloop_lines(src)]
+
+    assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
