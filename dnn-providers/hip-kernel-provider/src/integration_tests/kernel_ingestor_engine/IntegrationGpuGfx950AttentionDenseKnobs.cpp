@@ -108,6 +108,9 @@ struct GraphShape
     int64_t seqKv;
     /// Leaves attn_scale_value unset, so the engine must apply 1.0 (no scaling).
     bool omitScale = false;
+    /// Sets attn_scale_value to this instead of 1/sqrt(headSize), so a kernel that hard-wires
+    /// the default scale fails the comparison. Ignored when omitScale is set.
+    std::optional<float> scaleOverride = std::nullopt;
 };
 
 struct Tile
@@ -167,12 +170,19 @@ GraphShape withoutScale(GraphShape shape)
     return shape;
 }
 
+GraphShape withScale(GraphShape shape, float scale)
+{
+    shape.scaleOverride = scale;
+    return shape;
+}
+
 /// Forced (tile, head size) pairs and cold cases first; then one case for each remaining
 /// catalog head configuration, in ascending (head size, Hq, Hkv) order at B=1, Sq=Skv=256;
 /// then further cases until every (head size, dtype, causal, tile) class the catalog compiles
 /// runs at least once; then cold cases of an fp16 graph with an explicit mma_core_mode; then
-/// two forced cases with no attn_scale_value. Within them: bounds on both corners and both
-/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and forced cases with B > 1 and Sq != Skv.
+/// two forced cases with no attn_scale_value and one with a non-default attn_scale_value.
+/// Within them: bounds on both corners and both deprecated flags, fp16 and bf16, MHA, GQA and
+/// MQA, and forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -420,6 +430,12 @@ std::vector<KnobCase> knobCases()
          withoutScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256)),
          FORCED,
          Tile{256, 64}},
+        // A baked scale other than 1/sqrt(D) and 1.0: the engine must launch with the
+        // graph's value, not a default.
+        {"D128_Bm256Bn64_Scale2",
+         withScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256), 2.0F),
+         FORCED,
+         Tile{256, 64}},
     };
 }
 
@@ -487,7 +503,8 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     attributes.set_name(name);
     if(!shape.omitScale)
     {
-        attributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(shape.headSize)));
+        attributes.set_attn_scale(
+            shape.scaleOverride.value_or(1.0f / std::sqrt(static_cast<float>(shape.headSize))));
     }
     switch(shape.mask)
     {
@@ -502,10 +519,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
         break;
     case Mask::CAUSAL_MASK_FLAG:
-        attributes.set_causal_mask(true);
+        attributes.causal_mask = true;
         break;
     case Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG:
-        attributes.set_causal_mask_bottom_right(true);
+        attributes.causal_mask_bottom_right = true;
         break;
     default:
         throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");

@@ -55,6 +55,10 @@ include(CTest)
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
+option(MIOPEN_SPLIT_LIBS "With MIOPEN_REQ_LIBS_ONLY, also build device_conv_operations_<arch>, one uniquely named copy of the convolution library per GPU target" OFF)
+if(MIOPEN_SPLIT_LIBS AND NOT MIOPEN_REQ_LIBS_ONLY)
+    message(WARNING "MIOPEN_SPLIT_LIBS has no effect without MIOPEN_REQ_LIBS_ONLY")
+endif()
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(CK_TILE_DISPATCHER "Use CK Tile Dispatcher for profiler convolution kernels" OFF)
@@ -196,6 +200,13 @@ function(_ck_gpu_target_string_to_id TARGET_STR OUT_VAR)
         set(${OUT_VAR} "0x1153" PARENT_SCOPE)
     elseif(_tgt MATCHES "^gfx11-generic$")
         set(${OUT_VAR} "0x11FF" PARENT_SCOPE)
+    # GFX11.7
+    elseif(_tgt STREQUAL "gfx1170")
+        set(${OUT_VAR} "0x1170" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1171")
+        set(${OUT_VAR} "0x1171" PARENT_SCOPE)
+    elseif(_tgt MATCHES "^gfx11-7-generic$")
+        set(${OUT_VAR} "0x117F" PARENT_SCOPE)
     # GFX12
     elseif(_tgt STREQUAL "gfx1200")
         set(${OUT_VAR} "0x1200" PARENT_SCOPE)
@@ -406,7 +417,7 @@ if(NOT ENABLE_ASAN_PACKAGING)
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483 AND ${hip_VERSION_FLAT} LESS 700200000)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx11-7-generic;gfx12-generic")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 700200000)
         set(CK_GPU_TARGETS "")
     endif()
@@ -431,6 +442,16 @@ endif()
 #make sure all the targets on the list are actually supported by the current compiler
 rocm_check_target_ids(SUPPORTED_GPU_TARGETS
         TARGETS ${CK_GPU_TARGETS})
+
+# Per-target convolution library names (MIOPEN_SPLIT_LIBS) use the full target id, so xnack
+# variants stay separate. The name mapping is the one MIOpen uses (miopen_sanitize_arch in
+# projects/miopen/CMakeLists.txt): gfx942:xnack+ -> gfx942_xnackp.
+function(ck_sanitize_arch ARCH OUT_VAR)
+    string(REPLACE ":" "_" _ck_sanitized "${ARCH}")
+    string(REPLACE "+" "p" _ck_sanitized "${_ck_sanitized}")
+    string(REPLACE "-" "_" _ck_sanitized "${_ck_sanitized}")
+    set(${OUT_VAR} "${_ck_sanitized}" PARENT_SCOPE)
+endfunction()
 
 message(STATUS "Building CK for the following targets: ${SUPPORTED_GPU_TARGETS}")
 

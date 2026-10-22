@@ -10,10 +10,24 @@ UED, referenced KMD, dispatch, optional heuristic, shared/per-pack matchers, KDP
 inline/standalone UKDs. Resolve by UUID, not filename — pointwise ADD/MUL/SUB share a
 KMD whose filename does not follow the individual packs.
 
+Take the installed half with `projects/hipdnn/tools/IngestorGenerator/tools/inventory.py`: kernels per
+KDP (from `kernelDescriptors`), source kinds, distinct metadata tuples (`--group-by
+<fields>`, for attention `head_size,num_query_heads,num_kv_heads`), the catalog digest
+RUNBOOK stage 8 uses, and the `hipdnn_validate_descriptors` verdict:
+
+```bash
+"$PY" "$GEN/tools/inventory.py" \
+  "$INSTALL/lib/hipdnn_plugins/engines/arch_content/hip-kernel-provider/$ARCH" \
+  --engine "$ENGINE" --group-by <fields> \
+  --validator "$BUILD/bin/hipdnn_validate_descriptors" --json "$EVIDENCE/inventory_base.json"
+```
+
+Run it again on the extended installation; the two reports are the before/after record.
+
 Preserve old names, UUIDs, symbols, references and native hooks; only genuinely new
 objects get new IDs. Compare completed, KMD-typed metadata across the whole engine:
-conflicting tuples on overlapping effective architectures fail, equal tuples on disjoint
-architectures are legal. New topology, layouts, attributes or feature combinations
+equal tuples fail only when they compete at the same arch tier on a device; disjoint
+architectures or different tiers (explicit over generic over empty) are legal. New topology, layouts, attributes or feature combinations
 reopen [graph-contract.md](graph-contract.md), even for a "variant".
 
 A new variant can be one added KDP entry or a standalone UKD reference, with no new
@@ -23,10 +37,20 @@ retain existing engine-wide identities and hooks.
 
 ## Addition-only splicing
 
-The generator has no incremental mode. Scratch generation emits engine-level identities
-too, and `--force` against a live tree can replace shared objects and hand-filled
-bodies. An extension therefore copies only reviewed additions and explicitly changed
-references, never the whole scratch tree or an entire CMake list.
+The generator has no incremental mode and mints fresh UUIDs on every run. Scratch
+generation emits engine-level identities too, and `--force` against a live tree, or a
+copy of a scratch descriptor directory, replaces shared objects, retained UUIDs and
+hand-filled bodies. An extension therefore copies only reviewed additions and explicitly
+changed references, never the whole scratch tree or an entire CMake list.
+
+`projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py --scratch <scratch bundle dir> --live <live bundle dir>` does
+this for descriptors: it maps every scratch UUID to its live twin (documents by file
+name, kernel entries by `name`), refuses and writes nothing if any retained document or
+kernel differs beyond that map or is missing from scratch, and appends only new kernel
+entries after the live ones. A refusal means the config change is not addition-only:
+review it as a change, not a splice. The generated census test carries no UUIDs and is
+copied whole. Review KDP diffs with `git diff --diff-algorithm=histogram`; the default
+algorithm can show an interleaved addition as thousands of deletions.
 
 Every scratch reference to an existing UED/KMD/UDD/UHD/shared matcher must use the real
 retained UUID, as must consumer IDs in the enclosing KDP's
@@ -68,7 +92,7 @@ The one registration a generated engine needs is the **kernel source**, and only
 | Group | Kinds | What happens |
 |---|---|---|
 | Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
-| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory: list every arch the object runs on (a generic-target object lists all of them), on the kernel or inherited from its pack. |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory; see "hsaco kernels and `arch`" in `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`. |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
 | Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 
@@ -98,7 +122,14 @@ when it names any. The entry runs `hip_kernel_provider_census_tests`, the binary
 suites are compiled into. An addition under an uncensused suite states its inventory
 through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
 eligibility. Device proof must explicitly select and numerically verify the new
-candidate; passing the unchanged default is not extension acceptance.
+candidate; passing the unchanged default is not extension acceptance. RUNBOOK stage 5
+(*Where an extension's explicit selection runs*) names where those cases go and the
+command that runs only them.
+
+A new architecture is probed automatically, and a new compile path or `spec` value is
+packed by the automatic probe's default sample. When the addition needs a specific UKD
+(a value combination the sweep does not guarantee) packed on every PR, add its name to the
+integration's named probe `UKDS`. Run the `hkp-probe-*` entries as in RUNBOOK's final step.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5

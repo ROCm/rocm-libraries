@@ -175,6 +175,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_grid.cpp
   # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid_dispatch.cpp
+  # grid_x_chunk and the incomplete factorizations that walk it [AISPARSE-692-694]
+  unit_test_internal_grid_x.cpp
+  unit_test_internal_precond_grid_x_chunk.cpp
   unit_test_internal_collectives_boost.cpp
   # --- Dense element-count grids of the shared common helpers [AISPARSE-699] -
   # Distinct anchor at the end of the list so this leaf does not conflict with
@@ -223,6 +226,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  # --- AISPARSE-698: CSR validator launch-grid overflow regression -----------
+  # Distinct anchor at the very end of the device source list so this leaf does
+  # not conflict with the sibling unit-test branches that append above.
+  # Drives the public rocsparse_scheck_matrix_csr / rocsparse_check_spmat entry
+  # points on a (2^29 + 1)-row matrix and on small matrices with a forced grid
+  # clamp; links roc::rocsparse, no compile-in TUs.
+  unit_test_internal_util_checkmatrix_csr_large.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
   # --- Dense conversion grid.x clamps [AISPARSE-687] ------------------------
@@ -231,9 +241,28 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_dense_to_sparse and rocsparse_Xcoo2dense entry points with
   # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
   unit_test_internal_conversion_dense_grids.cpp
+  # --- csr2bsr / csr2bsr_nnz / bsr2csr block-row grid.x clamps [AISPARSE-703]
+  # Distinct anchor (after the BSR conversion host tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches that append at the end of the
+  # list. Drives the public rocsparse_sparse_to_sparse entry point with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_conversion_bsr_grids.cpp
   unit_test_internal_conversion_extras.cpp
+  # --- Grid-stride assign helpers [AISPARSE-696/697] ------------------------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # sibling unit-test branches that append after rocsparse_unit_test_main or in
+  # the level-2 group. Exercises rocsparse::assign_async / assign_device_async
+  # (compiled in via rocsparse_assign_async.cpp below) and the ceil_div helper
+  # in rocsparse_grid.hpp.
+  unit_test_internal_assign_async.cpp
+  # grid-stride loops of csrmm row_split and coomm (column panels on grid.y,
+  # batches on grid.z/y, the coo_segmented reduce on grid.x), driven through
+  # rocsparse_spmm with the matching maxGridSize entries shrunk, plus f16/bf16
+  # output with odd batch strides [AISPARSE-668/696].
+  unit_test_internal_level3_mm_grid_y.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  unit_test_internal_extra_csrgemm_bitmap.cpp
   # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
   # Distinct anchor (after the geam internal tests) so this leaf does not
   # conflict with the sibling grid-clamp branches. Drives the public
@@ -269,6 +298,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # point with handle->properties.maxGridSize[0] shrunk, so no internal
   # translation unit has to be compiled in.
   unit_test_internal_level3_csrmm_grids.cpp
+  # --- Blocked-ELL SpMM grid.y clamp + column-panel stride [AISPARSE-667] ---
+  # Appended at the end (distinct anchor) so this leaf does not conflict with the
+  # sibling large-grid branches. Drives rocsparse_spmm through the public API;
+  # no compile-in library TUs needed.
+  unit_test_internal_level3_bellmm.cpp
   # --- Conversion-directory grid clamps [AISPARSE-684/685/686] --------------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # the sibling unit-test branches above. Drives public entry points plus
@@ -362,6 +396,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
+  # Bitmap path of csrgemm, for unit_test_internal_extra_csrgemm_bitmap.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgemm_bitmap.cpp
   # --------------------------------------------------------------------------
   # Added at this leaf for unit_test_internal_conversion_csr2ell_batch.cpp
   # [AISPARSE-683]: the rocsparse_Xcsr2ell_strided_batched entry points are
@@ -475,6 +511,14 @@ set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "quick;standard;compr
 add_test(rocsparse-unit-test_gfx1151 "./rocsparse-unit-test")
 set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
+]=])
+  # Windows searches System32 before PATH, so from bin/rocsparse/ the device
+  # binary loads the display driver's amdhip64_7.dll instead of the one in
+  # bin/. That runtime cannot load kpack-split device code, so every kernel
+  # launch fails. Register the device binary on Windows only once it is
+  # installed in bin/ beside the HIP runtime.
+  if(NOT WIN32)
+    file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
 set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
 
@@ -482,16 +526,12 @@ add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
 set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
 
 ]=])
-  # The device binary imports the HIP runtime. rocsparse-test.exe finds those
-  # DLLs because it lives in bin/; these tests live in bin/rocsparse/. ctest's
-  # working directory is that folder, so ".." is bin/.
-  if(WIN32)
+  else()
+    # ctest's working directory is bin/rocsparse/, so ".." is bin/.
     file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 set_tests_properties(
   rocsparse-unit-test
   rocsparse-unit-test_gfx1151
-  rocsparse-unit-test-device
-  rocsparse-unit-test-device_gfx1151
   PROPERTIES ENVIRONMENT_MODIFICATION
     "PATH=path_list_prepend:../../lib/rocsparse-clients/lib;PATH=path_list_prepend:../../llvm/lib;PATH=path_list_prepend:../../lib;PATH=path_list_prepend:..")
 

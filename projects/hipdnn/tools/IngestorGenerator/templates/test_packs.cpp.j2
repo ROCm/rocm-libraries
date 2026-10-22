@@ -16,9 +16,13 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/NativeRegistry.hpp>
 
+{% if config.engine.census_name_symbol %}
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+{% endif %}
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -87,17 +91,18 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// The runtime source kind every kernel must declare at the loader. A packaged bundle
 /// is lowered to a kpack archive first, so the authored builder kind is not what
 /// arrives.
+{# The provider's clang-format (ColumnLimit 100) joins these two statements whenever
+   they fit on one line, so emit that form directly: the file is copied verbatim. #}
+{% set source_kind = {'embedded_source': 'EMBEDDED_SOURCE',
+                      'kpack': 'KPACK',
+                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] %}
+{% set kind_line = 'constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::' ~ source_kind ~ ';' %}
+{% if kind_line | length <= 100 %}
+{{ kind_line }}
+{% else %}
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
-    = ingestor::KernelSourceKind::{{ {'embedded_source': 'EMBEDDED_SOURCE',
-                                      'kpack': 'KPACK',
-                                      'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] }};
-
-/// A pack or kernel naming no architecture inherits/wildcards; one that names
-/// architectures must name the requested one, or this is the wrong shard.
-bool coversArch(const std::vector<std::string>& declared, const std::string& arch)
-{
-    return declared.empty() || std::find(declared.begin(), declared.end(), arch) != declared.end();
-}
+    = ingestor::KernelSourceKind::{{ source_kind }};
+{% endif %}
 
 class Test{{ config.engine.pascal_name }}Packs : public ::testing::Test
 {
@@ -126,13 +131,25 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
+{% if config.engine.census_name_symbol %}
+            return set.engine.name == {{ config.engine.census_name_symbol }};
+{% else %}
             return set.engine.name == "{{ config.engine.name | cpp_escape }}";
+{% endif %}
         });
         ASSERT_NE(match, sets.end())
+{% if config.engine.census_name_symbol %}
+            << "descriptor set '" << {{ config.engine.census_name_symbol }}
+            << "' did not load. Either its descriptors were never installed under the tree "
+               "this binary reads, its UED declares a different engine name than "
+               "{{ config.engine.census_name_symbol | cpp_escape }}, or its pack failed to register its "
+               "native symbols and every descriptor naming one of them was dropped.";
+{% else %}
             << "descriptor set '{{ config.engine.name | cpp_escape }}' did not load. Either its "
                "descriptors were never installed under the tree this binary reads, or "
                "its pack failed to register its native symbols and every descriptor "
                "naming one of them was dropped.";
+{% endif %}
         _set = &*match;
     }
 
@@ -169,12 +186,12 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryLoadedDescriptorCoversTheR
 {
     for(const auto& pack : _set->packs)
     {
-        EXPECT_TRUE(coversArch(pack.arch, _arch))
+        EXPECT_TRUE(ingestor::archSupports(pack.arch, _arch))
             << "pack '" << pack.name << "' does not cover '" << _arch
             << "', so this is not that architecture's shard";
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_TRUE(coversArch(kernel.arch, _arch))
+            EXPECT_TRUE(ingestor::archSupports(kernel.arch, _arch))
                 << "kernel '" << kernel.name << "' does not cover '" << _arch << "'";
         }
     }
@@ -195,8 +212,14 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, DeclaresTheConfiguredSdkVersion)
 {
+{% set sdk_version = 'hipdnn_data_sdk::utilities::Version{std::string("' ~ (emitted.sdk_version | cpp_escape) ~ '")}' %}
+{% set sdk_line = '    EXPECT_EQ(_set->engine.sdkVersion, ' ~ sdk_version ~ ');' %}
+{% if sdk_line | length <= 100 %}
+{{ sdk_line }}
+{% else %}
     EXPECT_EQ(_set->engine.sdkVersion,
-              hipdnn_data_sdk::utilities::Version{std::string("{{ emitted.sdk_version | cpp_escape }}")});
+              {{ sdk_version }});
+{% endif %}
 }
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
@@ -215,7 +238,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "{{ config.score_symbol | cpp_escape }}");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "{{ config.score_symbol | cpp_escape }}");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
 }
 {% else %}
