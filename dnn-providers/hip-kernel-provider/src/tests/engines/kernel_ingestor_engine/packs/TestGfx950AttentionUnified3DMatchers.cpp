@@ -134,6 +134,20 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesANonBshdKeyCache)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+/// A ragged (RFC-0014) operand packs its tokens behind an offsets tensor, padded per
+/// sequence; read as dense BSHD it gives wrong elements in bounds. Each operand on its own.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesARaggedOperand)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE("ragged operand uid " + std::to_string(uid));
+        GraphSpec spec;
+        spec.raggedOperand = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+}
+
 TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAKeyLengthNotAWholeNumberOfBlocks)
 {
     GraphSpec spec;

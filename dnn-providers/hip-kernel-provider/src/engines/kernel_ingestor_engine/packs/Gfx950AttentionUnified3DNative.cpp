@@ -461,6 +461,16 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
                                       "extents, not virtual and not pass-by-value");
             return std::nullopt;
         }
+        // A ragged (RFC-0014) operand packs its tokens behind an offsets tensor; reading it
+        // as a dense BSHD buffer would be silently wrong.
+        if(tensor->ragged_offset_tensor_uid().has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"ragged"}
+                                   << describeOperand(role, *tensor)
+                                   << " is ragged (has a ragged_offset tensor); ragged operands "
+                                      "are not supported");
+            return std::nullopt;
+        }
     }
 
     // --- 4. Layout. The failure is wrong elements in bounds, no fault.
