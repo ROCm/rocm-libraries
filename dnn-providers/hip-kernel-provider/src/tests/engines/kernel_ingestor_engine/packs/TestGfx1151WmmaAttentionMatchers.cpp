@@ -1202,6 +1202,24 @@ TEST(TestGfx1151WmmaAttentionMatchers, EachEngineRefusesTheOtherEnginesKernel)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// Both engines bind a dense graph alike; only paged graphs (TestGfx1151WmmaAttentionPaged)
+// are the prefill engine's alone, so the dense split between the two is the kernel
+// matchers' decode rule.
+TEST(TestGfx1151WmmaAttentionMatchers, BothEnginesBindADenseGraphAlike)
+{
+    GraphSpec prefill;
+    prefill.queryLength = 128;
+    for(const GraphSpec& spec : {decodeGraph(), prefill})
+    {
+        const Fixture fixture(spec);
+        const auto bound = fixture.bound();
+        ASSERT_TRUE(bound.has_value());
+        const auto decodeBound = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+            std::string(DECODE_SYMBOLS.graphMatcher))(fixture.context());
+        EXPECT_TRUE(decodeBound == bound);
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Kernel ABIs. A wrong argument count, order or name is not a launch error: the
 // kernel reads the kernarg segment as it was compiled, so the failure is misread

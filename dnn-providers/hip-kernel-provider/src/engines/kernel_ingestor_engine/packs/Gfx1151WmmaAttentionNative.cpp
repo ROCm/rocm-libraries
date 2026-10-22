@@ -27,6 +27,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -56,19 +57,19 @@
  *   kernels/gfx1151/wmma_fmha_fwd_v2.py, one multi-wave object per dtype x (Q/K, V/O)
  *   head-width bucket x bias kind, all of the "causal" class whose runtime bounds also
  *   express no mask and sliding windows. Flat 1-D grid; one launch, read from
- *   `kernel_source`.
+ *   `kernel_source`. Its "paged" layout objects serve the cuDNN paged-K/V graph (below).
  * - "decode", engine hipkernel:Gfx1151WmmaAttentionDecode: rocKE
  *   kernels/gfx1151/wmma_fmha_decode.py, the split-KV GQA-packed decode, one object per
  *   dtype x bucket x bias kind. Its kernels carry two launches in a `sources` map: "decode"
  *   and "merge", the kernel merging the splits, which share the object's code object
  *   (LaunchKernelDefinition.hpp).
  *
- * Which of the two serves a graph, the decode object's bucket and the decode split count
- * mirror the rocKE dispatcher (library/dispatch/attention/gfx1151.py
+ * Which of the two serves a dense graph, the decode object's bucket and the decode split
+ * count mirror the rocKE dispatcher (library/dispatch/attention/gfx1151.py
  * rdna_attention_use_decode and decode_launch_plan, kernels/gfx1151/wmma_fmha_decode.py
- * host helpers). The decode engine serves exactly the problems the dispatcher sends to
- * decode; the prefill engine declines those, so hipDNN's choice between the two engines is
- * never the ranking's. The prefill object is not the one the Python route builds: that
+ * host helpers). The decode engine serves exactly the dense problems the dispatcher sends
+ * to decode; the prefill engine declines those, so hipDNN's choice between the two engines
+ * is never the ranking's. The prefill object is not the one the Python route builds: that
  * route JIT-builds the exact (Q/K, V/O) bucket pair, and a mask "none" object for an
  * unmasked request, while hipDNN runs the shipped catalog object of the tightest bucket
  * pair that holds the widths, of the "causal" class whose runtime bounds express every
@@ -76,6 +77,17 @@
  * merge launch, never in the kernel's fused merge, whose WS_CNT counters hipDNN's
  * stateless workspace would need cleared every launch; the workspace therefore holds only
  * the split partials.
+ *
+ * Paged graphs (cuDNN semantics: page_table_k/v [B,1,M,1] INT32 over K/V containers
+ * [num_blocks, H, block_size, D] of any strides, seq_len_kv [B,1,1,1] INT32, a build-time
+ * max_seq_len_kv) are the prefill engine's alone, whatever their query length: they run
+ * one launch of a paged prefill object whose page size is the containers' block_size. The
+ * decode engine's objects are dense, so it declines every paged graph, and the dense
+ * decode rule never applies to one. The query is either dense [B, Hq, Sq, D] (uniform
+ * decode; with seq_len_q its live rows per sequence) or ragged: Q and O share one
+ * token-unit ragged offset tensor [B+1,1,1,1] (multiplier = the token stride) and
+ * seq_len_q gives each sequence's live rows. Batch size, lengths and block ids are read on
+ * the device, so one plan serves every step; rows with no visible key write zeros.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -109,6 +121,10 @@ constexpr std::string_view BIAS_FIELD = "bias";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view DV_SPLIT_FIELD = "dv_split";
+constexpr std::string_view LAYOUT_FIELD = "layout";
+constexpr std::string_view PAGE_BLOCK_SIZE_FIELD = "page_block_size";
+constexpr std::string_view DENSE_Q_FIELD = "dense_q";
+constexpr std::string_view SEQUSED_Q_FIELD = "seqused_q";
 // The decode engine's launch names: the `sources` keys of each of its kernels.
 constexpr const char* DECODE_LAUNCH = "decode";
 constexpr const char* MERGE_LAUNCH = "merge";
@@ -136,6 +152,17 @@ constexpr std::string_view BIAS_UID_TOKEN = "gfx1151_wmma_attention.bias.uid";
 constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx1151_wmma_attention.bias.stride_batch";
 constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx1151_wmma_attention.bias.stride_head";
 constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx1151_wmma_attention.bias.stride_query";
+// The graph's layout (GraphLayout); the paged tokens below are present only for a paged one.
+constexpr std::string_view LAYOUT_TOKEN = "gfx1151_wmma_attention.layout";
+constexpr std::string_view PAGE_SIZE_TOKEN = "gfx1151_wmma_attention.page_size";
+constexpr std::string_view PAGE_TABLE_UID_TOKEN = "gfx1151_wmma_attention.page_table.uid";
+constexpr std::string_view PAGE_TABLE_STRIDE_TOKEN = "gfx1151_wmma_attention.page_table.stride";
+constexpr std::string_view SEQ_LEN_KV_UID_TOKEN = "gfx1151_wmma_attention.seq_len_kv.uid";
+constexpr std::string_view MAX_SEQ_LEN_KV_TOKEN = "gfx1151_wmma_attention.max_seq_len_kv";
+// Present when the graph carries seq_len_q (always for a ragged Q).
+constexpr std::string_view SEQ_LEN_Q_UID_TOKEN = "gfx1151_wmma_attention.seq_len_q.uid";
+// Present only for a ragged Q: the ragged offsets Q and O share.
+constexpr std::string_view Q_OFFSET_UID_TOKEN = "gfx1151_wmma_attention.q_offset.uid";
 
 constexpr uint32_t BATCH_AXIS = 0;
 constexpr uint32_t HEAD_AXIS = 1;
@@ -355,6 +382,101 @@ bool addressFitsI32(const data_objects::TensorAttributes& tensor, int64_t elemen
            && !__builtin_mul_overflow(elements, elementBytes, &bytes) && fitsI32(bytes);
 }
 
+/// A paged K or V page container [num_blocks, H, page, D]: the kernel addresses a head
+/// and a page in 64 bits, and the rows of one page of one head from that page's base, so
+/// only that slice must be I32-addressable in bytes; the container may pass 4 GiB. The
+/// page count is an I32 kernel argument.
+bool pageFitsI32(const data_objects::TensorAttributes& tensor, int64_t elementBytes)
+{
+    int64_t maximum = 0;
+    for(const uint32_t axis : {SEQ_AXIS, HEAD_SIZE_AXIS})
+    {
+        int64_t term = 0;
+        if(__builtin_mul_overflow(tensor.dims()->Get(axis) - 1, tensor.strides()->Get(axis), &term)
+           || __builtin_add_overflow(maximum, term, &maximum))
+        {
+            return false;
+        }
+    }
+    int64_t elements = 0;
+    int64_t bytes = 0;
+    return fitsI32(tensor.dims()->Get(BATCH_AXIS))
+           && !__builtin_add_overflow(maximum, int64_t{1}, &elements)
+           && !__builtin_mul_overflow(elements, elementBytes, &bytes) && fitsI32(bytes);
+}
+
+/// A ragged Q or O (RFC 0014): logically [B, H, S, D], sequence b's rows starting at
+/// element ragged_offset[b] * multiplier. The kernel addresses a sequence from that token
+/// through the token stride, so the multiplier must be the token stride, tokens must be
+/// the outer axis of the packed rows (THD), and the batch stride is unused. The sequence
+/// base is 64-bit; one (sequence, head) slice must be I32-addressable in bytes.
+bool isWellFormedRaggedOperand(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+       || strides->size() != SDPA_RANK || tensor.virtual_()
+       || !tensor.ragged_offset_tensor_uid().has_value()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
+    {
+        return false;
+    }
+    for(uint32_t i = 0; i < SDPA_RANK; ++i)
+    {
+        if(dims->Get(i) <= 0 || strides->Get(i) < 0 || !fitsI32(strides->Get(i)))
+        {
+            return false;
+        }
+    }
+    const int64_t heads = dims->Get(HEAD_AXIS);
+    const int64_t rows = dims->Get(SEQ_AXIS);
+    const int64_t width = dims->Get(HEAD_SIZE_AXIS);
+    const int64_t headStride = strides->Get(HEAD_AXIS);
+    const int64_t tokenStride = strides->Get(SEQ_AXIS);
+    if((width > 1 && strides->Get(HEAD_SIZE_AXIS) != 1) || tokenStride <= 0
+       || tensor.ragged_offset_multiplier() != tokenStride || tokenStride % ROW_ALIGN_ELEMENTS != 0
+       || (heads > 1 && (headStride < width || headStride % ROW_ALIGN_ELEMENTS != 0)))
+    {
+        return false;
+    }
+    // A token's heads fit below the next token; the last row of a slice ends in I32 bytes.
+    const int64_t tokenSpan = (heads - 1) * headStride + width;
+    if(tokenStride < tokenSpan)
+    {
+        return false;
+    }
+    int64_t sliceEnd = 0;
+    int64_t bytes = 0;
+    return !__builtin_mul_overflow(rows - 1, tokenStride, &sliceEnd)
+           && !__builtin_add_overflow(sliceEnd, tokenSpan, &sliceEnd)
+           && !__builtin_mul_overflow(sliceEnd, int64_t{2}, &bytes) && fitsI32(bytes);
+}
+
+/// A non-virtual device INT32 tensor read by the kernel at element `index * stride`, so
+/// with no ragged offsets, pass-by-value storage or I32-overflowing addresses.
+bool isDeviceI32Tensor(const data_objects::TensorAttributes* tensor)
+{
+    return tensor != nullptr && !tensor->virtual_()
+           && !tensor->ragged_offset_tensor_uid().has_value()
+           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+           && tensor->data_type() == data_objects::DataType::INT32 && tensor->dims() != nullptr
+           && tensor->strides() != nullptr && tensor->dims()->size() == SDPA_RANK
+           && tensor->strides()->size() == SDPA_RANK;
+}
+
+/// seq_len_q / seq_len_kv [B,1,1,1] or ragged offsets [B+1,1,1,1]: @p length INT32
+/// values the kernel reads as v[b], so the batch axis has unit stride.
+bool isDeviceI32Vector(const data_objects::TensorAttributes* tensor, int64_t length)
+{
+    if(!isDeviceI32Tensor(tensor))
+    {
+        return false;
+    }
+    const auto* dims = tensor->dims();
+    return dims->Get(0) == length && dims->Get(1) == 1 && dims->Get(2) == 1 && dims->Get(3) == 1
+           && (length == 1 || tensor->strides()->Get(0) == 1);
+}
+
 std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType)
 {
     if(dataType == data_objects::DataType::BFLOAT16)
@@ -556,6 +678,30 @@ std::optional<BiasParameters> biasFor(const MatchContext& context,
     return result;
 }
 
+/// The graph's Q / K / V layout, matched against an object's (layout, dense_q, seqused_q).
+enum class GraphLayout : int64_t
+{
+    DENSE = 0,
+    // Paged K/V; dense Q [B, Hq, Sq, D], every row live.
+    PAGED_DENSE_Q = 1,
+    // Paged K/V; dense Q whose live rows per sequence are seq_len_q.
+    PAGED_DENSE_Q_SEQUSED = 2,
+    // Paged K/V; ragged Q / O through shared ragged offsets, live rows seq_len_q.
+    PAGED_RAGGED_Q = 3
+};
+
+/// The device operands of a paged graph (uids are 0 where absent).
+struct PagedParameters
+{
+    int64_t pageSize = 0;
+    int64_t pageTable = 0;
+    int32_t pageTableStride = 0;
+    int64_t seqLenKv = 0;
+    int64_t seqLenQ = 0;
+    int64_t qOffset = 0;
+    int64_t maxSeqLenKv = 0;
+};
+
 struct Binding
 {
     int64_t q = 0;
@@ -569,6 +715,8 @@ struct Binding
     // Set for a runtime pass-by-value scale tensor; `scale` is then unused.
     std::optional<hipdnn_plugin_sdk::ScalarOperand> runtimeScale;
     BiasParameters bias;
+    GraphLayout layout = GraphLayout::DENSE;
+    PagedParameters paged;
 };
 
 bool isFloatScalarType(data_objects::DataType type)
@@ -636,6 +784,258 @@ std::optional<ScaleSource> scaleFor(const MatchContext& context,
     return result;
 }
 
+/// The first hipDNN graph feature no layout of this engine serves, as a stable cause key
+/// and a reason; nullopt when there is none. The rocKE kernels implement logit softcap,
+/// attention sinks, ALiBi slopes and FP8 K/V, but hipDNN has no attribute semantics for
+/// them yet (a softcap attribute, gpt-oss sink semantics for sink_token, a per-head slopes
+/// tensor for the boolean alibi_mask, per-tensor K/V descales): they are declined until
+/// those exist, as is everything else here.
+std::optional<std::pair<std::string_view, std::string_view>>
+    unservedFeature(const data_objects::SdpaAttributes& attributes)
+{
+    using Cause = std::pair<std::string_view, std::string_view>;
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        return Cause{"sinks", "sink_token has no defined (gpt-oss) semantics yet"};
+    }
+    if(attributes.alibi_mask())
+    {
+        return Cause{"alibi", "alibi_mask carries no per-head slopes tensor yet"};
+    }
+    if(attributes.descale_q_tensor_uid().has_value()
+       || attributes.descale_k_tensor_uid().has_value()
+       || attributes.descale_v_tensor_uid().has_value()
+       || attributes.descale_s_tensor_uid().has_value()
+       || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
+       || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value())
+    {
+        return Cause{"fp8", "FP8 descale / amax operands have no K/V-cache semantics yet"};
+    }
+    if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
+       || attributes.dropout_mask_tensor_uid().has_value()
+       || attributes.dropout_scale_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value()
+       || (attributes.dropout_probability().has_value()
+           && attributes.dropout_probability().value() != 0.0F))
+    {
+        return Cause{"dropout", "the kernels have no dropout"};
+    }
+    if(attributes.block_mask_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
+       || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.implementation() != data_objects::AttentionImplementation::AUTO)
+    {
+        return Cause{"feature", "block mask, max / sum_exp outputs or a forced implementation"};
+    }
+    return std::nullopt;
+}
+
+/// The stats (LSE) operand: (write, uid), the uid being O's when stats are off; nullopt
+/// for malformed stats. LSE is FP32 [B, Hq, Sq, 1] with dense strides.
+std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
+                                               const data_objects::SdpaAttributes& attributes,
+                                               const Problem& p)
+{
+    const bool writeLse = attributes.generate_stats().value_or(false);
+    if(!writeLse)
+    {
+        return attributes.stats_tensor_uid().has_value()
+                   ? std::nullopt
+                   : std::optional<std::pair<bool, int64_t>>({false, attributes.o_tensor_uid()});
+    }
+    if(!attributes.stats_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    const int64_t lseUid = attributes.stats_tensor_uid().value();
+    const auto* lse = findTensor(context, lseUid);
+    if(lse == nullptr || !isWellFormedOperand(*lse)
+       || lse->data_type() != data_objects::DataType::FLOAT
+       || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
+       || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
+       || !addressFitsI32(*lse, 4))
+    {
+        return std::nullopt;
+    }
+    return std::pair<bool, int64_t>{true, lseUid};
+}
+
+/// Binds the operands, mask and scale every layout shares; false to decline.
+bool bindCommon(const MatchContext& context,
+                const data_objects::SdpaAttributes& attributes,
+                const std::pair<bool, int64_t>& lse,
+                BoundTokens& bound)
+{
+    const auto mask = maskFor(attributes);
+    const auto scale = scaleFor(context, attributes);
+    // The kernels always accumulate in FP32. UNSET and FLOAT therefore describe
+    // the same execution; HALF/BFLOAT16 are accepted for cuDNN-compat graphs.
+    const auto mmaCoreMode = attributes.mma_core_mode();
+    if(const auto unserved = unservedFeature(attributes))
+    {
+        // hipDNN reports a declined graph only as "no engine configurations"; the cause
+        // is logged at INFO (built only when INFO is on).
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:Gfx1151WmmaAttention declined the graph ["
+                               << unserved->first << "]: " << unserved->second);
+        return false;
+    }
+    if(!mask.has_value() || !scale.has_value()
+       || (mmaCoreMode != data_objects::DataType::UNSET
+           && mmaCoreMode != data_objects::DataType::FLOAT
+           && mmaCoreMode != data_objects::DataType::HALF
+           && mmaCoreMode != data_objects::DataType::BFLOAT16))
+    {
+        return false;
+    }
+    bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();
+    bound[std::string(K_TOKEN)] = attributes.k_tensor_uid();
+    bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
+    bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
+    bound[std::string(LSE_TOKEN)] = lse.second;
+    bound[std::string(WRITE_LSE_TOKEN)] = static_cast<int64_t>(lse.first);
+    bound[std::string(MASK_TOKEN)] = static_cast<int64_t>(mask->kind);
+    bound[std::string(BOTTOM_RIGHT_TOKEN)] = mask->bottomRight;
+    bound[std::string(WINDOW_LEFT_TOKEN)] = mask->left;
+    bound[std::string(WINDOW_RIGHT_TOKEN)] = mask->right;
+    int32_t scaleBits = 0;
+    std::memcpy(&scaleBits, &scale->value, sizeof(scale->value));
+    bound[std::string(SCALE_BITS_TOKEN)] = static_cast<int64_t>(scaleBits);
+    if(scale->runtimeUid.has_value())
+    {
+        bound[std::string(SCALE_UID_TOKEN)] = *scale->runtimeUid;
+        bound[std::string(SCALE_DTYPE_TOKEN)] = static_cast<int64_t>(scale->runtimeType);
+    }
+    return true;
+}
+
+/// The cuDNN paged-K/V graph. K / V are page containers [num_blocks, H, page, D] of any
+/// (row-aligned) strides and any size (one page of one head must be I32-addressable),
+/// including both halves of one interleaved cache, with one
+/// num_blocks (the kernel bounds K and V page ids by one page count); one INT32 page table
+/// [B,1,M,1] (unit entry stride) serves both; seq_len_kv [B,1,1,1] and the build-time
+/// max_seq_len_kv <= M * page bound the keys. Q is dense [B, Hq, Sq, D] (optionally with
+/// seq_len_q) or ragged through offsets O shares (with seq_len_q). Additive bias and stats
+/// with a ragged Q are declined.
+std::optional<BoundTokens>
+    gfx1151WmmaAttentionPagedGraphMatches(const MatchContext& context,
+                                          const data_objects::SdpaAttributes& attributes)
+{
+    const auto* q = findTensor(context, attributes.q_tensor_uid());
+    const auto* k = findTensor(context, attributes.k_tensor_uid());
+    const auto* v = findTensor(context, attributes.v_tensor_uid());
+    const auto* o = findTensor(context, attributes.o_tensor_uid());
+    if(q == nullptr || k == nullptr || v == nullptr || o == nullptr || !isWellFormedOperand(*k)
+       || !isWellFormedOperand(*v))
+    {
+        return std::nullopt;
+    }
+    const bool raggedQ = q->ragged_offset_tensor_uid().has_value();
+    if(raggedQ)
+    {
+        if(!isWellFormedRaggedOperand(*q) || !isWellFormedRaggedOperand(*o)
+           || o->ragged_offset_tensor_uid() != q->ragged_offset_tensor_uid())
+        {
+            return std::nullopt;
+        }
+    }
+    else if(!isWellFormedOperand(*q) || !isWellFormedOperand(*o) || !addressFitsI32(*q, 2)
+            || !addressFitsI32(*o, 2) || !hasAlignedRows(*q) || !hasAlignedRows(*o))
+    {
+        return std::nullopt;
+    }
+
+    // seqLenK is the page size here: K / V are page containers.
+    const auto p = problemFor(*q, *k, *v);
+    const int64_t page = p.seqLenK;
+    if(!fitsI32(p.batch) || !fitsI32(p.queryHeads) || !fitsI32(p.kvHeads) || !fitsI32(p.vHeads)
+       || !fitsI32(p.seqLenQ) || p.queryHeads % p.kvHeads != 0 || p.queryHeads % p.vHeads != 0
+       || !isServedHeadDim(p.headDimQ) || !isServedHeadDim(p.headDimV) || (page & (page - 1)) != 0
+       || v->dims()->Get(SEQ_AXIS) != page
+       || v->dims()->Get(BATCH_AXIS) != k->dims()->Get(BATCH_AXIS)
+       || k->dims()->Get(HEAD_SIZE_AXIS) != p.headDimQ || o->dims()->Get(BATCH_AXIS) != p.batch
+       || o->dims()->Get(HEAD_AXIS) != p.queryHeads || o->dims()->Get(SEQ_AXIS) != p.seqLenQ
+       || o->dims()->Get(HEAD_SIZE_AXIS) != p.headDimV)
+    {
+        return std::nullopt;
+    }
+    if(k->data_type() != p.dataType || v->data_type() != p.dataType || o->data_type() != p.dataType
+       || !supportedDataTypeName(p.dataType).has_value())
+    {
+        return std::nullopt;
+    }
+    for(const auto* tensor : {k, v})
+    {
+        if(!pageFitsI32(*tensor, 2) || !hasAlignedRows(*tensor))
+        {
+            return std::nullopt;
+        }
+    }
+
+    // One page table drives both K and V lookups.
+    const auto tableUid = attributes.page_table_k_tensor_uid();
+    if(!tableUid.has_value() || attributes.page_table_v_tensor_uid() != tableUid)
+    {
+        return std::nullopt;
+    }
+    const auto* table = findTensor(context, *tableUid);
+    if(!isDeviceI32Tensor(table) || table->dims()->Get(0) != p.batch || table->dims()->Get(1) != 1
+       || table->dims()->Get(2) <= 0 || table->dims()->Get(3) != 1
+       || (table->dims()->Get(2) > 1 && table->strides()->Get(2) != 1)
+       || table->strides()->Get(0) < 0 || !fitsI32(table->strides()->Get(0))
+       || !addressFitsI32(*table, 4))
+    {
+        return std::nullopt;
+    }
+    const int64_t maxSeqLenKv = attributes.max_seq_len_kv().value_or(0);
+    if(maxSeqLenKv <= 0 || maxSeqLenKv > table->dims()->Get(2) * page || !fitsI32(maxSeqLenKv))
+    {
+        return std::nullopt;
+    }
+    const auto seqLenKv = attributes.seq_len_kv_tensor_uid();
+    const auto seqLenQ = attributes.seq_len_q_tensor_uid();
+    if(!seqLenKv.has_value() || !isDeviceI32Vector(findTensor(context, *seqLenKv), p.batch)
+       || (seqLenQ.has_value() && !isDeviceI32Vector(findTensor(context, *seqLenQ), p.batch))
+       || (raggedQ
+           && (!seqLenQ.has_value()
+               || !isDeviceI32Vector(findTensor(context, *q->ragged_offset_tensor_uid()),
+                                     p.batch + 1))))
+    {
+        return std::nullopt;
+    }
+
+    const auto lse = lseFor(context, attributes, p);
+    BoundTokens bound;
+    if(!lse.has_value() || (raggedQ && lse->first) || attributes.attn_mask_tensor_uid().has_value()
+       || !bindCommon(context, attributes, *lse, bound))
+    {
+        return std::nullopt;
+    }
+    GraphLayout layout = GraphLayout::PAGED_DENSE_Q;
+    if(raggedQ)
+    {
+        layout = GraphLayout::PAGED_RAGGED_Q;
+    }
+    else if(seqLenQ.has_value())
+    {
+        layout = GraphLayout::PAGED_DENSE_Q_SEQUSED;
+    }
+    bound[std::string(BIAS_TOKEN)] = static_cast<int64_t>(BiasKind::NONE);
+    bound[std::string(LAYOUT_TOKEN)] = static_cast<int64_t>(layout);
+    bound[std::string(PAGE_SIZE_TOKEN)] = page;
+    bound[std::string(PAGE_TABLE_UID_TOKEN)] = *tableUid;
+    bound[std::string(PAGE_TABLE_STRIDE_TOKEN)] = table->strides()->Get(0);
+    bound[std::string(SEQ_LEN_KV_UID_TOKEN)] = *seqLenKv;
+    bound[std::string(MAX_SEQ_LEN_KV_TOKEN)] = maxSeqLenKv;
+    if(seqLenQ.has_value())
+    {
+        bound[std::string(SEQ_LEN_Q_UID_TOKEN)] = *seqLenQ;
+    }
+    if(raggedQ)
+    {
+        bound[std::string(Q_OFFSET_UID_TOKEN)] = *q->ragged_offset_tensor_uid();
+    }
+    return bound;
+}
+
 std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& context)
 {
     const auto* attributesPtr = sdpaNode(context);
@@ -644,6 +1044,11 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
+    if(attributes.page_table_k_tensor_uid().has_value()
+       || attributes.page_table_v_tensor_uid().has_value())
+    {
+        return gfx1151WmmaAttentionPagedGraphMatches(context, attributes);
+    }
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
     const auto* v = findTensor(context, attributes.v_tensor_uid());
@@ -684,103 +1089,22 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
             return std::nullopt;
         }
     }
-
-    const bool writeLse = attributes.generate_stats().value_or(false);
-    const data_objects::TensorAttributes* lse = o;
-    int64_t lseUid = attributes.o_tensor_uid();
-    if(writeLse)
-    {
-        if(!attributes.stats_tensor_uid().has_value())
-        {
-            return std::nullopt;
-        }
-        lseUid = attributes.stats_tensor_uid().value();
-        lse = findTensor(context, lseUid);
-        if(lse == nullptr || !isWellFormedOperand(*lse)
-           || lse->data_type() != data_objects::DataType::FLOAT
-           || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
-           || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
-           || !addressFitsI32(*lse, 4))
-        {
-            return std::nullopt;
-        }
-    }
-    else if(attributes.stats_tensor_uid().has_value())
-    {
-        return std::nullopt;
-    }
-
-    const auto mask = maskFor(attributes);
-    if(!mask.has_value())
-    {
-        return std::nullopt;
-    }
-    // hipDNN graph features the rocKE kernels serve but this engine cannot bind (the
-    // kernels' sinks, ALiBi slopes, paged and ragged layouts and FP8 K/V take operands
-    // of their own; see the catalog config) are declined, as is everything else.
+    // Sequence lengths and max_seq_len_kv belong to the paged graph (cuDNN rejects
+    // max_seq_len_kv without paging); the dense layout has no padded-batch form.
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value() || attributes.seed_tensor_uid().has_value()
-       || attributes.offset_tensor_uid().has_value()
-       || attributes.dropout_mask_tensor_uid().has_value()
-       || attributes.dropout_scale_tensor_uid().has_value()
-       || (attributes.dropout_probability().has_value()
-           && attributes.dropout_probability().value() != 0.0F)
-       || attributes.page_table_k_tensor_uid().has_value()
-       || attributes.page_table_v_tensor_uid().has_value()
-       || attributes.max_seq_len_kv().has_value() || attributes.block_mask_tensor_uid().has_value()
-       || attributes.sink_token_tensor_uid().has_value()
-       || attributes.descale_q_tensor_uid().has_value()
-       || attributes.descale_k_tensor_uid().has_value()
-       || attributes.descale_v_tensor_uid().has_value()
-       || attributes.descale_s_tensor_uid().has_value()
-       || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
-       || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value()
-       || attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value() || attributes.alibi_mask()
-       || attributes.padding_mask()
-       || attributes.implementation() != data_objects::AttentionImplementation::AUTO)
+       || attributes.seq_len_kv_tensor_uid().has_value() || attributes.max_seq_len_kv().has_value()
+       || attributes.padding_mask())
     {
         return std::nullopt;
     }
-    const auto scale = scaleFor(context, attributes);
-    if(!scale.has_value())
-    {
-        return std::nullopt;
-    }
-    // The kernels always accumulate in FP32. UNSET and FLOAT therefore describe
-    // the same execution; HALF/BFLOAT16 are accepted for cuDNN-compat graphs.
-    const auto mmaCoreMode = attributes.mma_core_mode();
-    if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::FLOAT
-       && mmaCoreMode != data_objects::DataType::HALF
-       && mmaCoreMode != data_objects::DataType::BFLOAT16)
-    {
-        return std::nullopt;
-    }
+    const auto lse = lseFor(context, attributes, p);
     const auto bias = biasFor(context, attributes, p);
-    if(!bias.has_value())
+    BoundTokens bound;
+    if(!lse.has_value() || !bias.has_value() || !bindCommon(context, attributes, *lse, bound))
     {
         return std::nullopt;
     }
-
-    BoundTokens bound;
-    bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();
-    bound[std::string(K_TOKEN)] = attributes.k_tensor_uid();
-    bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
-    bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
-    bound[std::string(LSE_TOKEN)] = lseUid;
-    bound[std::string(WRITE_LSE_TOKEN)] = static_cast<int64_t>(writeLse);
-    bound[std::string(MASK_TOKEN)] = static_cast<int64_t>(mask->kind);
-    bound[std::string(BOTTOM_RIGHT_TOKEN)] = mask->bottomRight;
-    bound[std::string(WINDOW_LEFT_TOKEN)] = mask->left;
-    bound[std::string(WINDOW_RIGHT_TOKEN)] = mask->right;
-    int32_t scaleBits = 0;
-    std::memcpy(&scaleBits, &scale->value, sizeof(scale->value));
-    bound[std::string(SCALE_BITS_TOKEN)] = static_cast<int64_t>(scaleBits);
-    if(scale->runtimeUid.has_value())
-    {
-        bound[std::string(SCALE_UID_TOKEN)] = *scale->runtimeUid;
-        bound[std::string(SCALE_DTYPE_TOKEN)] = static_cast<int64_t>(scale->runtimeType);
-    }
+    bound[std::string(LAYOUT_TOKEN)] = static_cast<int64_t>(GraphLayout::DENSE);
     bound[std::string(BIAS_TOKEN)] = static_cast<int64_t>(bias->kind);
     if(bias->kind != BiasKind::NONE)
     {
@@ -790,6 +1114,20 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
         bound[std::string(BIAS_STRIDE_QUERY_TOKEN)] = bias->strides[2];
     }
     return bound;
+}
+
+/// The decode engine's graph matcher: its objects are dense, so it declines every paged
+/// graph (one with a page table), which is the prefill engine's alone.
+std::optional<BoundTokens> gfx1151WmmaAttentionDecodeGraphMatches(const MatchContext& context)
+{
+    const auto* attributes = sdpaNode(context);
+    if(attributes != nullptr
+       && (attributes->page_table_k_tensor_uid().has_value()
+           || attributes->page_table_v_tensor_uid().has_value()))
+    {
+        return std::nullopt;
+    }
+    return gfx1151WmmaAttentionGraphMatches(context);
 }
 
 int64_t readBound(const BoundTokens& bound, std::string_view token)
@@ -843,6 +1181,24 @@ Binding bindingFor(const BoundTokens& bound)
                                 static_cast<int32_t>(readBound(bound, BIAS_STRIDE_HEAD_TOKEN)),
                                 static_cast<int32_t>(readBound(bound, BIAS_STRIDE_QUERY_TOKEN))};
     }
+    binding.layout = static_cast<GraphLayout>(readBound(bound, LAYOUT_TOKEN));
+    if(binding.layout != GraphLayout::DENSE)
+    {
+        auto& paged = binding.paged;
+        paged.pageSize = readBound(bound, PAGE_SIZE_TOKEN);
+        paged.pageTable = readBound(bound, PAGE_TABLE_UID_TOKEN);
+        paged.pageTableStride = static_cast<int32_t>(readBound(bound, PAGE_TABLE_STRIDE_TOKEN));
+        paged.seqLenKv = readBound(bound, SEQ_LEN_KV_UID_TOKEN);
+        paged.maxSeqLenKv = readBound(bound, MAX_SEQ_LEN_KV_TOKEN);
+        if(binding.layout != GraphLayout::PAGED_DENSE_Q)
+        {
+            paged.seqLenQ = readBound(bound, SEQ_LEN_Q_UID_TOKEN);
+        }
+        if(binding.layout == GraphLayout::PAGED_RAGGED_Q)
+        {
+            paged.qOffset = readBound(bound, Q_OFFSET_UID_TOKEN);
+        }
+    }
     return binding;
 }
 
@@ -868,7 +1224,9 @@ std::optional<std::string> stringMetadata(const KernelDefinition& kernel, std::s
     return value == nullptr ? std::nullopt : std::optional<std::string>(*value);
 }
 
-/// What the catalog metadata says one object is. Every field is required.
+/// What the catalog metadata says one object is. Every field is required except the
+/// layout fields, whose KMD defaults (dense, page 0, no dense_q / seqused_q) dense objects
+/// leave implicit.
 struct ObjectTraits
 {
     bool decode = false;
@@ -880,7 +1238,36 @@ struct ObjectTraits
     int64_t blockSize = 0;
     int64_t blockM = 0;
     int64_t dvSplit = 0;
+    GraphLayout layout = GraphLayout::DENSE;
+    int64_t pageSize = 0;
 };
+
+/// The graph layout an object serves from its (layout, page_block_size, dense_q,
+/// seqused_q) metadata; nullopt for a layout this engine cannot bind (the kernels'
+/// ragged K/V, or a paged Q packed without seqused_q, which hipDNN graphs never carry).
+std::optional<GraphLayout> objectLayout(const KernelDefinition& kernel, bool decode)
+{
+    const auto layout = stringMetadata(kernel, LAYOUT_FIELD).value_or("dense");
+    const auto pageSize = integerMetadata(kernel, PAGE_BLOCK_SIZE_FIELD).value_or(0);
+    const auto denseQ = integerMetadata(kernel, DENSE_Q_FIELD).value_or(0);
+    const auto seqUsedQ = integerMetadata(kernel, SEQUSED_Q_FIELD).value_or(0);
+    if(layout == "dense")
+    {
+        return pageSize == 0 && denseQ == 0 && seqUsedQ == 0
+                   ? std::optional<GraphLayout>(GraphLayout::DENSE)
+                   : std::nullopt;
+    }
+    if(layout != "paged" || decode || pageSize <= 0 || (pageSize & (pageSize - 1)) != 0)
+    {
+        return std::nullopt;
+    }
+    if(denseQ == 1)
+    {
+        return seqUsedQ == 0 ? GraphLayout::PAGED_DENSE_Q : GraphLayout::PAGED_DENSE_Q_SEQUSED;
+    }
+    return denseQ == 0 && seqUsedQ == 1 ? std::optional<GraphLayout>(GraphLayout::PAGED_RAGGED_Q)
+                                        : std::nullopt;
+}
 
 std::optional<BiasKind> biasKindNamed(std::string_view name)
 {
@@ -918,9 +1305,10 @@ std::optional<ObjectTraits> traitsOf(const KernelDefinition& kernel)
         return std::nullopt;
     }
     const auto bias = biasKindNamed(*biasName);
-    if(!bias.has_value() || *headSize <= 0 || *headSize > MAX_HEAD_DIM || *headSizeV <= 0
-       || *headSizeV > MAX_HEAD_DIM || *blockSize <= 0 || *blockSize > 1024 || *blockM <= 0
-       || *dvSplit <= 0 || *headSizeV % *dvSplit != 0)
+    const auto layout = objectLayout(kernel, *kind == KIND_DECODE);
+    if(!bias.has_value() || !layout.has_value() || *headSize <= 0 || *headSize > MAX_HEAD_DIM
+       || *headSizeV <= 0 || *headSizeV > MAX_HEAD_DIM || *blockSize <= 0 || *blockSize > 1024
+       || *blockM <= 0 || *dvSplit <= 0 || *headSizeV % *dvSplit != 0)
     {
         return std::nullopt;
     }
@@ -932,7 +1320,9 @@ std::optional<ObjectTraits> traitsOf(const KernelDefinition& kernel)
                         *bias,
                         *blockSize,
                         *blockM,
-                        *dvSplit};
+                        *dvSplit,
+                        *layout,
+                        integerMetadata(kernel, PAGE_BLOCK_SIZE_FIELD).value_or(0)};
 }
 
 ObjectTraits requireTraits(const KernelDefinition& kernel)
@@ -1094,6 +1484,13 @@ bool kernelMatchesFor(bool decodeEngine,
     {
         return false;
     }
+    // The layout and query form are baked: a paged object serves exactly its page size.
+    const auto layout = static_cast<GraphLayout>(readBound(bound, LAYOUT_TOKEN));
+    if(traits->layout != layout
+       || (layout != GraphLayout::DENSE && traits->pageSize != readBound(bound, PAGE_SIZE_TOKEN)))
+    {
+        return false;
+    }
     const auto mask = boundMask(bound);
     if(!maskModeServes(traits->maskMode, mask.kind))
     {
@@ -1102,13 +1499,17 @@ bool kernelMatchesFor(bool decodeEngine,
     if(decodeEngine)
     {
         // Exactly the dispatcher's object: decode by its rule, in the bucket
-        // wmma_fmha_decode_bucket picks (which also bounds Q/K below).
-        return usesDecode(*problem, mask, context.deviceProperties)
+        // wmma_fmha_decode_bucket picks (which also bounds Q/K below). The decode objects
+        // are dense, so a paged graph is never the decode engine's.
+        return layout == GraphLayout::DENSE && usesDecode(*problem, mask, context.deviceProperties)
                && decodeBucket(problem->headDimQ, problem->headDimV) == traits->headSize
                && decodePlanFor(*problem, mask, *traits, context.deviceProperties).has_value();
     }
-    // What the decode engine serves is not the prefill engine's.
-    if(catalogDecodePlan(*problem, mask, context.deviceProperties).has_value())
+    // What the decode engine serves is not the prefill engine's. That is a dense graph
+    // only: a paged graph's key length is its page size, not its sequence length, so the
+    // dense decode rule does not apply, and every paged graph is the prefill engine's.
+    if(layout == GraphLayout::DENSE
+       && catalogDecodePlan(*problem, mask, context.deviceProperties).has_value())
     {
         return false;
     }
@@ -1238,6 +1639,28 @@ std::vector<KernelArgument> prefillSignature(const ObjectTraits& traits)
         builder.i32(name);
     }
     builder.strides({"q", "k", "v", "o", "lse"});
+    // The paged layout's arguments (wmma_fmha_fwd_v2._declare_params): the query form's
+    // offsets / live counts, then the page lookup.
+    if(traits.layout != GraphLayout::DENSE)
+    {
+        if(traits.layout == GraphLayout::PAGED_RAGGED_Q)
+        {
+            builder.pointer("cu_seqlens_q");
+        }
+        if(traits.layout != GraphLayout::PAGED_DENSE_Q)
+        {
+            builder.pointer("seqused_q");
+        }
+        builder.pointer("seqused_k");
+        builder.pointer("block_table");
+        // num_blocks: the caches' page count; the kernel reads a block_table entry
+        // outside [0, num_blocks) as a page of zeros.
+        for(const char* name :
+            {"block_table_stride", "stride_k_block", "stride_v_block", "num_blocks"})
+        {
+            builder.i32(name);
+        }
+    }
     if(traits.bias != BiasKind::NONE)
     {
         addBiasArguments(builder);
@@ -1313,6 +1736,11 @@ struct RuntimeArguments
     // Passed only to a bias object.
     bool attnBias;
     std::array<int32_t, 3> biasStrides;
+    // Paged layouts: block_table row stride, the K / V page strides and the page count.
+    int32_t pageTableStride;
+    int32_t kPageStride;
+    int32_t vPageStride;
+    int32_t numPages;
 };
 
 RuntimeArguments runtimeArguments(const data_objects::TensorAttributes& q,
@@ -1330,26 +1758,41 @@ RuntimeArguments runtimeArguments(const data_objects::TensorAttributes& q,
                                       static_cast<int32_t>(tensor.strides()->Get(SEQ_AXIS)),
                                       static_cast<int32_t>(tensor.strides()->Get(HEAD_AXIS))};
     };
+    // A paged K / V container or a ragged Q / O has no batch stride: pages and sequences
+    // are addressed through the block table and the ragged offsets.
+    const auto unbatched = [&](const data_objects::TensorAttributes& tensor) {
+        auto result = strides(tensor);
+        result[0] = 0;
+        return result;
+    };
+    const bool paged = binding.layout != GraphLayout::DENSE;
+    const bool raggedQ = binding.layout == GraphLayout::PAGED_RAGGED_Q;
     RuntimeArguments args;
     args.batch = static_cast<int32_t>(problem.batch);
     args.queryHeads = static_cast<int32_t>(problem.queryHeads);
     args.kvHeads = static_cast<int32_t>(problem.kvHeads);
     args.vHeads = static_cast<int32_t>(problem.vHeads);
     args.seqLenQ = static_cast<int32_t>(problem.seqLenQ);
-    args.seqLenK = static_cast<int32_t>(problem.seqLenK);
+    // Paged: the kernel reads each sequence's keys from seq_len_kv; this is the bound.
+    args.seqLenK = static_cast<int32_t>(paged ? binding.paged.maxSeqLenKv : problem.seqLenK);
     args.headDimQ = static_cast<int32_t>(problem.headDimQ);
     args.headDimV = static_cast<int32_t>(problem.headDimV);
     args.bottomRight = binding.mask.bottomRight;
     args.windowLeft = binding.mask.left;
     args.windowRight = binding.mask.right;
     args.writeLse = binding.writeLse;
-    args.qStrides = strides(q);
-    args.kStrides = strides(k);
-    args.vStrides = strides(v);
-    args.oStrides = strides(o);
+    args.qStrides = raggedQ ? unbatched(q) : strides(q);
+    args.kStrides = paged ? unbatched(k) : strides(k);
+    args.vStrides = paged ? unbatched(v) : strides(v);
+    args.oStrides = raggedQ ? unbatched(o) : strides(o);
     args.lseStrides = binding.writeLse != 0 ? strides(lse) : std::array<int32_t, 3>{0, 0, 0};
     args.attnBias = traits.bias != BiasKind::NONE;
     args.biasStrides = binding.bias.strides;
+    args.pageTableStride = binding.paged.pageTableStride;
+    args.kPageStride = paged ? static_cast<int32_t>(k.strides()->Get(BATCH_AXIS)) : 0;
+    args.vPageStride = paged ? static_cast<int32_t>(v.strides()->Get(BATCH_AXIS)) : 0;
+    // K and V page containers share num_blocks (the paged matcher declines otherwise).
+    args.numPages = paged ? static_cast<int32_t>(k.dims()->Get(BATCH_AXIS)) : 0;
     return args;
 }
 
@@ -1480,6 +1923,14 @@ public:
                 "gfx1151 WMMA attention lost a bound tensor before preparation");
         }
         const auto traits = requireEngineTraits(kernel);
+        if(traits.layout != binding.layout)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx1151 WMMA attention "
+                    + describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                    + " was compiled for another Q / K / V layout than the graph's");
+        }
         const auto problem = problemFor(*q, *k, *v);
         const auto arguments = runtimeArguments(*q, *k, *v, *o, *lse, problem, binding, traits);
         requireLaunchRange(traits.blockSize, 1024, "block size");
@@ -1531,6 +1982,17 @@ public:
         const auto& p = state.arguments();
         const auto find = [&](int64_t uid) {
             return hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
+        };
+        // INT32 device operands of the paged layouts: page table, lengths, ragged offsets.
+        const auto findI32 = [&](int64_t uid, const char* name) {
+            void* pointer = find(uid);
+            if(reinterpret_cast<uintptr_t>(pointer) % alignof(int32_t) != 0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string("gfx1151 WMMA attention ") + name + " must be 4-byte aligned");
+            }
+            return pointer;
         };
         void* q = find(binding.q);
         void* k = find(binding.k);
@@ -1598,15 +2060,52 @@ public:
                               p.lseStrides[2],
                               tail...);
             };
-            if(p.attnBias)
+            const auto& paged = binding.paged;
+            switch(binding.layout)
             {
-                launchPrefill(bias, p.biasStrides[0], p.biasStrides[1], p.biasStrides[2]);
+            case GraphLayout::DENSE:
+                if(p.attnBias)
+                {
+                    launchPrefill(bias, p.biasStrides[0], p.biasStrides[1], p.biasStrides[2]);
+                }
+                else
+                {
+                    launchPrefill();
+                }
+                return;
+            case GraphLayout::PAGED_DENSE_Q:
+                launchPrefill(findI32(paged.seqLenKv, "seq_len_kv"),
+                              findI32(paged.pageTable, "page table"),
+                              p.pageTableStride,
+                              p.kPageStride,
+                              p.vPageStride,
+                              p.numPages);
+                return;
+            case GraphLayout::PAGED_DENSE_Q_SEQUSED:
+                launchPrefill(findI32(paged.seqLenQ, "seq_len_q"),
+                              findI32(paged.seqLenKv, "seq_len_kv"),
+                              findI32(paged.pageTable, "page table"),
+                              p.pageTableStride,
+                              p.kPageStride,
+                              p.vPageStride,
+                              p.numPages);
+                return;
+            case GraphLayout::PAGED_RAGGED_Q:
+                launchPrefill(findI32(paged.qOffset, "Q ragged offsets"),
+                              findI32(paged.seqLenQ, "seq_len_q"),
+                              findI32(paged.seqLenKv, "seq_len_kv"),
+                              findI32(paged.pageTable, "page table"),
+                              p.pageTableStride,
+                              p.kPageStride,
+                              p.vPageStride,
+                              p.numPages);
+                return;
+            default:
+                break;
             }
-            else
-            {
-                launchPrefill();
-            }
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "gfx1151 WMMA attention bound an unknown layout");
         }
 
         // Split-KV decode. One split writes O / LSE directly with null workspace
@@ -1796,7 +2295,7 @@ void registerGfx1151WmmaAttentionSymbols(SymbolScope<Handle>& scope)
 
 void registerGfx1151WmmaAttentionDecodeSymbols(SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(DECODE_GRAPH_MATCHER_SYMBOL), &gfx1151WmmaAttentionGraphMatches);
+    scope.add(std::string(DECODE_GRAPH_MATCHER_SYMBOL), &gfx1151WmmaAttentionDecodeGraphMatches);
     scope.add(std::string(DECODE_KERNEL_MATCHER_SYMBOL), &decodeKernelMatches);
     scope.add(std::string(DECODE_SCORE_SYMBOL), &scoreKernel);
     scope.add(std::string(DECODE_DISPATCH_SYMBOL), &gfx1151WmmaAttentionDecodeDispatchHandler());
