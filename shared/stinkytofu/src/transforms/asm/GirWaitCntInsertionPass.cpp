@@ -5,6 +5,10 @@
 
 #include "stinkytofu/transforms/asm/GirWaitCntInsertionPass.hpp"
 
+#include <set>
+#include <string>
+#include <utility>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -18,14 +22,29 @@ namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::waitcnt;
 
+/// `GIR RAW`, `GIR WAR`, or every kind that required this one wait.
+std::string girWaitStamp(const std::set<GirHazardKind>* kinds) {
+    if (!kinds || kinds->empty()) return "GIR";
+    std::string result = "GIR ";
+    bool first = true;
+    for (GirHazardKind kind : *kinds) {
+        if (!first) result += ",";
+        result += kind == GirHazardKind::RAW ? "RAW" : kind == GirHazardKind::WAR ? "WAR" : "WAW";
+        first = false;
+    }
+    return result;
+}
+
 void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,
-                 const WaitCountSpec& spec) {
+                 const WaitCountSpec& spec, const std::set<GirHazardKind>* dsKinds,
+                 const std::set<GirHazardKind>* tensorKinds) {
     if (spec.dsCount != WaitCountSpec::kUnused) {
         StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch), anchor);
         wait->addSrcReg(StinkyRegister(spec.dsCount));
         SWaitCntData data;
         data.dlcnt = spec.dsCount;
         wait->addModifier<SWaitCntData>(data);
+        wait->addModifier<CommentData>(CommentData{girWaitStamp(dsKinds)});
     }
     if (spec.tensorCount != WaitCountSpec::kUnused) {
         StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch), anchor);
@@ -35,11 +54,16 @@ void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* ancho
         wait->addModifier<SWaitTensorCntData>(data);
         if (!spec.tensorTokens.empty())
             wait->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
+        wait->addModifier<CommentData>(CommentData{girWaitStamp(tensorKinds)});
     }
 }
 
 void emitPlan(Function& function, PassContext& passCtx, GfxArchID arch,
-              const WaitInsertionPlan& plan) {
+              const WaitInsertionPlan& plan, const GirWaitKinds& kinds) {
+    const auto lookup = [](const auto& table, const auto& key) {
+        auto found = table.find(key);
+        return found == table.end() ? nullptr : &found->second;
+    };
     for (BasicBlock& block : function) {
         if (!passCtx.shouldProcessBasicBlock(block)) continue;
         AsmIRBuilder builder(block, arch);
@@ -47,7 +71,10 @@ void emitPlan(Function& function, PassContext& passCtx, GfxArchID arch,
             auto* inst = dyn_cast<StinkyInstruction>(&node);
             if (!inst) continue;
             auto wait = plan.anchorWaits.find(inst);
-            if (wait != plan.anchorWaits.end()) emitOneSpec(builder, arch, inst, wait->second);
+            if (wait == plan.anchorWaits.end()) continue;
+            emitOneSpec(builder, arch, inst, wait->second,
+                        lookup(kinds.anchors, std::pair{inst, CK_DS}),
+                        lookup(kinds.anchors, std::pair{inst, CK_Tensor}));
         }
     }
     for (const auto& drain : plan.tailDrains) {
@@ -57,7 +84,10 @@ void emitPlan(Function& function, PassContext& passCtx, GfxArchID arch,
         IRBase* terminator = block->getTerminator();
         auto* anchor = terminator ? dyn_cast<StinkyInstruction>(terminator) : nullptr;
         if (anchor && !isBranch(*anchor)) anchor = nullptr;
-        emitOneSpec(builder, arch, anchor, drain.spec);
+        emitOneSpec(
+            builder, arch, anchor, drain.spec,
+            lookup(kinds.tails, std::pair{static_cast<const BasicBlock*>(block), CK_DS}),
+            lookup(kinds.tails, std::pair{static_cast<const BasicBlock*>(block), CK_Tensor}));
     }
 }
 
@@ -80,7 +110,9 @@ class GirWaitCntInsertionPass final : public StinkyInstPass {
         const auto covers = [&passCtx](const BasicBlock& block) {
             return passCtx.shouldProcessBasicBlock(const_cast<BasicBlock&>(block));
         };
-        WaitInsertionPlan plan = buildGirFrameWaitPlan(function, frames, hazards, covers);
+        GirWaitKinds kinds;
+        WaitInsertionPlan plan =
+            buildGirFrameWaitPlan(function, frames, hazards, covers, {}, &kinds);
         if (plan.anchorWaits.empty() && plan.tailDrains.empty()) return PreservedAnalyses::all();
 
         // Generic register waits are emitted first so GIR ranks can credit them. A stronger GIR
@@ -91,7 +123,7 @@ class GirWaitCntInsertionPass final : public StinkyInstPass {
         const GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
-        emitPlan(function, passCtx, arch, plan);
+        emitPlan(function, passCtx, arch, plan, kinds);
         return preserveCFGAnalyses();
     }
 };
