@@ -104,6 +104,8 @@ void Arguments::init()
     algo           = 0;
     solution_index = 0;
 
+    pointer_byte_offset = 0;
+
     geam_ex_op = rocblas_geam_ex_operation_min_plus;
 
     flags = rocblas_gemm_flags_none;

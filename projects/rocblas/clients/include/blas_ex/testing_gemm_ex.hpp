@@ -306,6 +306,74 @@ void testing_gemm_ex_run(const Arguments& arg)
         d_type = arg.c_type;
     }
 
+    // Pointer-alignment: apply a byte offset to the A/B/C/D device pointers
+    // so they are element-aligned but not necessarily naturally aligned to
+    // sizeof(pointer). Exercises the source-kernel alignment guard (see
+    // rocblas_internal_gemm_ex_typecasting_64); force the source path from
+    // YAML with algo=1, solution_index=-2.
+    if(arg.pointer_byte_offset != 0)
+    {
+        const int64_t byte_off = arg.pointer_byte_offset;
+
+        HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
+        HOST_MEMCHECK(host_matrix<Ti>, hB, (B_row, B_col, ldb));
+        HOST_MEMCHECK(host_matrix<To>, hC, (M, N, ldc));
+
+        using To_hpa = std::conditional_t<std::is_same_v<To, rocblas_bfloat16>, float, To>;
+        HOST_MEMCHECK(host_matrix<To>, hD_1, (M, N, ldc));
+        HOST_MEMCHECK(host_matrix<To_hpa>, hD_gold, (M, N, ldc));
+
+        rocblas_init_matrix<Ti>(
+            hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true);
+        rocblas_init_matrix<Ti, true>(
+            hB, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, false, true);
+        rocblas_init_matrix<To, true>(
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
+
+        // Over-allocate each buffer by byte_off bytes so the offset pointer stays in
+        // bounds, then hand a byte-shifted pointer to the API.
+        DEVICE_MEMCHECK(device_vector<char>, dA_bytes, (hA.size() * sizeof(Ti) + byte_off));
+        DEVICE_MEMCHECK(device_vector<char>, dB_bytes, (hB.size() * sizeof(Ti) + byte_off));
+        DEVICE_MEMCHECK(device_vector<char>, dC_bytes, (hC.size() * sizeof(To) + byte_off));
+
+        Ti* dA = reinterpret_cast<Ti*>(static_cast<char*>(dA_bytes) + byte_off);
+        Ti* dB = reinterpret_cast<Ti*>(static_cast<char*>(dB_bytes) + byte_off);
+        To* dC = reinterpret_cast<To*>(static_cast<char*>(dC_bytes) + byte_off);
+
+        CHECK_HIP_ERROR(
+            hipMemcpy(dA, (const Ti*)hA, hA.size() * sizeof(Ti), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dB, (const Ti*)hB, hB.size() * sizeof(Ti), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dC, (const To*)hC, hC.size() * sizeof(To), hipMemcpyHostToDevice));
+
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+        // clang-format off
+        DAPI_CHECK(rocblas_gemm_ex_fn, (handle, transA, transB, M, N, K, &h_alpha_Tc,
+                                        dA, arg.a_type, lda,
+                                        dB, arg.b_type, ldb, &h_beta_Tc,
+                                        dC, arg.c_type, ldc,
+                                        dC, arg.c_type, ldc,
+                                        arg.compute_type, algo, solution_index, flags));
+        // clang-format on
+
+        CHECK_HIP_ERROR(
+            hipMemcpy((To*)hD_1, dC, hC.size() * sizeof(To), hipMemcpyDeviceToHost));
+
+        // reference result in hD_gold (C holds beta input via hC)
+        copy_matrix_with_different_leading_dimensions(hC, hD_gold);
+        ref_gemm<Ti, To_hpa, Tc>(transA, transB, M, N, K, h_alpha_Tc, hA, lda, hB, ldb, h_beta_Tc,
+                                 (To_hpa*)hD_gold, ldc,
+                                 rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
+
+        if(arg.unit_check)
+        {
+            const double tol = K * sum_error_tolerance<Tc>;
+            near_check_general<To, To_hpa>(M, N, ldc, hD_gold, hD_1, tol);
+        }
+        return;
+    }
+
     // Allocate device memory
     DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_Tc, (1));
     DEVICE_MEMCHECK(device_vector<Tc>, d_beta_Tc, (1));

@@ -125,6 +125,10 @@ struct Arguments
     uint32_t algo;
     int32_t  solution_index;
 
+    // byte offset applied to device matrix pointers before the API call, to test
+    // element-aligned but non-naturally-aligned buffers (default 0)
+    int32_t pointer_byte_offset;
+
     rocblas_geam_ex_operation geam_ex_op;
 
     rocblas_gemm_flags flags;
@@ -237,6 +241,7 @@ struct Arguments
     OPER(cold_iters) SEP             \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
+    OPER(pointer_byte_offset) SEP    \
     OPER(geam_ex_op) SEP             \
     OPER(flags) SEP                  \
     OPER(a_type) SEP                 \

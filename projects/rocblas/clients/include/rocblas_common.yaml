@@ -550,6 +550,7 @@ Arguments:
   - cold_iters: c_int32
   - algo: c_uint32
   - solution_index: c_int32
+  - pointer_byte_offset: c_int32
   - geam_op: rocblas_geam_ex_operation
   - flags: rocblas_gemm_flags
   - a_type: rocblas_datatype
@@ -669,6 +670,7 @@ Defaults:
   cold_iters: 2
   algo: 0
   solution_index: 0
+  pointer_byte_offset: 0
   geam_op: rocblas_geam_ex_operation_min_plus
   flags: none
   atomics_mode: atomics_not_allowed
