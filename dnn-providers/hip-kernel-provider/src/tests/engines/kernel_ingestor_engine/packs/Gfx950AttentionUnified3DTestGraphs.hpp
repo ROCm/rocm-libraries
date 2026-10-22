@@ -369,7 +369,7 @@ inline std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 
 /// The fields the engine's KMD declares, as a completed catalog record carries them. The
 /// defaults are the shipped kernel for the default graph (bf16, D128, Hq 8 / Hkv 2, top-left
-/// causal, block 16, 16 segments, decode grid), with its reduce kernel as its one companion.
+/// causal, block 16, 16 segments, decode grid), launching its segment and reduce kernels.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -381,8 +381,9 @@ struct KernelSpec
     int64_t slidingWindow = 0;
     int64_t numSegments = 16;
     int64_t useDecodeGrid = 1;
-    /// How many companion sources the record carries; the engine needs exactly one.
-    std::size_t companions = 1;
+    /// The launch names the record's `sources` carries; the engine needs exactly `segment`
+    /// and `reduce`. Empty is a single-launch record.
+    std::vector<std::string> launches = {"segment", "reduce"};
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -423,7 +424,10 @@ inline KernelDefinition makeKernel(const KernelSpec& spec)
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-00000000dea3");
     kernel.name = "attention_unified_3d.bf16_d128_hq8_kv2_m1_bs16_seg16.gfx950";
     kernel.metadata = metadataOf(spec);
-    kernel.companions.resize(spec.companions);
+    for(const auto& launch : spec.launches)
+    {
+        kernel.sources[launch] = {};
+    }
     return kernel;
 }
 
@@ -502,8 +506,9 @@ inline std::vector<KernelArgument> pythonReduceAbi()
             buffer("seq_lens_ptr")};
 }
 
-/// A KPACK descriptor for this engine naming an archive that is not there, its source
-/// recording @p segment and its one companion recording @p reduce. That absence is the
+/// A KPACK descriptor for this engine naming an archive that is not there, its `segment`
+/// launch recording @p segment and its `reduce` launch recording @p reduce (any other
+/// launch the spec names records @p segment). That absence is the
 /// point: every check prepare() performs BEFORE the loader runs is reached, the signature
 /// comparisons run next, and when they pass the loader reports the missing file. No device,
 /// no compile, no launch.
@@ -513,18 +518,15 @@ inline KernelDefinition makeKpackKernel(const KernelSpec& spec,
                                         = pythonReduceAbi())
 {
     auto kernel = makeKernel(spec);
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.source.library = "there-is-no-archive-here.kpack";
-    kernel.source.tocKey = "toc#0";
-    kernel.source.symbol = "rocke_uattn3d_tiled";
-    kernel.source.signature = segment;
-    for(auto& companion : kernel.companions)
+    for(auto& [launch, source] : kernel.sources)
     {
-        companion.kind = KernelSourceKind::KPACK;
-        companion.library = "there-is-no-archive-here.kpack";
-        companion.tocKey = "toc#1";
-        companion.symbol = "rocke_uattn_reduce_tiled";
-        companion.signature = reduce;
+        const bool isReduce = launch == "reduce";
+        source.kind = KernelSourceKind::KPACK;
+        // One module: both launches resolve out of the same library and toc key.
+        source.library = "there-is-no-archive-here.kpack";
+        source.tocKey = "toc#0";
+        source.symbol = isReduce ? "rocke_uattn_reduce_tiled" : "rocke_uattn3d_tiled";
+        source.signature = isReduce ? reduce : segment;
     }
     kernel.originDirectory = "/tmp/hkp-unified-3d-no-such-tree";
     kernel.treeRoot = "/tmp/hkp-unified-3d-no-such-tree";

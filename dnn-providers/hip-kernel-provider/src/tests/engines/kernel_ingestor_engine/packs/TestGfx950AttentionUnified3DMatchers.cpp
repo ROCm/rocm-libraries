@@ -17,7 +17,8 @@
  * The rules that are this engine's own, each against the neighbouring graph or record that
  * must be refused: decode only (a longer query leaves rows unwritten), a GQA group dividing
  * 16, D256 at bf16 only, the NO_MASK decode graph served by the bottom-right causal kernel,
- * and a record that is not a decode-grid kernel with exactly one companion. The SDPA-shape
+ * and a record that is not a decode-grid kernel launching exactly its segment and reduce
+ * kernels. The SDPA-shape
  * rules it shares with Unified2D are spot-checked; Unified2D's suite covers them in full.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
@@ -211,17 +212,25 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesARecordThatDisagreesWithTheGr
     EXPECT_FALSE(matchesKernel(GraphSpec{}, window));
 }
 
-/// Without its reduce kernel the segment kernel's partial results are never combined and
-/// the output is never written; with two, which one reduces is a guess.
-TEST(TestGfx950AttentionUnified3DMatchers, DeclinesARecordWithoutExactlyOneCompanion)
+/// Without its reduce launch the segment kernel's partial results are never combined and
+/// the output is never written; an extra or renamed launch is one this handler never runs.
+/// The state manager drops these against launchNames() first; this is the native's own
+/// refusal for a caller that hands it a definition directly.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesARecordWhoseLaunchesAreNotSegmentAndReduce)
 {
-    KernelSpec none;
-    none.companions = 0;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, none));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
 
-    KernelSpec two;
-    two.companions = 2;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, two));
+    for(const auto& launches : std::vector<std::vector<std::string>>{
+            {},
+            {"segment"},
+            {"segment", "merge"},
+            {"segment", "reduce", "extra"},
+        })
+    {
+        KernelSpec spec;
+        spec.launches = launches;
+        EXPECT_FALSE(matchesKernel(GraphSpec{}, spec)) << launches.size() << " launch(es)";
+    }
 }
 
 /// This engine launches the decode grid only; a prefill-grid record would be launched with
@@ -297,9 +306,9 @@ TEST(TestGfx950AttentionUnified3DMatchers, RanksFewerSegmentsFirstWithDistinctSc
 
 TEST(TestGfx950AttentionUnified3DMatchers, ScoresAnUnlaunchableRecordZero)
 {
-    KernelSpec none;
-    none.companions = 0;
-    EXPECT_EQ(scoreOf(GraphSpec{}, none), 0.0);
+    KernelSpec noReduce;
+    noReduce.launches = {"segment"};
+    EXPECT_EQ(scoreOf(GraphSpec{}, noReduce), 0.0);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

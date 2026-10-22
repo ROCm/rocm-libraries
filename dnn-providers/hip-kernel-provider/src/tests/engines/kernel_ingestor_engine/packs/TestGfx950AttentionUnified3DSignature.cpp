@@ -141,7 +141,7 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesExchangedIntegerScalars)
     expectRefused(swapped(pythonSegmentAbi(), 16, 17), pythonReduceAbi(), "num_seqs/stride");
 }
 
-/// The reduce kernel's list is checked too, before either archive is opened: a companion
+/// The reduce kernel's list is checked too, before either archive is opened: a reduce launch
 /// that disagrees is refused even though the segment kernel's list is right.
 TEST(TestGfx950AttentionUnified3DSignature, RefusesAReduceListOfTheWrongLength)
 {
@@ -155,7 +155,7 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesTheReduceOutputMovedOffItsSlo
     expectRefused(pythonSegmentAbi(), swapped(pythonReduceAbi(), 0, 1), "output/segm_output");
 }
 
-TEST(TestGfx950AttentionUnified3DSignature, RefusesTheSegmentListAsTheCompanion)
+TEST(TestGfx950AttentionUnified3DSignature, RefusesTheSegmentListAsTheReduceLaunch)
 {
     expectRefused(pythonSegmentAbi(), pythonSegmentAbi(), "the segment kernel is not a reduce");
 }

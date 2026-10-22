@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,10 +98,19 @@ TEST(TestGfx950AttentionUnified3DDispatch, WorkspaceQueryRefusesACandidateItCann
     const auto bound = bindingsFor(graph);
     const auto* handler = dispatchHandler();
     ASSERT_NE(handler, nullptr);
-    KernelSpec noCompanion;
-    noCompanion.companions = 0;
-    EXPECT_THROW(handler->workspaceBytes(graph.context(), bound, makeKernel(noCompanion)),
+    KernelSpec noReduce;
+    noReduce.launches = {"segment"};
+    EXPECT_THROW(handler->workspaceBytes(graph.context(), bound, makeKernel(noReduce)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+/// The launch set the state manager holds every kernel of this pack to: a descriptor whose
+/// `sources` names any other set is dropped before it reaches the handler.
+TEST(TestGfx950AttentionUnified3DDispatch, LaunchesTheSegmentAndReduceKernels)
+{
+    const auto* handler = dispatchHandler();
+    ASSERT_NE(handler, nullptr);
+    EXPECT_EQ(handler->launchNames(), (std::set<std::string>{"segment", "reduce"}));
 }
 
 TEST(TestGfx950AttentionUnified3DDispatch, BindsEachOperandUidToItsOwnToken)
@@ -135,12 +145,12 @@ TEST(TestGfx950AttentionUnified3DDispatch, ReachesTheLoaderOnceEverythingBeforeI
     }
 }
 
-/// A record without its reduce kernel is refused by name before any archive is touched.
-TEST(TestGfx950AttentionUnified3DDispatch, PrepareRefusesARecordWithoutItsCompanion)
+/// A record without its reduce launch is refused by name before any archive is touched.
+TEST(TestGfx950AttentionUnified3DDispatch, PrepareRefusesARecordWithoutItsReduceLaunch)
 {
-    KernelSpec noCompanion;
-    noCompanion.companions = 0;
-    EXPECT_NE(prepareFailureFor(noCompanion).find(GEOMETRY_MARKER), std::string::npos);
+    KernelSpec noReduce;
+    noReduce.launches = {"segment"};
+    EXPECT_NE(prepareFailureFor(noReduce).find(GEOMETRY_MARKER), std::string::npos);
 }
 
 /// prepare() is reachable without kernel_match: it re-checks the decode rule, since the
