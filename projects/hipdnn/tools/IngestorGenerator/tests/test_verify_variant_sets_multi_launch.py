@@ -74,6 +74,22 @@ class TestNesting:
         assert code == 0, output
         assert "small binaries subset of big: True" in output
 
+    def test_the_order_of_a_descriptors_sources_keys_does_not_matter(
+        self, tmp_path, capsys
+    ):
+        """A launch tuple is a set of named launches: the same launches listed in
+        another order are the same binary."""
+
+        def reverse(by_name):
+            sources = by_name[D64]["sources"]
+            by_name[D64]["sources"] = dict(reversed(list(sources.items())))
+
+        small = _tree(tmp_path, "small", keep=(D64,))
+        big = _tree(tmp_path, "big", reverse, keep=(D64,))
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 0, output
+        assert "small binaries subset of big: True" in output
+
     def test_tuples_differing_in_one_launch_do_not_nest(self, tmp_path, capsys):
         def other_merge(by_name):
             _set_specs(

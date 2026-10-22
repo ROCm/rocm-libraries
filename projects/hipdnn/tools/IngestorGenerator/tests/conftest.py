@@ -59,6 +59,15 @@ def gfx1151_wmma_attention_config(load_test_config):
 
 
 @pytest.fixture
+def multi_launch_config():
+    """A packaged config whose pack declares ``launches``; nothing under ``configs/``
+    does, so this is the only way the multi-launch arms of the templates render."""
+    return load_config(
+        Path(__file__).parent / "fixtures" / "verify_multi_launch" / "config.yaml"
+    )
+
+
+@pytest.fixture
 def heuristic_free_config():
     """An engine declaring ``heuristic: none``; nothing under ``configs/`` does, so
     without it the ``{% else %}`` arm of every ``has_heuristic`` branch renders for

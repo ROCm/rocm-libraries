@@ -459,6 +459,55 @@ class TestRealCompile:
             result.returncode == 0
         ), f"emitted multi-pack native stub failed to compile:\n{result.stderr}"
 
+    def test_multi_launch_stub_compiles(
+        self, compile_env, generator, multi_launch_config, tmp_path
+    ):
+        """The only config reaching the `{% if config.launch_names %}` arms: the `<set>`
+        include and the `launchNames() const override` signature must match
+        IKernelDispatchHandler."""
+        config = multi_launch_config
+        assert config.launch_names, "fixture is no longer a multi-launch one"
+        rendered = generator._render_template(
+            "native.cpp.j2", config, ids=mint_ids(config)
+        )
+        result = _compile(compile_env, rendered, tmp_path)
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-launch native stub failed to compile:\n{result.stderr}"
+
+    def test_multi_launch_stub_declares_exactly_the_configured_launch_names(
+        self, generator, multi_launch_config
+    ):
+        config = multi_launch_config
+        rendered = generator._render_template(
+            "native.cpp.j2", config, ids=mint_ids(config)
+        )
+        body = re.search(
+            r"std::set<std::string>\s+launchNames\(\)\s+const\s+override\s*\{(.*?)\n\s*\}",
+            rendered,
+            re.DOTALL,
+        )
+        assert body, "the multi-launch stub declares no launchNames() override"
+        returned = re.search(r"return\s*\{(.*?)\}\s*;", body.group(1), re.DOTALL)
+        assert returned, "launchNames() does not return a braced set"
+        declared = re.findall(r'"((?:[^"\\]|\\.)*)"', returned.group(1))
+        assert sorted(declared) == sorted(config.launch_names)
+        assert len(declared) > 1, "fixture no longer has several launches"
+
+    def test_multi_launch_census_stub_parses(
+        self, compile_env, generator, multi_launch_config, tmp_path
+    ):
+        """The census's multi-launch arm walks each kernel's `sources` map."""
+        config = multi_launch_config
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", config, ids=mint_ids(config)
+        )
+        assert "kernel.sources" in rendered, "census lost its multi-launch arm"
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacksLaunches")
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-launch census does not parse:\n{result.stderr}"
+
     def test_compile_catches_a_real_break(
         self, compile_env, generator, scale_add_config, tmp_path
     ):

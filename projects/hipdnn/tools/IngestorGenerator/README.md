@@ -732,7 +732,12 @@ names it launches and owns their order, and the provider drops a kernel whose la
 differ from the handler's when it builds its catalog. One engine has one handler, so every
 kernel of an engine must name the same set of launches: a config mixing single- and
 multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). See the
+engines by launch set). An operation whose variants need different launch counts, such as
+a single-launch prefill and a two-launch decode of SDPA forward, is therefore split into
+separate engines, one per launch set. The generated native stub declares `launchNames()`
+from the config's launches and notes in `prepare()` that each launch is built with
+`launchKernelDefinition`; the generated census test checks each kernel's `sources` entries
+against the emitted source kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
 
 ## The five pre-mint config-loader checks
