@@ -42,6 +42,16 @@ struct FmhaBatchPrefillPageTileTraits
     static_assert(kFragmentsPerWave * kFragmentRows == kRowsPerWave);
 };
 
+// KV tile order of a query tile with sink tokens (StreamingLLM): the loop first visits the sink
+// tiles from origin 0 and then jumps to the window start, so tile i starts at 128*i below
+// sink_tiles and at resume_origin + 128*(i - sink_tiles) from there. Without sink tokens the
+// tiles are contiguous from the first origin.
+struct FmhaPageTileSinkTiles
+{
+    index_t sink_tiles;
+    index_t resume_origin;
+};
+
 // One owned fragment's validated page metadata.
 struct FmhaBatchPrefillPageFragmentId
 {

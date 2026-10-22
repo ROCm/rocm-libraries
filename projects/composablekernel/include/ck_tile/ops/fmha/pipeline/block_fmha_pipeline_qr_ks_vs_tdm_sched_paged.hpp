@@ -7,6 +7,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_batch_prefill_page_tile.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
@@ -537,6 +538,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         PageIds page_id0 = k_dram_window.prefetch_page_id(0, num_total_loop, kv_load_start);
         PageIds page_id1 = k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start);
         PageIds page_id2 = k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start);
+        // With sink tokens the tiles are not contiguous: the sink tiles from origin 0, then the
+        // window from physical_seqlen_k_start (the windows below jump the same way). The page
+        // lookups follow that order.
+        [[maybe_unused]] const FmhaPageTileSinkTiles page_tile_order{num_sink_loop,
+                                                                     physical_seqlen_k_start};
+        if constexpr(kHasSink)
+        {
+            page_id0 =
+                k_dram_window.prefetch_page_id(0, num_total_loop, kv_load_start, page_tile_order);
+            page_id1 =
+                k_dram_window.prefetch_page_id(1, num_total_loop, kv_load_start, page_tile_order);
+            page_id2 =
+                k_dram_window.prefetch_page_id(2, num_total_loop, kv_load_start, page_tile_order);
+        }
         PageIds page_id3{};
         // Raw ids read before PV, validated into the queue value after PV.
         PageIds page_id3_raw{};
@@ -782,13 +797,28 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 // Issue the next ID before QK/PV without exposing its result.
                 if constexpr(Problem::kPageBlockSize >= 64)
                 {
-                    page_id3_valid_tokens = k_dram_window.prefetch_page_id_to_lds_scalar(
-                        page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
+                    if constexpr(kHasSink)
+                        page_id3_valid_tokens =
+                            k_dram_window.prefetch_page_id_to_lds_scalar(page_tile_i + 3,
+                                                                         num_total_loop,
+                                                                         kv_load_start,
+                                                                         id_lds_slot,
+                                                                         page_tile_order);
+                    else
+                        page_id3_valid_tokens = k_dram_window.prefetch_page_id_to_lds_scalar(
+                            page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
                 }
                 else
                 {
-                    page_id3 = k_dram_window.prefetch_page_id_to_lds(
-                        page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
+                    if constexpr(kHasSink)
+                        page_id3 = k_dram_window.prefetch_page_id_to_lds(page_tile_i + 3,
+                                                                         num_total_loop,
+                                                                         kv_load_start,
+                                                                         id_lds_slot,
+                                                                         page_tile_order);
+                    else
+                        page_id3 = k_dram_window.prefetch_page_id_to_lds(
+                            page_tile_i + 3, num_total_loop, kv_load_start, id_lds_slot);
                 }
                 // V is prefetched one iteration before its consumer.
                 if constexpr(kHasSink)

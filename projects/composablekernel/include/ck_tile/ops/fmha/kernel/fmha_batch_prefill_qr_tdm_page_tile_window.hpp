@@ -66,6 +66,19 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                static_cast<long_index_t>(tile_index) * 128;
     }
 
+    // With sink tokens (StreamingLLM) the key loop visits the sink tiles from first_origin and
+    // then jumps to the window start: tile i starts at resume_origin + 128 * (i - sink_tiles)
+    // from sink_tiles on. Instances without sinks use the contiguous overload above.
+    CK_TILE_DEVICE long_index_t logical_tile_origin_of(index_t tile_index,
+                                                       index_t first_origin,
+                                                       const FmhaPageTileSinkTiles& order) const
+    {
+        if(tile_index >= order.sink_tiles)
+            return static_cast<long_index_t>(order.resume_origin) +
+                   static_cast<long_index_t>(tile_index - order.sink_tiles) * 128;
+        return logical_tile_origin_of(tile_index, first_origin);
+    }
+
     // Physical page lookup for one owned fragment.
     // P>=128: fragment 0 only, table column t / P.
     // P64   : fragment 0 only, table column (t + 32*w) / 64; valid_rows stays tile-level.
@@ -152,6 +165,26 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         return result;
     }
 
+    // Sink-order prologue lookup (see logical_tile_origin_of).
+    CK_TILE_DEVICE PageIds prefetch_page_id(index_t tile_index,
+                                            index_t num_total_loop,
+                                            index_t first_origin,
+                                            const FmhaPageTileSinkTiles& order) const
+    {
+        PageIds result{};
+        if(tile_index < 0 || tile_index >= num_total_loop)
+            return result;
+        const index_t wave = get_warp_id();
+        if(wave >= kWaves)
+            return result;
+        const long_index_t tile_origin = logical_tile_origin_of(tile_index, first_origin, order);
+        static_for<0, kFragmentsPerWave, 1>{}([&](auto i_fragment) {
+            result.owned[decltype(i_fragment)::value] =
+                load_fragment_id(tile_origin, wave, decltype(i_fragment)::value);
+        });
+        return result;
+    }
+
     // P16 steady-state metadata publication. One masked wave0 async b32 writes up
     // to eight owned physical ids into the 32-byte pending slot. The caller waits
     // for asynccnt 0 and crosses a workgroup barrier before any wave reads a slot.
@@ -211,6 +244,34 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         if(wave >= kWaves)
             return result;
         const long_index_t tile_origin = logical_tile_origin_of(tile_index, first_origin);
+        static_for<0, kFragmentsPerWave, 1>{}([&](auto i_fragment) {
+            FmhaBatchPrefillPageFragmentId valid{};
+            const index_t f = 2 * wave + decltype(i_fragment)::value;
+            const long_index_t fragment_origin =
+                tile_origin + static_cast<long_index_t>(f) * kFragmentRows;
+            valid.valid_rows = static_cast<index_t>(
+                clamp<long_index_t>(seqlen_k_ - fragment_origin, 0, kFragmentRows));
+            result.owned[decltype(i_fragment)::value] = valid; // dummy id 0
+        });
+        prefetch_page_id_to_lds_p16(tile_origin, id_slot);
+        return result;
+    }
+
+    // Sink-order P16 queue publication (see logical_tile_origin_of).
+    CK_TILE_DEVICE PageIds prefetch_page_id_to_lds(index_t tile_index,
+                                                   index_t num_total_loop,
+                                                   index_t first_origin,
+                                                   CK_TILE_LDS_ADDR int32_t* id_slot,
+                                                   const FmhaPageTileSinkTiles& order) const
+    {
+        static_assert(PageSize_ == 16, "the struct page-id queue serves P16 only");
+        PageIds result{};
+        if(tile_index < 0 || tile_index >= num_total_loop)
+            return result;
+        const index_t wave = get_warp_id();
+        if(wave >= kWaves)
+            return result;
+        const long_index_t tile_origin = logical_tile_origin_of(tile_index, first_origin, order);
         static_for<0, kFragmentsPerWave, 1>{}([&](auto i_fragment) {
             FmhaBatchPrefillPageFragmentId valid{};
             const index_t f = 2 * wave + decltype(i_fragment)::value;
@@ -314,6 +375,34 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 true);
         }
         return min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
+    }
+
+    // Sink-order scalar queue publication (see logical_tile_origin_of); same body as above with
+    // the tile origin taken from the sink order.
+    CK_TILE_DEVICE index_t prefetch_page_id_to_lds_scalar(index_t tile_index,
+                                                          index_t num_total_loop,
+                                                          index_t first_origin,
+                                                          CK_TILE_LDS_ADDR int32_t* id_slot,
+                                                          const FmhaPageTileSinkTiles& order) const
+    {
+        if constexpr(PageSize_ == 16)
+            return 0;
+        if(tile_index < 0 || tile_index >= num_total_loop)
+            return 0;
+        const long_index_t logical_origin = logical_tile_origin_of(tile_index, first_origin, order);
+        const index_t logical_page        = static_cast<index_t>(logical_origin / PageSize_);
+        const index_t valid_tokens =
+            min(index_t{128}, seqlen_k_ - static_cast<index_t>(logical_origin));
+        const index_t lane = get_thread_id();
+        if(lane < kQueuePages && lane * PageSize_ < valid_tokens)
+        {
+            amd_async_global_load_to_lds<int32_t, 1, 0, true>(
+                id_slot + lane,
+                reinterpret_cast<const CK_TILE_GLOBAL_ADDR int32_t*>(page_row_ + logical_page),
+                lane,
+                true);
+        }
+        return valid_tokens;
     }
 
     CK_TILE_DEVICE index_t load_page_id_from_lds_scalar(index_t valid_tokens,

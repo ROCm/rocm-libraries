@@ -316,6 +316,22 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
+    # Sink instance (sink tokens and per-head sink logits): the page-id lookups follow the jump from
+    # the sink tiles to the window, so every page writer path is covered at both head dimensions.
+    foreach(page IN ITEMS 16 64 128 1024)
+        foreach(head_dim IN ITEMS 64 128)
+            set(target test_ck_tile_fmha_batch_prefill_page_tile_p${page}_d${head_dim}_causal_sink)
+            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+            target_compile_definitions(${target} PRIVATE
+                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=1
+                CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1)
+            target_compile_options(${target} PRIVATE -Wno-float-equal
+                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        endforeach()
+    endforeach()
+
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
     # mask).

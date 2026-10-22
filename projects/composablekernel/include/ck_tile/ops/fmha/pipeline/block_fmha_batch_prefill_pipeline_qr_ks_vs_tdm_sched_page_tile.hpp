@@ -11,13 +11,17 @@ namespace ck_tile {
 // Owns its page-ID schedule and keeps the M128/N128 compute geometry of the scheduled TDM pipeline.
 // The physical allocation page may differ from the logical N128 tile: P>=128
 // uses a slice of one physical page, P64 two pages (one per pair of waves), P16 assembles
-// eight page-local fragments.
+// eight page-local fragments. The per-head sink logit (virtual sink) is merged at normalization in
+// sink instances only.
 template <typename Problem_>
 struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
-    : BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_, FmhaTdmSchedPolicyFor<Problem_>, false>
+    : BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_,
+                                           FmhaTdmSchedPolicyFor<Problem_>,
+                                           Problem_::kHasSink>
 {
-    using Base =
-        BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_, FmhaTdmSchedPolicyFor<Problem_>, false>;
+    using Base    = BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_,
+                                                         FmhaTdmSchedPolicyFor<Problem_>,
+                                                         Problem_::kHasSink>;
     using Problem = typename Base::Problem;
     static_assert(Problem::kIsGroupMode);
     // Physical page support. The supported set is P % N == 0 or N % P == 0:
@@ -49,7 +53,6 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                       (Base::kQKHeaddim == 128 && Base::kN1 == 128),
                   "the batch-prefill page tile supports D64/V64 or D128/V128");
     static_assert(Base::kBlockPerCu == 1);
-    static_assert(!Base::kHasSink);
     // Not supported: sinks, and dropout, bias and logits soft cap (rejected by the core).
     static_assert(Base::Policy::AsyncCopy);
 

@@ -53,21 +53,26 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                 k.F_page_size,
                 k.F_pipeline.F_mask,
                 k.F_pipeline.F_lse,
+                k.F_pipeline.F_sink,
                 k.F_pipeline.F_kv_lookup_table,
             )
             for k in kernels
         }
-        expected = set(
-            itertools.product(
+        expected = {
+            combo
+            for combo in itertools.product(
                 ["fp16", "bf16"],
                 [64, 128],
                 [16, 64, 128, 256, 1024],
                 ["s_no", "s_mask"],
                 ["t", "f"],
+                ["t", "f"],
                 ["vllm", "sglang"],
             )
-        )
-        self.assertEqual(len(kernels), 160)
+            # sink instances are masked only
+            if not (combo[5] == "t" and combo[3] == "s_no")
+        }
+        self.assertEqual(len(kernels), 240)
         self.assertEqual(product, expected)
         for k in kernels:
             self.assertEqual(k.F_mode, "group")
@@ -100,7 +105,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
 
     def test_generic_mask_impl_still_uses_simplified_page_tile_masks(self):
         pool, kernels = _blobs(["gfx1250"], mask_impl="generic")
-        self.assertEqual(len(kernels), 160)
+        self.assertEqual(len(kernels), 240)
         self.assertFalse([k for k in kernels if "FmhaMasks::" in k.template])
 
     def test_mixed_build_guards_the_gfx9_kernels(self):
@@ -108,7 +113,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
         pool, kernels = _blobs(["gfx942", "gfx1250"])
         page_tile = [k for k in kernels if k.F_pipeline.tag == _PAGE_TILE]
         old = [k for k in kernels if k.F_pipeline.tag != _PAGE_TILE]
-        self.assertEqual(len(page_tile), 160)
+        self.assertEqual(len(page_tile), 240)
         self.assertEqual(sorted(k.name for k in old), sorted(k.name for k in gfx9))
         for k in old:
             self.assertRegex(k.template, r"defined\(__gfx9(42)?__\)")
@@ -123,7 +128,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
     def test_aiter_receipts_and_filter_keep_the_page_tile_kernels(self):
         for receipt in (200, 600):
             _, kernels = _blobs(["gfx1250"], receipt, kernel_filter="*_ndropout_*")
-            self.assertEqual(len(kernels), 160, receipt)
+            self.assertEqual(len(kernels), 240, receipt)
         _, kernels = _blobs(["gfx1250"], 100)
         self.assertEqual(kernels, [])
 
