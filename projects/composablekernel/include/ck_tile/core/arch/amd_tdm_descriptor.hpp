@@ -268,20 +268,20 @@ union TDM_GROUP2_MODE0
             uint32_t global_addr_increment_lo;
         };
 
+        // sgpr3 = {stride/increment hi [15:0], tile_dim3/iterate_count [31:16]}. Each view
+        // is one 32-bit struct; two separate 16-bit unions would each take a full dword and
+        // push tile_dim3/iterate_count past the descriptor (rank >= 4 then moved one dim3 slice).
         union
         {
             struct
             {
-                union
-                {
-                    uint32_t tensor_dim2_stride_hi : 16;
-                    uint32_t global_addr_increment_hi : 16;
-                };
-                union
-                {
-                    uint32_t tile_dim3 : 16;
-                    uint32_t iterate_count : 16;
-                };
+                uint32_t tensor_dim2_stride_hi : 16;
+                uint32_t tile_dim3 : 16;
+            };
+            struct
+            {
+                uint32_t global_addr_increment_hi : 16;
+                uint32_t iterate_count : 16;
             };
             uint32_t sgpr3;
         };
@@ -338,6 +338,7 @@ union TDM_GROUP2
     };
     int32x4_t bitfield;
 };
+static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "TDM group 2 is four dwords");
 
 union TDM_GROUP3_MODE0
 {
