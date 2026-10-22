@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 def test_grouped_partial_stores_advance_workspace_offset():
     config = Path(tensile_file).parent / "Tests/common/streamk/gfx1250/core/sk_group_load_store_partials.yaml"
     kernels = emit_kernels_from_config(str(config), arch="gfx1250", canonical=False)
-    assert len(kernels) == 1
+    assert len(kernels) == 2
     for name, assembly, error in kernels:
         assert error == 0
         assert_assembles(assembly, name)

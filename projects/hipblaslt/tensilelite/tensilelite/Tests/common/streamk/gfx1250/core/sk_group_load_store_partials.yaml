@@ -43,7 +43,7 @@ BenchmarkProblems:
     - TileProcessingStrategy: [StreamK]
     - WorkAssignment: [StaticGrid]
     - StreamKFixupTreeReduction: [1]
-    - ClusterDim: [[1, 1]]
+    - ClusterDim: [[1, 1], [4, 4]]
     - TDMInst: [3]
     - TDMIterateMode: [-1]
     - UseSgprForGRO: [0]
