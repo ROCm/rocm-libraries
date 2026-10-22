@@ -2093,6 +2093,8 @@ class StreamK(TileProcessingStrategy):
             WaveNum = kernel["NumThreads"] // kernel["WavefrontSize"]
 
         storeCode = Module("Partials GroupLoadStore")
+        # Keep the shared scalar offset updates beside the stores that consume them.
+        offsetCode = storeCode if kernel["GroupLoadStore"] else module
         for elementIdx in range(len(batchElements)):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
@@ -2115,12 +2117,12 @@ class StreamK(TileProcessingStrategy):
                 module.add(vectorStaticMultiply(vgpr(addr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, tmpSgprRes))
                 # kStr += inst("v_mul_lo_u32", , "Partials buffer address")
                 if clsLoop:
-                    module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
+                    offsetCode.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
                 else:
-                    module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="Init sgpr offset"))
+                    offsetCode.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="Init sgpr offset"))
             else:
                 # module.addComment1("WavefrontSize={}, WaveNum={}, storeWidth={}, bpeC={}".format(kernel["WavefrontSize"], WaveNum, storeWidth, writer.states.bpeCinternal))
-                module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
+                offsetCode.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=increment, comment="Inc sgpr offset"))
 
             # TODO StreamK need this packing code???
             # if self.asmCaps["HasWMMA"] and kernel["EnableMatrixInstructionStore"] and kernel["ProblemType"]["DestDataType"].isHalf() and (not kernel["ProblemType"]["HighPrecisionAccumulate"]):
