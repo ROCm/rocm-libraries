@@ -67,6 +67,30 @@ struct WordPairs {
 /// arithWorkgroupSize.
 WordPairs makeArithPairs(int randomCount);
 
+/// The 64-bit operand pairs a and b as their low and high 32-bit words.
+struct WordQuads {
+  std::vector<uint32_t> aLo, aHi, bLo, bHi;
+};
+
+/// The cross product of 64-bit edge values (0, 1, -1, 2, INT64_MIN, INT64_MAX,
+/// values around the 32-bit boundaries and values that share a high word but
+/// differ in the sign bit of the low word) followed by randomCount pairs from
+/// std::mt19937 with a fixed seed (raw engine output), padded with more random
+/// pairs to a multiple of arithWorkgroupSize.
+WordQuads makeArithPairs64(int randomCount);
+
+/// A register pair under test and the registers that keep it allocated.
+struct PairRegisters {
+  RegisterRange range;
+  RegisterRef pair;
+};
+
+/// Allocates registers of lo's kind and copies lo and hi into a pair at an
+/// even index, or at an odd index (three registers are allocated and the pair
+/// sits at offset 1) when misaligned. The pair is valid while range lives.
+PairRegisters makePair(IRBuilder &builder, RegisterRef lo, RegisterRef hi,
+                       bool misaligned = false);
+
 } // namespace rocm::tensilelite::codegen::test
 
 #endif // ROCM_TENSILELITE_TESTS_CODEGEN_ARITHDEVICETEST_HPP

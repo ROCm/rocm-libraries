@@ -378,4 +378,70 @@ WordPairs makeArithPairs(int randomCount) {
   return pairs;
 }
 
+namespace {
+
+std::vector<uint64_t> arithEdgeValues64() {
+  return {0,
+          1,
+          UINT64_MAX,
+          2,
+          static_cast<uint64_t>(INT64_MIN),
+          static_cast<uint64_t>(INT64_MIN) + 1,
+          static_cast<uint64_t>(INT64_MAX),
+          static_cast<uint64_t>(INT64_MAX) - 1,
+          0x0000000080000000,
+          0x000000007FFFFFFF,
+          0xFFFFFFFF00000000,
+          0x0000000100000000,
+          0x123456789ABCDEF0,
+          0x1234567800000001,
+          0x12345678FFFFFFFF,
+          0x1234567880000000,
+          0xFFFFFFFF80000000,
+          0xFFFFFFFF7FFFFFFF};
+}
+
+void appendQuad(WordQuads &quads, uint64_t a, uint64_t b) {
+  quads.aLo.push_back(static_cast<uint32_t>(a));
+  quads.aHi.push_back(static_cast<uint32_t>(a >> 32));
+  quads.bLo.push_back(static_cast<uint32_t>(b));
+  quads.bHi.push_back(static_cast<uint32_t>(b >> 32));
+}
+
+uint64_t randomWord64(std::mt19937 &engine) {
+  uint64_t low = engine();
+  return low | uint64_t{engine()} << 32;
+}
+
+} // namespace
+
+WordQuads makeArithPairs64(int randomCount) {
+  WordQuads quads;
+  std::vector<uint64_t> edges = arithEdgeValues64();
+  for (uint64_t a : edges)
+    for (uint64_t b : edges)
+      appendQuad(quads, a, b);
+  std::mt19937 engine(randomSeed);
+  int count = static_cast<int>(quads.aLo.size()) + randomCount;
+  count = (count + arithWorkgroupSize - 1) / arithWorkgroupSize *
+          arithWorkgroupSize;
+  while (std::ssize(quads.aLo) < count) {
+    uint64_t a = randomWord64(engine);
+    appendQuad(quads, a, randomWord64(engine));
+  }
+  return quads;
+}
+
+PairRegisters makePair(IRBuilder &builder, RegisterRef lo, RegisterRef hi,
+                       bool misaligned) {
+  int count = misaligned ? 3 : 2;
+  RegisterRange range = lo.kind == RegisterKind::sgpr
+                            ? builder.allocateSgpr(count, 2)
+                            : builder.allocateVgpr(count, 2);
+  RegisterRef pair = range.ref(misaligned ? 1 : 0, 2);
+  builder.movb32(pair.slice(0), lo);
+  builder.movb32(pair.slice(1), hi);
+  return {std::move(range), pair};
+}
+
 } // namespace rocm::tensilelite::codegen::test

@@ -248,4 +248,24 @@ TEST_F(Registers, RefOutOfBoundsThrows) {
   EXPECT_NO_THROW(range.ref(3, 1));
 }
 
+TEST_F(Registers, SliceReturnsRefsOfEachKind) {
+  RegisterRef pair{vgpr, 5, 2};
+  EXPECT_EQ(pair.slice(0), (RegisterRef{vgpr, 5, 1}));
+  EXPECT_EQ(pair.slice(1), (RegisterRef{vgpr, 6, 1}));
+  EXPECT_EQ(pair.slice(0, 2), pair);
+  RegisterRef quad{sgpr, 4, 4};
+  EXPECT_EQ(quad.slice(1, 2), (RegisterRef{sgpr, 5, 2}));
+  EXPECT_EQ(quad.slice(3), (RegisterRef{sgpr, 7, 1}));
+  EXPECT_EQ((RegisterRef{agpr, 2, 2}).slice(1), (RegisterRef{agpr, 3, 1}));
+}
+
+TEST_F(Registers, SliceOutOfBoundsThrows) {
+  RegisterRef pair{vgpr, 5, 2};
+  EXPECT_THROW(pair.slice(-1), std::out_of_range);
+  EXPECT_THROW(pair.slice(2), std::out_of_range);
+  EXPECT_THROW(pair.slice(1, 2), std::out_of_range);
+  EXPECT_THROW(pair.slice(0, 0), std::out_of_range);
+  EXPECT_NO_THROW(pair.slice(1));
+}
+
 } // namespace

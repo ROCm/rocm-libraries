@@ -9,7 +9,6 @@
 #include "instruction/common.hpp"
 
 #include <cstdint>
-#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,10 +21,6 @@ namespace {
 
 constexpr std::string_view movb32Name = "movb32";
 constexpr std::string_view movb64Name = "movb64";
-
-RegisterRef half(RegisterRef pair, int index) {
-  return RegisterRef{pair.kind, pair.start + index, 1};
-}
 
 // Rejects the kind combinations that have no instruction. A source register
 // is checked as is; an immediate is one canonical 32-bit value or half.
@@ -67,33 +62,11 @@ void emitMove32(IRBuilder &builder, RegisterRef dst, Operand src) {
   }
 }
 
-// Inline constants print as ints. Any other value is a 32-bit literal that the
-// hardware zero-extends, so it prints unsigned: a negative spelling would
-// encode the same 32-bit literal and lose the high word.
-InstructionInput mov64Input(Operand src) {
-  if (src.isRegister() || gfx9::isInlineConstant(src.immediate()))
-    return toInput(src);
-  char text[16];
-  std::snprintf(text, sizeof(text), "0x%x",
-                static_cast<unsigned>(src.immediate()));
-  return std::string(text);
-}
-
 void emitMove64(IRBuilder &builder, RegisterRef dst, Operand src) {
   if (dst.kind == RegisterKind::sgpr)
-    builder.create<rocisa::SMovB64>(dst.container(), mov64Input(src));
+    builder.create<rocisa::SMovB64>(dst.container(), detail::toInput64(src));
   else
-    builder.create<rocisa::VMovB64>(dst.container(), mov64Input(src));
-}
-
-// The low or high 32 bits of a pair or a 64-bit immediate.
-Operand sourceHalf(Operand src, int index) {
-  if (src.isRegister())
-    return Operand(half(src.reg(), index));
-  int64_t value = src.immediate();
-  int32_t word = index == 0 ? static_cast<int32_t>(static_cast<uint32_t>(value))
-                            : static_cast<int32_t>(value >> 32);
-  return Operand(int64_t{word});
+    builder.create<rocisa::VMovB64>(dst.container(), detail::toInput64(src));
 }
 
 void emitSplitMove64(IRBuilder &builder, RegisterRef dst, Operand src) {
@@ -102,7 +75,7 @@ void emitSplitMove64(IRBuilder &builder, RegisterRef dst, Operand src) {
   bool highFirst = src.isRegister(dst.kind) && dst.start > src.reg().start;
   for (int i = 0; i < 2; ++i) {
     int index = highFirst ? 1 - i : i;
-    builder.movb32(half(dst, index), sourceHalf(src, index));
+    builder.movb32(dst.slice(index), detail::operandHalf(src, index));
   }
 }
 
@@ -112,8 +85,8 @@ void requireLegalSource64(RegisterRef dst, Operand src) {
     requireLegalSource(movb64Name, dst, src);
     return;
   }
-  requireLegalSource(movb64Name, dst, sourceHalf(src, 0));
-  requireLegalSource(movb64Name, dst, sourceHalf(src, 1));
+  requireLegalSource(movb64Name, dst, detail::operandHalf(src, 0));
+  requireLegalSource(movb64Name, dst, detail::operandHalf(src, 1));
 }
 
 } // namespace

@@ -133,6 +133,15 @@ std::shared_ptr<rocisa::RegisterContainer> RegisterRef::container() const {
   return makeContainer(kind, start, count);
 }
 
+RegisterRef RegisterRef::slice(int offset, int subCount) const {
+  if (offset < 0 || subCount <= 0 || offset + subCount > count)
+    throw std::out_of_range("register sub-range at offset " +
+                            std::to_string(offset) + " with count " +
+                            std::to_string(subCount) + " is outside " +
+                            registerText(kind, start, count));
+  return RegisterRef{kind, start + offset, subCount};
+}
+
 std::shared_ptr<rocisa::RegisterContainer> RegisterRange::container() const {
   return ref().container();
 }
@@ -149,12 +158,7 @@ RegisterRef RegisterRange::ref() const {
 
 RegisterRef RegisterRange::ref(int offset, int subCount) const {
   assert(allocator && "register range owns no registers");
-  if (offset < 0 || subCount <= 0 || offset + subCount > rangeCount)
-    throw std::out_of_range("register sub-range at offset " +
-                            std::to_string(offset) + " with count " +
-                            std::to_string(subCount) + " is outside " +
-                            registerText(rangeKind, rangeStart, rangeCount));
-  return RegisterRef{rangeKind, rangeStart + offset, subCount};
+  return ref().slice(offset, subCount);
 }
 
 void RegisterRange::release() {

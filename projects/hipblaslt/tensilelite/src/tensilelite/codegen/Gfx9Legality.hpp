@@ -4,9 +4,11 @@
 // The gfx9 (gfx950) operand rules that rocisa does not check, verified against
 // the LLVM assembler. Violations are rejected with "literal operands are not
 // supported" (a literal in VOP3), "violates constant bus restrictions" (two
-// distinct SGPRs or literals in a VALU instruction) and "only one unique
-// literal operand is allowed" (SOP2). Immediates passed to these predicates
-// must already be canonical 32-bit values, that is within the int32 range.
+// distinct SGPRs or literals in a VALU instruction), "only one unique
+// literal operand is allowed" (SOP2 and SOPC) and "invalid register alignment"
+// (a 64-bit SGPR operand at an odd index). Immediates passed to these
+// predicates must already be canonical 32-bit values, that is within the int32
+// range, unless the predicate says it takes a full 64-bit value.
 
 #ifndef ROCM_TENSILELITE_CODEGEN_GFX9LEGALITY_HPP
 #define ROCM_TENSILELITE_CODEGEN_GFX9LEGALITY_HPP
@@ -22,6 +24,10 @@ namespace rocm::tensilelite::codegen::gfx9 {
 constexpr int64_t minInlineInteger = -16;
 constexpr int64_t maxInlineInteger = 64;
 
+/// Wait states a VALU read of an SGPR needs after a VALU instruction wrote it;
+/// the s_nop that covers them takes this minus one.
+constexpr int valuWriteSgprReadWaitStates = 2;
+
 bool isInlineConstant(int64_t value);
 /// True if operand is an immediate that is not an inline constant.
 bool isLiteral(Operand operand);
@@ -33,7 +39,9 @@ bool isLegalVop2(Operand src0, Operand src1);
 /// VOP3, including VOP2 ops the assembler promotes to VOP3 when src1 is not a
 /// VGPR: no literals and at most one constant bus read.
 bool isLegalVop3(Operand src0, Operand src1);
-/// SOP2: no vector registers and at most one distinct literal.
+/// SOP2, and SOPC (s_cmp) as well: no vector registers and at most one
+/// distinct literal. For 64-bit operands the immediates must also satisfy
+/// isEncodableImmediate64.
 bool isLegalSop2(Operand src0, Operand src1);
 /// v_accvgpr_write_b32 takes a VGPR, an SGPR or an inline constant, but no
 /// literal or AGPR. The immediate must be canonical.
@@ -45,6 +53,20 @@ bool isLegalAccvgprWriteSource(Operand src);
 /// hardware zero-extends. Unlike the other predicates, the immediate is a
 /// full 64-bit value.
 bool isLegalMov64(RegisterRef dst, Operand src);
+/// True if a 64-bit instruction encodes value exactly: an inline constant, or a
+/// 32-bit literal in [0, UINT32_MAX], which the hardware zero-extends.
+bool isEncodableImmediate64(int64_t value);
+/// True if src is a legal 64-bit SALU source: an SGPR pair at an even index or
+/// an immediate satisfying isEncodableImmediate64.
+bool isLegalSalu64Source(Operand src);
+/// True if src is a legal 64-bit VOP3 source: a VGPR or SGPR pair at an even
+/// index, or an inline-constant immediate.
+bool isLegalVop3Source64(Operand src);
+/// True if src is a legal v_cndmask_b32 data source: a VGPR or an inline
+/// constant; an SGPR would violate the constant bus once the mask is read.
+bool isLegalCndmaskSource(Operand src);
+/// True if ref can hold a lane mask: an SGPR pair at an even index.
+bool isLaneMask(RegisterRef ref);
 
 } // namespace rocm::tensilelite::codegen::gfx9
 

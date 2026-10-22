@@ -71,8 +71,7 @@ bool isLegalMov64(RegisterRef dst, Operand src) {
   if (dst.kind == RegisterKind::agpr || dst.start % 2 != 0)
     return false;
   if (src.isImmediate())
-    return isInlineConstant(src.immediate()) ||
-           (src.immediate() >= 0 && src.immediate() <= UINT32_MAX);
+    return isEncodableImmediate64(src.immediate());
   // An SGPR destination has no vector source and a VGPR destination has no
   // AGPR source.
   RegisterRef reg = src.reg();
@@ -80,6 +79,33 @@ bool isLegalMov64(RegisterRef dst, Operand src) {
                          ? reg.kind == RegisterKind::sgpr
                          : reg.kind != RegisterKind::agpr;
   return kindIsLegal && reg.start % 2 == 0;
+}
+
+bool isEncodableImmediate64(int64_t value) {
+  return isInlineConstant(value) || (value >= 0 && value <= UINT32_MAX);
+}
+
+bool isLegalSalu64Source(Operand src) {
+  if (src.isImmediate())
+    return isEncodableImmediate64(src.immediate());
+  return src.isRegister(RegisterKind::sgpr) && src.reg().start % 2 == 0;
+}
+
+bool isLegalVop3Source64(Operand src) {
+  if (src.isImmediate())
+    return isInlineConstant(src.immediate());
+  RegisterRef reg = src.reg();
+  return reg.kind != RegisterKind::agpr && reg.start % 2 == 0;
+}
+
+bool isLegalCndmaskSource(Operand src) {
+  if (src.isImmediate())
+    return isInlineConstant(src.immediate());
+  return src.isRegister(RegisterKind::vgpr);
+}
+
+bool isLaneMask(RegisterRef ref) {
+  return ref.kind == RegisterKind::sgpr && ref.count == 2 && ref.start % 2 == 0;
 }
 
 } // namespace rocm::tensilelite::codegen::gfx9

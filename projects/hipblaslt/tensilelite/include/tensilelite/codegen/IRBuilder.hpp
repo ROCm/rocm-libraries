@@ -34,6 +34,10 @@ struct WaitCounts {
   std::optional<int> scalarMemory;
 };
 
+/// Integer comparison predicates. The s and u prefixes compare as signed or
+/// unsigned values; eq and ne are sign-agnostic.
+enum class Predicate { eq, ne, slt, sle, sgt, sge, ult, ule, ugt, uge };
+
 /// Appends rocisa instructions to an insertion point, in the style of LLVM's
 /// IRBuilder.
 ///
@@ -169,6 +173,47 @@ public:
   void subi32(RegisterRef dst, Operand a, Operand b);
   /// Emits dst = the low 32 bits of a * b.
   void muli32(RegisterRef dst, Operand a, Operand b);
+
+  // The comparisons below share these rules.
+  //
+  // A destination of one SGPR holds a uniform bool, 0 or 1, and needs scalar
+  // operands (SGPRs and immediates). An SGPR pair at an even index holds a lane
+  // mask, one bit per lane; in the scalar form all ones or all zeros. The
+  // scalar form is a SALU sequence; any VGPR operand gives the VALU form, which
+  // needs a lane mask destination and ends with s_nop 1 so that any following
+  // instruction can read the mask (VALU reads of an SGPR a VALU instruction
+  // wrote need two wait states). Operands that gfx9 cannot encode, such as
+  // literals in VOP3 or SGPR pairs at an odd index, are copied into temporary
+  // registers, which are released afterwards.
+  //
+  // dst may alias an operand. Throws std::invalid_argument, before emitting
+  // anything, if dst is not one of the destinations above, if an operand is an
+  // AGPR or has the wrong number of registers, if an immediate does not fit,
+  // or if a uniform bool destination has a VGPR operand.
+
+  /// Emits dst = a pred b for one-register operands. Immediates must lie in
+  /// [INT32_MIN, UINT32_MAX] and are used as 32-bit patterns.
+  void cmpi32(Predicate pred, RegisterRef dst, Operand a, Operand b);
+  /// Emits dst = a pred b for register-pair operands; immediates are full
+  /// 64-bit values. The scalar ordered predicates use a SALU borrow chain, so
+  /// they do not depend on exec.
+  void cmpi64(Predicate pred, RegisterRef dst, Operand a, Operand b);
+
+  /// Emits dst = cond ? a : b. The width comes from dst, 1 or 2 registers, and
+  /// register operands must match it; immediates are 32-bit patterns (as for
+  /// cmpi32) for one register and full 64-bit values for a pair. cond is an
+  /// SGPR holding a uniform bool, where nonzero is true, or an SGPR pair at an
+  /// even index holding a lane mask. An SGPR dst needs a uniform bool cond and
+  /// scalar operands. A VGPR dst takes either cond, widening a uniform bool to
+  /// a temporary mask, and any SGPR, VGPR or immediate operands. A mask
+  /// written by a VALU instruction outside the builder must already satisfy
+  /// the two wait states; masks from cmpi32 and cmpi64 do. Throws
+  /// std::invalid_argument, before emitting anything, if dst is not 1 or 2
+  /// registers, if dst, cond or an operand is an AGPR, if cond has the wrong
+  /// kind or shape, if an operand has the wrong number of registers, if an
+  /// immediate does not fit, or if an SGPR dst has a mask cond or a VGPR
+  /// operand.
+  void select(RegisterRef dst, RegisterRef cond, Operand a, Operand b);
 
   // Buffer resource descriptors.
 

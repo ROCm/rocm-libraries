@@ -29,6 +29,11 @@ struct RegisterRef {
   /// Returns a container naming the registers, such as v[4:7], s2 or acc5.
   std::shared_ptr<rocisa::RegisterContainer> container() const;
 
+  /// Returns a reference to count registers starting offset registers into
+  /// this one, such as slice(1) for the high half of a pair. Throws
+  /// std::out_of_range if they are not inside this reference.
+  RegisterRef slice(int offset, int count = 1) const;
+
   bool operator==(const RegisterRef &) const = default;
 };
 
