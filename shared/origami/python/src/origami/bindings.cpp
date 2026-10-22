@@ -235,6 +235,7 @@ NB_MODULE(origami, m) {
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
       .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
+      .def_rw("wave_group", &origami::gemm::context_t::wave_group)
       .def_rw("wgm", &origami::gemm::context_t::wgm);
 
   nanobind::class_<origami::problem_t>(m, "problem_t")

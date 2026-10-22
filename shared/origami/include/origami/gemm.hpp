@@ -67,6 +67,10 @@ struct ORIGAMI_EXPORT context_t {
   size_t tile_elements     = 0;
   double output_tile_bytes = 0.0;
 
+  /// Waves per workgroup along M and N, and LocalSplitU groups along K.  Each is at
+  /// least 1: non-MFMA kernels report a 0x0 wave group.
+  dim3_t wave_group{1, 1, 1};
+
   /// Per-operand DRAM traffic (cache/mem model input).
   operand_traffic_t traffic{};
 
