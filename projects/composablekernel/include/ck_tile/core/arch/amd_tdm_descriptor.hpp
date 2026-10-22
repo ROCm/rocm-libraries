@@ -359,6 +359,7 @@ union TDM_GROUP2
     };
     int32x4_t bitfield;
 };
+static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "TDM group 2 is four dwords");
 
 static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "group 2 fields must fit its four SGPRs");
 static_assert(sizeof(TDM_GROUP2) == 16, "group 2 fields must fit its four SGPRs");

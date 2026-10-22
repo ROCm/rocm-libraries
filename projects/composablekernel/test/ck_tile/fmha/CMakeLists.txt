@@ -390,6 +390,10 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
+    # TDM descriptors of the vectorized KV layout, read back from LDS.
+    add_qr_tdm_sched_gtest(test_ck_tile_fmha_batch_prefill_page_tile_tdm_vectorized
+        test_batch_prefill_page_tile_tdm_vectorized.cpp)
+
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
     # mask).
