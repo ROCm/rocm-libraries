@@ -349,8 +349,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
         .set_dropout_scale(dropoutScale)
         .set_alibi_mask(true)
         .set_padding_mask(true)
-        .set_causal_mask(true)
-        .set_causal_mask_bottom_right(true)
         .set_generate_stats(true)
         .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
@@ -358,6 +356,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttribu
         .set_paged_attention_max_seq_len_kv(256)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
         .set_mma_core_mode(DataType::HALF);
+    sdpaNode->attributes.causal_mask = true;
+    sdpaNode->attributes.causal_mask_bottom_right = true;
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
