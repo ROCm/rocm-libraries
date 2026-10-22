@@ -68,17 +68,38 @@ def engine(request) -> Engine:
     return request.param
 
 
+def _require(engine: Engine, path: Path, what: str) -> None:
+    """Skip only an engine not started at all; a partly added engine fails."""
+    if path.is_file():
+        return
+    started = [p.name for p in (engine.manifest, engine.selection) if p.is_file()]
+    if not started:
+        pytest.skip(f"{engine.name}: engine not added yet (no manifest or selection in configs/)")
+    pytest.fail(f"{engine.name}: {what} missing beside {started}: {path}")
+
+
+def _require_shipped_kdp(engine: Engine) -> None:
+    """The shipped KDP is DVC-tracked: skip only when its pointer exists (not pulled)."""
+    if engine.shipped_kdp.is_file():
+        return
+    pointer = engine.shipped_kdp.parent.with_suffix(".dvc")
+    if pointer.is_file():
+        pytest.skip(f"shipped KDP not in this checkout: {engine.shipped_kdp}")
+    pytest.fail(
+        f"{engine.name}: shipped KDP missing and no DVC pointer: "
+        f"{engine.shipped_kdp} (expected {pointer})"
+    )
+
+
 @pytest.fixture(scope="module")
 def selection(engine):
-    if not engine.selection.is_file():
-        pytest.skip(f"{engine.name}: selection not in this checkout: {engine.selection}")
+    _require(engine, engine.selection, "selection")
     return load_config(engine.selection)
 
 
 @pytest.fixture(scope="module")
 def manifest(engine) -> dict:
-    if not engine.manifest.is_file():
-        pytest.skip(f"{engine.name}: manifest not in this checkout: {engine.manifest}")
+    _require(engine, engine.manifest, "manifest")
     return enumerator.load_manifest(str(engine.manifest))
 
 
@@ -200,8 +221,7 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     engine, selection, tmp_path_factory, capsys
 ):
-    if not engine.shipped_kdp.is_file():
-        pytest.skip(f"shipped KDP not in this checkout: {engine.shipped_kdp}")
+    _require_shipped_kdp(engine)
     out = tmp_path_factory.mktemp("g2")
     IngestorGenerator(_ROOT / "templates").render(selection, out)
     descriptors = out / selection.descriptor_dir
@@ -232,15 +252,14 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
 
 def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
-    engine, manifest, registry_config, tmp_path_factory, capsys
+    engine, registry_config, tmp_path_factory, capsys
 ):
     """The manifest's own enumeration, rendered and diffed against the shipped
     catalog: the gate that the registry, not the authored selection, still yields
     the shipped kernels. Keyed on the shipped spec fields, because the enumeration
     also carries `lds_k_row_pad`, which the shipped specs omit and g1 asserts sits at
     its default."""
-    if not engine.shipped_kdp.is_file():
-        pytest.skip(f"shipped KDP not in this checkout: {engine.shipped_kdp}")
+    _require_shipped_kdp(engine)
     out = tmp_path_factory.mktemp("g3")
     path = out / "registry.yaml"
     path.write_text(yaml.safe_dump(registry_config, sort_keys=False))
