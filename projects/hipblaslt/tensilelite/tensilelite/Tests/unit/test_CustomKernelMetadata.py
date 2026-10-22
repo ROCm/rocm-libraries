@@ -1210,13 +1210,15 @@ def test_read_custom_kernel_config_alias_to_an_anchor_outside_the_entry(tmp_path
     assert readCustomKernelConfig("k", str(tmp_path)) == {"X": {"A": 1}}
 
 def test_read_custom_kernel_config_matches_a_full_parse_of_shipped_kernels():
-    # Kernels under 600 KB (101: tensile, aiter, rocblas, triton, wave) keep
-    # the whole-block comparison cheap. The 1 MB rocRoller kernels are read
-    # through the same slice by validate_all in test_custom_kernel_cli.
+    # Kernels whose file is under 600 KB keep the whole-block comparison cheap.
+    # One rocRoller kernel, about 1 MB of metadata and about 0.5 s to parse in
+    # full, is added so that a rocRoller kernel is compared as well. The other
+    # rocRoller kernels are read through the same slice by validate_all in
+    # test_custom_kernel_cli, but their content is not compared here.
     paths = [p for p in iterCustomKernelFiles() if os.path.getsize(p) < 600_000]
     assert paths
-    for path in paths:
-        name = os.path.basename(path)[:-2]
+    names = [os.path.basename(p)[:-2] for p in paths] + [_LARGE_METADATA_KERNEL]
+    for name in names:
         assert readCustomKernelConfig(name) == _readEmbeddedYaml(name)["custom.config"], name
 
 _REAL_ENTRY = "custom.config:\n  A: 1\n"
