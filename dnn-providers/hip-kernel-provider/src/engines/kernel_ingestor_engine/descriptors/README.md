@@ -2,11 +2,13 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the DVC-stored bundles
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three rocKE bundles: the DVC-stored
 `rocKE/gfx950_attention_dense/` and `rocKE/gfx942_attention_unified_3d/` (their KDPs are
 stored in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below),
-whose KDPs declare gfx950 and gfx942 respectively, so production packaging runs for a build
-whose GPU targets include gfx950 or gfx942 and that has rocKE enabled
+whose KDPs declare gfx950 and gfx942 respectively, and the git-stored
+`rocKE/gfx1151_wmma_attention/`, whose KDP declares gfx11 (gfx1100 to gfx1103, gfx1150 to
+gfx1153) and gfx12 (gfx1200, gfx1201) targets. Production packaging runs for a build whose
+GPU targets include any of these and that has rocKE enabled
 (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
 any other build the root has nothing to pack and production packaging is dormant, unless
 the cache variable below is pointed elsewhere.
@@ -95,7 +97,7 @@ rocKE/<bundle>/
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
 updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`
-uses this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
+and `gfx942_attention_unified_3d` use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
 
 **Heuristic models.** A heuristic model file is binary and does not belong in git. Track it

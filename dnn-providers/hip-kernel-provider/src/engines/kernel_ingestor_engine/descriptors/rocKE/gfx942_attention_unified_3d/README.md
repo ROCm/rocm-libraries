@@ -58,3 +58,4 @@ the selection's `authored_subpath`.
 - The native symbols (`hipkernel.gfx942_attention_unified3d.*`) are registered in
   `packs/Gfx942AttentionUnified3dNative.cpp`. Until that native pack lands, the loader
   refuses this engine at provider load.
+- Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.

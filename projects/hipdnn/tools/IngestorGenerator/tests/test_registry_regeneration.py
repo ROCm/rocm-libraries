@@ -34,7 +34,7 @@ import registry_enumerator as enumerator  # noqa: E402
 
 _PROVIDER = enumerator._REPO / "dnn-providers" / "hip-kernel-provider"
 _ROCKE_LIBRARY = _PROVIDER / "rocke" / "library"
-_DESCRIPTORS = _PROVIDER / "src/engines/kernel_ingestor_engine/descriptors/rocKE"
+_KIE = _PROVIDER / "src/engines/kernel_ingestor_engine"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,28 +42,20 @@ class Engine:
     name: str
     manifest: Path
     selection: Path
-    shipped_kdp: Path
-    shipped_kmd: Path
 
 
-def _engine(name: str, stem: str | None = None) -> Engine:
-    """`name` is the bundle folder and config stem; `stem` the descriptor file stem,
-    the generator's engine slug, which splits only before capitals: `Gfx942AttentionUnified3d`
-    gives `gfx942_attention_unified3d`, not the folder's `gfx942_attention_unified_3d`."""
-    shipped = _DESCRIPTORS / name
-    stem = stem or name
+def _engine(name: str) -> Engine:
+    """`name` is the config stem (and the bundle folder)."""
     return Engine(
         name=name,
         manifest=_ROOT / "configs" / f"{name}.engine.yaml",
         selection=_ROOT / "configs" / f"{name}.yaml",
-        shipped_kdp=shipped / "artifacts" / f"{stem}.kdp.json",
-        shipped_kmd=shipped / f"{stem}.kmd.json",
     )
 
 
 ENGINES = (
     _engine("gfx950_attention_dense"),
-    _engine("gfx942_attention_unified_3d", stem="gfx942_attention_unified3d"),
+    _engine("gfx942_attention_unified_3d"),
 )
 
 
@@ -82,16 +74,28 @@ def _require(engine: Engine, path: Path, what: str) -> None:
     pytest.fail(f"{engine.name}: {what} missing beside {started}: {path}")
 
 
-def _require_shipped_kdp(engine: Engine) -> None:
-    """The shipped KDP is DVC-tracked: skip only when its pointer exists (not pulled)."""
-    if engine.shipped_kdp.is_file():
-        return
-    pointer = engine.shipped_kdp.parent.with_suffix(".dvc")
+def _shipped(selection) -> tuple[Path, Path]:
+    """The shipped (KDP, KMD), located from the selection itself: its descriptor
+    dir names the bundle folder and its engine slug the file stem, which can differ
+    from the folder (`gfx942_attention_unified3d` in `gfx942_attention_unified_3d/`)."""
+    bundle = _KIE / selection.descriptor_dir
+    slug = selection.engine.slug
+    return bundle / "artifacts" / f"{slug}.kdp.json", bundle / f"{slug}.kmd.json"
+
+
+def _require_shipped_kdp(engine: Engine, selection) -> tuple[Path, Path]:
+    """The KMD is git-tracked, so a missing one fails. The shipped KDP is
+    DVC-tracked: skip only when its pointer exists (not pulled)."""
+    kdp, kmd = _shipped(selection)
+    _require(engine, kmd, "shipped KMD")
+    if kdp.is_file():
+        return kdp, kmd
+    pointer = kdp.parent.with_suffix(".dvc")
     if pointer.is_file():
-        pytest.skip(f"shipped KDP not in this checkout: {engine.shipped_kdp}")
+        pytest.skip(f"shipped KDP not in this checkout: {kdp}")
     pytest.fail(
         f"{engine.name}: shipped KDP missing and no DVC pointer: "
-        f"{engine.shipped_kdp} (expected {pointer})"
+        f"{kdp} (expected {pointer})"
     )
 
 
@@ -225,7 +229,7 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     engine, selection, tmp_path_factory, capsys
 ):
-    _require_shipped_kdp(engine)
+    shipped_kdp, shipped_kmd = _require_shipped_kdp(engine, selection)
     out = tmp_path_factory.mktemp("g2")
     IngestorGenerator(_ROOT / "templates").render(selection, out)
     descriptors = out / selection.descriptor_dir
@@ -240,13 +244,13 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     rc = catalog_diff.main(
         [
             "--shipped",
-            str(engine.shipped_kdp),
+            str(shipped_kdp),
             "--regenerated",
             str(kdp),
             "--ignore-ids",
             "--strict-spec",
             "--shipped-kmd",
-            str(engine.shipped_kmd),
+            str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
         ]
@@ -256,14 +260,14 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
 
 def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
-    engine, registry_config, tmp_path_factory, capsys
+    engine, selection, registry_config, tmp_path_factory, capsys
 ):
     """The manifest's own enumeration, rendered and diffed against the shipped
     catalog: the gate that the registry, not the authored selection, still yields
     the shipped kernels. Keyed on the shipped spec fields, because the enumeration
     also carries `lds_k_row_pad`, which the shipped specs omit and g1 asserts sits at
     its default."""
-    _require_shipped_kdp(engine)
+    shipped_kdp, shipped_kmd = _require_shipped_kdp(engine, selection)
     out = tmp_path_factory.mktemp("g3")
     path = out / "registry.yaml"
     path.write_text(yaml.safe_dump(registry_config, sort_keys=False))
@@ -275,12 +279,12 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     rc = catalog_diff.main(
         [
             "--shipped",
-            str(engine.shipped_kdp),
+            str(shipped_kdp),
             "--regenerated",
             str(kdp),
             "--ignore-ids",
             "--shipped-kmd",
-            str(engine.shipped_kmd),
+            str(shipped_kmd),
             "--regenerated-kmd",
             str(kmd),
         ]
