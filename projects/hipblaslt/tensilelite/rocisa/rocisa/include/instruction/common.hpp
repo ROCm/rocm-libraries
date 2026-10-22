@@ -4327,6 +4327,70 @@ namespace rocisa
         }
     };
 
+    struct VSubBCoU32 : public CommonInstruction
+    {
+        VSubBCoU32(const std::shared_ptr<Container>& dst,
+                   const std::shared_ptr<Container>& dst1,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const InstructionInput&           src2,
+                   const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            this->dst1 = dst1;
+            if(getAsmBugs()["ExplicitNC"])
+            {
+                setInst("v_sub_co_ci_u32");
+            }
+            else if(getAsmBugs()["ExplicitCO"])
+            {
+                setInst("v_subb_co_u32");
+            }
+            else
+            {
+                setInst("v_subb_u32");
+            }
+        }
+
+        VSubBCoU32(const std::shared_ptr<Container>&    dst,
+                   const std::shared_ptr<Container>&    dst1,
+                   const std::vector<InstructionInput>& srcs,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            this->dst1 = dst1;
+            if(getAsmBugs()["ExplicitNC"])
+            {
+                setInst("v_sub_co_ci_u32");
+            }
+            else if(getAsmBugs()["ExplicitCO"])
+            {
+                setInst("v_subb_co_u32");
+            }
+            else
+            {
+                setInst("v_subb_u32");
+            }
+        }
+
+        VSubBCoU32(const VSubBCoU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSubBCoU32>(*this);
+        }
+    };
+
     struct VMacF32 : public CommonInstruction
     {
         VMacF32(const std::shared_ptr<Container>& dst,
