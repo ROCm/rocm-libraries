@@ -20,8 +20,11 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
 from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv.direct_aot_jobs import _knob_grid
 from kernels.conv.direct_variants import (
     DIRECT_DGRAD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_WMMA,
     DIRECT_WAVE_PARAMETRIC,
     direct_mfma_knobs_reason,
@@ -32,7 +35,7 @@ from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
-_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA}
+_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
 _WAVE32_ONLY = {DIRECT_DGRAD_WMMA} | _WAVE32_ONLY_FWD
 
 
@@ -180,15 +183,17 @@ def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():
             j.identity.pad_h,
             j.identity.stride_h,
             j.identity.cpg,
-            j.identity.dilation_h,
-            j.identity.dilation_w,
+            j.identity.kpg,
+            j.identity.dilation_h or 1,
+            j.identity.dilation_w or 1,
         )
         for j in jobs
-        if j.identity.algorithm == DIRECT_FWD_WMMA
+        if j.identity.algorithm in _WAVE32_ONLY_FWD
     }
-    for c in dks.DIRECT_CAPABILITIES[DIRECT_FWD_WMMA][1]:
-        key = (DIRECT_FWD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.dil_h, c.dil_w)
-        assert key in built, c
+    for variant in _WAVE32_ONLY_FWD:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            key = (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg, c.dil_h, c.dil_w)
+            assert key in built, (variant, c)
 
 
 def test_identities_are_unique(jobs):
@@ -1635,8 +1640,9 @@ def test_compile_all_refuses_variants_before_checking_them(capsys):
 
 
 # ---------------------------------------------------------------------------
-# A wave32 target (gfx1250): only the wave-parametric depthwise forward
-# kernels exist there, and they are built and launched at its wave size.
+# A wave32 target (gfx1250): the wave-parametric depthwise forward kernels
+# and the wave32-only WMMA ones exist there, built and launched at its wave
+# size.
 # ---------------------------------------------------------------------------
 _WAVE32_ARCH = "gfx1250"
 
@@ -1653,7 +1659,7 @@ def wave32_jobs():
 def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_jobs):
     """The MFMA variants are wave64 and drop out; the depthwise ones are built
     at wave_size 32, which the identity records and the spec carries. The
-    wave32-only WMMA forward kernel is built too."""
+    wave32-only WMMA forward kernels are built too."""
     assert {j.identity.algorithm for j in wave32_jobs} == (
         DIRECT_WAVE_PARAMETRIC | _WAVE32_ONLY_FWD
     )

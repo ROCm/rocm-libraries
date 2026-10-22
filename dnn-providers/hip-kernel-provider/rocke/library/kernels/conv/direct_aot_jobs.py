@@ -22,6 +22,8 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
+    DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
@@ -521,6 +523,49 @@ DGRAD_RTC_LOOP_MAX_ATOMS = 4
 #   calibrated on gfx950 builds, configs past it spill to scratch, so they
 #   are not cached.
 DGRAD_RTC_VGPR_FILL = 0.875
+# Wave32 WMMA forward of tiny channel counts (direct_fwd_smallc_wmma /
+# direct_fwd_smallk_wmma): (filter, pad, stride, C) of the stems and
+# (filter, pad, stride, K) of the few-output-channel layers the cache serves.
+FWD_SMALLC_STEMS = ((3, 1, 1, 3), (3, 1, 1, 4), (3, 1, 2, 3), (7, 3, 2, 3))
+FWD_SMALLK_LAYERS = ((3, 1, 1, 4),)
+# fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
+# tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
+FWD_SMALLC_KNOBS = (
+    (1, 1, 2, 4, 4, 16, 8, 1),
+    (1, 1, 2, 8, 8, 16, 1, 1),
+    (1, 1, 2, 8, 8, 16, 2, 1),
+    (1, 1, 2, 8, 8, 16, 4, 1),
+    (1, 1, 2, 8, 8, 16, 8, 1),
+    (1, 1, 4, 4, 2, 32, 1, 1),
+    (1, 1, 4, 4, 4, 16, 1, 1),
+    (1, 1, 4, 8, 8, 16, 1, 1),
+    (1, 1, 4, 8, 8, 16, 2, 1),
+    (1, 2, 4, 4, 8, 16, 4, 1),
+    (1, 2, 4, 4, 8, 16, 8, 1),
+    (1, 2, 8, 4, 2, 64, 8, 1),
+    (1, 2, 8, 4, 4, 32, 4, 1),
+    (1, 2, 8, 4, 4, 32, 8, 1),
+    (1, 4, 8, 4, 4, 64, 4, 1),
+    (2, 1, 2, 2, 2, 16, 1, 1),
+    (2, 1, 2, 4, 4, 16, 1, 1),
+    (2, 1, 2, 8, 8, 16, 1, 1),
+    (2, 2, 2, 2, 4, 16, 1, 1),
+    (2, 2, 2, 4, 4, 32, 1, 1),
+    (2, 2, 2, 4, 8, 16, 1, 1),
+    (2, 4, 2, 4, 4, 64, 2, 1),
+    (2, 8, 2, 2, 8, 32, 4, 1),
+    (2, 8, 2, 4, 8, 64, 2, 1),
+)
+# fwd_smallk_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
+# stages, prefetch); prefetch builds with the iterative-ilp scheduler.
+FWD_SMALLK_KNOBS = (
+    (1, 4, 3, 3, 6, 16, 64, 2, True),
+    (1, 4, 3, 3, 6, 16, 64, 3, True),
+    (1, 4, 3, 4, 12, 12, 64, 3, True),
+    (3, 2, 1, 5, 10, 10, 64, 3, True),
+    (3, 4, 1, 4, 12, 12, 64, 3, False),
+    (3, 4, 1, 4, 12, 12, 64, 3, True),
+)
 
 
 def wgrad_waves() -> Tuple[Tuple[int, int, int], ...]:
@@ -886,6 +931,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _col_pads(k)
         ),
     ),
+    # Forward of tiny channel counts on wave32 WMMA, ungrouped: the small
+    # channel count baked, the other one runtime.
+    _FWD_SMALLC: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in FWD_SMALLC_STEMS
+        ),
+    ),
+    _FWD_SMALLK: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=0, kpg=kk)
+            for k, pad, st, kk in FWD_SMALLK_LAYERS
+        ),
+    ),
 }
 
 
@@ -1217,6 +1278,36 @@ def _knob_grid(
                 if sched:
                     knobs["sched"] = sched
                 yield knobs
+    elif variant in (_FWD_SMALLC, _FWD_SMALLK):
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        if variant == _FWD_SMALLC:
+            for wk, wp, tk, tp, oh, ow, tb, ts in FWD_SMALLC_KNOBS:
+                knobs = dict(
+                    waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, out_h=oh, out_w=ow
+                )
+                if tb > 1:
+                    knobs["tiles_per_block"] = tb
+                if ts:
+                    knobs["tdm_store"] = True
+                yield knobs
+        else:
+            for wc, wp, tc, tp, oh, ow, ck, st, pf in FWD_SMALLK_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    out_h=oh,
+                    out_w=ow,
+                    ck=ck,
+                    stages=st,
+                )
+                if pf:
+                    knobs.update(prefetch=True, sched="iterative-ilp")
+                yield knobs
     elif variant == "direct_wgrad":
         for (wk, wc, wq), hpb, mk in itertools.product(
             wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
@@ -1531,6 +1622,22 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
+    if variant in (_FWD_SMALLC, _FWD_SMALLK):
+        # Ungrouped, the small channel count baked; 128 of the runtime one
+        # (a multiple of every channel block and chunk) on a 64x64 image.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=caps.cpg or 128,
+            kpg=caps.kpg or 128,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
     if variant == "direct_wgrad_dw_cols":
         # The binary bakes C (knob ``channels``): one group per channel.
         return DirectConvProblem(

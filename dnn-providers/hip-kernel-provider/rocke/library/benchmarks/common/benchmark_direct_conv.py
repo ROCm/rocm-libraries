@@ -224,9 +224,12 @@ def parse_miopen_cmd_direct(cmd: str):
     kpg = K // groups
     # For fprop the grouped direct kernels require cpg == kpg.
     # For dgrad and wgrad cpg and kpg may differ; the spec validators enforce the
-    # kernel-specific constraints, so we skip the symmetric check here.
+    # kernel-specific constraints, so we skip the symmetric check here. So do
+    # ungrouped forward problems (stems with C = 3 included): the non-grouped
+    # and small-channel kernels take any channel counts their validators accept.
     if (
         miopen_args.forw not in (2, 4)
+        and groups != 1
         and cpg != 1
         and cpg != kpg
         and (cpg % 4 != 0 or cpg < 4)

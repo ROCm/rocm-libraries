@@ -24,6 +24,8 @@ __all__ = [
     "DIRECT_DGRAD_TRANSPOSE",
     "DIRECT_DGRAD_TRANSPOSE_RTC",
     "DIRECT_DGRAD_WMMA",
+    "DIRECT_FWD_SMALLC_WMMA",
+    "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
@@ -57,6 +59,11 @@ DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fu
 # Wave32 WMMA direct forward (dense and grouped, channels runtime; small
 # groups packed into block-diagonal super-groups; stride 1 and 2, dilation).
 DIRECT_FWD_WMMA = "direct_fwd_wmma"
+# Wave32 WMMA forward of convolutions with a tiny channel count (ungrouped):
+# few input channels (stems) as one GEMM over the flattened (r, s, c), and few
+# output channels as a GEMM over (r, s, k) followed by an overlap-add in LDS.
+DIRECT_FWD_SMALLC_WMMA = "direct_fwd_smallc_wmma"
+DIRECT_FWD_SMALLK_WMMA = "direct_fwd_smallk_wmma"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -144,6 +151,14 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_direct_fwd_wmma import DirectFwdWmmaSpec
 
         return DirectFwdWmmaSpec(problem=problem, name="rocke_direct_fwd_wmma", **knobs)
+    if variant == DIRECT_FWD_SMALLC_WMMA:
+        from kernels.common.conv_fwd_small_wmma import FwdSmallcWmmaSpec
+
+        return FwdSmallcWmmaSpec(problem=problem, name="rocke_fwd_smallc_wmma", **knobs)
+    if variant == DIRECT_FWD_SMALLK_WMMA:
+        from kernels.common.conv_fwd_small_wmma import FwdSmallkWmmaSpec
+
+        return FwdSmallkWmmaSpec(problem=problem, name="rocke_fwd_smallk_wmma", **knobs)
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
             problem=problem, name="rocke_direct_conv_nongrouped", **knobs
@@ -409,6 +424,14 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_spec(spec, arch=arch)
         if variant == "direct_depthwise":
             return dc.is_valid_depthwise_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_SMALLC_WMMA:
+            from kernels.common.conv_fwd_small_wmma import is_valid_fwd_smallc_spec
+
+            return is_valid_fwd_smallc_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_SMALLK_WMMA:
+            from kernels.common.conv_fwd_small_wmma import is_valid_fwd_smallk_spec
+
+            return is_valid_fwd_smallk_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
         if variant == "direct_depthwise_tiled":
@@ -480,10 +503,13 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_nongrouped as dn
     from kernels.common import conv_direct_wgrad_gather as wg
     from kernels.common import conv_direct_wgrad_tiled as wt
+    from kernels.common import conv_fwd_small_wmma as fs
 
     builders = {
         DIRECT_DGRAD_WMMA: dwm.build_direct_dgrad_wmma,
         DIRECT_FWD_WMMA: fw.build_direct_fwd_wmma,
+        DIRECT_FWD_SMALLC_WMMA: fs.build_fwd_smallc_wmma,
+        DIRECT_FWD_SMALLK_WMMA: fs.build_fwd_smallk_wmma,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
@@ -605,6 +631,24 @@ def direct_spec_for_problem(
             f"tile_k={spec.tile_k} exceeds the {spec.merged_k} output channels "
             f"of a merged block"
         )
+    if variant in (DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA):
+        # A binary serves every extent, but is only offered where at least
+        # half of its padded tile grid is real work, and (small C) where its
+        # output-channel block is not mostly past K.
+        from kernels.common import conv_fwd_small_wmma as fs
+
+        eff = (
+            fs.fwd_smallc_tile_efficiency(spec)
+            if variant == DIRECT_FWD_SMALLC_WMMA
+            else fs.fwd_smallk_tile_efficiency(spec)
+        )
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+        if variant == DIRECT_FWD_SMALLC_WMMA and spec.block_k > 2 * problem.kpg:
+            return None, (
+                f"block_k={spec.block_k} is over twice the {problem.kpg} output "
+                f"channels"
+            )
     return spec, "ok"
 
 
