@@ -625,6 +625,14 @@ struct AttentionDenseFixture
     int64_t headSize;
 };
 
+/// Strides of a [B, H, S, D] tensor stored BSHD: token-major, head varying fastest. The
+/// pack's kernels bake this layout and its graph_match declines any other, including the
+/// packed BHSD that generateStrides() would give.
+std::vector<int64_t> bshdStrides(int64_t heads, int64_t seqLen, int64_t headSize)
+{
+    return {seqLen * heads * headSize, headSize, heads * headSize, 1};
+}
+
 /// Builds a single-node BSHD SDPA graph (the layout the pack requires) pinned to
 /// `fixture.engineName`.
 std::shared_ptr<Graph> buildAttentionDenseGraph(const AttentionDenseFixture& fixture)
@@ -638,29 +646,30 @@ std::shared_ptr<Graph> buildAttentionDenseGraph(const AttentionDenseFixture& fix
         fixture.batch, fixture.numQueryHeads, fixture.seqLen, fixture.headSize};
     const std::vector<int64_t> kvDims{
         fixture.batch, fixture.numKvHeads, fixture.seqLen, fixture.headSize};
+    const auto qStrides = bshdStrides(fixture.numQueryHeads, fixture.seqLen, fixture.headSize);
+    const auto kvStrides = bshdStrides(fixture.numKvHeads, fixture.seqLen, fixture.headSize);
 
-    auto q = Graph::tensor(TensorAttributes()
-                               .set_name("Q")
-                               .set_dim(qDims)
-                               .set_stride(generateStrides(qDims))
-                               .set_data_type(DataType::BFLOAT16));
-    auto k = Graph::tensor(TensorAttributes()
-                               .set_name("K")
-                               .set_dim(kvDims)
-                               .set_stride(generateStrides(kvDims))
-                               .set_data_type(DataType::BFLOAT16));
-    auto v = Graph::tensor(TensorAttributes()
-                               .set_name("V")
-                               .set_dim(kvDims)
-                               .set_stride(generateStrides(kvDims))
-                               .set_data_type(DataType::BFLOAT16));
+    auto q = Graph::tensor(
+        TensorAttributes().set_name("Q").set_dim(qDims).set_stride(qStrides).set_data_type(
+            DataType::BFLOAT16));
+    auto k = Graph::tensor(
+        TensorAttributes().set_name("K").set_dim(kvDims).set_stride(kvStrides).set_data_type(
+            DataType::BFLOAT16));
+    auto v = Graph::tensor(
+        TensorAttributes().set_name("V").set_dim(kvDims).set_stride(kvStrides).set_data_type(
+            DataType::BFLOAT16));
 
     SdpaAttributes attrs;
     attrs.set_causal_mask(true).set_attn_scale(1.0F
                                                / std::sqrt(static_cast<float>(fixture.headSize)));
     auto [o, stats] = graph->sdpa(q, k, v, attrs);
     static_cast<void>(stats);
-    o->set_name("O").set_output(true).set_data_type(DataType::BFLOAT16);
+    // Laid out explicitly: an unset output defaults to packed BHSD, which the pack declines.
+    o->set_name("O")
+        .set_output(true)
+        .set_data_type(DataType::BFLOAT16)
+        .set_dim(qDims)
+        .set_stride(qStrides);
 
     graph->set_preferred_engine_id_ext(fixture.engineName);
     return graph;
