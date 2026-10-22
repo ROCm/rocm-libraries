@@ -52,6 +52,9 @@ def test_paged_native_parity(paged_emission):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     _idx, spec, arch, expected = paged_emission
+    if not hasattr(spec, "block_size"):
+        assert engine.paged_decode_reduce_lower_llvm(asdict(spec), arch) == expected
+        return
     if arch == "gfx950":
         m = import_module(f"kernels.{arch}.attention_tiled_3d")
         reduce = m.UnifiedAttentionReduceTiledSpec(
@@ -61,6 +64,7 @@ def test_paged_native_parity(paged_emission):
             dtype=spec.dtype,
             num_segments=8,
             waves_per_eu=3,
+            metadata_containment=spec.metadata_containment,
         )
         expected += _lower_kernel_to_llvm_python(
             m.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
@@ -99,7 +103,9 @@ def test_paged_selection_and_identity(arch):
         assert spec.block_size == page and spec.tile_size == 32
         assert selected.spec.with_num_kv_blocks(100).kernel_spec == spec
     spec = result.spec.kernel_spec
-    other = replace(spec, block_size=64, tile_size_override=64)
+    other = replace(
+        spec, metadata_containment=False, block_size=64, tile_size_override=64
+    )
     assert other.kernel_name() != replace(other, tile_size_override=32).kernel_name()
     assert asdict(spec)["tile_size_override"] == 32
     for kwargs in (
@@ -108,12 +114,16 @@ def test_paged_selection_and_identity(arch):
         {"kv_storage_dtype": "fp8e4m3"},
         {"use_wide_kv_load": True},
     ):
-        with pytest.raises(ValueError, match="paged gather"):
+        with pytest.raises(ValueError, match="paged gather|bounded decode"):
             replace(spec, **kwargs)
 
 
 class Tensor:
+    next_pointer = 4096
+
     def __init__(self, shape, dtype="torch.float16"):
+        self.pointer = Tensor.next_pointer
+        Tensor.next_pointer += 1 << 48
         self.shape, self.dtype = shape, dtype
         self.device, self.is_cuda = "cuda:0", True
 
@@ -132,7 +142,7 @@ class Tensor:
         return True
 
     def data_ptr(self):
-        return 4096
+        return self.pointer
 
 
 def inputs(page=1):
@@ -253,6 +263,13 @@ def _paged_runtime_kwargs(arch, page):
         algorithm="paged_decode_t32",
     )
     spec = dispatch_attention(req).spec
+    # This fixture exercises legacy direct/structural loader contracts. The
+    # dedicated containment suite covers the candidate's marked pair.
+    spec = replace(
+        spec,
+        kernel_spec=replace(spec.kernel_spec, metadata_containment=False),
+        reduce_spec=replace(spec.reduce_spec, metadata_containment=False),
+    )
     return {
         "problem": p,
         "q": ts[0],

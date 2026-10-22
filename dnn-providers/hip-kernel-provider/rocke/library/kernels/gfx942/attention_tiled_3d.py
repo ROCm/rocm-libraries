@@ -41,6 +41,12 @@ from kernels.common._attention_kv_loader import (
     resolve_attention_kv_loader,
 )
 from kernels.common._attention_paged_kv import paged_kv_offset
+from kernels.common._attention_paged_bounds import (
+    PagedBounds,
+    neutral_segment,
+    bounded_reduce_params,
+    reject_failed_sequence,
+)
 from kernels.common._attention_strided_kv import (
     StridedKvParams,
     declare_strided_kv_params,
@@ -174,6 +180,7 @@ class UnifiedAttention3DTiledSpec:
     # so no page-table load sits on the KV loop's critical path. Paged K/V;
     # implemented for fp16/bf16, which can be extended to the fp8 loader.
     use_wave_page_id_load: bool = False
+    metadata_containment: bool = False
 
     def __post_init__(self):
         validate_attention_3d_spec_types(self, complete=True)
@@ -292,6 +299,7 @@ class UnifiedAttention3DTiledSpec:
             "kvswz" if self.use_kv_lds_swizzle else "",
             "wpid" if self.use_wave_page_id_load else "",
             "stridedkv" if self.kv_layout == "strided" else "",
+            "bounds_v1" if self.metadata_containment else "",
         )
 
 
@@ -364,6 +372,8 @@ def build_unified_attention_3d_tiled(
 
     require_tiled_attention_arch(arch)
     validate_attention_3d_spec_types(spec, complete=True)
+    if spec.metadata_containment and arch != "gfx942":
+        raise ValueError("bounded decode builder requires gfx942")
 
     if spec.dtype not in ("fp16", "bf16"):
         raise NotImplementedError("tiled 3D kernel supports fp16/bf16")
@@ -461,6 +471,7 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    bounds = PagedBounds(b) if spec.metadata_containment else None
     k_strides = v_strides = None
     if loader_kind is AttentionKVLoaderKind.STRIDED:
         k_strides = declare_strided_kv_params(b, "k")
@@ -483,15 +494,57 @@ def build_unified_attention_3d_tiled(
             block_q=BLOCK_Q,
             iterations=spec.binary_search_iters,
         )
+    if bounds is not None:
+        with b.scf_if(
+            b.lor(
+                b.cmp_ge(seq_idx, num_seqs_p),
+                b.lor(
+                    b.cmp_ge(kv_head_idx, b.const_i32(NUM_KV)),
+                    b.cmp_ge(seg_idx, b.const_i32(NUM_SEG)),
+                ),
+            )
+        ):
+            b.ret()
+        bounds.start(seq_idx, kv_head_idx, seg_idx, tid, NUM_KV, NUM_SEG)
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
-    cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
+    cur_batch_q_len = None if bounds is not None else b.sub(cu_q_stop, cu_q_start)
     if spec.use_decode_grid:
         q_block_local_idx = b.const_i32(0)
     else:
         q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
         q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
+    if bounds is not None:
+        bad_cu = b.lor(
+            b.cmp_ne(cu_q_start, seq_idx),
+            b.cmp_ne(cu_q_stop, b.add(seq_idx, b.const_i32(1))),
+        )
+        bad_length = b.lor(
+            b.cmp_lt(seq_len, b.const_i32(0)), b.cmp_gt(seq_len, bounds.capacity)
+        )
+        invalid_metadata = b.lor(bad_cu, bad_length)
+        bounds.mark(invalid_metadata)
+        cu_q_start = seq_idx
+        cur_batch_q_len = b.const_i32(1)
+        seq_len = b.select(invalid_metadata, b.const_i32(0), seq_len)
+        with b.scf_if(invalid_metadata):
+            neutral_segment(
+                b,
+                seq_idx,
+                kv_head_idx,
+                seg_idx,
+                tid,
+                segm_output_ptr,
+                segm_max_ptr,
+                segm_expsum_ptr,
+                HD,
+                NQK,
+                NUM_QH,
+                NUM_SEG,
+            )
+            bounds.finish()
+            b.ret()
     context_len = b.sub(seq_len, cur_batch_q_len)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
@@ -518,6 +571,24 @@ def build_unified_attention_3d_tiled(
     )
 
     seg_start_tile_pos = b.mul(b.mul(seg_idx, tps), b.const_i32(T))
+    if bounds is not None:
+        with b.scf_if(b.cmp_ge(seg_start_tile_pos, seq_len)):
+            neutral_segment(
+                b,
+                seq_idx,
+                kv_head_idx,
+                seg_idx,
+                tid,
+                segm_output_ptr,
+                segm_max_ptr,
+                segm_expsum_ptr,
+                HD,
+                NQK,
+                NUM_QH,
+                NUM_SEG,
+            )
+            bounds.finish()
+            b.ret()
     with b.scf_if(b.cmp_ge(seg_start_tile_pos, seq_len)):
         neg_inf_local = b.const_f32(float("-inf"))
         zero_local = b.const_f32(0.0)
@@ -677,8 +748,12 @@ def build_unified_attention_3d_tiled(
         key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
         value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
     else:
-        key_rsrc = b.buffer_rsrc(key, big_bytes)
-        value_rsrc = b.buffer_rsrc(value, big_bytes)
+        key_rsrc = b.buffer_rsrc(
+            key, bounds.k_bytes if bounds is not None else big_bytes
+        )
+        value_rsrc = b.buffer_rsrc(
+            value, bounds.v_bytes if bounds is not None else big_bytes
+        )
 
     KV_HALVES_PER_CALL = THREADS * HALVES_PER_LANE
     assert (T * HD) % KV_HALVES_PER_CALL == 0
@@ -757,8 +832,11 @@ def build_unified_attention_3d_tiled(
                     HD,
                     T,
                 )
-            elif loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER:
-                voff = paged_kv_offset(
+            elif (
+                bounds is not None
+                or loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+            ):
+                voff = (bounds.offset if bounds is not None else paged_kv_offset)(
                     b,
                     block_tables,
                     seq_base,
@@ -822,8 +900,11 @@ def build_unified_attention_3d_tiled(
                     HD,
                     T,
                 )
-            elif loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER:
-                voff = paged_kv_offset(
+            elif (
+                bounds is not None
+                or loader_kind is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+            ):
+                voff = (bounds.offset if bounds is not None else paged_kv_offset)(
                     b,
                     block_tables,
                     seq_base,
@@ -1299,6 +1380,10 @@ def build_unified_attention_3d_tiled(
         b.global_store(segm_max_ptr, ml_idx, m_final, align=4)
         b.global_store(segm_expsum_ptr, ml_idx, l_final, align=4)
 
+    if bounds is not None:
+        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+        bounds.finish()
+
     return b.kernel
 
 
@@ -1315,6 +1400,7 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
+    metadata_containment: bool = False
 
     def __post_init__(self):
         validate_attention_3d_spec_types(self, reducer=True, complete=True)
@@ -1334,6 +1420,7 @@ class UnifiedAttentionReduceTiledSpec:
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
+            "bounds_v1" if self.metadata_containment else "",
         )
 
 
@@ -1344,6 +1431,8 @@ def build_unified_attention_reduce_tiled(
 ) -> KernelDef:
     """Combine the per-segment partial state into the final fp16/bf16 output."""
     validate_attention_3d_spec_types(spec, reducer=True, complete=True)
+    if spec.metadata_containment and arch != "gfx942":
+        raise ValueError("bounded decode reducer requires gfx942")
     HD = spec.head_size
     NUM_SEG = spec.num_segments
     NUM_QH = spec.num_query_heads
@@ -1368,9 +1457,31 @@ def build_unified_attention_reduce_tiled(
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
 
+    if spec.metadata_containment:
+        status, num_seqs = bounded_reduce_params(b)
+
     q_token = b.block_id_x()
     q_head = b.block_id_y()
     tid = b.thread_id_x()
+
+    if spec.metadata_containment:
+        with b.scf_if(
+            b.lor(b.cmp_ge(q_token, num_seqs), b.cmp_ge(q_head, b.const_i32(NUM_QH)))
+        ):
+            b.ret()
+        reject_failed_sequence(
+            b,
+            status,
+            q_token,
+            q_head,
+            tid,
+            out,
+            dtype,
+            HD,
+            NUM_QH,
+            spec.num_kv_heads,
+            NUM_SEG,
+        )
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)

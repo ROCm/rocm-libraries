@@ -25,6 +25,8 @@ from kernels.common._attention_validation import (
 from kernels.common.attention_paged_decode import (
     validate_paged_loader_geometry,
     validate_paged_3d_features,
+    has_paged_metadata_containment,
+    paged_metadata_bounds,
 )
 
 from rocke.dispatch.core import TorchBinding
@@ -448,8 +450,11 @@ def bind_tuning_attention_torch(
     )
     problem = replace(problem, num_kv_blocks=num_blocks)
     original_target = spec.arch, spec.path
+    bounded = has_paged_metadata_containment(spec)
     if hasattr(spec, "with_num_kv_blocks"):
         spec = spec.with_num_kv_blocks(num_blocks)
+    if has_paged_metadata_containment(spec) != bounded:
+        raise ValueError("KV block retargeting must preserve metadata containment")
     if (spec.arch, spec.path) != original_target:
         raise ValueError("KV block retargeting must preserve the spec arch and path")
     validate_tuning_attention_contract(request, problem, spec)
@@ -458,6 +463,23 @@ def bind_tuning_attention_torch(
     if loader_geometry is not None:
         validate_paged_3d_features(
             problem, spec, q=tensors["q"], defer_qq_bias_stride=True, **inputs
+        )
+    if has_paged_metadata_containment(spec):
+        paged_metadata_bounds(
+            problem,
+            tuple(
+                tensors[name]
+                for name in (
+                    "q",
+                    "k",
+                    "v",
+                    "out",
+                    "cu_seqlens_q",
+                    "seqused_k",
+                    "block_table",
+                )
+            ),
+            spec,
         )
     stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))

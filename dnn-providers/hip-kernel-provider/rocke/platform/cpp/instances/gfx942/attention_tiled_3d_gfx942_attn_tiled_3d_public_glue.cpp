@@ -935,7 +935,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
 static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                                                 const rocke_unified_attention_3d_tiled_spec_t* spec,
                                                 const char* arch,
-                                                bool strided_kv)
+                                                bool strided_kv,
+                                                bool metadata_containment)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
@@ -970,7 +971,36 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
+        if(metadata_containment
+           && (strided_kv || !spec->use_decode_grid || spec->use_i64_kv_addr
+               || spec->kv_storage_dtype != NULL || spec->use_wide_kv_load
+               || spec->use_wave_page_id_load || spec->num_seqs <= 0 || spec->sliding_window < 0
+               || !rocke_bounds_geometry(spec->head_size,
+                                         spec->num_query_heads,
+                                         spec->num_kv_heads,
+                                         spec->num_segments,
+                                         spec->dtype,
+                                         arch,
+                                         "gfx942")))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "bounded decode requires paged T32 async decode grid");
+            return NULL;
+        }
+        if(metadata_containment
+           && spec->num_seqs > 0x7FFF0000
+                                   / ((int64_t)spec->num_query_heads * spec->head_size
+                                      * spec->num_segments * 4))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode workspace geometry exceeds i32");
+            return NULL;
+        }
         const int tile = rocke_unified_attention_3d_tiled_spec_tile_size(spec);
+        if(metadata_containment && tile != 32)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode requires tile 32");
+            return NULL;
+        }
         if((spec->block_size != 1 && spec->block_size != 16 && spec->block_size != 32
             && spec->block_size != 64)
            || (tile != 16 && tile != 32 && tile != 64))
@@ -1022,6 +1052,8 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                 }
                 memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
             }
+            if(metadata_containment)
+                strcat(name, "_bounds_v1");
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
             {
@@ -1036,6 +1068,7 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
+        ctx.metadata_containment = metadata_containment;
         ctx.strided_kv = strided_kv;
         ctx.kv_loader_kind = loader_kind;
 
@@ -1076,22 +1109,23 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
 {
-    return build_segment_gfx942(b, spec, arch, false);
+    return build_segment_gfx942(b, spec, arch, false, false);
 }
 
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
 {
-    return build_segment_gfx942(b, spec, arch, true);
+    return build_segment_gfx942(b, spec, arch, true, false);
 }
 
 /* ===================================================================== *
  *  PUBLIC build entry -- reduce kernel (lines 1002-1133)
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
-    rocke_ir_builder_t* b,
-    const rocke_unified_attention_reduce_tiled_spec_t* spec,
-    const char* arch)
+static rocke_kernel_def_t*
+    build_reduce_gfx942(rocke_ir_builder_t* b,
+                        const rocke_unified_attention_reduce_tiled_spec_t* spec,
+                        const char* arch,
+                        bool metadata_containment)
 {
     rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
 
@@ -1110,6 +1144,19 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
         return NULL;
     }
 
+    if(metadata_containment
+       && !rocke_bounds_geometry(spec->head_size,
+                                 spec->num_query_heads,
+                                 spec->num_kv_heads,
+                                 spec->num_segments,
+                                 spec->dtype,
+                                 arch,
+                                 "gfx942"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode has invalid reducer geometry");
+        return NULL;
+    }
+
     if(b->kernel != NULL)
     {
         char name[256];
@@ -1119,6 +1166,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
                 b, ROCKE_ERR_VALUE, "attn_reduce_tiled_gfx942: kernel_name encode failed");
             return NULL;
         }
+        if(metadata_containment)
+            strcat(name, "_bounds_v1");
         b->kernel->name = rocke_arena_strdup(&b->arena, name);
         if(b->kernel->name == NULL)
         {
@@ -1132,6 +1181,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
     {
         return NULL;
     }
+
+    ctx.metadata_containment = metadata_containment;
 
     /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 1018). */
     if(b->kernel != NULL)
@@ -1161,6 +1212,26 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
 /* ===================================================================== *
  *  build -> lower-to-.ll convenience (own/free internal IRBuilder)
  * ===================================================================== */
+
+rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
+    rocke_ir_builder_t* b,
+    const rocke_unified_attention_reduce_tiled_spec_t* spec,
+    const char* arch)
+{
+    return build_reduce_gfx942(b, spec, arch, false);
+}
+extern "C" rocke_kernel_def_t* rocke_build_paged_decode_bounded_v1_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx942(b, spec, arch, false, true);
+}
+extern "C" rocke_kernel_def_t* rocke_build_paged_decode_reduce_bounded_v1_gfx942(
+    rocke_ir_builder_t* b,
+    const rocke_unified_attention_reduce_tiled_spec_t* spec,
+    const char* arch)
+{
+    return build_reduce_gfx942(b, spec, arch, true);
+}
 rocke_status_t rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
     const rocke_unified_attention_3d_tiled_spec_t* spec,
     const char* arch,

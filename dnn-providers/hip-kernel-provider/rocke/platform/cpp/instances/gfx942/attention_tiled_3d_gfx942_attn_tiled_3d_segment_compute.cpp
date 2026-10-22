@@ -606,4 +606,9 @@ void rocke_gfx942_attention_tiled_3d_emit_epilogue(rocke_gfx942_attention_tiled_
     rocke_b_global_store(b, ctx->segm_max_ptr, ml_idx, ctx->m_final, 4);
     rocke_b_global_store(b, ctx->segm_expsum_ptr, ml_idx, ctx->l_final, 4);
     rocke_b_region_leave(b);
+    if(ctx->metadata_containment)
+    {
+        rocke_b_s_waitcnt(b, 0, 0, -1);
+        rocke_bounds_finish(b, &ctx->bounds);
+    }
 }

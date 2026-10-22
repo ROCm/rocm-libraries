@@ -647,7 +647,16 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
                 capturing,
                 tuple(
                     int(segment[n].data_ptr())
-                    for n in ("segm_output_ptr", "segm_max_ptr", "segm_expsum_ptr")
+                    for n in (
+                        "segm_output_ptr",
+                        "segm_max_ptr",
+                        "segm_expsum_ptr",
+                        *(
+                            ("metadata_status_ptr",)
+                            if "metadata_status_ptr" in segment
+                            else ()
+                        ),
+                    )
                 ),
             )
         )

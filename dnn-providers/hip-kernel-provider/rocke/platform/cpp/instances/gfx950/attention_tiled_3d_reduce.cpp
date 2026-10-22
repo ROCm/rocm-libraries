@@ -190,11 +190,41 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* ---- grid ids + thread (lines 1029-1031) ---- */
+    if(ctx->metadata_containment)
+    {
+        ctx->bounds.status = rocke_bounds_ptr_param(b, "metadata_status_ptr", true);
+        ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
+    }
     ctx->q_token = rocke_b_block_id_x(b);
     ctx->q_head = rocke_b_block_id_y(b);
     ctx->tid = rocke_b_thread_id_x(b);
 
     /* ---- SSA constants (lines 1033-1034) ---- */
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(b, ctx->q_token, ctx->num_seqs_p);
+        rocke_value_t* t2 = rocke_b_const_i32(b, ctx->cfg.NUM_QH);
+        rocke_value_t* t3 = rocke_b_cmp_ge(b, ctx->q_head, t2);
+        rocke_value_t* t4 = rocke_b_lor(b, t1, t3);
+        {
+            rocke_if_t g5 = rocke_b_scf_if(b, t4);
+            rocke_b_region_enter(b, g5.then_region);
+            rocke_b_ret(b);
+            rocke_b_region_leave(b);
+        }
+    }
+    if(ctx->metadata_containment)
+        rocke_bounds_reject(b,
+                            ctx->bounds.status,
+                            ctx->q_token,
+                            ctx->q_head,
+                            ctx->tid,
+                            ctx->out,
+                            ctx->cfg.dtype,
+                            ctx->cfg.HD,
+                            ctx->cfg.NUM_QH,
+                            ctx->cfg.NUM_KV,
+                            ctx->cfg.NUM_SEG);
     ctx->neg_inf = rocke_b_const_f32(b, -INFINITY);
     ctx->zero_f = rocke_b_const_f32(b, 0.0);
 

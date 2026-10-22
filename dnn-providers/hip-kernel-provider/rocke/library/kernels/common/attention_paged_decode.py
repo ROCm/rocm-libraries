@@ -316,6 +316,14 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
     """
     validate_attention_problem_types(problem)
     p = problem
+    if (
+        p.num_seqs <= 0
+        or p.num_query_heads <= 0
+        or p.num_kv_heads <= 0
+        or p.head_size not in (64, 128, 256)
+        or p.block_size not in (1, 16, 32, 64)
+    ):
+        raise ValueError("paged decode has invalid geometry")
     if p.max_seqlen_q != 1 or p.total_q != p.num_seqs:
         raise ValueError("paged gather requires one query per sequence")
     if p.dtype not in ("fp16", "bf16") or p.use_fp8:
@@ -411,3 +419,60 @@ def validate_paged_decode(problem, tensors, tuning_spec=None):
         raise ValueError("paged decode tensors must be on the same device")
     if any(int(t.data_ptr()) % 16 for t in (q, k, v, out)):
         raise ValueError("paged decode Q/K/V/O must be 16-byte aligned")
+
+
+def paged_metadata_bounds(problem, tensors, tuning_spec):
+    """Trusted scalar limits for bounded specs, without reading device contents."""
+    validate_paged_decode(problem, tensors, tuning_spec)
+    segment, reducer = tuning_spec.kernel_spec, tuning_spec.reduce_spec
+    if not (
+        getattr(segment, "metadata_containment", False)
+        and getattr(reducer, "metadata_containment", False)
+    ):
+        raise ValueError("bounded decode requires matching segment and reducer")
+    if not segment.use_decode_grid or segment.tile_size != 32:
+        raise ValueError("bounded decode requires the one-query T32 grid")
+    q, k, v, out, cu, used, table = tensors
+    # Every intermediate, including rounded inactive segment starts, stays i32.
+    segments = segment.num_segments
+    tile_span = segments * 32
+    rounded = ((problem.max_seqlen_k + tile_span - 1) // tile_span) * tile_span
+    if rounded + max(32, segment.sliding_window, segment.block_size) > BUFFER_LIMIT:
+        raise ValueError("bounded decode rounded token arithmetic exceeds i32")
+    for tensor, itemsize in ((q, 2), (out, 2), (cu, 4), (used, 4)):
+        if int(tensor.numel()) * itemsize > BUFFER_LIMIT:
+            raise ValueError("bounded decode tensor span exceeds i32")
+    # Noalias input/output contracts also forbid metadata writes overlapping a
+    # kernel read. Check view intervals; internal scratch is separately allocated.
+    spans = [
+        (int(t.data_ptr()), int(t.numel()) * size)
+        for t, size in zip(tensors, (2, 2, 2, 2, 4, 4, 4))
+    ]
+    for i, (base, size) in enumerate(spans):
+        for other, other_size in spans[i + 1 :]:
+            if base < other + other_size and other < base + size:
+                raise ValueError("bounded decode tensor views must not overlap")
+    status_bytes = problem.num_seqs * problem.num_kv_heads * segments * 4
+    if status_bytes > BUFFER_LIMIT:
+        raise ValueError("bounded decode status span exceeds i32")
+    return {
+        "physical_pages": int(k.shape[0]),
+        "max_seqlen_k": int(problem.max_seqlen_k),
+        "table_cols": int(table.shape[1]),
+        "k_span_bytes": int(k.numel()) * 2,
+        "v_span_bytes": int(v.numel()) * 2,
+    }
+
+
+def has_paged_metadata_containment(tuning_spec):
+    if tuning_spec is None:
+        return False
+    segment = getattr(tuning_spec.kernel_spec, "metadata_containment", False)
+    reducer = getattr(
+        getattr(tuning_spec, "reduce_spec", None), "metadata_containment", False
+    )
+    require_attention_bool(segment, "kernel_spec.metadata_containment")
+    require_attention_bool(reducer, "reduce_spec.metadata_containment")
+    if segment != reducer:
+        raise ValueError("segment/reducer metadata containment must match")
+    return segment

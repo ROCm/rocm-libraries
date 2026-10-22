@@ -4,7 +4,8 @@ The gfx942 and gfx950 segment kernels distinguish cache page size `P` from
 compute tile size `T`. Both consume logical token tiles and stage the existing
 `[T,D]` K/V LDS operands. Transfer width and split-KV segment length remain
 separate target and scheduling choices. Staging is one compute tile per buffer;
-MFMA, online softmax, synchronization and the reducer are unchanged.
+MFMA and online softmax retain their existing schedules. Bounded mode adds
+metadata guards and a reducer failure gate.
 An internal loader-kind resolver selects strided addressing, the existing paged
 descriptor, or per-token paged gather. Both engines use that decision for
 validation and architecture-local K/V tile issuing. Storage conversion, transfer
@@ -58,10 +59,11 @@ page-contained limitation.
 
 The runtime checks shapes, dtypes, contiguity, alignment, actual pool bounds,
 table capacity, matching architecture, and explicit segment/reducer semantics.
-It never reads device metadata to the host. Callers own the values: lengths
+It never reads device metadata to the host by default. Unmarked legacy specs
+retain the caller-validity contract: lengths
 are in `[0,max_seqlen_k]`, query offsets are `[0,1,...,B]`, and referenced page
 IDs index the physical pools. Inactive table entries need not be initialized.
-The C builders share this caller contract; metadata cannot be validated during
+Legacy C builders share this caller contract; metadata cannot be validated during
 source generation. `allow_unsupported` does not bypass runtime safety checks.
 
 Explicit gfx942/gfx950 paged 3D specs must expose valid page/tile geometry and
@@ -102,6 +104,57 @@ reads, and page-ID substitution alone does not guarantee zero invalid K/V data.
 An LDS swizzle must be shared by tile writes and QK/PV reads. Selectable loaders
 at identical geometry must enter the concrete spec and compilation identity.
 
+## Bounded metadata containment
+
+The `attention_paged_decode_t32` candidate uses ABI `rocke-attention-paged/v2`
+and enables strict boolean `metadata_containment` on both specs. Explicit marked
+pairs receive the same guards in direct, prepared, internal graph and external
+capture execution. Generic automatic/unmarked legacy paged routes retain their
+caller-validity contract. Kernel names append `_bounds_v1`; installed shared C
+spec POD layouts remain unchanged. Raw native callers select the versioned
+builders in [the bounded builder header](../../../platform/cpp/include/rocke/instance_attention_paged_decode_bounded.h).
+
+Bounded mode supports gfx942/gfx950, FP16/BF16, T32, P1/16/32/64,
+D64/128/256, GQA ratios 1/2/4/8/16, one query per sequence and 1..128
+segments. It preserves bottom-right windows, sinks, softcap, ALiBi and QQ bias.
+It rejects additive bias, top-left/unbounded bands, i64 addressing, FP8 K/V,
+wide K/V and wave page-ID loading. Actual K/V tensor view spans become buffer
+bounds. Host structure checks also cover rounded token/workspace/status spans
+and nonoverlapping input/output/metadata views. Feature inputs must remain
+separate from these views and internal workspace; raw C callers must supply
+truthful allocation bounds, matching launch grids and valid lifetimes.
+
+Each segment derives Q and scratch rows from its trusted CTA sequence index.
+Live query offsets only check consistency with `[0,1,...,B]`; lengths are checked
+before token arithmetic. Each used logical page index is guarded before its
+load, and that same physical ID is checked and sanitized before multiplication.
+Unused table tails and pages wholly excluded by the window are not audited.
+Invalid lengths, offsets or consumed IDs produce NaN across every head and
+dimension of the affected sequence. Unrelated sequences remain valid, and valid
+zero length retains zero output, including with sinks. NaN is not a unique
+error diagnostic for inputs that already contain nonfinite numeric values.
+
+Each CTA overwrites one `[B,Hkv,S]` int32 status slot every execution, including
+neutral exits. Sixty-four lane-private sticky LDS flags add 256 bytes per CTA;
+a final wave reduction publishes failure after outstanding DMA completes. The
+reducer scans all status slots for its sequence before reading partial output.
+There is no status-clear kernel, atomic, or hidden host synchronization. Ordered
+metadata changes between launches/replays are supported. Concurrent GPU writes
+during reads remain the caller's synchronization responsibility.
+
+Bounded page-contained/subpage paths use checked per-copy offsets instead of
+hoisted page IDs; loader classification and DMA schedules remain unchanged.
+This is a containment tradeoff with extra table/guard work and reducer status
+reads. No performance improvement is claimed. `attention_3d_workspace_nbytes`
+accepts the selected `tuning_spec` to account for its segment count and status.
+
+The [containment host suite](../../tests/test_paged_metadata_containment.py)
+checks range proofs, pair admission and launch signatures. The
+[containment numeric suite](../../tests/test_paged_metadata_containment_numeric.py)
+checks invalid-to-valid recovery on unchanged buffers across execution modes,
+affected/unaffected sequences, zero lengths and Q/O canaries. The paged parity
+family appends 32 bounded segment/reducer cases to the original 66 configs.
+
 ## Selection and validation
 
 Use dispatch algorithm `paged_decode_t32` to request T32 explicitly. The
@@ -113,8 +166,8 @@ vocabulary, while the default retains the existing 2D policies.
 The candidate binds without reading device metadata by default and keeps the
 original device tensors live across launches. Pass
 `unsafe_skip_paged_value_validation=False` to validate contents at bind time;
-the option requires a boolean. Rebind after mutation when relying on that
-synchronized check. The candidate accepts only numeric unit values for `k_scale`,
+the option requires a boolean. That bind-time check is a snapshot; bounded device checks still run after
+ordered mutation and replay. The candidate accepts only numeric unit values for `k_scale`,
 `v_scale` and `out_scale` in tensor maps, binding arguments and launch overrides;
 `softmax_scale` remains independently configurable. Requests carry `softcap`,
 `use_sinks`, `use_alibi` and `use_qq_bias`; the problem and compiled spec must

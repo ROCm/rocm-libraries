@@ -291,7 +291,7 @@ def test_binding_rechecks_returned_retarget(change, monkeypatch):
         returned = replace(spec, path="2d")
     elif change == "geometry":
         returned = replace(
-            spec, kernel_spec=replace(spec.kernel_spec, tile_size_override=16)
+            spec, kernel_spec=_poison(spec.kernel_spec, "tile_size_override", 16)
         )
     elif change == "segments":
         returned = replace(spec, reduce_spec=replace(spec.reduce_spec, num_segments=16))
@@ -310,7 +310,8 @@ def test_binding_rechecks_returned_retarget(change, monkeypatch):
         bindings, "validate_tuning_attention_tensors", lambda *a, **k: 32
     )
     with pytest.raises(
-        ValueError, match="retargeting|num_segments|segment count|geometry"
+        ValueError,
+        match="retargeting|num_segments|segment count|geometry|bounded decode",
     ):
         bindings.bind_tuning_attention_torch(
             req, structural, {"problem": p, "q": object()}

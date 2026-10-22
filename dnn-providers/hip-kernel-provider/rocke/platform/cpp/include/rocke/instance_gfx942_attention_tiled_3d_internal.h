@@ -66,6 +66,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t          */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t          */
 #include "rocke/instance_attention_kv_loader_internal.h"
+#include "rocke/instance_attention_paged_bounds_internal.h"
 #include "rocke/instance_attention_strided_kv_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/ir.h"
@@ -188,6 +189,8 @@ bool rocke_gfx942_attn_tiled_3d_reduce_config_from_spec(
  * ===================================================================== */
 typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
 {
+    bool metadata_containment;
+    rocke_paged_bounds_t bounds;
     bool strided_kv;
     rocke_attention_kv_loader_kind_t kv_loader_kind;
     rocke_strided_kv_params_t k_strides;

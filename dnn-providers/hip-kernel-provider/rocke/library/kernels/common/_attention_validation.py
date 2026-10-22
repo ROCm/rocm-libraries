@@ -181,6 +181,26 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
         optional=True,
         allow_missing=not complete,
     )
+    if complete or hasattr(spec, "metadata_containment"):
+        require_attention_bool(
+            _field(spec, "metadata_containment", label), "metadata_containment"
+        )
+    if getattr(spec, "metadata_containment", False):
+        if not 1 <= spec.num_segments <= 128 or spec.dtype not in ("fp16", "bf16"):
+            raise ValueError("bounded decode requires fp16/bf16 and 1..128 segments")
+        if spec.head_size not in (64, 128, 256) or spec.num_kv_heads <= 0:
+            raise ValueError("bounded decode has invalid head geometry")
+        ratio = spec.num_query_heads // spec.num_kv_heads
+        if spec.num_query_heads != ratio * spec.num_kv_heads or ratio not in (
+            1,
+            2,
+            4,
+            8,
+            16,
+        ):
+            raise ValueError("bounded decode has invalid GQA ratio")
+        if spec.num_query_heads * spec.head_size * spec.num_segments * 4 > 0x7FFF0000:
+            raise ValueError("bounded decode workspace geometry exceeds i32")
     if reducer:
         return
     gfx950 = (
@@ -257,3 +277,28 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
         label,
         allow_missing=not complete,
     )
+
+    if getattr(spec, "metadata_containment", False):
+        if (
+            spec.kv_layout != "paged"
+            or spec.tile_size != 32
+            or spec.block_size not in (1, 16, 32, 64)
+            or spec.num_seqs <= 0
+            or spec.num_seqs
+            * spec.num_query_heads
+            * spec.head_size
+            * spec.num_segments
+            * 4
+            > 0x7FFF0000
+            or spec.sliding_window < 0
+            or spec.sliding_window > 0x7FFFFFFF
+            or not spec.use_decode_grid
+            or spec.use_i64_kv_addr
+            or spec.kv_storage_dtype is not None
+            or spec.use_wide_kv_load
+            or spec.use_wave_page_id_load
+            or getattr(spec, "use_additive_bias", False)
+            or getattr(spec, "causal_top_left", False)
+            or getattr(spec, "right_bound", 0) != 0
+        ):
+            raise ValueError("bounded decode requires paged T32 async decode grid")

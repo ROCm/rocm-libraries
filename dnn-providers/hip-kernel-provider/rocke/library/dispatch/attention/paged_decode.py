@@ -3,12 +3,15 @@
 
 """Executable token-mapped decode; existing page sizes retain default routing.
 
-Binding checks tensor structure without reading device metadata by default.
-Callers maintain in-bounds lengths, query offsets and referenced page IDs, and
-may mutate valid values in place between launches. Pass
-``unsafe_skip_paged_value_validation=False`` for synchronized content validation
-at bind time; rebind after mutation when relying on that validation.
+Binding checks tensor structure without reading device metadata to the host.
+The bounded segment/reducer pair checks live lengths, query offsets and used
+page IDs on every ordered launch/replay. Invalid metadata produces NaN for the
+affected sequence. Concurrent mutation requires caller stream synchronization.
+Pass ``unsafe_skip_paged_value_validation=False`` for an additional synchronized
+content check at bind time.
 """
+
+from dataclasses import replace
 
 from kernels.common.attention_unified import _3d_signature, _num_segments
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
@@ -66,6 +69,8 @@ def make_candidate():
             ),
             arch=req.arch.lower(),
         )
+        segment = replace(segment, use_decode_grid=True, metadata_containment=True)
+        reduce = replace(reduce, metadata_containment=True)
         return AttentionTuningSpec(
             path="3d",
             arch=req.arch.lower(),
@@ -89,6 +94,8 @@ def make_candidate():
             spec.path != "3d"
             or spec.kernel_spec.tile_size != 32
             or spec.kernel_spec.kv_layout != "paged"
+            or not getattr(spec.kernel_spec, "metadata_containment", False)
+            or not getattr(spec.reduce_spec, "metadata_containment", False)
         ):
             raise ValueError("paged_decode_t32 requires a paged tile-32 segment spec")
         kwargs.setdefault("unsafe_skip_paged_value_validation", True)
@@ -99,7 +106,7 @@ def make_candidate():
         family=FAMILY,
         algorithm="paged_decode_t32",
         spec_id="paged_decode_t32",
-        abi_version="rocke-attention-paged/v1",
+        abi_version="rocke-attention-paged/v2",
         priority=20,
         capability=Capability(
             arches=("gfx942", "gfx950"),
@@ -125,7 +132,9 @@ def make_candidate():
         select_spec=select,
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
         build=lambda spec, arch: spec.build(arch),
-        signature=lambda spec: _3d_signature(spec.kernel_spec.dtype),
+        signature=lambda spec: _3d_signature(
+            spec.kernel_spec.dtype, metadata_containment=True
+        ),
         grid=lambda spec, req: spec.launch_grid(_problem(req)),
         block=lambda spec: spec.launch_block(),
         bind_torch=bind,

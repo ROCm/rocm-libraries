@@ -1,6 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  * Mirrors attention_paged_kv_emit.py without changing public spec layouts. */
+#include "rocke/instance_attention_paged_decode_bounded.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/ir_serialize.h"
@@ -14,12 +15,12 @@ int main(int argc, char** argv)
     if(argc < 2)
         return 2;
     const int idx = atoi(argv[1]);
-    if(idx < 0 || idx >= 66)
+    if(idx < 0 || idx >= 98)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
-    const int use942 = idx < 24 || (idx >= 48 && idx < 57);
+    const int use942 = idx < 24 || (idx >= 48 && idx < 57) || (idx >= 66 && idx < 82);
     const int ci = idx / 4 % 3;
     const char* arch = use942 ? "gfx942" : "gfx950";
     const char* mode = argc > 2 ? argv[2] : "ll";
@@ -41,7 +42,7 @@ int main(int argc, char** argv)
     s.waves_per_eu = 3;
     s.num_seqs = 3;
     /* Append feature cases without changing the original 48 configurations. */
-    if(idx >= 48)
+    if(idx >= 48 && idx < 66)
     {
         const int feature = (idx - 48) % 9;
         const int combined = feature >= 4;
@@ -54,11 +55,44 @@ int main(int argc, char** argv)
         s.use_alibi = combined || feature == 2;
         s.use_qq_bias = combined || feature == 3;
     }
+    const int bounded = idx >= 66;
+    const int local = (idx - 66) % 16;
+    const int reducer = bounded && local >= 12;
+    rocke_unified_attention_reduce_tiled_spec_t red
+        = rocke_unified_attention_reduce_tiled_spec_default();
+    if(bounded)
+    {
+        s.head_size = dims[local / 4 % 3];
+        s.block_size = blocks[local % 4];
+        s.dtype = local % 2 ? "bf16" : "fp16";
+        s.use_sinks = local >= 8;
+        s.sliding_window = local >= 8 ? 33 : 0;
+        s.has_softcap = local >= 8;
+        s.use_alibi = local >= 8;
+        s.use_qq_bias = local >= 8;
+        s.use_decode_grid = true;
+        red.head_size = local == 15 ? 64 : dims[(local - 12 + 3) % 3];
+        red.num_query_heads = 8;
+        red.num_kv_heads = 2;
+        red.dtype = "bf16";
+        red.num_segments = 8;
+        red.has_waves_per_eu = true;
+        red.waves_per_eu = 3;
+    }
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "strided_kv") != ROCKE_OK)
         return 1;
-    rocke_kernel_def_t* k = use942 ? rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch)
-                                   : rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, arch);
+    rocke_kernel_def_t* k;
+    if(reducer)
+        k = (use942 ? rocke_build_paged_decode_reduce_bounded_v1_gfx942
+                    : rocke_build_paged_decode_reduce_bounded_v1_gfx950)(&b, &red, arch);
+    else if(bounded)
+        k = (use942 ? rocke_build_paged_decode_bounded_v1_gfx942
+                    : rocke_build_paged_decode_bounded_v1_gfx950)(&b, &s, arch);
+    else
+        k = (use942 ? rocke_build_unified_attention_3d_tiled_gfx942
+                    : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, arch);
+
     if(!k || !rocke_ir_builder_ok(&b))
     {
         fprintf(stderr, "%s\n", rocke_ir_builder_error(&b));

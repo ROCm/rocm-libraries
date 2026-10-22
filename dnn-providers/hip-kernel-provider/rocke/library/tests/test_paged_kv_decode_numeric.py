@@ -107,8 +107,10 @@ def test_paged_tile_decode(
 
         runtime_spec = replace(
             result.spec,
+            reduce_spec=replace(result.spec.reduce_spec, metadata_containment=False),
             kernel_spec=replace(
                 result.spec.kernel_spec,
+                metadata_containment=False,
                 tile_size_override=tile,
                 use_kv_lds_swizzle=transport == "swizzle_page_ids",
                 use_wave_page_id_load=transport == "swizzle_page_ids",

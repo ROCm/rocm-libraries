@@ -227,6 +227,7 @@ _SEMANTIC_FIELDS = frozenset(
         "kv_layout",
         "use_i64_kv_addr",
         "use_decode_grid",
+        "metadata_containment",
         "causal_top_left",
         "right_bound",
     }
