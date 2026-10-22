@@ -197,6 +197,36 @@ enumerate:
   spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
   max_kernels: 198
+  # The bf16 D256 causal prefill kernel, a second registry candidate in this one pack. Its
+  # geometry is not the first section's (transposed 32x32, 2 warps x 32 rows, KV tile 64, and
+  # the production route's codegen constellation), so its spec carries the knobs that make
+  # it: a field the list leaves out compiles at its dataclass default, which is another
+  # kernel. Masks are the causal pair the route's D256 candidate serves; fp16 D256 has no
+  # entry (ATT-34) and no kernel, so the matcher declines it. One pack and no
+  # operation-scoped matcher: head size and dtype are shape applicability, which
+  # graph_match and kernel_match already judge per kernel.
+  also:
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_d256_nw2_mw32_t64_llvm}
+      fixed: {arch: gfx950, kv_block_size: 16, batch: 511, seqlen_q: 512, seqlen_k: 512}
+      cells:
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values:
+            - [256, 256, 8, 1]
+            - [256, 256, 8, 8]
+            - [256, 256, 16, 2]
+            - [256, 256, 16, 4]
+            - [256, 256, 16, 16]
+            - [256, 256, 32, 4]
+            - [256, 256, 32, 8]
+            - [256, 256, 32, 32]
+            - [256, 256, 64, 8]
+        - fields: [dtype]
+          values: [bf16]
+        - fields: [mask_type]
+          values: [TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
+      free_fields: []
+      spec_fields: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr, waves_per_eu, use_q_direct_reg, use_transposed_half_local_pv, use_transposed_scalar_state, use_transposed_mask_once, use_transposed_mask_limit, use_mask_phase_split, use_register_pv, use_k_single_buffer, use_v_double_buffer, use_early_v_schedule, use_sched_barrier, use_softmax_mfma_interleave, softmax_interleave_mode, softmax_interleave_groups, use_fast_paged_kv_desc, use_mfma32_skip_legacy_qreg, use_kq_lds_pad, kq_lds_pad_halves]
+      max_kernels: 18
 
 reduction:
   fields:

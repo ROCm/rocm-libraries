@@ -48,7 +48,7 @@ An engine built from the rocKE dispatcher registry names its kernels by the mani
 | Registry identifier | Descriptor field | Rule |
 |---|---|---|
 | `pin.algorithm` | the engine (UED `name`) | One manifest, one engine, one algorithm family. A second algorithm is a second manifest. |
-| `pin.spec_id` | the pack (one KDP) | One pack per pinned `spec_id`. Another `spec_id` served by the same engine is another pack, told apart by an operation-scoped UMD. |
+| `pin.spec_id` | the pack (one KDP) | One pack per pinned `spec_id`. Another `spec_id` served by the same engine is another pack, told apart by an operation-scoped UMD, **when a graph-level property separates them**. When the only difference is shape or dtype the matchers already judge per kernel (a head size, a geometry), add it as an `enumerate.also` section instead: one pack, each section's kernels traced by their own `provenance.rocke_spec_id`. |
 | `tuning_id` | per-kernel `provenance.rocke_tuning_id` | Informational: names the configuration the registry produced. Nothing selects on it. |
 | `pin.spec_id` | per-kernel `provenance.rocke_spec_id` | Informational, same as above. |
 | kernel spec fields | `kernel_source.spec` | Written as the registry holds them; fields the manifest does not list sit at their dataclass defaults. |

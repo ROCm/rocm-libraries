@@ -685,6 +685,10 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  also:                           # slice only: more sections, one pack. Each takes its own
+    - pin: {algorithm: ..., spec_id: ...}   # pin, fixed, cells, free_fields, spec_fields and
+      cells: [...]                          # max_kernels; candidates, request, sweep_level and
+      spec_fields: [...]                    # space come from `enumerate`. Same cell fields.
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -706,7 +710,10 @@ ground_truth:                     # optional; read by tools/ground_truth.py grap
     mask_type: {NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}}
 ```
 
-Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. Metadata
+Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. An
+`also` section's kernels follow the primary section's, in order, and each carries its own
+pin's `rocke_spec_id`; a kernel name two sections both render is an error, and
+`ground_truth.value_map` must map the values of every section's cells. Metadata
 fields and name slots the spec lacks are read from the request. A field sits in at most
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm

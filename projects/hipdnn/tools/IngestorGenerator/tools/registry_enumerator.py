@@ -401,9 +401,6 @@ class Registry:
             )
         self.groups = self._parse_groups(decl["cells"])
         self.cell_fields = [f for fields, _ in self.groups for f in fields]
-        check_value_map_cells(
-            self.groups, (manifest.get("ground_truth") or {}).get("value_map")
-        )
         for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
@@ -471,6 +468,13 @@ class Registry:
                         f"fields, so a shape's coverage is one key."
                     )
                 self.also.append(section)
+        if primary:
+            # One table spans every section: a value only an `also` section lists is
+            # still a value the table must map, and no section's subset leaves a key dead.
+            check_value_map_cells(
+                [g for section in self.sections() for g in section.groups],
+                (manifest.get("ground_truth") or {}).get("value_map"),
+            )
 
     def sections(self) -> list:
         """This section, then each ``enumerate.also`` section."""

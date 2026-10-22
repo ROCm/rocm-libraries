@@ -22,9 +22,12 @@
 # descriptors/rocKE/gfx950_attention_unified_2d/artifacts/ and run `dvc add artifacts`,
 # not `git add`. See the descriptors README ("Large rocKE files live in DVC").
 #
-# One geometry per cell: narrow 16x16 MFMA, 4 warps x 16 rows (BLOCK_M 64), KV tile of 4
-# pages (T = 64 at block_size 16), llvm backend. `num_seqs` (511) is the batch capacity
-# the binary serves, not a shape: see the manifest.
+# Two registry candidates, one pack. head_size 64 and 128: one geometry per cell, narrow
+# 16x16 MFMA, 4 warps x 16 rows (BLOCK_M 64), KV tile of 4 pages (T = 64 at block_size 16),
+# llvm backend. head_size 256 (bf16, causal masks): the D256 prefill geometry, transposed 32x32,
+# 2 warps x 32 rows (BLOCK_M 64), KV tile 64, and the production route's codegen constellation
+# (its second variants group carries those knobs). `num_seqs` (511) is the batch capacity the
+# binary serves, not a shape: see the manifest.
 #
 dialect: packaged
 authored_subpath: rocKE/gfx950_attention_unified_2d
@@ -365,3 +368,33 @@ packs:
     - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: -1, knobs: knobs1, resolved: {mask_type: 0}}
     - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: true, right_bound: 0, knobs: knobs1, resolved: {mask_type: 1}}
     - {head_size: 128, num_query_heads: 128, num_kv_heads: 8, dtype: fp16, causal_top_left: false, right_bound: 0, knobs: knobs1, resolved: {mask_type: 2}}
+  - name: attention_unified_2d.bf16_d256_hq{num_query_heads}_kv{num_kv_heads}_m{md_mask_type}_bs16_t64_nw2.gfx950
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    spec_order: [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr, waves_per_eu, use_q_direct_reg, use_transposed_half_local_pv, use_transposed_scalar_state, use_transposed_mask_once, use_transposed_mask_limit, use_mask_phase_split, use_register_pv, use_k_single_buffer, use_v_double_buffer, use_early_v_schedule, use_sched_barrier, use_softmax_mfma_interleave, softmax_interleave_mode, softmax_interleave_groups, use_fast_paged_kv_desc, use_mfma32_skip_legacy_qreg, use_kq_lds_pad, kq_lds_pad_halves]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {head_size: 256, block_size: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 511, right_bound: 0, use_mfma_32x32: true, use_transposed_qk_32x32: true, use_i64_kv_addr: false, waves_per_eu: 2, use_q_direct_reg: true, use_transposed_half_local_pv: true, use_transposed_scalar_state: true, use_transposed_mask_once: true, use_transposed_mask_limit: true, use_mask_phase_split: true, use_register_pv: false, use_k_single_buffer: true, use_v_double_buffer: false, use_early_v_schedule: false, use_sched_barrier: false, use_softmax_mfma_interleave: true, softmax_interleave_mode: 2, softmax_interleave_groups: 4, use_fast_paged_kv_desc: false, use_mfma32_skip_legacy_qreg: false, use_kq_lds_pad: true, kq_lds_pad_halves: 16}
+    knob_sets:
+      knobs0:
+      - {tile_size: 64, num_warps: 2, block_m_per_warp: 32, default: true}
+    shapes:
+    - {num_query_heads: 8, num_kv_heads: 1, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 8, num_kv_heads: 1, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 8, num_kv_heads: 8, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 8, num_kv_heads: 8, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 2, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 2, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 4, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 4, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 16, num_kv_heads: 16, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 16, num_kv_heads: 16, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 4, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 4, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 8, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 8, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 32, num_kv_heads: 32, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 32, num_kv_heads: 32, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
+    - {num_query_heads: 64, num_kv_heads: 8, causal_top_left: true, knobs: knobs0, resolved: {mask_type: 1}}
+    - {num_query_heads: 64, num_kv_heads: 8, causal_top_left: false, knobs: knobs0, resolved: {mask_type: 2}}
