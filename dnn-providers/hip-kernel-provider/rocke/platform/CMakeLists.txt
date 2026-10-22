@@ -697,8 +697,8 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
-    # fmha_mfma free-stride ABI and layout contracts, and the 2D/3D mask_type
-    # spec fields.
+    # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
+    # fields, and the 3D segment+reduce module's pairing.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -710,6 +710,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
         "tests/library/tests/test_sdpa_seqlen.py"
