@@ -804,7 +804,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.umax",
     "arith.umin",
     "arith.uitofp_f32",
-    "arith.cvt_f32_to_u8_sat"};
+    "arith.cvt_f32_to_u8_sat",
+
+    /* tile.dpp_row_mirror */
+    "tile.dpp_row_mirror"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1083,7 +1086,9 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.umax                 */ true,
     /* arith.umin                 */ true,
     /* arith.uitofp_f32           */ true,
-    /* arith.cvt_f32_to_u8_sat    */ true};
+    /* arith.cvt_f32_to_u8_sat    */ true,
+
+    /* tile.dpp_row_mirror        */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

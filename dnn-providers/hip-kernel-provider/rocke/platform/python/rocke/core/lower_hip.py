@@ -2319,6 +2319,23 @@ class _Lowerer:
             f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
         )
 
+    def _op_tile_dpp_row_mirror(self, op: Op) -> None:
+        """Lower a DPP ``row_mirror`` / ``row_half_mirror`` control word.
+
+        See :meth:`_op_tile_dpp_row_mirror` in ``lower_llvm.py``: only
+        ``0x140`` and ``0x141`` are legal, and the data must be i32.
+        """
+        ctrl = dpp_ctrl_attr(op)
+        (data,) = op.operands
+        if ctrl not in (0x140, 0x141):
+            raise ValueError(
+                f"tile.dpp_row_mirror: ctrl must be 320 or 321, got {ctrl}"
+            )
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` XOR butterfly via SWAP-mode encoding.
 

@@ -134,8 +134,8 @@ a pinned request selects.
 Every spec a tuning candidate hands out comes from one canonicalize step,
 the shared `rocke.dispatch.tuning.KnobSpace.canonicalize` (attention's
 subclasses are `DenseSpace` in `dense_rules.py` and `UnifiedSpace` in
-`unified_rules.py`, both through `WavesPerEuSpace` in `waves.py`), whether it
-was swept, sampled, pinned by knobs, or found by id. Knob values are first
+`unified_rules.py`, both through the shared `tuning.WavesPerEuSpace`), whether
+it was swept, sampled, pinned by knobs, or found by id. Knob values are first
 converted to the type their axis declares (`True` / `1` name one
 configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
@@ -214,13 +214,13 @@ priority-30 tuning catalog). Both dense modules build their candidates with
 `candidate.make_tuning_candidate`; an arch module supplies only its base spec,
 validator, variants and features. The family-neutral machinery (axis
 helpers, the walk and sampler, `config_key` / `tuning_id`, `KnobSpace`,
-`make_tuned_candidate`, the conformance kit) is `rocke.dispatch.tuning` in the
-platform, and names no kernel field; attention keeps only its data and rules:
-`axes.py` (knob axes, production stacks, held-out knobs), `dense_rules.py` /
-`unified_rules.py` (the `KnobSpace` subclasses), `waves.py` (`waves_per_eu`
-as their outer knob: the WPE values and `WavesPerEuSpace`, which sets the
-outer knob and the `_wpe{N}` id stem), and `candidate.py` (the two
-factories).
+`WavesPerEuSpace` -- `waves_per_eu` as an outer knob and its `_wpe{N}` id
+stem, the one kernel field it names --, `make_tuned_candidate`, the
+conformance kit) is `rocke.dispatch.tuning` in the platform; attention keeps
+only its data and rules: `axes.py` (knob axes, production stacks, held-out
+knobs), `dense_rules.py` / `unified_rules.py` (the `KnobSpace` subclasses),
+`waves.py` (the WPE values each sweep level tries), and `candidate.py` (the
+two factories).
 `tests/dispatch/attention/test_tuning_contract.py` runs the conformance kit.
 
 **Adding a tuned family** (any operator, not only attention): follow the

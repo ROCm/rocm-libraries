@@ -75,6 +75,37 @@ rocke/helpers/
 │ # Reduction strategies. Pairs with
 │ # ``persistent.py`` -- the partitioner picks the
 │ # work, the persistent loop drives it.
+├── mailbox.py # Tagged (payload, tag) mailboxes for resident-
+│ # grid kernels: put / put2 / put_bf, sc1 asm
+│ # poll loop (both engines), pre_poll throttle,
+│ # payload_wait, bulk release / acquire, NUMA
+│ # dual copies. Mirrored ops only; the Python-
+│ # only impl="ir" (tagged_poll) lives in
+│ # library/kernels/gfx950/qwen38_mono/
+│ # mailbox_ir.py. See
+│ # examples/gfx950/persistent_mailbox/.
+├── device_ops.py # ptr_from_i64, asm buffer descriptor,
+│ # s_sleep, memrealtime, xcc_id, buffer_wbl2 /
+│ # buffer_inv release / acquire, scoped
+│ # atomic add, fresh_v / fresh_s (inline asm).
+├── task_schedule.py # Static task tables of persistent layer
+│ # kernels: Stage / Dep / TaskTable, placement
+│ # maps and policies, validate() (deadlock
+│ # freedom, dataflow, cross-layer write-after-
+│ # read with parity slots, validate_stack for
+│ # mixed-kind stacks), task_index /
+│ # for_my_tasks emitters. Used by
+│ # library/kernels/gfx950/qwen38_mono/framework.py.
+├── lds_arena.py # One LDS allocation with phase overlays
+│ # (ATOM layout._place rules: 16-byte entries,
+│ # rows 16 words mod 64 apart), pinned entries,
+│ # one-CTA-per-CU padding, typed views.
+├── mx_quant.py # MXFP8 activation quantizer (E4M3 + E8M0
+│ # per 32): block amax, E8M0 rule, scaled-cvt
+│ # packing, numpy reference. Mirrored ops only
+│ # (inline asm, DPP, ds_swizzle); the Python-
+│ # only cvt="intrinsic" knob lives in
+│ # library/kernels/gfx950/mx_quant.py.
 ├── i4_dequant.py # Packed-i4 byte unpack (sign-extend
 │ # 4-bit nibbles to i32 / f32 / fp8 / bf8) for
 │ # the i4-quant weight path in block-scale GEMM

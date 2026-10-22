@@ -487,9 +487,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "exp.f32": "declare float @llvm.exp.f32(float)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
+    "sqrt.f64": "declare double @llvm.sqrt.f64(double)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
     "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
@@ -891,6 +893,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # so a single call covers BOTH register exchanges.
     # Not overloaded, so the name needs no suffix, but the two flags are
     # immarg like every other permlane* flag pair.
+    # gfx950 MX decode GEMV: the scaled fp4 -> bf16 convert and the 16-lane row swap.
+    "amdgcn.cvt.scalef32.pk.bf16.fp4": (
+        "declare <2 x bfloat> @llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32, float, i32 immarg)"
+    ),
+    "amdgcn.permlane16.swap": (
+        "declare { i32, i32 } @llvm.amdgcn.permlane16.swap("
+        "i32, i32, i1 immarg, i1 immarg)"
+    ),
     "amdgcn.permlane32.swap": (
         "declare { i32, i32 } @llvm.amdgcn.permlane32.swap("
         "i32, i32, i1 immarg, i1 immarg)"
@@ -3114,6 +3124,16 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_exp(self, op: Op) -> None:
+        """``math.exp`` (Python engine only): ``llvm.exp.f32``."""
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp currently supports f32")
+        self._need("exp.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.exp.f32(float {self._operand(v)})"
+        )
+
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -3154,6 +3174,15 @@ class _Lowerer:
 
     def _op_math_sqrt(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            # Python engine only (no C++ lowering): the FlyDSL mono's f64
+            # square root (MLIR MathToLLVM: llvm.sqrt.f64), for Qwen3.8 stage
+            # bodies built into rocKE layer kernels (qwen38_mono.stage_adapt).
+            self._need("sqrt.f64")
+            self._current().emit(
+                f"  {op.result.name} = call double @llvm.sqrt.f64(double {self._operand(v)})"
+            )
+            return
         if v.type.name != "f32":
             raise NotImplementedError("math.sqrt currently supports f32")
         self._need("sqrt.f32")
@@ -3327,12 +3356,18 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
+        # A ``constant`` pointer (``int_to_ptr(addr, PtrType(t, "constant"))``,
+        # Python engine only): an invariant ``addrspace(4)`` load, which the
+        # backend selects as a scalar ``s_load`` at a wave-uniform index.
+        const = isinstance(ptr.type, PtrType) and ptr.type.space == "constant"
+        asp = "ptr addrspace(4)" if const else "ptr addrspace(1)"
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_ty}, {asp} "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  {op.result.name} = load {elem_ty}, ptr addrspace(1) {gep}, align {align}"
+            f"  {op.result.name} = load {elem_ty}, {asp} {gep}, align {align}"
+            + (", !invariant.load !{}" if const else "")
         )
 
     def _op_memref_global_store(self, op: Op) -> None:
@@ -4195,6 +4230,76 @@ class _Lowerer:
                 f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
             )
 
+    def _op_tile_mfma_scale_mx(self, op: Op) -> None:
+        """Lower ``tile.mfma_scale_mx`` (Python engine only).
+
+        Free-format gfx950 scaled MFMA: the overloaded
+        ``llvm.amdgcn.mfma.scale.f32.<shape>.f8f6f4.v<A>i32.v<B>i32`` with the
+        op's ``cbsz`` / ``blgp`` formats and ``op_sel`` scale bytes. Metadata
+        and validation live in :mod:`rocke.core.arch.mfma_scale_mx`; the
+        declaration is registered per mangled name.
+        """
+        from .arch import mfma_scale_mx as _mx
+
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("tile.mfma_scale_mx requires gfx950")
+        error = _mx.check_operands(op.attrs, [v.type.name for v in op.operands])
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        shape, fa, fb = op.attrs["shape"], op.attrs["fmt_a"], op.attrs["fmt_b"]
+        ta, tb = _llvm_type(a.type), _llvm_type(b.type)
+        acc_ty = _llvm_type(c.type)
+        wa, wb = _mx.OPERAND_WORDS[fa], _mx.OPERAND_WORDS[fb]
+        # Overloaded on the A / B operand types, so mangled per width pair.
+        key = f"mfma.scale.f32.{shape}.f8f6f4.v{wa}i32.v{wb}i32"
+        self._decls[key] = (
+            f"declare {acc_ty} @llvm.amdgcn.{key}({ta}, {tb}, {acc_ty}, "
+            f"i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"
+        )
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {acc_ty} @llvm.amdgcn.{key}("
+            f"{self._operand_with_type(a)}, {self._operand_with_type(b)}, "
+            f"{acc_ty} {self._operand(c)}, i32 {fa}, i32 {fb}, "
+            f"i32 {int(op.attrs.get('opsel_a', 0))}, i32 {self._operand(sa)}, "
+            f"i32 {int(op.attrs.get('opsel_b', 0))}, i32 {self._operand(sb)})"
+        )
+
+    def _lower_cvt_scalef32_pk_f32_to_8bit(self, op: Op, kind: str) -> None:
+        """``arith.cvt_scalef32_pk_{fp8,bf8}_f32`` (Python engine only).
+
+        ``old`` (i32) is reinterpreted as the intrinsic's ``<2 x i16>``; the
+        ``hi`` attr is the ``dst_lo_hi_sel`` immediate.
+        """
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError(f"{op.name} requires gfx950")
+        old, src0, src1, scale = op.operands
+        intrin = f"llvm.amdgcn.cvt.scalef32.pk.{kind}.f32"
+        key = intrin.removeprefix("llvm.")
+        self._decls[key] = (
+            f"declare <2 x i16> @{intrin}(<2 x i16>, float, float, float, i1 immarg)"
+        )
+        self._need(key)
+        old16 = self._fresh("q8old")
+        res16 = self._fresh("q8res")
+        sel = "true" if op.attrs.get("hi") else "false"
+        self._current().emit(
+            f"  {old16} = bitcast i32 {self._operand(old)} to <2 x i16>"
+        )
+        self._current().emit(
+            f"  {res16} = call <2 x i16> @{intrin}(<2 x i16> {old16}, "
+            f"float {self._operand(src0)}, float {self._operand(src1)}, "
+            f"float {self._operand(scale)}, i1 {sel})"
+        )
+        self._current().emit(f"  {op.result.name} = bitcast <2 x i16> {res16} to i32")
+
+    def _op_arith_cvt_scalef32_pk_fp8_f32(self, op: Op) -> None:
+        self._lower_cvt_scalef32_pk_f32_to_8bit(op, "fp8")
+
+    def _op_arith_cvt_scalef32_pk_bf8_f32(self, op: Op) -> None:
+        self._lower_cvt_scalef32_pk_f32_to_8bit(op, "bf8")
+
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
         self._need("mfma.f32.16x16x128.fp4")
@@ -4686,6 +4791,28 @@ class _Lowerer:
             f"i32 {ctrl}, i32 15, i32 15, i1 true)"
         )
 
+    def _op_tile_dpp_row_mirror(self, op: Op) -> None:
+        """Lower a DPP ``row_mirror`` (0x140) / ``row_half_mirror`` (0x141).
+
+        Only those two control words are legal. Reject anything else rather
+        than emit it: any other DPP control is a different, silently valid
+        lane mapping. As for ``tile.quad_perm``,
+        :func:`~rocke.core.ir.dpp_ctrl_attr` first rejects wrong arity,
+        non-i32 data or result, and a missing or non-``int`` ``ctrl``.
+        """
+        ctrl = dpp_ctrl_attr(op)
+        (data,) = op.operands
+        if ctrl not in (0x140, 0x141):
+            raise ValueError(
+                f"tile.dpp_row_mirror: ctrl must be 320 or 321, got {ctrl}"
+            )
+        self._need("update.dpp.i32")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
@@ -4964,6 +5091,28 @@ class _Lowerer:
         self._current().emit(f"  {r0.name} = extractvalue {{ i32, i32 }} {tmp}, 0")
         self._current().emit(f"  {r1.name} = extractvalue {{ i32, i32 }} {tmp}, 1")
 
+    def _op_tile_permlane16_swap(self, op: Op) -> None:
+        """``v_permlane16_swap_b32`` (Python engine only)."""
+        lo, hi = op.operands
+        self._need("amdgcn.permlane16.swap")
+        tmp = self._fresh("p16s.tmp")
+        self._current().emit(
+            f"  {tmp} = call {{ i32, i32 }} @llvm.amdgcn.permlane16.swap("
+            f"i32 {self._operand(lo)}, i32 {self._operand(hi)}, i1 false, i1 false)"
+        )
+        r0, r1 = op.results
+        self._current().emit(f"  {r0.name} = extractvalue {{ i32, i32 }} {tmp}, 0")
+        self._current().emit(f"  {r1.name} = extractvalue {{ i32, i32 }} {tmp}, 1")
+
+    def _op_arith_cvt_scalef32_pk_bf16_fp4(self, op: Op) -> None:
+        """``v_cvt_scalef32_pk_bf16_fp4`` (Python engine only)."""
+        src, scale = op.operands
+        self._need("amdgcn.cvt.scalef32.pk.bf16.fp4")
+        self._current().emit(
+            f"  {op.result.name} = call <2 x bfloat> "
+            f"@llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32 {self._operand(src)}, "
+            f"float {self._operand(scale)}, i32 {int(op.attrs['byte'])})"
+        )
     def _op_tile_perm_b32(self, op: Op) -> None:
         """``v_perm_b32`` — in-lane byte select across two VGPRs (pure VALU)."""
         src0, src1, sel = op.operands
@@ -5772,6 +5921,130 @@ class _Lowerer:
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
 
     # ----- buffer-rsrc + async DRAM->LDS -----
+
+    # ----- persistent-kernel memory ops (Python engine only) -----
+    # ``ir.PYTHON_ONLY_OPCODES``: the C++ engine has no mirror of these.
+
+    def _op_tile_int_to_ptr(self, op: Op) -> None:
+        """``tile.int_to_ptr``: ``inttoptr i64`` to a global pointer."""
+        (addr,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = inttoptr i64 {self._operand(addr)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    @staticmethod
+    def _cp_buffer_intrinsic(kind: str, dwords: int) -> "Tuple[str, str]":
+        """(``_need`` key, LLVM value type) of a 1/2/4-dword raw buffer op."""
+        if dwords == 1:
+            return f"raw.ptr.buffer.{kind}.i32", "i32"
+        if dwords in (2, 4):
+            return f"raw.ptr.buffer.{kind}.v{dwords}i32", f"<{dwords} x i32>"
+        raise ValueError(f"buffer {kind} with cache policy: bad dwords {dwords}")
+
+    def _op_tile_buffer_load_cp(self, op: Op) -> None:
+        """``tile.buffer_load_cp``: ``raw.ptr.buffer.load`` with ``aux`` bits."""
+        rsrc, voffset, soffset = op.operands
+        key, ty = self._cp_buffer_intrinsic("load", int(op.attrs["dwords"]))
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {ty} @llvm.amdgcn.{key}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, "
+            f"i32 {int(op.attrs['aux'])})"
+        )
+
+    def _op_tile_buffer_store_cp(self, op: Op) -> None:
+        """``tile.buffer_store_cp``: ``raw.ptr.buffer.store`` with ``aux`` bits."""
+        data, rsrc, voffset, soffset = op.operands
+        key, ty = self._cp_buffer_intrinsic("store", int(op.attrs["dwords"]))
+        self._need(key)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{key}({ty} {self._operand(data)}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, "
+            f"i32 {int(op.attrs['aux'])})"
+        )
+
+    def _atomic_elem_gep(self, ptr: Value, idx: Value, ty: str) -> str:
+        gep = self._fresh("agep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds {ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, {_llvm_type(idx.type)} {self._operand(idx)}"
+        )
+        return gep
+
+    def _op_tile_global_load_atomic(self, op: Op) -> None:
+        """``tile.global_load_atomic``: ``load atomic`` at a sync scope."""
+        ptr, idx = op.operands
+        ty = _llvm_type(op.result.type)
+        size = 8 if ty == "i64" else 4
+        gep = self._atomic_elem_gep(ptr, idx, ty)
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        self._current().emit(
+            f"  {op.result.name} = load atomic {ty}, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} {op.attrs['ordering']}, align {size}"
+        )
+
+    def _op_tile_global_store_atomic(self, op: Op) -> None:
+        """``tile.global_store_atomic``: ``store atomic`` at a sync scope."""
+        ptr, idx, value = op.operands
+        ty = _llvm_type(value.type)
+        size = 8 if ty == "i64" else 4
+        gep = self._atomic_elem_gep(ptr, idx, ty)
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        self._current().emit(
+            f"  store atomic {ty} {self._operand(value)}, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} {op.attrs['ordering']}, align {size}"
+        )
+
+    def _op_tile_tagged_poll(self, op: Op) -> None:
+        """``tile.tagged_poll``: a self-contained tag-polling loop.
+
+        ``poll.loop`` issues every buffer load (cache bits ``aux``), ORs the
+        per-pair ``tag != expected`` compares and branches to ``poll.retry``
+        (the side-effecting ``pause`` asm, which also stops the loads from
+        being hoisted) or to ``poll.done``. The results are defined in
+        ``poll.loop``, which dominates ``poll.done``.
+        """
+        tag = self._operand(op.operands[0])
+        rest = op.operands[1:]
+        widths = [int(w) for w in op.attrs["dwords"]]
+        aux = int(op.attrs["aux"])
+        cur = self._current()
+        loop = self._new_block("poll.loop")
+        cur.emit(f"  br label %{loop.label}")
+        cur.terminated = True
+        bad = None
+        for k, w in enumerate(widths):
+            rsrc, voff = rest[2 * k], rest[2 * k + 1]
+            key, ty = self._cp_buffer_intrinsic("load", w)
+            self._need(key)
+            res = op.results[k].name
+            loop.emit(
+                f"  {res} = call {ty} @llvm.amdgcn.{key}("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voff)}, i32 0, i32 {aux})"
+            )
+            for lane in range(1, w, 2):
+                got = self._fresh("poll.tag")
+                ne = self._fresh("poll.ne")
+                loop.emit(f"  {got} = extractelement {ty} {res}, i32 {lane}")
+                loop.emit(f"  {ne} = icmp ne i32 {got}, {tag}")
+                if bad is None:
+                    bad = ne
+                else:
+                    acc = self._fresh("poll.any")
+                    loop.emit(f"  {acc} = or i1 {bad}, {ne}")
+                    bad = acc
+        retry = self._new_block("poll.retry")
+        done = self._new_block("poll.done")
+        loop.emit(f"  br i1 {bad}, label %{retry.label}, label %{done.label}")
+        loop.terminated = True
+        pause = _escape_llvm_asm_string(str(op.attrs.get("pause", "s_nop 0")))
+        retry.emit(f'  call void asm sideeffect "{pause}", ""()')
+        retry.emit(f"  br label %{loop.label}")
+        retry.terminated = True
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
         """Build a buffer resource descriptor for a global pointer.
@@ -7164,8 +7437,13 @@ def _format_agpr_alloc(value: object) -> str:
 
 def _param_attrs(attrs: Dict[str, object], t: Type) -> str:
     out: List[str] = []
+    if attrs.get("inreg"):
+        # Python engine only (ir.PYTHON_ONLY_PARAM_ATTRS): kernarg preload into
+        # user SGPRs on gfx940/gfx950 (the code object keeps a fallback prologue
+        # for firmware without preload)
+        out.append("inreg")
     if not isinstance(t, PtrType):
-        return ""
+        return (" " + " ".join(out)) if out else ""
     if attrs.get("noalias"):
         out.append("noalias")
     if attrs.get("readonly"):

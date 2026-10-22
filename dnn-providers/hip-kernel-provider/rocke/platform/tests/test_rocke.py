@@ -3936,6 +3936,122 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertTrue(value.op.is_pure)
         self.assertTrue(is_pure_op_name("tile.dpp_xor"))
 
+    # ---- dpp_row_mirror ----
+    def test_dpp_row_mirror_encodes_ctrl(self):
+        # half=True is row_half_mirror (0x141 == 321), half=False row_mirror
+        # (0x140 == 320). One kernel per value, asserting the expected control
+        # AND the absence of the other, so a swapped mapping fails here.
+        call = (
+            "call i32 @llvm.amdgcn.update.dpp.i32("
+            "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
+        )
+        for half, want, other in ((True, 321, 320), (False, 320, 321)):
+            with self.subTest(half=half):
+                ll = self._lower(
+                    f"rmirror_{int(half)}",
+                    lambda b: b.dpp_row_mirror(b.const_i32(1), half=half),
+                )
+                self.assertIn(call.format(want), ll)
+                self.assertNotIn(f"i32 {other}, i32 15, i32 15", ll)
+
+    def test_dpp_row_mirror_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        for half, want, other in ((True, 321, 320), (False, 320, 321)):
+            with self.subTest(half=half):
+                b = IRBuilder(f"rmirror_hip_{int(half)}")
+                b.dpp_row_mirror(b.const_i32(1), half=half)
+                hip = lower_kernel_to_hip(b.kernel)
+                self.assertIn(
+                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                )
+                self.assertNotIn(f", {other}, 15, 15, 1)", hip)
+
+    def test_dpp_row_mirror_butterfly_lane_model(self):
+        """``xor 1, xor 2, half mirror, mirror`` leaves each 16-lane row's sum
+        in every lane of that row, in wave32 and wave64.
+
+        A pure-Python lane model driven by the control words the builder
+        actually emits (so it checks the docstring claim against the
+        encoding, not a restatement of it). With floats it also checks that
+        every lane of a row gets the same bits: lanes combine their operands
+        in different orders, which a commutative add makes harmless.
+        """
+        import random
+
+        def src_lane(ctrl, lane):
+            if ctrl == 0x140:  # row_mirror: lane i of a row reads 15 - i
+                return (lane & ~15) | (15 - (lane & 15))
+            if ctrl == 0x141:  # row_half_mirror: lane i of a half-row reads 7 - i
+                return (lane & ~7) | (7 - (lane & 7))
+            self.assertTrue(0 <= ctrl <= 255, ctrl)  # quad_perm selectors
+            return (lane & ~3) | ((ctrl >> (2 * (lane & 3))) & 3)
+
+        b = self._builder("rmirror_model")
+        x = b.const_i32(1)
+        ctrls = [
+            v.op.attrs["ctrl"]
+            for v in (
+                b.warp_shuffle_xor_quad(x, 1),
+                b.warp_shuffle_xor_quad(x, 2),
+                b.dpp_row_mirror(x, half=True),
+                b.dpp_row_mirror(x, half=False),
+            )
+        ]
+        rng = random.Random(0)
+        for wave in (32, 64):
+            for draw in (lambda: rng.randint(-1000, 1000), lambda: rng.uniform(-1, 1)):
+                for _ in range(50):
+                    vals = [draw() for _ in range(wave)]
+                    cur = list(vals)
+                    for ctrl in ctrls:
+                        cur = [cur[i] + cur[src_lane(ctrl, i)] for i in range(wave)]
+                    for row in range(wave // 16):
+                        lanes = cur[16 * row : 16 * row + 16]
+                        self.assertEqual(len(set(lanes)), 1, (wave, row, lanes))
+                        self.assertAlmostEqual(
+                            lanes[0], sum(vals[16 * row : 16 * row + 16]), places=9
+                        )
+
+    def test_dpp_row_mirror_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("rmirror_pure")
+        value = b.dpp_row_mirror(b.const_i32(1), half=False)
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.dpp_row_mirror"))
+
+    def test_dpp_row_mirror_rejects_non_i32(self):
+        b = self._builder("rmirror_bad")
+        with self.assertRaises(ValueError):
+            b.dpp_row_mirror(b.const_f32(1.0), half=False)
+
+    def test_dpp_row_mirror_rejects_non_bool_half(self):
+        # ``half`` picks the lane mapping: a truthy/falsy stand-in must not
+        # silently select one ("false" used to become row_half_mirror).
+        for bad in ("false", "True", None, 0, 1, 1.0):
+            with self.subTest(half=bad):
+                b = self._builder("rmirror_half")
+                with self.assertRaisesRegex(TypeError, "half must be a bool"):
+                    b.dpp_row_mirror(b.const_i32(1), half=bad)
+
+    def test_dpp_row_mirror_lowering_rejects_other_ctrl(self):
+        """Any control other than 0x140/0x141 is a different lane mapping
+        (0x142 is row_bcast:15, 0x40 a quad_perm); IR that skipped the
+        builder must fail in both lowerers instead of emitting it."""
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad_ctrl in (0x142, 0x40, -1):
+            with self.subTest(ctrl=bad_ctrl):
+                b = self._builder(f"rmirror_ctrl_{bad_ctrl}")
+                value = b.dpp_row_mirror(b.const_i32(1), half=False)
+                value.op.attrs["ctrl"] = bad_ctrl
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(ValueError, r"ctrl must be 320 or 321"):
+                        lower(b.kernel, arch="gfx950")
+
     def test_dpp_lowering_rejects_malformed_raw_op(self):
         """Raw IR that skipped the builder is rejected, never coerced, by both
         Python lowerers for both DPP ops: anything but one operand and one
@@ -3956,6 +4072,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         for op_name, key, ctrl in (
             ("tile.quad_perm", "ctrl", 177),
             ("tile.dpp_xor", "xor_mask", 7),
+            ("tile.dpp_row_mirror", "ctrl", 0x140),
         ):
             ok = {key: ctrl}
             cases = (

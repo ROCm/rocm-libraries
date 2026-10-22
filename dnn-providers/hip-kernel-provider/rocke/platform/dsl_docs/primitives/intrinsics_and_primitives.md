@@ -469,6 +469,28 @@ host_preshuffle_layout(spec, *, n, k)
 Used together with the FP8 / BF8 MFMA atoms, these helpers compose
 into the full v2 MFMA-based block-scaled / MX GEMM body.
 
+gfx950 MX decode pieces:
+
+```text
+# MXFP8 activation quantizer (helpers/mx_quant.py, mirrored ops only).
+# amax over a 32-value block, E = ceil-exponent of amax * fl(1/448)
+# clamped to [1, 254], E4M3 RNE through v_cvt_scalef32_pk_fp8_f32.
+quantize_mxfp8(b, values, lanes, *, cvt="asm", reduce="dpp",
+ nan="propagate", xor16="swizzle") -> (words, E)
+
+# Scaled MFMA with free formats and op_sel scale-byte select
+# (Python engine only: compile with backend="python").
+IRBuilder.mfma_scale_mx(a, b, c, a_scale, b_scale, *, shape="16x16x128",
+ fmt_a="fp8", fmt_b="fp4", opsel_a=0, opsel_b=0)
+# Two f32 -> two scaled fp8 / bf8 bytes in one half of ``old``
+# (Python engine only).
+IRBuilder.cvt_scalef32_pk_fp8_f32(old, src0, src1, scale, *, hi=False, bf8=False)
+```
+
+The `compute` knob of `library/kernels/gfx950/mx_mfma.py` chooses between
+the dual-engine catalog `mfma_scaled` 32x32x64 atom, `mfma_scale_mx`, and an
+inline-asm MFMA chain; see `optimization/arch/gfx950.md`.
+
 ## fused-MoE indirect-address helpers
 
 `helpers/gather_scatter.py` is the per-token indirect-address surface

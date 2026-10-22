@@ -465,6 +465,9 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_UITOFP_F32,
     ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
 
+    /* tile.dpp_row_mirror (DPP row_mirror / row_half_mirror). Appended. */
+    ROCKE_OP_TILE_DPP_ROW_MIRROR,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1328,6 +1331,16 @@ rocke_value_t*
  * 8 -> row_ror:8, 15 -> row_mirror (lane i reads 15-i == i^15), and any
  * other mask fails to lower with ROCKE_ERR_VALUE. See IRBuilder.dpp_xor. */
 rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+/* dpp_row_mirror: half=false is DPP row_mirror (0x140; lane i of each 16-lane
+ * row reads lane 15-i), half=true is row_half_mirror (0x141; lane i of each
+ * 8-lane half-row reads lane 7-i). i32 data only. Wave-size-independent (16
+ * divides 32 and 64); base DPP; row/bank masks fixed at 15, 15 by the
+ * lowerers. After two quad_perm xor stages, half mirror then mirror completes
+ * a 16-lane commutative reduction in every lane. Valid only for a commutative
+ * combine (lanes see operands in different orders) with every lane of the row
+ * active: the lowerers set bound_ctrl, so a source lane disabled in EXEC reads
+ * 0, which only a sum tolerates. See IRBuilder.dpp_row_mirror. */
+rocke_value_t* rocke_b_dpp_row_mirror(rocke_ir_builder_t* b, rocke_value_t* data, bool half);
 /* warp_shuffle_xor_dpp: the kernel-facing VALU XOR shuffle (CUDA
  * __shfl_xor_sync within a 16-lane row): lane l gets v from lane l ^ lane_xor,
  * lane_xor in 1..15, one rocke_b_dpp_xor (f32 bitcast through i32, as

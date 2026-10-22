@@ -288,6 +288,11 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_segments",
     ),
     "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    # Scaled-MFMA compute-path probes: every field (K steps, compute knob,
+    # formats, asm hazard padding) is defaulted.
+    "kernels.gfx950.mx_mfma.AsmHazard": (),
+    "kernels.gfx950.mx_mfma.MxMfmaProbeSpec": (),
+    "kernels.gfx950.mx_mfma.MxMfmaRateSpec": (),
     # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
     # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),

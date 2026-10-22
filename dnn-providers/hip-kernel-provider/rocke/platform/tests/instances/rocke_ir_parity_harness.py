@@ -1396,6 +1396,31 @@ def build_warp_shuffle_xor_dpp_masks_f32(arch):
     return _build
 
 
+def build_dpp_row_mirror_reduce(arch):
+    """16-lane i32 sum through ``xor 1, xor 2, half mirror, mirror``: pins the
+    ``tile.dpp_row_mirror`` emission for both control words (0x141 and 0x140)
+    inside the reduction recipe it exists for, so a change that alters the
+    op's IR in both engines at once still trips the golden."""
+
+    def _build():
+        from rocke.core.ir import I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_dpp_row_mirror_reduce_{arch}")
+        src = b.param("S", PtrType(I32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(I32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        acc = b.global_load(src, tid, I32, align=4)
+        acc = b.add(acc, b.warp_shuffle_xor_quad(acc, 1))
+        acc = b.add(acc, b.warp_shuffle_xor_quad(acc, 2))
+        acc = b.add(acc, b.dpp_row_mirror(acc, half=True))
+        acc = b.add(acc, b.dpp_row_mirror(acc, half=False))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -4273,6 +4298,16 @@ def cases():
                 _arch,
                 build_lightning_indexer_case(_arch, **_over),
             )
+
+    # tile.dpp_row_mirror (row_half_mirror + row_mirror) in the 16-lane
+    # butterfly; base DPP, so both CDNA targets.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/dpp_row_mirror_reduce_i32",
+            _arch,
+            build_dpp_row_mirror_reduce(_arch),
+        )
 
     return out
 

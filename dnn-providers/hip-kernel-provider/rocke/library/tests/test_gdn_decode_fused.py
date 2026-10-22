@@ -254,6 +254,47 @@ class TestFusedEmission(unittest.TestCase):
                             self.assertIn("define amdgpu_kernel", ll)
                             self.assertEqual(_scratch_bytes(self, s), 0)
 
+    def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
+        """Where late_row_inputs lets single-wave fuse_conv load its rows'
+        state and norm inputs first (conv_once, WTK 4 / 8), the hoisted
+        kernel spills no more than the late order it replaces. The specs are
+        the register-heaviest of that set: the per-lane norm inputs,
+        stream_rows and, with an f32 state, both column maps."""
+        from unittest import mock
+
+        from kernels.gfx950 import gdn_decode
+
+        for gate in ("gdn", "kda"):
+            for st, ics in (("bf16", (False,)), ("f32", (False, True))):
+                for wtk in (4, 8):
+                    for ic in ics:
+                        s = _fused(
+                            gate_kind=gate,
+                            state_dtype=st,
+                            num_warps=1,
+                            warp_threads_k=wtk,
+                            fuse_conv=True,
+                            fuse_out_norm=True,
+                            conv_once=True,
+                            stream_rows=True,
+                            interleave_cols=ic,
+                            xcd_remap=True,
+                            state_load_hint="streaming",
+                            state_store_hint="streaming",
+                        )
+                        with self.subTest(name=s.kernel_name()):
+                            self.assertFalse(gdn_decode.late_row_inputs(s))
+                            hoisted = _scratch_bytes(self, s)
+                            hoisted_ops = _op_names(s)
+                            with mock.patch.object(
+                                gdn_decode, "late_row_inputs", lambda _: True
+                            ):
+                                late = _scratch_bytes(self, s)
+                                late_ops = _op_names(s)
+                            # the patch reached the emitter: the order moved
+                            self.assertNotEqual(hoisted_ops, late_ops)
+                            self.assertLessEqual(hoisted, late)
+
     def test_unfused_kernel_has_no_lds_or_barrier(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -262,6 +303,11 @@ class TestFusedEmission(unittest.TestCase):
         )
         self.assertNotIn("addrspace(3)", ll)
         self.assertNotIn("s.barrier", ll)
+
+
+def _op_names(spec):
+    """Op names of ``spec``'s kernel in emission order (regions inline)."""
+    return [op.name for op in _flat_ops(build_gdn_decode(spec, arch=ARCH))]
 
 
 def _flat_ops(kernel):
@@ -296,23 +342,40 @@ def _root_param(value) -> str:
 
 
 def _specs_for_ir_checks():
-    """Both emitters, both gate kinds, every state width and fusion mode."""
+    """Both emitters, both gate kinds, every state width and fusion mode, and
+    the performance knobs that add or reshape global accesses."""
     for gate in ("gdn", "kda"):
         for st in ("bf16", "f32"):
             yield dc.replace(GdnDecodeSpec(), gate_kind=gate, state_dtype=st)
             yield dc.replace(
                 GdnDecodeSpec(), gate_kind=gate, state_dtype=st, simple=True
             )
+            yield dc.replace(
+                GdnDecodeSpec(),
+                gate_kind=gate,
+                state_dtype=st,
+                interleave_cols=True,
+                state_load_hint="streaming",
+                state_store_hint="streaming",
+            )
             for dtype in ("bf16", "f16"):
                 for conv, norm in _FLAGS:
                     for nw in (1, 4):
-                        yield _fused(
+                        spec = _fused(
                             gate_kind=gate,
                             dtype=dtype,
                             state_dtype=st,
                             num_warps=nw,
                             fuse_conv=conv,
                             fuse_out_norm=norm,
+                        )
+                        yield spec
+                        yield dc.replace(
+                            spec,
+                            interleave_cols=True,
+                            conv_once=conv,
+                            norm_gate_once=conv and norm,
+                            out_lds=norm,
                         )
 
 

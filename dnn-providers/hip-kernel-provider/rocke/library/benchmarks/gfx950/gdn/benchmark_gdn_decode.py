@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Benchmark registered GDN single-token decode candidates.
+"""Benchmark registered GDN single-token decode tiles.
 
-Candidate enumeration comes only from the dispatch registry. Production
-``auto`` is reported separately and remains a static policy.
+Candidate enumeration comes only from the dispatch registry: each registered
+tile's base configuration (every knob at its default). Production ``auto`` is
+reported separately and remains a static policy.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import sys
 from dispatch.gdn import (
     GdnDecodeRequest,
     dispatch_gdn_decode,
-    dispatch_gdn_decode_all,
+    dispatch_gdn_decode_bases,
 )
 from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
@@ -27,8 +28,9 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 
 
 def registered_results(req: GdnDecodeRequest):
-    """Return the exact registry results consumed by candidate benchmarking."""
-    return dispatch_gdn_decode_all(req)
+    """Return the exact registry results consumed by candidate benchmarking:
+    each registered tile's base configuration, in registry order."""
+    return dispatch_gdn_decode_bases(req)
 
 
 def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
@@ -117,6 +119,17 @@ def main() -> int:
         help="comma-separated decode batch sizes",
     )
     ap.add_argument("--no-device", action="store_true", help="skip HIP-graph timing")
+    ap.add_argument(
+        "--geometry",
+        default="16/32",
+        help="num_k_heads/num_v_heads of the request (e.g. 16/48)",
+    )
+    ap.add_argument(
+        "--state-dtype",
+        default="bf16",
+        choices=("bf16", "f16", "f32"),
+        help="recurrent-state dtype of the request",
+    )
     args = ap.parse_args()
 
     print(
@@ -124,13 +137,20 @@ def main() -> int:
         f"{'eager_us':>10} {'device_us':>10}  correctness"
     )
 
+    num_k_heads, num_v_heads = (int(x) for x in args.geometry.split("/"))
     failures = 0
     for batch in (int(x) for x in args.batches.split(",")):
-        request = GdnDecodeRequest(batch=batch, arch=ARCH)
+        request = GdnDecodeRequest(
+            batch=batch,
+            arch=ARCH,
+            num_k_heads=num_k_heads,
+            num_v_heads=num_v_heads,
+            state_dtype=args.state_dtype,
+        )
         results = registered_results(request)
-        if len(results) != 54:
+        if not results:
             print(
-                f"batch {batch}: expected 54 legal registry candidates, got {len(results)}",
+                f"batch {batch}: no legal registry candidate for {request}",
                 file=sys.stderr,
             )
             failures += 1
@@ -145,7 +165,7 @@ def main() -> int:
 
         auto = dispatch_gdn_decode(request)
         for result in (auto, *results):
-            spec: GdnDecodeSpec = result.spec
+            spec: GdnDecodeSpec = result.spec.kernel_spec
             arm = "auto" if result is auto else "cand"
             tile = f"{spec.num_warps},{spec.warp_threads_k},{spec.blocks_per_v_dim}"
             grid = result.grid[0]

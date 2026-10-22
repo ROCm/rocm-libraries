@@ -55,6 +55,15 @@ from rocke.runtime import synchronize_and_release
 # largest value seen at the batches exercised here while staying far below the
 # magnitude of a real indexing or reduction bug.
 TOL = 1e-2
+# Output bound relative to the reference's own scale: per (sequence, token,
+# value head) row, max|out - ref| / max|ref|. The kernel and the fp32
+# reference differ by summation order (~1e-6 relative) plus the one rounding
+# of the stored output, at most half an I/O ulp: 2**-8 relative for bf16 (7
+# stored fraction bits), so 2**-7 is twice the rounding bound (the sweeps'
+# worst row sits just under 2**-8). ``TOL`` above is absolute and the plain
+# outputs are small, so ``TOL`` alone cannot see a percent-level error in
+# them (a 3% output scaling passes it); this bound rejects one above ~1%.
+OUT_RTOL = 2.0**-7
 
 _ARCH = "gfx950"
 _LAUNCHER_CACHE: Dict[Tuple, KernelLauncher] = {}
@@ -92,7 +101,7 @@ def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
     return launcher
 
 
-def _gate_input(spec: GdnDecodeSpec, rnd, batch: int, hv: int, dk: int):
+def _gate_input(spec: GdnDecodeSpec, rnd, batch: int, hv: int, dk: int, t: int = 1):
     """The `a` tensor, whose meaning depends on the gate mode.
 
     * GDN: one raw logit per head, `[B, 1, HV]`.
@@ -107,9 +116,17 @@ def _gate_input(spec: GdnDecodeSpec, rnd, batch: int, hv: int, dk: int):
     position in the input dict and leave the random stream undisturbed.
     """
     if spec.gate_kind != "kda":
-        return rnd(batch, 1, hv)
-    g = rnd(batch, 1, hv, dk, scale=0.5)
+        return rnd(batch, t, hv)
+    g = rnd(batch, t, hv, dk, scale=0.5)
     return g if spec.fuse_gate else -g.abs()
+
+
+def _write_slots(batch: int, T: int, disjoint: bool, device) -> torch.Tensor:
+    """``[batch]`` write slots (``[batch, T]`` for ``T > 1``): after the
+    ``batch`` read slots when ``disjoint``, else from slot 0."""
+    first = batch if disjoint else 0
+    w = torch.arange(first, first + batch * T, device=device, dtype=torch.int32)
+    return w if T == 1 else w.reshape(batch, T)
 
 
 def make_inputs(
@@ -137,8 +154,11 @@ def make_inputs(
     """
     torch_dtype = _TORCH_DT[spec.dtype]
     state_dtype = _TORCH_DT[spec.state_dtype]
-    depth = 2 * batch + 1 if pool_depth is None else pool_depth
-    if depth < (2 * batch if disjoint_writes else batch):
+    # num_tokens T: each sequence reads one slot and writes T (one snapshot
+    # per token), so the default pool holds batch * (1 + T) + 1 slots.
+    T = spec.num_tokens
+    depth = batch * (1 + T) + 1 if pool_depth is None else pool_depth
+    if depth < (batch * (1 + T) if disjoint_writes else batch * T):
         raise ValueError(
             f"pool_depth {depth} too small for batch {batch} with "
             f"disjoint_writes={disjoint_writes}"
@@ -152,14 +172,14 @@ def make_inputs(
     hk, hv = spec.num_k_heads, spec.num_v_heads
     dk, dv = spec.head_k_dim, spec.head_v_dim
     inp = {
-        "query": rnd(batch, 1, hk, dk),
-        "key": rnd(batch, 1, hk, dk),
-        "value": rnd(batch, 1, hv, dv),
+        "query": rnd(batch, T, hk, dk),
+        "key": rnd(batch, T, hk, dk),
+        "value": rnd(batch, T, hv, dv),
         # `a` stays at this position in the dict so the GDN draw order -- and
         # therefore every seeded GDN input ever recorded -- is bit-for-bit
         # unchanged. See _gate_input for what it holds in each mode.
-        "a": _gate_input(spec, rnd, batch, hv, dk),
-        "b": rnd(batch, 1, hv),
+        "a": _gate_input(spec, rnd, batch, hv, dk, T),
+        "b": rnd(batch, T, hv),
         # f32 for KDA: the gate is evaluated in f32 and KDA prefill already
         # declares this tensor f32, so the two families share one contract.
         "dt_bias": (
@@ -169,11 +189,7 @@ def make_inputs(
         ),
         "A_log": torch.randn(hv, device=device, generator=gen, dtype=torch.float32),
         "read_indices": torch.arange(batch, device=device, dtype=torch.int32),
-        "write_indices": (
-            torch.arange(batch, 2 * batch, device=device, dtype=torch.int32)
-            if disjoint_writes
-            else torch.arange(batch, device=device, dtype=torch.int32)
-        ),
+        "write_indices": _write_slots(batch, T, disjoint_writes, device),
         "state": rnd(depth, hv, dv, dk, dtype=state_dtype, scale=0.01),
     }
     # Fused-mode tensors are drawn after every unfused draw, so a fused spec's
@@ -196,7 +212,8 @@ def make_inputs(
             * 0.5
         )
     if spec.fuse_out_norm:
-        inp["out_gate"] = rnd(batch, hv * dv)
+        # one row per (sequence, token): [B * T, Hv * Dv]
+        inp["out_gate"] = rnd(batch * T, hv * dv)
         inp["og_stride"] = hv * dv
         inp["norm_weight"] = 1.0 + 0.1 * torch.randn(
             dv, device=device, generator=gen, dtype=torch.float32
@@ -266,6 +283,45 @@ def out_error(spec: GdnDecodeSpec, out: torch.Tensor, ref_out: torch.Tensor) -> 
     return diff.max().item()
 
 
+def out_rel_error(out: torch.Tensor, ref_out: torch.Tensor) -> float:
+    """Max over (sequence, token, value head) rows of max|out - ref| /
+    max|ref| within the row; comparable with ``OUT_RTOL``. ``out`` and
+    ``ref_out`` are ``[B, T, HV, DV]`` (any shape whose last axis is DV)."""
+    ref = ref_out.float().reshape(-1, ref_out.shape[-1])
+    diff = (out.float().reshape(ref.shape) - ref).abs().amax(-1)
+    scale = ref.abs().amax(-1).clamp(min=1e-30)
+    return (diff / scale).max().item()
+
+
+def _ref_fp32_tokens(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
+    """``num_tokens > 1``: token ``t`` is a single-token step from token
+    ``t - 1``'s state. Returns ``(out [B, T, HV, DV], states [B, T, HV, DV,
+    DK])``, the post-state of every token (what ``write_indices[b, t]``
+    receives)."""
+    import dataclasses as dc
+
+    T = spec.num_tokens
+    one = dc.replace(spec, num_tokens=1)
+    state = inp["state"].float()[inp["read_indices"].long()]
+    outs, states = [], []
+    for t in range(T):
+        step = dict(inp)
+        for name in ("query", "key", "value", "a", "b"):
+            step[name] = inp[name][:, t : t + 1]
+        if spec.fuse_out_norm:
+            # out_gate rows are [B * T, ...]: row b * T + t is token t
+            og = inp["out_gate"]
+            step["out_gate"] = og.reshape(og.shape[0] // T, T, og.shape[1])[:, t]
+        step["state"] = state
+        step["read_indices"] = torch.arange(
+            state.shape[0], device=state.device, dtype=torch.int32
+        )
+        out, state = ref_fp32(one, step)
+        outs.append(out[:, 0])
+        states.append(state)
+    return torch.stack(outs, 1), torch.stack(states, 1)
+
+
 def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
     """Whole-tensor fp32 reference for one decode step.
 
@@ -283,6 +339,8 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
         inp["query"] = y[:, : hk * dk].reshape(bsz, 1, hk, dk)
         inp["key"] = y[:, hk * dk : 2 * hk * dk].reshape(bsz, 1, hk, dk)
         inp["value"] = y[:, 2 * hk * dk :].reshape(bsz, 1, spec.num_v_heads, dv)
+    if spec.num_tokens > 1:
+        return _ref_fp32_tokens(spec, inp)
     hv, g = spec.num_v_heads, spec.v_per_k_head
     scale = 1.0 / math.sqrt(spec.head_k_dim)
     eps = 1e-6  # q/k L2-norm eps (the kernel's NORM_EPS); not the output norm's
@@ -341,7 +399,11 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
         # than read from the kernel's table, so a wrong table fails the check:
         # SiLU for GDN (Qwen3-Next), sigmoid for KDA (Kimi Linear);
         # ALGORITHM.md section 1.4.
-        act = torch.nn.functional.silu if spec.gate_kind == "gdn" else torch.sigmoid
+        # norm_gate_act overrides it ("silu" / "sigmoid"); "auto" keeps it.
+        act_name = spec.norm_gate_act
+        if act_name == "auto":
+            act_name = "silu" if spec.gate_kind == "gdn" else "sigmoid"
+        act = torch.nn.functional.silu if act_name == "silu" else torch.sigmoid
         og = inp["out_gate"][:, : hv * spec.head_v_dim].float().reshape(out.shape)
         rstd = torch.rsqrt(out.pow(2).mean(-1, keepdim=True) + inp["norm_eps"])
         out = out * rstd * inp["norm_weight"].float() * act(og)
@@ -377,7 +439,7 @@ def _validate_decode_inputs(
         # the vector loads would read beyond it. Metadata checks are sync-free,
         # so they always run even when index-value validation is disabled.
         a = inp["a"]
-        want_a = (batch, 1, spec.num_v_heads, spec.head_k_dim)
+        want_a = (batch, spec.num_tokens, spec.num_v_heads, spec.head_k_dim)
         if tuple(a.shape) != want_a:
             raise ValueError(f"KDA a shape {tuple(a.shape)} != {want_a}")
         want_a_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
@@ -411,12 +473,14 @@ def _validate_decode_inputs(
             f"{spec.state_dtype} ({want_dt}); the kernel is compiled with a "
             f"{spec.state_dtype} pointer and would reinterpret these bytes"
         )
+    T = spec.num_tokens
     for name in ("read_indices", "write_indices"):
         idx = inp[name]
         if idx.dtype != torch.int32:
             raise ValueError(f"{name} must be int32; got {idx.dtype}")
-        if tuple(idx.shape) != (batch,):
-            raise ValueError(f"{name} must be [batch={batch}]; got {tuple(idx.shape)}")
+        want_idx = (batch, T) if name == "write_indices" and T > 1 else (batch,)
+        if tuple(idx.shape) != want_idx:
+            raise ValueError(f"{name} must be {want_idx}; got {tuple(idx.shape)}")
     # The remaining buffers are addressed from SPEC constants, never from
     # their own shapes, and the kernel emits no buffer descriptor -- there is
     # no `num_records` to clamp an over-reach. Gate buffers differ by mode:
@@ -426,14 +490,14 @@ def _validate_decode_inputs(
     dk, dv = spec.head_k_dim, spec.head_v_dim
     io_dt = _TORCH_DT[spec.dtype]
     want_shapes = {
-        "query": (batch, 1, hk, dk),
-        "key": (batch, 1, hk, dk),
-        "value": (batch, 1, hv, dv),
-        "b": (batch, 1, hv),
+        "query": (batch, T, hk, dk),
+        "key": (batch, T, hk, dk),
+        "value": (batch, T, hv, dv),
+        "b": (batch, T, hv),
         "A_log": (hv,),
     }
     if spec.gate_kind == "gdn":
-        want_shapes.update({"a": (batch, 1, hv), "dt_bias": (hv,)})
+        want_shapes.update({"a": (batch, T, hv), "dt_bias": (hv,)})
     if spec.fuse_conv:
         # The packed row replaces query/key/value in the kernel ABI.
         for name in ("query", "key", "value"):
@@ -451,7 +515,7 @@ def _validate_decode_inputs(
         _check_dense(inp, "conv_state", (pool_depth, conv_dim, CONV_WIDTH - 1), io_dt)
         _check_dense(inp, "conv_weight", (conv_dim, CONV_WIDTH), torch.float32)
     if spec.fuse_out_norm:
-        _check_row_input(inp, "out_gate", "og_stride", batch, hv * dv, io_dt)
+        _check_row_input(inp, "out_gate", "og_stride", batch * T, hv * dv, io_dt)
         _check_dense(inp, "norm_weight", (dv,), torch.float32)
         eps = inp["norm_eps"]
         # The kernarg packs eps as an f32, so judge the value the kernel gets:
@@ -521,8 +585,15 @@ def _validate_decode_inputs(
                 f"{name} out of range: [{lo}, {hi}] escapes -1 (skip) or "
                 f"[0, {pool_depth})"
             )
-    active = (inp["read_indices"] >= 0) & (inp["write_indices"] >= 0)
-    active_writes = inp["write_indices"][active]
+    writes = inp["write_indices"]
+    # The kernel skips a sequence on read < 0 or (one token) write < 0; a
+    # chain (num_tokens > 1) on read < 0 only, a negative write_indices[b, t]
+    # skipping that one snapshot store.
+    active = inp["read_indices"] >= 0
+    if writes.ndim == 1:
+        active = active & (writes >= 0)
+    active_writes = writes[active]
+    active_writes = active_writes[active_writes >= 0]
     if active_writes.numel() != active_writes.unique().numel():
         raise ValueError("write_indices must be unique across active sequences")
 
@@ -576,7 +647,7 @@ def prepare(spec: GdnDecodeSpec, inp, batch: int, *, validate_indices: bool = Tr
     torch_dtype = _TORCH_DT[spec.dtype]
     out = torch.zeros(
         batch,
-        1,
+        spec.num_tokens,
         spec.num_v_heads,
         spec.head_v_dim,
         device=inp[_device_ref(spec)].device,

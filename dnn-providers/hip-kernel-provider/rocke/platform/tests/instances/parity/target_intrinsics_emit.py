@@ -124,6 +124,12 @@ def build_warp_shuffle_xor_dpp(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_dpp_row_mirror(b: IRBuilder) -> None:
+    h = b.dpp_row_mirror(b.const_i32(1), half=True)
+    b.dpp_row_mirror(h, half=False)
+    b.ret()
+
+
 def build_av_b128(b: IRBuilder) -> None:
     p = b.param("p", PtrType(I32, "global"), align=16)
     data = b.av_load_b128(p)
@@ -149,6 +155,7 @@ BUILDERS = [
     build_av_b128,
     build_scheduler_hints,
     build_warp_shuffle_xor_dpp,
+    build_dpp_row_mirror,
 ]
 
 

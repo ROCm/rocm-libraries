@@ -116,15 +116,17 @@ def _scan_tile(req: GdnPrefillRequest, value_splits: int) -> KdaTileSpec:
 def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
     assert isinstance(req, GdnPrefillRequest)
     value_splits = value_splits_for(req.batch_heads)
+    # Request fields are copied as given: prefill_request_errors rejects a
+    # non-int dim and a non-bool flag rather than letting them be coerced.
     return KdaChunkScanSpec(
-        head_k=int(req.head_k_dim),
-        head_v=int(req.head_v_dim),
+        head_k=req.head_k_dim,
+        head_v=req.head_v_dim,
         dtype=normalize_dtype(req.dtype),
         tile=_scan_tile(req, value_splits),
         value_splits=value_splits,
         token_major_io=True,
-        has_initial_state=bool(req.has_initial_state),
-        store_final_state=bool(req.store_final_state),
+        has_initial_state=req.has_initial_state,
+        store_final_state=req.store_final_state,
     )
 
 
@@ -136,8 +138,8 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     scan = _scan_spec(req)
     prep_tile = dataclasses.replace(scan.tile, block_size=256)
     return KdaChunkPrepSpec(
-        head_k=int(req.head_k_dim),
-        head_v=int(req.head_v_dim),
+        head_k=req.head_k_dim,
+        head_v=req.head_v_dim,
         dtype=normalize_dtype(req.dtype),
         tile=prep_tile,
         raw_inputs=True,
@@ -147,7 +149,7 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
         has_dt_bias=True,
         lower_bound=-5.0,
         gate_kind="gdn",
-        kv_group=int(req.kv_group),
+        kv_group=req.kv_group,
     )
 
 

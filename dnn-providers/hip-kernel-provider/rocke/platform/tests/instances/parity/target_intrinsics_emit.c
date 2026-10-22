@@ -159,6 +159,13 @@ static void build_warp_shuffle_xor_dpp(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_dpp_row_mirror(rocke_ir_builder_t* b)
+{
+    rocke_value_t* h = rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true);
+    rocke_b_dpp_row_mirror(b, h, false);
+    rocke_b_ret(b);
+}
+
 static void build_av_b128(rocke_ir_builder_t* b)
 {
     rocke_value_t* p = global_ptr_param(b, "p", rocke_i32(), 16);
@@ -188,6 +195,7 @@ static const build_fn_t BUILDERS[] = {
     build_av_b128,
     build_scheduler_hints,
     build_warp_shuffle_xor_dpp,
+    build_dpp_row_mirror,
 };
 
 static const int NUM_BUILDERS = (int)(sizeof(BUILDERS) / sizeof(BUILDERS[0]));

@@ -422,6 +422,27 @@ static void _op_tile_dpp_xor(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)ctrl);
 }
 
+static void _op_tile_dpp_row_mirror(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const int64_t ctrl = ll_dpp_attr(L, op, "tile.dpp_row_mirror", "ctrl");
+    const rocke_value_t* data = op->operands[0];
+    /* Only row_mirror (0x140) and row_half_mirror (0x141) are legal; any other
+     * DPP control is a different, silently valid lane mapping. */
+    if(ctrl != 0x140 && ctrl != 0x141)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.dpp_row_mirror: ctrl must be 320 or 321, got %lld",
+                      (long long)ctrl);
+    rocke_ll_need(L, "update.dpp.i32");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
+                   "i32 %s, i32 %s, i32 %lld, i32 15, i32 15, i1 true)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   rocke_ll_operand(L, data),
+                   (long long)ctrl);
+}
+
 static void _op_tile_wave_reduce(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
@@ -1149,6 +1170,7 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
     rocke_ll_set_handler(ROCKE_OP_TILE_QUAD_PERM, _op_tile_quad_perm);
     rocke_ll_set_handler(ROCKE_OP_TILE_DPP_XOR, _op_tile_dpp_xor);
+    rocke_ll_set_handler(ROCKE_OP_TILE_DPP_ROW_MIRROR, _op_tile_dpp_row_mirror);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
     rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
     rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);

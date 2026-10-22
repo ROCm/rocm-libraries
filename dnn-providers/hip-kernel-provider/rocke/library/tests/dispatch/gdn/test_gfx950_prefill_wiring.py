@@ -212,6 +212,24 @@ def test_float_batch_is_rejected():
         dispatch_gdn_prefill(_req(batch=3.9, algorithm="chunk_prep"))
 
 
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["head_k_dim", "head_v_dim"])
+@pytest.mark.parametrize("bad", [128.0, 128.5, True, "128"])
+def test_non_int_head_dim_is_rejected(algorithm, field, bad):
+    """``int(128.5)`` used to build a D128 kernel the caller never asked for."""
+    with pytest.raises(ValueError, match=f"{field} must be an int"):
+        dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
+
+
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["has_initial_state", "store_final_state"])
+@pytest.mark.parametrize("bad", ["false", 1, 0, None])
+def test_non_bool_state_flag_is_rejected(algorithm, field, bad):
+    """``bool("false")`` used to select the kernel that reads h0."""
+    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+        dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
+
+
 def test_retuning_onto_an_unlisted_split_fails_by_name():
     """A band selecting a split with no tile entry must say what to do.
 

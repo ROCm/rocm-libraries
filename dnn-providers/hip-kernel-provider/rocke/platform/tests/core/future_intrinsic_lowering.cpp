@@ -601,6 +601,69 @@ void case_dpp_xor_builders_reject_invalid_input()
     });
 }
 
+/* ---- dpp_row_mirror ---- */
+/* One kernel per `half` value, asserting the expected control word AND the
+ * absence of the other: emitting both in one kernel cannot tell a swapped
+ * half -> ctrl mapping from the right one. row_half_mirror == 0x141 == 321,
+ * row_mirror == 0x140 == 320. */
+void case_dpp_row_mirror()
+{
+    const std::string half = lower_one("rmirror_half", [](rocke_ir_builder_t* b) {
+        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true);
+    });
+    EXPECT_IR(half,
+              "declare i32 @llvm.amdgcn.update.dpp.i32("
+              "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
+    EXPECT_IR(half,
+              "call i32 @llvm.amdgcn.update.dpp.i32("
+              "i32 1, i32 1, i32 321, i32 15, i32 15, i1 true)");
+    EXPECT_NO_IR(half, "i32 320, i32 15, i32 15");
+
+    const std::string full = lower_one("rmirror_full", [](rocke_ir_builder_t* b) {
+        rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false);
+    });
+    EXPECT_IR(full,
+              "call i32 @llvm.amdgcn.update.dpp.i32("
+              "i32 1, i32 1, i32 320, i32 15, i32 15, i1 true)");
+    EXPECT_NO_IR(full, "i32 321, i32 15, i32 15");
+}
+
+void case_dpp_row_mirror_hip()
+{
+    const std::string half = lower_one_hip(
+        "rmirror_hip_half",
+        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), true); },
+        "gfx950");
+    EXPECT_IR(half, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
+    EXPECT_NO_IR(half, ", 320, 15, 15, 1)");
+
+    const std::string full = lower_one_hip(
+        "rmirror_hip_full",
+        [](rocke_ir_builder_t* b) { rocke_b_dpp_row_mirror(b, rocke_b_const_i32(b, 1), false); },
+        "gfx950");
+    EXPECT_IR(full, "__builtin_amdgcn_update_dpp(c1, c1, 320, 15, 15, 1)");
+    EXPECT_NO_IR(full, ", 321, 15, 15, 1)");
+}
+
+void case_dpp_row_mirror_rejects_non_i32()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "rmirror_f32");
+    bool rejected = false;
+    try
+    {
+        rocke_value_t* r = rocke_b_dpp_row_mirror(&b, rocke_b_const_f32(&b, 1.0), false);
+        rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+    }
+    catch(...)
+    {
+        rejected = true;
+    }
+    if(!rejected)
+        fail("dpp_row_mirror must reject non-i32 data", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
 /* How a raw DPP op carries its int attribute ("ctrl", or "xor_mask" for
  * tile.dpp_xor). */
 enum class RawCtrl
@@ -731,6 +794,18 @@ void case_dpp_xor_rejects_bad_mask()
         expect_dpp_raw_rejected(op, ok, RawCtrl::Int, bad, ROCKE_ERR_VALUE, __LINE__);
 }
 
+void case_dpp_row_mirror_rejects_bad_ctrl()
+{
+    const rocke_opcode_t op = ROCKE_OP_TILE_DPP_ROW_MIRROR;
+    const RawShape ok = RawShape::Ok;
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Missing, 0, ROCKE_ERR_KEY, __LINE__);
+    /* Each is a legal DPP control for a different lane mapping (0x142 is
+     * row_bcast:15, 0x40 a quad_perm) or not a control at all (-1). */
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x142, ROCKE_ERR_VALUE, __LINE__);
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, 0x40, ROCKE_ERR_VALUE, __LINE__);
+    expect_dpp_raw_rejected(op, ok, RawCtrl::Int, -1, ROCKE_ERR_VALUE, __LINE__);
+}
+
 /* The shape and the attribute types, for both DPP ops: anything but one
  * operand and one result is ROCKE_ERR_VALUE (zero operands included: a clean
  * error, not a NULL dereference), a non-int ctrl/xor_mask is ROCKE_ERR_TYPE
@@ -743,7 +818,9 @@ void case_dpp_ops_reject_untyped_raw_op()
     {
         rocke_opcode_t opcode;
         int64_t ctrl;
-    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177}, {ROCKE_OP_TILE_DPP_XOR, 7}};
+    } ops[] = {{ROCKE_OP_TILE_QUAD_PERM, 177},
+               {ROCKE_OP_TILE_DPP_XOR, 7},
+               {ROCKE_OP_TILE_DPP_ROW_MIRROR, 0x140}};
     const RawShape ok = RawShape::Ok;
     for(const auto& o : ops)
     {
@@ -3131,6 +3208,7 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
         {ROCKE_OP_TILE_QUAD_PERM, "tile.quad_perm"},
         {ROCKE_OP_TILE_DPP_XOR, "tile.dpp_xor"},
+        {ROCKE_OP_TILE_DPP_ROW_MIRROR, "tile.dpp_row_mirror"},
         {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
         {ROCKE_OP_TILE_READLANE, "tile.readlane"},
         {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
@@ -3191,7 +3269,8 @@ void case_opcode_names_are_aligned()
         }
         if(rocke_opcode_from_name(e.name) != e.opcode)
             fail(e.name, __LINE__);
-        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_XOR)
+        if((e.opcode == ROCKE_OP_TILE_QUAD_PERM || e.opcode == ROCKE_OP_TILE_DPP_XOR
+            || e.opcode == ROCKE_OP_TILE_DPP_ROW_MIRROR)
            && !rocke_opcode_is_pure(e.opcode))
             fail(e.name, __LINE__);
     }
@@ -3295,6 +3374,10 @@ const TestCase k_cases[] = {
     {"dpp_xor_builders_reject_invalid_input", case_dpp_xor_builders_reject_invalid_input},
     {"dpp_xor_rejects_bad_mask", case_dpp_xor_rejects_bad_mask},
     {"dpp_ops_reject_untyped_raw_op", case_dpp_ops_reject_untyped_raw_op},
+    {"dpp_row_mirror", case_dpp_row_mirror},
+    {"dpp_row_mirror_hip", case_dpp_row_mirror_hip},
+    {"dpp_row_mirror_rejects_non_i32", case_dpp_row_mirror_rejects_non_i32},
+    {"dpp_row_mirror_rejects_bad_ctrl", case_dpp_row_mirror_rejects_bad_ctrl},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
     {"quad_perm", case_quad_perm},
