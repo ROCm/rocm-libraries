@@ -179,12 +179,12 @@ void rocfft_execution_info_internal::validate_jit_data_ptr_count(const rocfft_pl
     if(!user_info->load_cb_data_jit.empty()
        && user_info->load_cb_data_jit.size()
               != plan.desc.count_pointers(
-                  plan.desc.inFields, plan.desc.inArrayType, local_comm_rank))
+                  plan.desc.inFields, plan.desc.input_layout.get_array_type(), local_comm_rank))
         throw std::runtime_error("load JIT callback data count doesn't match input brick count");
     // Check store cb data against output pointers
     if(!user_info->store_cb_data_jit.empty()
        && user_info->store_cb_data_jit.size()
               != plan.desc.count_pointers(
-                  plan.desc.outFields, plan.desc.outArrayType, local_comm_rank))
+                  plan.desc.outFields, plan.desc.output_layout.get_array_type(), local_comm_rank))
         throw std::runtime_error("store JIT callback data count doesn't match output brick count");
 }
