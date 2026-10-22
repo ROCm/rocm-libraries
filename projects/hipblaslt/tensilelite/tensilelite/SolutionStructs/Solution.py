@@ -4060,17 +4060,18 @@ class Solution(collections.abc.Mapping):
         if state["EnableMatrixInstruction"]:
           # MI16x16xNx1 needs double padding to avoid bank conflict:
           # WMMA_V3 doubles when readRegs == 2; MFMA doubles when readRegs in {1, 4};
-          # WMMA V1/V2 doubles only when readRegs == 1.
+          # WMMA V1/V2 never doubles.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
             if wmmaV3:
               if readRegsA == 2: optPadA *= 2
               if readRegsB == 2: optPadB *= 2
-            else:
-              # On WMMA V1/V2 a b128 read padded by its own width already shifts
-              # one 4-bank window per row. Doubling makes the row stride 4*even
-              # banks, a 2-way conflict.
-              if readRegsA == 1 or (readRegsA == 4 and not hasWmma): optPadA *= 2
-              if readRegsB == 1 or (readRegsB == 4 and not hasWmma): optPadB *= 2
+            elif not hasWmma:
+              # MFMA only. WMMA V1/V2 is skipped: a b128 read padded by its own
+              # width already shifts one 4-bank window per row, and doubling makes
+              # the row stride 4*even banks, a 2-way conflict. A b32 read
+              # (readRegs == 1) is below the smallest LRVW WMMA accepts.
+              if readRegsA in (1, 4): optPadA *= 2
+              if readRegsB in (1, 4): optPadB *= 2
 
         def calcLdsPadPerOperand(tc: str, idx: int, numBytes: float, lrvw: int, optPad: int) -> int:
           """Auto-resolve LdsPad{tc} (tc in {A, B}) when the user left it on -1.
