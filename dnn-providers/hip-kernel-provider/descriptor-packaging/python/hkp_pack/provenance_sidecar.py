@@ -102,8 +102,19 @@ def _subjects(descriptor_name: str, doc) -> tuple[str | None, list[dict]]:
 
 
 def _kind(ukd: dict):
+    """The kernel_source kind of a UKD; for one with `sources`, the kind its
+    entries share, or None when they disagree or are not objects."""
     source = ukd.get("kernel_source")
-    return source.get("kind") if isinstance(source, dict) else None
+    if isinstance(source, dict):
+        return source.get("kind")
+    sources = ukd.get("sources")
+    if isinstance(sources, dict):
+        kinds = {
+            s.get("kind") if isinstance(s, dict) else None for s in sources.values()
+        }
+        if len(kinds) == 1:
+            return kinds.pop()
+    return None
 
 
 def ukd_sha256(ukd: dict) -> str:

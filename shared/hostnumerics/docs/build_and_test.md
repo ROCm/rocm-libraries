@@ -92,6 +92,11 @@ Python/tests ON with Ninja Multi-Config and OFF with Ninja, installation,
 external C++ consumers, installed Python imports, embedded defaults,
 ASan/UBSan, and clang-tidy. These jobs run on Ubuntu.
 
+CI also builds and tests native C++ on Windows with MSVC and Ninja, installs
+HostNumerics, and builds and tests an external consumer of the installed package.
+Python bindings are disabled in this Windows job; Linux covers binding builds
+and installed imports, with Windows Python coverage left for a follow-up.
+
 The [package test project](../tests/package/CMakeLists.txt) and
 [embedded test project](../tests/embedded/CMakeLists.txt) can also be configured
 directly. Pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so they can find
