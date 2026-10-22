@@ -4639,7 +4639,8 @@ namespace
     bool isFusedAllToAll(const RocblasltContractionProblem& prob)
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        return prob.fused_epilogue != nullptr;
+        RocblasltFusedEpilogueInfo info;
+        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
 #else
         static_cast<void>(prob);
         return false;
