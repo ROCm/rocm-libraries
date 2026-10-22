@@ -9,7 +9,7 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
-#include <roc/hostnumerics/result.hpp>
+#include <roc/hostnumerics/expected.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
 #include <stdexcept>

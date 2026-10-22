@@ -7,7 +7,7 @@
 #include <complex>
 #include <cstdint>
 #include <limits>
-#include <roc/hostnumerics/result.hpp>
+#include <roc/hostnumerics/expected.hpp>
 #include <roc/hostnumerics/scalar_conversion_options.hpp>
 #include <string_view>
 #include <type_traits>

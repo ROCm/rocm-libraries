@@ -21,7 +21,8 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${HOSTNUMERICS_SOURCE_DIR}/cmake")
 include(HostNumericsTestDependencies)
-add_executable(hostnumerics-embedded-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp")
+add_executable(hostnumerics-embedded-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp"
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/expected_test.cpp")
 target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics GTest::gtest_main)
 
 enable_testing()
@@ -30,13 +31,4 @@ gtest_discover_tests(
     hostnumerics-embedded-test
     DISCOVERY_MODE PRE_TEST
     TEST_PREFIX "hostnumerics-embedded-test."
-)
-
-# Internal C++ result contracts cannot be exercised through the Python bindings.
-add_executable(hostnumerics-result-tests "${HOSTNUMERICS_SOURCE_DIR}/tests/result_test.cpp")
-target_link_libraries(hostnumerics-result-tests PRIVATE roc::hostnumerics-core GTest::gtest_main)
-gtest_discover_tests(
-    hostnumerics-result-tests
-    DISCOVERY_MODE PRE_TEST
-    TEST_PREFIX "hostnumerics-result."
 )
