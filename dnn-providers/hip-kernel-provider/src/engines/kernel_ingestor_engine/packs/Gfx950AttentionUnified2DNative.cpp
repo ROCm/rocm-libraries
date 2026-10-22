@@ -32,7 +32,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/KpackKernelLoader.hpp"
@@ -925,7 +925,9 @@ bool kernelMatches(const MatchContext& context,
 
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
-    if(q == nullptr || k == nullptr)
+    // problemFor reads dims without checking them, so a direct caller (not behind
+    // graph_match) must not reach it with a malformed operand.
+    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
     {
         return false;
     }

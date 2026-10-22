@@ -49,7 +49,7 @@ by ``--expect-ids``.
 
 Symbol comparison (``--shipped-descriptors`` / ``--regenerated-descriptors``):
 
-The UED's ``graph_match.native``, a native UHD's ``payload``, the UDD's
+The UED's ``graph_match.native``, a native UHD's ``native.symbol``, the UDD's
 ``dispatch_symbol`` and every UMD's ``match_symbol`` name the C++ the provider
 resolves at load. Renaming one of them silently orphans the hand-written native
 pack, and nothing in the KDP shows it. Files are paired by name, so a descriptor
@@ -382,7 +382,11 @@ def compare_engine_blocks(
 #: its ``kind`` is ``native``.
 _SYMBOL_FIELDS = {
     "ued": lambda doc: (doc.get("graph_match") or {}).get("native"),
-    "uhd": lambda doc: doc.get("payload") if doc.get("kind") == "native" else None,
+    "uhd": lambda doc: (
+        (doc.get("native") or {}).get("symbol")
+        if doc.get("adapter") == "native"
+        else None
+    ),
     "udd": lambda doc: doc.get("dispatch_symbol"),
     "umd": lambda doc: doc.get("match_symbol"),
 }
@@ -731,7 +735,7 @@ def main(argv=None) -> int:
     if shipped_symbols is not None:
         sections.append(
             (
-                "native symbols (ued graph_match, uhd payload, udd, umd)",
+                "native symbols (ued graph_match, uhd native.symbol, udd, umd)",
                 compare_symbols(shipped_symbols, regenerated_symbols),
             )
         )

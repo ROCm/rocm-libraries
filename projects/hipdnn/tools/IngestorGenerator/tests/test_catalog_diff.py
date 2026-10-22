@@ -735,7 +735,7 @@ class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
 
     _FILES = {
         "e.ued.json": {"graph_match": {"native": "hipkernel.e.graph_match"}},
-        "e.uhd.json": {"kind": "native", "payload": "hipkernel.e.score"},
+        "e.uhd.json": {"adapter": "native", "native": {"symbol": "hipkernel.e.score"}},
         "e.udd.json": {"dispatch_symbol": "hipkernel.e.dispatch"},
         "k.umd.json": {"scope": "kernel", "match_symbol": "hipkernel.e.kernel_match"},
     }
@@ -759,6 +759,18 @@ class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
             str(regenerated),
         )
 
+    def test_every_shipped_bundle_symbol_is_read(self):
+        """Every shipped native UED/UHD/UDD/UMD yields a symbol. A reader keyed on a
+        retired descriptor field reads None on both sides and passes vacuously."""
+        root = (
+            Path(__file__).resolve().parents[5]
+            / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+            / "descriptors/rocKE/gfx950_attention_dense"
+        )
+        symbols = catalog_diff._load_symbols(str(root), "shipped")
+        kinds = {name.split(".")[-2] for name in symbols}
+        assert kinds == {"ued", "uhd", "udd", "umd"}, sorted(symbols)
+
     def test_identical_symbols_pass(self, run, tmp_path):
         """The positive control: the comparison is not vacuously failing."""
         assert self._run(run, tmp_path, self._FILES) == 0
@@ -767,7 +779,10 @@ class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
         "name,doc",
         [
             ("e.ued.json", {"graph_match": {"native": "hipkernel.e.graph_match2"}}),
-            ("e.uhd.json", {"kind": "native", "payload": "hipkernel.e.rank"}),
+            (
+                "e.uhd.json",
+                {"adapter": "native", "native": {"symbol": "hipkernel.e.rank"}},
+            ),
             ("e.udd.json", {"dispatch_symbol": "hipkernel.e.run"}),
             ("k.umd.json", {"scope": "kernel", "match_symbol": "hipkernel.e.other"}),
         ],
