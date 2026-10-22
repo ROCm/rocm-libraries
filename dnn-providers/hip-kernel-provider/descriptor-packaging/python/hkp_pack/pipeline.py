@@ -329,10 +329,7 @@ def _compile_sources_ukd(
     by_variant = {}
     for name, ks in entries.items():
         if ks.get("kind") != "rocke":
-            raise HkpPackError(
-                f"{where} sources '{name}' has kind '{ks.get('kind')}'; only "
-                "'rocke' entries may be authored in sources"
-            )
+            raise sources.refuse_authored_kind(where, name, ks.get("kind"))
         by_variant.setdefault(_source_variant_key(ks), []).append(name)
     compiled = {}
     for vk, names in by_variant.items():

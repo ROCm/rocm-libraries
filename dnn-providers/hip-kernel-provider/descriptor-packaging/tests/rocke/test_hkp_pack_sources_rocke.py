@@ -17,7 +17,7 @@ from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from hkp_pack import agreement, desk_check
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
-from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
+from pack_helpers import GENERIC_TARGETS, _run_cli, read_shipped, run_pipeline
 
 ARCH = "gfx1100"
 
@@ -182,6 +182,11 @@ def _entry(source, builder, role=None, tag="a", **extra):
     return ks
 
 
+UED_ID = "5b0f2c1e-3a47-5d2b-9f0e-6c1d8a7b4e21"
+KMD_ID = "9d3e7a52-1c6b-5f48-8a0d-2e4b6c8f1a37"
+UHD_ID = "c4a81f06-7d2e-5b93-a1c5-0f3e9d6b2a58"
+
+
 def _root(tmp_path, ukd_kernel, *, version="0.1", compiled=None):
     """A source root with one rocke UKD consumed by one engine.
 
@@ -202,8 +207,8 @@ def _root(tmp_path, ukd_kernel, *, version="0.1", compiled=None):
                 "schema_version": 1,
                 "consumers": [
                     {
-                        "engine_id": "ued-toy",
-                        "kmd_id": "kmd-toy",
+                        "engine_id": UED_ID,
+                        "kmd_id": KMD_ID,
                         "metadata_fields": list(compiled),
                         "matcher_only_fields": ["family"],
                         "bindings": {name: {"field": name} for name in compiled},
@@ -215,25 +220,26 @@ def _root(tmp_path, ukd_kernel, *, version="0.1", compiled=None):
     }
     docs = {
         "kmd": {
-            "version": "0.1",
-            "id": "kmd-toy",
+            "version": "1.0",
+            "id": KMD_ID,
             "name": "Toy metadata",
             "fields": [{"name": "family", "type": "string"}]
             + [{"name": name, "type": "int"} for name in compiled],
         },
         "ued": {
-            "version": "0.1",
-            "id": "ued-toy",
+            "version": "1.0",
+            "id": UED_ID,
             "name": "test_fixture:toy",
-            "heuristic": "uhd-toy",
-            "metadata": "kmd-toy",
+            "sort_kernel_catalog": {"default": UHD_ID},
+            "metadata": KMD_ID,
         },
         "uhd": {
-            "version": "0.1",
-            "id": "uhd-toy",
+            "version": "1.0",
+            "id": UHD_ID,
             "name": "Toy heuristic",
-            "kind": "native",
-            "payload": "hipkernel.toy.score",
+            "adapter": "native",
+            "objective": "max",
+            "native": {"symbol": "hipkernel.toy.score"},
         },
         "umd": {
             "version": "0.1",
@@ -254,7 +260,7 @@ def _root(tmp_path, ukd_kernel, *, version="0.1", compiled=None):
             "name": "Toy pack",
             "arch": [ARCH],
             "matchers": ["umd-toy"],
-            "engine": "ued-toy",
+            "engine": UED_ID,
             "dispatch": "udd-toy",
             "kernelDescriptors": [ukd],
         },
@@ -589,21 +595,13 @@ def test_a_packed_tree_passes_the_compiled_agreement_reader(
             r"\['\(primary\)', 'merge'\]",
             r"\['\(primary\)'\]",
         ),
-        # Two entries on one kernel: one kernel answering for two names.
-        (
-            lambda s: {
-                "a": _entry(s, "build_seg"),
-                "b": _entry(s, "build_seg"),
-            },
-            r"\['\(primary\)', '\(primary\)'\]",
-            r"\['\(primary\)'\]",
-        ),
+        # Two entries on the companion and none on the primary.
         (
             lambda s: {
                 "a": _entry(s, "build_toy", role="merge"),
                 "b": _entry(s, "build_toy", role="merge"),
             },
-            r"\['merge', 'merge'\]",
+            r"\['merge'\]",
             r"\['\(primary\)', 'merge'\]",
         ),
     ],
@@ -612,7 +610,6 @@ def test_a_packed_tree_passes_the_compiled_agreement_reader(
         "unclaimed-companion",
         "unclaimed-primary",
         "role-on-a-single-kernel-builder",
-        "primary-twice",
         "companion-twice",
     ],
 )
@@ -634,6 +631,39 @@ def test_the_claimed_kernels_must_equal_the_compiled_kernels(
         rf"but the compile produced {compiled}",
         message,
     ), message
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "builder, roles",
+    [("build_seg", (None, None)), ("build_toy", (None, None, "merge"))],
+    ids=["single-kernel-builder", "with-a-companion"],
+)
+def test_one_kernel_under_two_launch_names_packs_and_passes_the_full_check(
+    tmp_path, monkeypatch, rocke_importable, rocm_kpack_dir, builder, roles
+):
+    """A pipeline stage may run one kernel twice with different arguments: the
+    entries share one compile, name one symbol, and the shipped tree is verified
+    by the full desk check."""
+    src = _module(tmp_path, "toymod_twice")
+    seen = _patch_compilers(monkeypatch)
+    entries = {
+        f"launch{i}": _entry(src, builder, role=role) for i, role in enumerate(roles)
+    }
+    _pack(_root(tmp_path, {"sources": entries}), tmp_path, rocm_kpack_dir)
+    assert len(seen) == 1
+    _shipped_doc, ukd = _shipped(tmp_path)
+    packed = ukd["sources"]
+    assert set(packed) == set(entries)
+    assert packed["launch0"] == packed["launch1"]
+    kdp = tmp_path / "out" / ARCH / "toy.kdp.json"
+    assert desk_check.compiled_agreement(kdp, GENERIC_TARGETS, rocm_kpack_dir) == (
+        [],
+        [],
+        1,
+    )
+    result = _run_cli(str(kdp), "--kpack-python-dir", rocm_kpack_dir, mode="full")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.quick
@@ -686,7 +716,7 @@ def test_a_failed_claim_leaves_no_shipped_descriptor(
                     "k1": {"kind": "hsaco", "file": "x.co", "symbol": "s"},
                 }
             },
-            "only 'rocke' entries may be authored",
+            "'k1' has kind 'hsaco'",
         ),
         (
             lambda s: {

@@ -567,7 +567,7 @@ def verify(ukd, records, payload):
                 f"launch '{name}': signature does not match the argument list of "
                 f"'{ks.get('symbol')}' in the code object"
             )
-        shared.setdefault(hashlib.sha256(payload[name]).hexdigest(), []).append(name)
+        shared.setdefault((ks.get("library"), ks.get("toc_key")), []).append(name)
     # One metadata speaks for every launch: the verdict is the one the packer
     # reached, re-derived from what each launch reported.
     for entry in records:
@@ -578,7 +578,9 @@ def verify(ukd, records, payload):
             {name: evidence[name]["observations"] for name in entries},
         )
     # Each compile's kernels must be claimed exactly: a launch dropped from the
-    # map leaves its kernel unclaimed, however the rest was re-stamped.
+    # map leaves its kernel unclaimed, however the rest was re-stamped. A compile
+    # is one (library, toc_key); two compiles may yield identical bytes, and one
+    # kernel may be claimed by several launches.
     for names in shared.values():
         first = evidence[names[0]]["observations"]
         # Launches on one code object are one compile, so one set of evidence. The
@@ -599,7 +601,7 @@ def verify(ukd, records, payload):
         # The evidence above is not covered by the descriptor digest, so the
         # claims are also held to what the object itself exports.
         exported = exported_kernels(payload[names[0]], f"launches {sorted(names)}")
-        claimed = sorted(entries[n].get("symbol") for n in names)
+        claimed = sorted({entries[n].get("symbol") for n in names})
         if claimed != exported:
             raise HkpPackError(
                 f"launches {sorted(names)} claim the symbols {claimed}, but the "

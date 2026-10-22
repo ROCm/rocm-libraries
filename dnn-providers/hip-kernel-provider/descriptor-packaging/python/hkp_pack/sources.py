@@ -35,6 +35,25 @@ PRIMARY = "(primary)"
 UNSUPPORTED_AUTHORED_KINDS = ("hip", "hsaco", "embedded_source")
 
 
+def refuse_authored_kind(where, name, kind):
+    """The refusal for a `sources` entry that is not authored as rocke.
+
+    Authored entries are rocke only. hip and hsaco are not supported yet,
+    embedded_source is never packed into a code object, and kpack entries are
+    already packed. Any other kind is not a kind at all.
+    """
+    head = f"{where} sources '{name}' has kind '{kind}'"
+    if kind in ("hip", "hsaco"):
+        tail = "which is not yet supported as a sources entry; only 'rocke' entries are"
+    elif kind == "embedded_source":
+        tail = "which is not packed into a code object, so it cannot be a sources entry"
+    elif kind == "kpack":
+        tail = "and already-packed entries are not pack input"
+    else:
+        tail = "which is not a sources entry kind (expected 'rocke')"
+    return HkpPackError(f"{head}, {tail}")
+
+
 def reads_sources(version):
     """Whether a UKD document `version` ('<major>.<minor>') may carry `sources`."""
     major, minor = version.split(".")
@@ -79,12 +98,12 @@ def kind_of(ukd):
 
 
 def claimed_roles(roles):
-    """The kernels a variant's entries claim, as a sorted list.
+    """The distinct kernels a variant's entries claim, as a sorted list.
 
-    `roles` holds each entry's `role`, None for a primary claim. Duplicates stay,
-    so two entries claiming one kernel do not collapse into a match.
+    `roles` holds each entry's `role`, None for a primary claim. Entries naming
+    one kernel under different launch names make one claim.
     """
-    return sorted(PRIMARY if role is None else role for role in roles)
+    return sorted({PRIMARY if role is None else role for role in roles})
 
 
 def compiled_roles(observations):
