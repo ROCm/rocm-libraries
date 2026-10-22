@@ -3,6 +3,7 @@
 
 #include <tensilelite/codegen/IRBuilder.hpp>
 
+#include "ExpectLines.hpp"
 #include "code.hpp"
 #include "container.hpp"
 #include "instruction/branch.hpp"
@@ -24,6 +25,7 @@
 namespace {
 
 using namespace rocm::tensilelite::codegen;
+using rocm::tensilelite::codegen::test::expectLinesInOrder;
 
 class IRBuilderTest : public testing::Test {
 protected:
@@ -33,29 +35,6 @@ protected:
   rocisa::Module body{"body"};
   IRBuilder builder{target, allocator, body};
 };
-
-// Checks each needle against the lines of text in order, so tests do not
-// depend on rocisa's padding and comment formatting.
-void expectLinesInOrder(const std::string &text,
-                        std::vector<std::string_view> needles) {
-  std::vector<std::string> lines;
-  std::istringstream stream(text);
-  for (std::string line; std::getline(stream, line);)
-    lines.push_back(line);
-
-  std::ptrdiff_t next = 0;
-  for (std::string_view needle : needles) {
-    while (next < std::ssize(lines) &&
-           lines[next].find(needle) == std::string::npos)
-      ++next;
-    if (next == std::ssize(lines)) {
-      ADD_FAILURE() << "missing or out of order: '" << needle << "' in:\n"
-                    << text;
-      return;
-    }
-    ++next;
-  }
-}
 
 TEST_F(IRBuilderTest, EmitsKernelSequence) {
   RegisterRange kernarg = allocator.reserve(RegisterKind::sgpr, 0, 2);

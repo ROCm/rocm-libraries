@@ -4,10 +4,19 @@
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Kernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Registers_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocisaCore_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target_test.cpp"
 )
+
+# Assembling and launching needs the JIT assembler.
+if(TENSILELITE_ENABLE_JIT)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/KernelLaunch_test.cpp"
+    )
+endif()
 
 target_link_libraries(tensilelite-tests
     PRIVATE
