@@ -4643,7 +4643,15 @@ namespace
                    == hipSuccess;
         };
 
-        // Initialize writable scratch; read-only gradient E is seeded below.
+        // Zero the whole buffer before anything reads it.
+        //
+        // Scratch comes from a raw hipMalloc, and not every span in it gets
+        // seeded: an in-place problem reads C through D, and a solution can read
+        // its own workspace. Those reads would land on whatever the allocator
+        // handed back, where a denormal pattern changes the timing of the very
+        // thing being measured and a NaN or Inf can change it a great deal. Zero
+        // is uniform, cheap and cannot denormal. A gradient epilogue's E, which
+        // it reads, is seeded with the caller's below.
         if(tuningFailureInjected(TuningFailureStage::Setup)
            || hipMemsetAsync(bytes, 0, layout.total, prob.stream) != hipSuccess)
         {
