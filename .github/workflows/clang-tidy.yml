@@ -41,6 +41,7 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Define opted-in libraries
         id: lib-config
@@ -90,11 +91,11 @@ jobs:
 
       - name: Build job matrix
         id: build-matrix
+        env:
+          CHANGED: ${{ steps.changes.outputs.changes }}
+          LIBS: ${{ steps.lib-config.outputs.libs }}
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          CHANGED='${{ steps.changes.outputs.changes }}'
-          LIBS='${{ steps.lib-config.outputs.libs }}'
-          IS_DISPATCH=${{ github.event_name == 'workflow_dispatch' }}
-
           MATRIX=$(
             echo "$LIBS" | jq -c \
               --argjson changed "$CHANGED" \
@@ -119,6 +120,7 @@ jobs:
         with:
           sparse-checkout: ${{ matrix.checkout_paths_str }}
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Checkout TheRock
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -126,6 +128,7 @@ jobs:
           repository: ROCm/TheRock
           ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
           path: TheRock
+          persist-credentials: false
 
       - name: Install base dependencies
         run: |
@@ -187,9 +190,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+          echo "${NEEDS_JSON}"
+          FAILED_JOBS="$(echo "${NEEDS_JSON}" \
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"

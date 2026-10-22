@@ -15,7 +15,7 @@ runs:
   steps:
     - name: Load CI environment
       id: ci-env
-      uses: ./.github/actions/ci-env
+      uses: $/.github/actions/ci-env
 
     - name: Checkout TheRock
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -24,6 +24,7 @@ runs:
         ref: ${{ steps.ci-env.outputs.therock-ref }}
         path: TheRock
         sparse-checkout: build_tools
+        persist-credentials: false
 
     - name: Install ROCm dependencies
       shell: bash
@@ -31,11 +32,16 @@ runs:
 
     - name: Install ROCm
       shell: bash
+      env:
+        AMDGPU_FAMILY: ${{ inputs.amdgpu_family }}
+        EXTRA_ARGS: ${{ inputs.extra_args }}
       run: |
+        # extra_args is a whitespace-separated argument list.
+        read -r -a extra_args <<< "${EXTRA_ARGS}"
         python3 TheRock/build_tools/install_rocm_from_artifacts.py \
           --latest-release \
-          --amdgpu-family ${{ inputs.amdgpu_family }} \
+          --amdgpu-family "${AMDGPU_FAMILY}" \
           --output-dir /opt/rocm \
           --base-only \
-          ${{ inputs.extra_args }}
+          "${extra_args[@]}"
         echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"

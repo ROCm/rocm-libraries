@@ -27,7 +27,8 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
 
       - name: Checkout the Monorepo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -35,6 +36,8 @@ jobs:
           fetch-depth: 0 # needed for git subtree pull/push
           token: ${{ steps.generate-token.outputs.token }}
           ref: ${{ env.MONOREPO_BRANCH }}
+          # "Update Repositories in the Monorepo" pushes to the monorepo.
+          persist-credentials: true
 
       - name: Set up Git user
         run: |

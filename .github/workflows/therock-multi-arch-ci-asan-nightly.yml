@@ -46,8 +46,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Surface locked TheRock ref
+        env:
+          THEROCK_REF: ${{ needs.setup.outputs.ref }}
         run: |
-          RESOLVED_REF="${{ needs.setup.outputs.ref }}"
+          RESOLVED_REF="${THEROCK_REF}"
           COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
           echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
           {
@@ -65,7 +67,9 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
-    secrets: inherit
+    # TheRock's multi_arch_ci_* declare no workflow_call secrets and pass
+    # theirs on by inheritance, so they cannot be forwarded by name.
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -95,10 +99,12 @@ jobs:
           ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJSON(needs) }}'
+            --needs-json "${NEEDS_JSON}"

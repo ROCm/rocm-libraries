@@ -42,6 +42,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: ${{ inputs.therock_ref }}
+          persist-credentials: false
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -49,6 +50,7 @@ jobs:
           repository: ROCm/therock-ci-config
           ref: main
           path: ci-config
+          persist-credentials: false
         continue-on-error: true
 
       - name: Setting up Python
@@ -62,8 +64,9 @@ jobs:
           TEST_TYPE: ${{ inputs.test_type }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
           CI_CONFIG_PATH: ci-config
+          PLATFORM: ${{ inputs.platform }}
         id: configure
-        run: python ./build_tools/github_actions/fetch_test_configurations.py --platform=${{ inputs.platform }}
+        run: python ./build_tools/github_actions/fetch_test_configurations.py --platform=${PLATFORM}
 
   test_components:
     name: 'Test ${{ matrix.components.job_name }}'
@@ -74,7 +77,7 @@ jobs:
       fail-fast: false
       matrix:
         components: ${{ fromJSON(needs.configure_test_matrix.outputs.components) }}
-    uses: './.github/workflows/therock-test-component.yml'
+    uses: '$/.github/workflows/therock-test-component.yml'
     with:
       artifact_run_id: ${{  github.run_id }}
       therock_ref: ${{ inputs.therock_ref }}
