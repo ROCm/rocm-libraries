@@ -75,8 +75,8 @@ TEST(FmhaRegistryTest, SoftCapKernelsDoNotCollide)
 
     key_on.signature.has_logits_soft_cap = true;
 
-    // Pins the difference and the guarantee that adding the field left every
-    // identifier without a soft cap byte-identical.
+    // Checks that enabling soft cap adds exactly this suffix.
+    // Compatibility with older identifiers follows from the guarded append.
     EXPECT_EQ(key_off.encode_identifier() + "_sc", key_on.encode_identifier());
 
     FmhaRegistry reg;

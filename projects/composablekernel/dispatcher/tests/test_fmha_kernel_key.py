@@ -61,7 +61,7 @@ def compared_fields():
 
 
 def identifier_fields():
-    """Signature fields encode_identifier() emits into the registry key."""
+    """Signature fields referenced by encode_identifier()."""
     body = _body(KEY_HPP, r"std::string encode_identifier\s*\(\s*\)\s*const")
     return set(re.findall(r"\bsignature\.(\w+)", body))
 
