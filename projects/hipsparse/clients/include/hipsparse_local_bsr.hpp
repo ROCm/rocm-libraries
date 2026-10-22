@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  BSR matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalBsr
 {
@@ -63,11 +65,8 @@ public:
                                                             order);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroySpMat(descr);
-                descr = nullptr;
-            }
+            std::cerr << "hipsparseCreateBsr failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -76,7 +75,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroySpMat(descr);
+            const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalBsr destructor");
+            }
         }
     }
 
@@ -93,5 +96,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseSpMatDescr_t. A leftover hipsparseDestroySpMat(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroySpMat(const hipsparseLocalBsr&) = delete;
 
 #endif // HIPSPARSE_LOCAL_BSR_HPP

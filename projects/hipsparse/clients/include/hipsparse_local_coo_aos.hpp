@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  COO (AoS) matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalCooAoS
 {
@@ -46,11 +48,8 @@ public:
             &descr, rows, cols, nnz, cooInd, cooValues, cooIdxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroySpMat(descr);
-                descr = nullptr;
-            }
+            std::cerr << "hipsparseCreateCooAoS failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -59,7 +58,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroySpMat(descr);
+            const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalCooAoS destructor");
+            }
         }
     }
 
@@ -76,5 +79,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseSpMatDescr_t. A leftover hipsparseDestroySpMat(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroySpMat(const hipsparseLocalCooAoS&) = delete;
 
 #endif // HIPSPARSE_LOCAL_COO_AOS_HPP

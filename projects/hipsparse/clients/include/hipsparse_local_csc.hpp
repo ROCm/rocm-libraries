@@ -27,6 +27,8 @@
 
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
+
 /*! \brief  CSC matrix descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalCsc
 {
@@ -57,11 +59,8 @@ public:
                                                             valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroySpMat(descr);
-                descr = nullptr;
-            }
+            std::cerr << "hipsparseCreateCsc failed: " << hipsparseGetErrorName(status)
+                      << std::endl;
             throw(status);
         }
     }
@@ -70,7 +69,11 @@ public:
     {
         if(descr != nullptr)
         {
-            hipsparseDestroySpMat(descr);
+            const hipsparseStatus_t status = hipsparseDestroySpMat(descr);
+            if(status != HIPSPARSE_STATUS_SUCCESS)
+            {
+                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalCsc destructor");
+            }
         }
     }
 
@@ -87,5 +90,10 @@ public:
         return descr;
     }
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseSpMatDescr_t. A leftover hipsparseDestroySpMat(wrapper) is a compile
+// error instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroySpMat(const hipsparseLocalCsc&) = delete;
 
 #endif // HIPSPARSE_LOCAL_CSC_HPP
