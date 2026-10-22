@@ -253,3 +253,58 @@ class Spec:
             int(hints),
             **knobs,
         )
+
+
+# The instance-row spelling of an unset knob: -1 for the int knobs (0 is legal for
+# ``tight_registers`` and ``store_db``), "auto" for the word knobs.
+UNSET_INT = -1
+UNSET_WORD = "auto"
+
+# Row fields of an ``_instances.Instance`` that carry the functional key, besides ``dtype``.
+ROW_FIELDS = (
+    "head_dim",
+    "head_dim_v",
+    "causal",
+    "has_bias",
+    "dropout",
+    "padded",
+    "hints",
+    "floor",
+    "dform",
+)
+
+
+def to_spec(instance) -> Spec:
+    """The Spec an ``_instances.Instance`` row of a ``sdpa_bwd_<kernel>`` op names.
+
+    ``head_dim_v`` is the resolved V head dim (the tile when it equals it); the Spec
+    spells that 0. ``causal`` and ``has_bias`` are the exclusive class.
+    """
+    kernel = instance.op.removeprefix("sdpa_bwd_")
+    if kernel not in KERNELS:
+        raise ValueError(f"{instance.op!r} is not a backward op")
+    knobs = instance.knobs
+    if knobs["causal"] and knobs["has_bias"]:
+        raise ValueError(f"causal and has_bias are exclusive: {instance!r}")
+    cls = "bias" if knobs["has_bias"] else "causal" if knobs["causal"] else "plain"
+    set_knobs = {}
+    for name in KNOBS[kernel]:
+        value = knobs[name]
+        if value not in (UNSET_INT, UNSET_WORD):
+            set_knobs[name] = value
+    extra = set(knobs) - set(ROW_FIELDS) - set(KNOBS[kernel])
+    if extra:
+        raise ValueError(f"{instance.op}: knobs {sorted(extra)} do not belong to it")
+    return Spec(
+        kernel,
+        instance.dtype,
+        knobs["head_dim"],
+        cls,
+        knobs["dform"],
+        knobs["dropout"],
+        knobs["padded"],
+        knobs["floor"],
+        knobs["head_dim_v"],
+        knobs["hints"],
+        **set_knobs,
+    )
