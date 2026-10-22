@@ -56,11 +56,17 @@ std::atomic<int> threadCreationsAllowed{-1};
 /// Test-only interposer. The executable's definition wins over libpthread's for every
 /// caller, std::thread included, so a test can make thread creation fail the way a
 /// process at its thread limit does. Transparent unless a test arms it.
-extern "C" int
-    pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*start)(void*), void* arg)
+// The parameter names are glibc's own: readability-inconsistent-declaration-parameter-name
+// reports a definition whose names differ at the declaration in <pthread.h>, where no NOLINT can
+// reach it, and they are reserved identifiers.
+// NOLINTBEGIN(bugprone-reserved-identifier)
+extern "C" int pthread_create(pthread_t* __restrict __newthread,
+                              const pthread_attr_t* __restrict __attr,
+                              void* (*__start_routine)(void*),
+                              void* __restrict __arg)
 {
     using Real = int (*)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
-    static const Real real = reinterpret_cast<Real>(dlsym(RTLD_NEXT, "pthread_create"));
+    static const Real s_real = reinterpret_cast<Real>(dlsym(RTLD_NEXT, "pthread_create"));
 
     auto allowed = threadCreationsAllowed.load();
     while(allowed >= 0)
@@ -74,8 +80,9 @@ extern "C" int
             break;
         }
     }
-    return real(thread, attr, start, arg);
+    return s_real(__newthread, __attr, __start_routine, __arg);
 }
+// NOLINTEND(bugprone-reserved-identifier)
 #endif
 
 namespace

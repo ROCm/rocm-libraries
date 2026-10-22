@@ -41,6 +41,9 @@ public:
         std::optional<CatalogKey> key;
         bool keyBuilt = false;
         /// The engine version `key` was built for; meaningful once keyBuilt.
+        // Explicit init avoids -Wmissing-field-initializers on the partial Device{...} in
+        // GenericPlanBuilder::beginApplicability.
+        // NOLINTNEXTLINE(readability-redundant-member-init) - see above
         hipdnn_data_sdk::utilities::Version keyVersion{};
     };
 

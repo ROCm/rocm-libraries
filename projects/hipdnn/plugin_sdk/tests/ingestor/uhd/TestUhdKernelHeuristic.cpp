@@ -319,9 +319,9 @@ Catalog catalogOver(const std::vector<KernelDefinition>& definitions, int64_t se
 /// definitions are shared and immutable, so a ranking outlives the temporary catalog.
 const std::vector<KernelDefinition>& definitionsAgainstPriority()
 {
-    static const std::vector<KernelDefinition> definitions
+    static const std::vector<KernelDefinition> s_definitions
         = {kernelWith(0x01, 64, 100), kernelWith(0x02, 128, 1)};
-    return definitions;
+    return s_definitions;
 }
 
 Catalog catalogAgainstPriority(int64_t seqlen)
@@ -332,9 +332,9 @@ Catalog catalogAgainstPriority(int64_t seqlen)
 /// Priorities swapped: declared order puts the large tile first.
 Catalog catalogAlongPriority(int64_t seqlen)
 {
-    static const std::vector<KernelDefinition> definitions
+    static const std::vector<KernelDefinition> s_definitions
         = {kernelWith(0x01, 64, 1), kernelWith(0x02, 128, 100)};
-    return catalogOver(definitions, seqlen);
+    return catalogOver(s_definitions, seqlen);
 }
 
 /// An engine's figure of merit (RFC 0019 §11.1): the calibrated top value, else 0.
