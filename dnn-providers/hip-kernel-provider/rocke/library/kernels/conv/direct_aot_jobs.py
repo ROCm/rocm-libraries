@@ -93,6 +93,17 @@ DW_TILED_BLOCK_W = (4, 7, 8, 14, 16)
 DW_TILED_BLOCK_H = (1, 2, 4, 7)
 DW_TILED_BLOCK_WAVES = (1, 2)
 DW_TILED_UNROLL = (False, True)
+# Channel-packed depthwise forward (cpl > 1: every lane owns cpl adjacent
+# channels, vector loads/stores and packed f32 FMAs): (cpl, block_w values,
+# block_waves values) for the weight-preloading kernel, and the tiles of the
+# output-stationary kernel (cpl 2; its tiles shrink with the packed registers).
+# The packed row-streaming kernel wins the large-batch layers, the tiled one
+# the stride-2 layers.
+DW_FWD_CPL_GRID = (
+    (2, (2, 4, 7, 8), (1, 2, 4)),
+    (4, (4,), (1, 2)),
+)
+DW_TILED_CPL = 2
 
 # Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
 # live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
@@ -1034,6 +1045,10 @@ def _knob_grid(
     elif variant == "direct_depthwise":
         for bw, waves in itertools.product(DW_BLOCK_W_FWD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)
+        # Channel-packed lanes (cpl > 1); cpl == 1 keeps the knob-less identity.
+        for cpl, bws, waves_list in DW_FWD_CPL_GRID:
+            for bw, waves in itertools.product(bws, waves_list):
+                yield dict(block_w=bw, block_waves=waves, cpl=cpl)
     elif variant == "direct_depthwise_spatial":
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
@@ -1042,6 +1057,10 @@ def _knob_grid(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
         ):
             yield dict(block_w=bw, block_h=bh, block_waves=waves, unroll_rows=unroll)
+        for bw, bh, waves in itertools.product(
+            DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES
+        ):
+            yield dict(block_w=bw, block_h=bh, block_waves=waves, cpl=DW_TILED_CPL)
     elif variant == "direct_depthwise_dgrad":
         for bw, waves in itertools.product(DW_BLOCK_W_DGRAD, DW_BLOCK_WAVES):
             yield dict(block_w=bw, block_waves=waves)

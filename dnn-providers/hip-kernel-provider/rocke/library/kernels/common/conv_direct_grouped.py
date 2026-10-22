@@ -8385,6 +8385,10 @@ class DirectDepthwiseSpec:
     block_w: int = 8  # output W positions per block
     block_waves: int = 1  # waves per block
     wave_size: int = 64
+    # Channels per lane. Above 1 every lane owns a run of ``cpl`` adjacent
+    # channels: input and output move as one ``cpl``-wide vector per lane and
+    # the taps run as packed ``<2 x f32>`` FMAs over channel pairs.
+    cpl: int = 1
 
     @property
     def threads_per_block(self) -> int:
@@ -8392,19 +8396,16 @@ class DirectDepthwiseSpec:
 
     @property
     def block_ch(self) -> int:
-        return self.block_waves * self.wave_size
+        return self.block_waves * self.wave_size * self.cpl
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
-        return kernel_name_join(
-            self.name,
-            p.short(),
-            f"bw{self.block_w}",
-            f"bw{self.block_waves}wv",
-            flags={"bf16": p.dtype == "bf16"},
-        )
+        parts = [self.name, p.short(), f"bw{self.block_w}", f"bw{self.block_waves}wv"]
+        if self.cpl > 1:
+            parts.append(f"cpl{self.cpl}")
+        return kernel_name_join(*parts, flags={"bf16": p.dtype == "bf16"})
 
     def validate(self) -> None:
         p = self.problem
@@ -8478,7 +8479,35 @@ def is_valid_depthwise_spec(
             f"max {_DW_MAX_PRELOAD_TAPS}; use DirectDepthwiseColSpec, whose "
             f"live-register cost is linear in KH and independent of KW"
         )
+    why = _depthwise_cpl_reason(spec.cpl, p.groups)
+    if why is not None:
+        return False, why
+    if spec.cpl > 1 and (
+        spec.cpl * taps > _DW_MAX_PRELOAD_TAPS
+        or spec.cpl * spec.block_w * p.KH > _DW_CPL_MAX_ACC
+    ):
+        # Past these the packed weights or accumulator slots spill.
+        return False, (
+            f"cpl={spec.cpl} holds {spec.cpl * taps} weights and "
+            f"{spec.cpl * spec.block_w * p.KH} accumulator-rows per lane "
+            f"(max {_DW_MAX_PRELOAD_TAPS} / {_DW_CPL_MAX_ACC})"
+        )
     return True, "ok"
+
+
+#: Bound on ``cpl * block_w * KH`` for the channel-packed row-streaming
+#: depthwise kernel: its ``KH * block_w`` accumulator slots of ``cpl`` f32
+#: each spill past it.
+_DW_CPL_MAX_ACC = 192
+
+
+def _depthwise_cpl_reason(cpl: int, groups: int) -> Optional[str]:
+    """Why a depthwise kernel cannot pack ``cpl`` channels per lane, or None."""
+    if cpl not in (1, 2, 4):
+        return f"cpl must be 1, 2 or 4 (got {cpl})"
+    if groups % cpl:
+        return f"{groups} channels are not a multiple of cpl={cpl}"
+    return None
 
 
 def build_direct_depthwise(
@@ -8501,6 +8530,8 @@ def build_direct_depthwise(
     ok, why = is_valid_depthwise_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseSpec for {arch}: {why}")
+    if spec.cpl > 1:
+        return _build_direct_depthwise_packed(spec, arch)
 
     from rocke.core.ir import F32
 
@@ -8784,6 +8815,228 @@ def build_direct_depthwise(
     return b.kernel
 
 
+def _dw_packed_helpers(b: IRBuilder, p: "DirectConvProblem", cpl: int):
+    """Vector helpers shared by the channel-packed depthwise forward kernels:
+    ``load1`` (one 16-bit element), ``loadv`` (a ``cpl``-wide vector),
+    ``to_pairs`` (a raw vector as ``cpl / 2`` ``<2 x f32>`` pairs) and
+    ``store`` (pairs back to one ``cpl``-wide 16-bit vector store)."""
+    from rocke.core.ir import BF16, F16
+
+    elem = BF16 if p.dtype == "bf16" else F16
+    c0 = b.const_i32(0)
+    NP = cpl // 2
+
+    def load1(rsrc: Value, off: Value) -> Value:
+        if p.dtype == "bf16":
+            return b.buffer_load_bf16(rsrc, off, c0)
+        return b.buffer_load_f16(rsrc, off, c0)
+
+    def loadv(rsrc: Value, off: Value) -> Value:
+        return b.buffer_load_vN(rsrc, off, c0, elem, cpl)
+
+    def to_pairs(v: Value) -> List[Value]:
+        xs = [b.cast_to_f32(b.vec_extract(v, i)) for i in range(cpl)]
+        return [b.vec_pack(xs[2 * k : 2 * k + 2], F32) for k in range(NP)]
+
+    def store(rsrc: Value, off: Value, pairs: List[Value]) -> None:
+        halves = [b.vec_cast_f32_to(v, elem) for v in pairs]
+        while len(halves) > 1:
+            halves = [
+                b.vec_concat(halves[i], halves[i + 1]) for i in range(0, len(halves), 2)
+            ]
+        if p.dtype == "bf16":
+            b.buffer_store_vN_bf16(rsrc, off, c0, halves[0], cpl // 2)
+        else:
+            b.buffer_store_vN_f16(rsrc, off, c0, halves[0], cpl // 2)
+
+    return load1, loadv, to_pairs, store
+
+
+def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> KernelDef:
+    """:func:`build_direct_depthwise` with ``cpl > 1``.
+
+    Same H-streaming schedule; each lane owns ``cpl`` adjacent channels. Input
+    rows load and output rows store as one ``cpl``-wide vector per lane, and
+    every tap is ``cpl / 2`` packed ``<2 x f32>`` FMAs over channel pairs.
+    """
+    p = spec.problem
+    BLOCK_W = spec.block_w
+    CPL = spec.cpl
+    NP = CPL // 2
+    THREADS = spec.threads_per_block
+    S = p.stride
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+    params = emit_direct_params(b, io_type=_io_type(p.dtype))
+    p_Hi = params["p_Hi"]
+    load1, loadv, to_pairs, store = _dw_packed_helpers(b, p, CPL)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    c_W = params["p_Wo"]
+    c_half = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero2 = b.vec_pack([b.const_f32(0.0), b.const_f32(0.0)], F32)
+
+    tid = b.thread_id_x()
+    bx = b.block_id_x()
+    by = b.block_id_y()
+    n = b.block_id_z()
+    q_tile_start = b.mul(bx, b.const_i32(BLOCK_W))
+    ch = b.mul(b.add(b.mul(by, b.const_i32(THREADS)), tid), b.const_i32(CPL))
+    ch_in_range = b.cmp_lt(ch, params["p_groups"])
+
+    a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])
+    b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])
+    d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
+    d_desc = direct_d_descriptor_dynamic(b, params)
+
+    # Weights B[C, KH, KW, 1]: per channel pair, a <2 x f32> per tap. Lanes past
+    # the channel count read the OOB sentinel (zeros) and never store.
+    w_ch_off = b.mul(b.mul(ch, b.const_i32(p.KH * p.KW)), c_half)
+    weights: List[List[List[Value]]] = []
+    for r_const in range(p.KH):
+        row = []
+        for s_const in range(p.KW):
+            vals = []
+            for i in range(CPL):
+                off = b.add(
+                    w_ch_off,
+                    b.const_i32(2 * (i * p.KH * p.KW + r_const * p.KW + s_const)),
+                )
+                safe = b.select(ch_in_range, off, oob_sentinel)
+                vals.append(b.cast_to_f32(load1(b_rsrc, safe)))
+            row.append([b.vec_pack(vals[2 * k : 2 * k + 2], F32) for k in range(NP)])
+        weights.append(row)
+
+    # Streaming loop bounds and column terms as in build_direct_depthwise.
+    c_KH = b.const_i32(p.KH)
+    c_stride_rv = b.const_i32(S)
+    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    n_fma_groups_v = b.div(b.add(p_Hi, b.const_i32(p.KH - 1)), c_KH)
+    n_groups_v = b.div(b.add(p_Hi, b.const_i32(p.PAD + p.KH - 1)), c_KH)
+
+    row_cols: Dict[int, Tuple[int, int]] = {}
+    for w_out in range(BLOCK_W):
+        for s_const in range(p.KW):
+            row_cols.setdefault(w_out * S + s_const, (w_out, s_const))
+    n_cols = len(row_cols)
+    col_idx = {col: i for i, col in enumerate(row_cols)}
+
+    ch_off = b.mul(ch, c_half)
+    wi_tile = b.add(b.mul(q_tile_start, c_stride_rv), b.const_i32(-p.PAD))
+    col_terms: List[Value] = []
+    for col in row_cols:
+        wi = b.add(wi_tile, b.const_i32(col))
+        col_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, params["p_Wi"]))
+        col_off = b.mul(b.mul(wi, params["p_A_stride_wi"]), c_half)
+        col_terms.append(b.select(col_ok, col_off, oob_sentinel))
+    n_off = b.mul(n, params["p_A_stride_n"])
+
+    def load_row(y: Value) -> List[Value]:
+        """Raw <CPL x elem> input vectors of streaming row ``y``, one per column."""
+        hi = b.add(y, b.const_i32(-p.PAD))
+        row_ok = b.cmp_lt(hi, p_Hi)
+        row_off = b.mul(b.add(n_off, b.mul(hi, params["p_A_stride_hi"])), c_half)
+        return [
+            loadv(
+                a_rsrc, b.add(ch_off, b.select(row_ok, b.add(row_off, t), oob_sentinel))
+            )
+            for t in col_terms
+        ]
+
+    def row_y(grp_iv: Value, j: int) -> Value:
+        return b.add(b.mul(grp_iv, c_KH), b.const_i32(p.PAD + j))
+
+    def flush(grp_iv: Value, j: int, y_j: Value, slots: List[List[Value]]) -> None:
+        j_valid = b.cmp_lt(y_j, n_iters_v)
+        P_FLUSH_j = (p.PAD + j + 1) % p.KH
+        p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+        if j >= p.PAD:
+            flush_ge = j_valid
+        else:
+            flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
+        if S == 1:
+            should_flush = flush_ge
+        else:
+            should_flush = b.land(
+                flush_ge, b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
+            )
+        ho_row_j = b.div(p_flush_rv, c_stride_rv)
+        for w_out in range(BLOCK_W):
+            out_q = b.add(q_tile_start, b.const_i32(w_out))
+            ok = b.land(b.land(b.cmp_lt(out_q, c_W), ch_in_range), should_flush)
+            d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
+            store(
+                d_rsrc,
+                b.select(ok, b.mul(d_off, c_half), oob_sentinel),
+                slots[P_FLUSH_j * BLOCK_W + w_out],
+            )
+            slots[P_FLUSH_j * BLOCK_W + w_out] = [zero2] * NP
+
+    PF = min(p.KH, -(-16 // n_cols))
+    n_flat = p.KH * BLOCK_W
+    slot_args = [(f"dwp_acc_{f}_{k}", zero2) for f in range(n_flat) for k in range(NP)]
+    row_args = []
+    for k in range(PF):
+        for col, v in zip(row_cols, load_row(b.const_i32(p.PAD + k))):
+            row_args.append((f"dwp_a_r{k}_c{col}", v))
+    n_acc = len(slot_args)
+
+    def unflat(vals) -> List[List[Value]]:
+        return [list(vals[f * NP : (f + 1) * NP]) for f in range(n_flat)]
+
+    fma_loop = b.scf_for_iter(
+        c0,
+        n_fma_groups_v,
+        c1,
+        slot_args + row_args,
+        iv_name="dwp_grp",
+        elide_trailing_barrier=False,
+    )
+    with fma_loop as (grp_iv, loop_vals):
+        slots = unflat(loop_vals[:n_acc])
+        window = [
+            list(loop_vals[n_acc + k * n_cols : n_acc + (k + 1) * n_cols])
+            for k in range(PF)
+        ]
+        for j in range(p.KH):
+            y_j = row_y(grp_iv, j)
+            window.append(load_row(b.add(y_j, b.const_i32(PF))))
+            a_row = [to_pairs(v) for v in window.pop(0)]
+            for w_out in range(BLOCK_W):
+                for s_const in range(p.KW):
+                    a = a_row[col_idx[w_out * S + s_const]]
+                    for r_const in range(p.KH):
+                        idx = ((p.PAD + j - r_const) % p.KH) * BLOCK_W + w_out
+                        w = weights[r_const][s_const]
+                        acc = slots[idx]
+                        slots[idx] = [
+                            b.vector_fma(w[k], a[k], acc[k]) for k in range(NP)
+                        ]
+            flush(grp_iv, j, y_j, slots)
+        b.scf_yield(
+            *(v for sl in slots for v in sl), *(v for row in window for v in row)
+        )
+
+    flush_loop = b.scf_for_iter(
+        n_fma_groups_v,
+        n_groups_v,
+        c1,
+        [(f"dwp_tail_{i}", fma_loop.results[i]) for i in range(n_acc)],
+        iv_name="dwp_tail",
+        elide_trailing_barrier=False,
+    )
+    with flush_loop as (grp_iv, loop_vals):
+        slots = unflat(loop_vals)
+        for j in range(p.KH):
+            flush(grp_iv, j, row_y(grp_iv, j), slots)
+        b.scf_yield(*(v for sl in slots for v in sl))
+
+    return b.kernel
+
+
 # Registers per lane the row-streaming depthwise kernel can hold without
 # spilling (see depthwise_stream_register_reason). Calibrated on gfx950 bf16:
 # every config estimated at or below it compiles spill-free, while 293 (13x13,
@@ -8808,7 +9061,7 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
     cols = spec.block_w if isinstance(spec, DirectDepthwiseSpec) else 1
     n_cols = (cols - 1) * p.stride + p.KW
     pf = min(p.KH, -(-16 // n_cols))
-    live = p.KH * p.KW + p.KH * cols + pf * n_cols
+    live = (p.KH * p.KW + p.KH * cols + pf * n_cols) * getattr(spec, "cpl", 1)
     if live > _DW_STREAM_REG_BUDGET:
         return (
             f"~{live} live registers per lane exceed the {_DW_STREAM_REG_BUDGET} "
@@ -8872,6 +9125,9 @@ class DirectDepthwiseTiledSpec:
     # then overlap one row's loads with the previous row's FMAs.
     unroll_rows: bool = False
     wave_size: int = 64
+    # Channels per lane (see DirectDepthwiseSpec.cpl): ``cpl``-wide vector
+    # loads and stores, taps as packed ``<2 x f32>`` FMAs over channel pairs.
+    cpl: int = 1
 
     @property
     def threads_per_block(self) -> int:
@@ -8879,7 +9135,7 @@ class DirectDepthwiseTiledSpec:
 
     @property
     def block_ch(self) -> int:
-        return self.block_waves * self.wave_size
+        return self.block_waves * self.wave_size * self.cpl
 
     @property
     def n_cols(self) -> int:
@@ -8892,7 +9148,7 @@ class DirectDepthwiseTiledSpec:
         """Registers per lane the kernel keeps live across its row loop: the
         accumulators, the ``block_h`` input rows of an iteration and the
         current and prefetched weight rows."""
-        return (
+        return self.cpl * (
             self.block_h * self.block_w
             + self.block_h * self.n_cols
             + 2 * self.problem.KW
@@ -8908,14 +9164,18 @@ class DirectDepthwiseTiledSpec:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
-        return kernel_name_join(
+        parts = [
             self.name,
             p.short(),
             f"f{p.KH}x{p.KW}",
             f"bw{self.block_w}",
             f"bh{self.block_h}",
             f"bw{self.block_waves}wv",
-            flags={"ur": self.unroll_rows, "bf16": p.dtype == "bf16"},
+        ]
+        if self.cpl > 1:
+            parts.append(f"cpl{self.cpl}")
+        return kernel_name_join(
+            *parts, flags={"ur": self.unroll_rows, "bf16": p.dtype == "bf16"}
         )
 
     def validate(self) -> None:
@@ -8985,6 +9245,9 @@ def is_valid_depthwise_tiled_spec(
         return False, f"wave_size {spec.wave_size} != {arch} wave {target.wave_size}"
     if spec.threads_per_block > target.max_threads_per_block:
         return False, f"threads_per_block {spec.threads_per_block} exceeds arch limit"
+    why = _depthwise_cpl_reason(spec.cpl, p.groups)
+    if why is not None:
+        return False, why
     if spec.live_regs > _DW_TILED_REG_BUDGET:
         return False, (
             f"~{spec.live_regs} live registers per lane exceed the "
@@ -9009,6 +9272,8 @@ def build_direct_depthwise_tiled(
     ok, why = is_valid_depthwise_tiled_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseTiledSpec for {arch}: {why}")
+    if spec.cpl > 1:
+        return _build_direct_depthwise_tiled_packed(spec, arch)
 
     from rocke.core.ir import F32
 
@@ -9169,6 +9434,171 @@ def build_direct_depthwise_tiled(
                 b.buffer_store_bf16(d_rsrc, safe_d, c0, b.trunc_f32_to_bf16(acc))
             else:
                 b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc))
+
+    return b.kernel
+
+
+def _build_direct_depthwise_tiled_packed(
+    spec: "DirectDepthwiseTiledSpec", arch: str
+) -> KernelDef:
+    """:func:`build_direct_depthwise_tiled` with ``cpl > 1``.
+
+    Same output-stationary tile and filter-row loop; each lane owns ``cpl``
+    adjacent channels. Input columns load and outputs store as one
+    ``cpl``-wide vector per lane, and every tap is ``cpl / 2`` packed
+    ``<2 x f32>`` FMAs over channel pairs.
+    """
+    p = spec.problem
+    BW = spec.block_w
+    TH = spec.block_h
+    CPL = spec.cpl
+    NP = CPL // 2
+    THREADS = spec.threads_per_block
+    S = p.stride
+    KH, KW, PAD = p.KH, p.KW, p.PAD
+    n_cols = spec.n_cols
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+    params = emit_direct_params(b, io_type=_io_type(p.dtype))
+    p_Hi = params["p_Hi"]
+    p_Ho = params["p_Ho"]
+    load1, loadv, to_pairs, store = _dw_packed_helpers(b, p, CPL)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    c_half = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero2 = b.vec_pack([b.const_f32(0.0), b.const_f32(0.0)], F32)
+
+    tid = b.thread_id_x()
+    bx = b.block_id_x()
+    by = b.block_id_y()
+    bz = b.block_id_z()
+    n_h_tiles = b.div(b.add(p_Ho, b.const_i32(TH - 1)), b.const_i32(TH))
+    n = b.div(bz, n_h_tiles)
+    h_tile = b.mod(bz, n_h_tiles)
+    q0 = b.mul(bx, b.const_i32(BW))
+    h0 = b.mul(h_tile, b.const_i32(TH))
+    ch = b.mul(b.add(b.mul(by, b.const_i32(THREADS)), tid), b.const_i32(CPL))
+    ch_in_range = b.cmp_lt(ch, params["p_groups"])
+
+    a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])
+    b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])
+    d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
+
+    # Weights B[C, KH, KW, 1]: channel ch + i's filter starts at
+    # (ch + i) * KH * KW. Lanes past the channel count read the sentinel.
+    w_ch_off = b.mul(b.mul(ch, b.const_i32(KH * KW)), c_half)
+
+    def load_w_row(r: Value) -> List[Value]:
+        """Raw weights of filter row ``r``: CPL per tap, tap-major."""
+        row_off = b.add(w_ch_off, b.mul(r, b.const_i32(KW * 2)))
+        out = []
+        for s in range(KW):
+            for i in range(CPL):
+                off = b.add(row_off, b.const_i32(2 * (i * KH * KW + s)))
+                out.append(load1(b_rsrc, b.select(ch_in_range, off, oob_sentinel)))
+        return out
+
+    def w_pairs(raw: List[Value]) -> List[List[Value]]:
+        xs = [b.cast_to_f32(v) for v in raw]
+        return [
+            [
+                b.vec_pack(xs[s * CPL + 2 * k : s * CPL + 2 * k + 2], F32)
+                for k in range(NP)
+            ]
+            for s in range(KW)
+        ]
+
+    ch_off = b.mul(ch, c_half)
+    wi_tile = b.add(b.mul(q0, b.const_i32(S)), b.const_i32(-PAD))
+    col_terms: List[Value] = []
+    for col in range(n_cols):
+        wi = b.add(wi_tile, b.const_i32(col))
+        col_ok = b.land(b.cmp_ge(wi, c0), b.cmp_lt(wi, params["p_Wi"]))
+        col_off = b.mul(b.mul(wi, params["p_A_stride_wi"]), c_half)
+        col_terms.append(b.select(col_ok, col_off, oob_sentinel))
+    n_off = b.mul(n, params["p_A_stride_n"])
+    hi_tile = b.add(b.mul(h0, b.const_i32(S)), b.const_i32(-PAD))
+
+    def load_row(hi: Value) -> List[Value]:
+        """Raw <CPL x elem> input vectors of row ``hi``, one per column."""
+        row_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, p_Hi))
+        row_off = b.mul(b.add(n_off, b.mul(hi, params["p_A_stride_hi"])), c_half)
+        return [
+            loadv(
+                a_rsrc, b.add(ch_off, b.select(row_ok, b.add(row_off, t), oob_sentinel))
+            )
+            for t in col_terms
+        ]
+
+    def pairs_of(vals: List[Value]) -> List[Value]:
+        """Flatten raw column vectors into their ``<2 x f32>`` pairs."""
+        return [pr for v in vals for pr in to_pairs(v)]
+
+    def fma_row(accs: List[Value], t: int, row: List[Value], w: List[List[Value]]):
+        for w_out in range(BW):
+            for s in range(KW):
+                col = w_out * S + s
+                for k in range(NP):
+                    idx = (t * BW + w_out) * NP + k
+                    accs[idx] = b.vector_fma(w[s][k], row[col * NP + k], accs[idx])
+
+    n_acc = TH * BW * NP
+    accs: List[Value] = [zero2] * n_acc
+    n_row = n_cols * NP
+    for ph in range(S):
+        n_r = -(-(KH - ph) // S)
+        phase_base = b.add(hi_tile, b.const_i32(ph))
+        iter_args = [(f"dwtp_acc{ph}_{i}", a) for i, a in enumerate(accs)]
+        for t in range(TH - 1):
+            row = pairs_of(load_row(b.add(phase_base, b.const_i32(S * t))))
+            iter_args += [(f"dwtp_x{ph}_r{t}_{c}", v) for c, v in enumerate(row)]
+        w0 = load_w_row(b.const_i32(ph))
+        iter_args += [(f"dwtp_w{ph}_{i}", v) for i, v in enumerate(w0)]
+        n_win = (TH - 1) * n_row
+
+        loop = b.scf_for_iter(
+            c0,
+            b.const_i32(n_r),
+            c1,
+            iter_args,
+            iv_name=f"dwtp_r{ph}",
+            unroll=spec.unroll_rows,
+            elide_trailing_barrier=False,
+        )
+        with loop as (iv, vals):
+            new_accs = list(vals[:n_acc])
+            window = vals[n_acc : n_acc + n_win]
+            rows = [list(window[t * n_row : (t + 1) * n_row]) for t in range(TH - 1)]
+            w_cur = w_pairs(list(vals[n_acc + n_win :]))
+            step = b.mul(iv, b.const_i32(S))
+            new_row = load_row(
+                b.add(b.add(phase_base, step), b.const_i32(S * (TH - 1)))
+            )
+            w_next = load_w_row(b.add(b.const_i32(ph), b.add(step, b.const_i32(S))))
+            for t in range(TH - 1):
+                fma_row(new_accs, t, rows[t], w_cur)
+            rows.append(pairs_of(new_row))
+            fma_row(new_accs, TH - 1, rows[TH - 1], w_cur)
+            b.scf_yield(*new_accs, *(v for row in rows[1:] for v in row), *w_next)
+        accs = list(loop.results[:n_acc])
+
+    d_desc = direct_d_descriptor_dynamic(b, params)
+    for t in range(TH):
+        ho = b.add(h0, b.const_i32(t))
+        h_ok = b.land(b.cmp_lt(ho, p_Ho), ch_in_range)
+        for w_out in range(BW):
+            wo = b.add(q0, b.const_i32(w_out))
+            ok = b.land(h_ok, b.cmp_lt(wo, params["p_Wo"]))
+            d_off, _ = d_desc.offset(b, n=n, h=ho, w=wo, k=ch)
+            base = (t * BW + w_out) * NP
+            store(
+                d_rsrc,
+                b.select(ok, b.mul(d_off, c_half), oob_sentinel),
+                accs[base : base + NP],
+            )
 
     return b.kernel
 
