@@ -1704,11 +1704,12 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop)
+                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
-          splitWaveLoop_(splitWaveLoop) {}
+          splitWaveLoop_(splitWaveLoop),
+          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1800,11 +1801,12 @@ class InsertClusterBarrierPassImpl : public Pass {
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
-            // One Rule 3 handshake per enclosing loop, the first trigger in
-            // program order. HalfPLR and ExpandPointerSwap emit several copies
-            // that fall through inside one LoopBegin; a later copy is the same
-            // loop. A different head (tail loop, another path, a wave-split
-            // clone) gets its own first handshake.
+            // reduceClusterBarrierPerLoop_: one Rule 3 handshake per enclosing loop,
+            // the first trigger in program order. HalfPLR and ExpandPointerSwap
+            // emit several copies that fall through inside one LoopBegin; a later
+            // copy is the same loop. A different head (tail loop, another path, a
+            // wave-split clone) gets its own first handshake. Off: every trigger
+            // in the loop handshakes.
             std::unordered_set<StinkyInstruction*> loopsWithHandshake;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
@@ -1833,14 +1835,27 @@ class InsertClusterBarrierPassImpl : public Pass {
                     StinkyInstruction* head = findEnclosingLoopHead(trigger);
                     if (head == nullptr) continue;
 
-                    // First trigger of this loop only. Claim the loop even when that
-                    // trigger already has its cluster wait, so a re-run does not hand
-                    // the handshake to a later trigger. A later workgroup barrier plus
-                    // tensor_load in the same loop, including a fall-through unroll
-                    // copy, does not get another handshake. The producer drain below
-                    // is not a cluster barrier, so it is still recorded.
-                    if (loopsWithHandshake.insert(head).second &&
-                        !isImmediatelyPrecededByClusterBarrierWait(trigger)) {
+                    bool emitHandshake = false;
+                    if (reduceClusterBarrierPerLoop_) {
+                        // First trigger of this loop only. Claim the loop even when
+                        // that trigger already has its cluster wait, so a re-run does
+                        // not hand the handshake to a later trigger. A later workgroup
+                        // barrier plus tensor_load in the same loop, including a
+                        // fall-through unroll copy, does not get another handshake.
+                        // The producer drain below is not a cluster barrier, so it is
+                        // still recorded.
+                        if (loopsWithHandshake.insert(head).second &&
+                            !isImmediatelyPrecededByClusterBarrierWait(trigger))
+                            emitHandshake = true;
+                    } else if (isImmediatelyPrecededByClusterBarrierWait(trigger)) {
+                        // A re-run skips a trigger that already has its wait, and
+                        // skips the drain recording below with it.
+                        continue;
+                    } else {
+                        emitHandshake = true;
+                    }
+
+                    if (emitHandshake) {
                         // Emit the cluster wait above the drains the wait-cnt pass
                         // already anchored on this workgroup signal.
                         IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
@@ -2057,6 +2072,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int pgrValue_ = 1;
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
+    const bool reduceClusterBarrierPerLoop_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2064,10 +2080,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 }  // namespace
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
-                                                     int rule3SignalLeadCycles,
-                                                     bool splitWaveLoop) {
+                                                     int rule3SignalLeadCycles, bool splitWaveLoop,
+                                                     bool reduceClusterBarrierPerLoop) {
     return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop);
+                                                          rule3SignalLeadCycles, splitWaveLoop,
+                                                          reduceClusterBarrierPerLoop);
 }
 
 namespace cluster_barrier {
