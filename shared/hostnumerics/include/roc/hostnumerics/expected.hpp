@@ -22,16 +22,34 @@
 // the full interface; one would add a large external header for the few
 // operations used here.
 //
-// Each operation kept here behaves as in std::expected. Assignment, conversion
-// between result types, value(), value_or(), and the monadic operations are
+// Each operation kept here behaves as in std::expected. Assignment requires
+// nonthrowing move construction for both payload types. Conversion between
+// result types, void values, value(), value_or(), and monadic operations are
 // omitted. When HostNumerics can require C++23, replace Expected and Unexpected
 // with std::expected and std::unexpected, raise the exported C++ standard, and
 // delete this header.
 
 namespace roc::hostnumerics::detail {
+template <typename E>
+class Unexpected;
+
+namespace expected_detail {
+template <typename T>
+inline constexpr bool IsUnexpectedV = false;
+template <typename E>
+inline constexpr bool IsUnexpectedV<Unexpected<E>> = true;
+
+template <typename E>
+inline constexpr bool IsErrorV = std::is_object_v<E> && !std::is_array_v<E> &&
+                                 !std::is_const_v<E> && !std::is_volatile_v<E> && !IsUnexpectedV<E>;
+}  // namespace expected_detail
+
 // Explicitly marks an error, including when the value and error types match.
 template <typename E>
 class Unexpected {
+    static_assert(expected_detail::IsErrorV<E>,
+                  "E must be an unqualified, non-array object type other than Unexpected.");
+
    public:
     using error_type = E;
 
@@ -71,24 +89,22 @@ Unexpected(E) -> Unexpected<E>;
 template <typename T, typename E>
 class Expected;
 
-namespace result_detail {
-template <typename T>
-inline constexpr bool IsUnexpectedV = false;
-template <typename E>
-inline constexpr bool IsUnexpectedV<Unexpected<E>> = true;
-
+namespace expected_detail {
 template <typename T>
 inline constexpr bool IsExpectedV = false;
 template <typename T, typename E>
 inline constexpr bool IsExpectedV<Expected<T, E>> = true;
-}  // namespace result_detail
+}  // namespace expected_detail
 
 // std::variant manages storage and lifetimes. Callers check has_value() before
 // accessing a payload; accessing the inactive one is checked by assertions.
 template <typename T, typename E>
 class [[nodiscard]] Expected {
-    static_assert(std::is_object_v<T> && std::is_object_v<E>);
-    static_assert(!result_detail::IsUnexpectedV<std::remove_cv_t<T>> &&
+    static_assert(std::is_object_v<T> && !std::is_array_v<T>,
+                  "T must be a non-array object type; void values are not supported.");
+    static_assert(expected_detail::IsErrorV<E>,
+                  "E must be an unqualified, non-array object type other than Unexpected.");
+    static_assert(!expected_detail::IsUnexpectedV<std::remove_cv_t<T>> &&
                   !std::same_as<std::remove_cv_t<T>, std::in_place_t>);
 
    public:
@@ -102,8 +118,8 @@ class [[nodiscard]] Expected {
 
     template <typename U = T>
         requires(!std::same_as<std::remove_cvref_t<U>, Expected> &&
-                 !result_detail::IsExpectedV<std::remove_cvref_t<U>> &&
-                 !result_detail::IsUnexpectedV<std::remove_cvref_t<U>> &&
+                 !expected_detail::IsExpectedV<std::remove_cvref_t<U>> &&
+                 !expected_detail::IsUnexpectedV<std::remove_cvref_t<U>> &&
                  !std::same_as<std::remove_cvref_t<U>, std::in_place_t> &&
                  std::constructible_from<T, U &&>)
     constexpr explicit(!std::is_convertible_v<U&&, T>)
@@ -130,10 +146,22 @@ class [[nodiscard]] Expected {
 
     Expected(const Expected&) = default;
     Expected(Expected&&) = default;
-    // Keep variant's valueless state unreachable by disabling state changes.
-    // A throwing construction prevents the result from coming into existence.
-    Expected& operator=(const Expected&) = delete;
-    Expected& operator=(Expected&&) = delete;
+    // Nonthrowing moves let variant preserve its active payload when a copy
+    // throws during a state change, keeping its valueless state unreachable.
+    Expected& operator=(const Expected&)
+        requires(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<E>)
+    = default;
+    Expected& operator=(Expected&&)
+        requires(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<E>)
+    = default;
+    Expected& operator=(const Expected&)
+        requires(!(std::is_nothrow_move_constructible_v<T> &&
+                   std::is_nothrow_move_constructible_v<E>))
+    = delete;
+    Expected& operator=(Expected&&)
+        requires(!(std::is_nothrow_move_constructible_v<T> &&
+                   std::is_nothrow_move_constructible_v<E>))
+    = delete;
 
     constexpr bool has_value() const noexcept {
         return m_result.index() == 0;
