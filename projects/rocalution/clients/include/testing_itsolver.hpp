@@ -110,7 +110,6 @@ bool testing_itsolver(Arguments argus)
     p.SetMaxIter(50);
 
     p.SetAlgorithm(ItILU0Algorithm::SyncSplit);
-    p.SetOptions(ItILU0Option::ConvergenceHistory);
 
     // Set up iterative triangular solve
     SolverDescr descr;
@@ -177,8 +176,10 @@ bool testing_itsolver(Arguments argus)
     int           niter_preconditioner;
     const double* history = p.GetConvergenceHistory(&niter_preconditioner);
 
+    // Without ItILU0Option::ConvergenceHistory, no history is recorded
+    success = success && history == nullptr;
+
     // On the host, ItILU0 falls back to ILU0 and reports zero iterations
-    success = success && history != nullptr;
     success = success && niter_preconditioner >= 0 && niter_preconditioner <= 50;
 
     // Clear solver
