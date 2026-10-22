@@ -202,6 +202,42 @@ public:
   /// Emits dst = the low 64 bits of a * b.
   void muli64(RegisterRef dst, Operand a, Operand b);
 
+  // Division.
+  //
+  /// Emits dst = a / b for signed 32-bit values, with the quotient truncated
+  /// toward zero like C and LLVM's sdiv. INT32_MIN / -1 wraps to INT32_MIN.
+  /// Division by zero gives an unspecified value, but never faults or hangs.
+  ///
+  /// useIEEE selects one of LLVM's AMDGPU expansions. true is the exact one,
+  /// correct for all inputs: an f32 reciprocal of |b| scaled by 2^32 - 512, one
+  /// Newton step and two corrections on the magnitudes, then the sign. false is
+  /// LLVM's 24-bit expansion, which divides in f32 and applies one +-1
+  /// correction; it is exact only when |a| < 2^23 and |b| < 2^23, and other
+  /// inputs give unspecified results.
+  ///
+  /// The op is a SALU sequence iff dst and every register operand are SGPRs
+  /// (the uniform form), and a VALU sequence for a VGPR dst, where SGPR and
+  /// immediate operands are legalized. The uniform form computes the f32
+  /// reciprocal in temporary VGPRs and moves it to an SGPR with
+  /// v_readfirstlane_b32, as LLVM lowers uniform division, so it needs at least
+  /// one active lane: readfirstlane with exec == 0 is undefined, and LLVM has
+  /// the same precondition. It writes SCC, and the fast path reads exec.
+  ///
+  /// Neither form writes exec or VCC; every correction is a compare and a
+  /// select, with masks in temporary SGPR pairs. Temporary VGPRs, SGPRs and an
+  /// SGPR pair are allocated and released inside the op.
+  ///
+  /// Immediates must lie in [INT32_MIN, UINT32_MAX] and are used as int32 bit
+  /// patterns, so 0xFFFFFFFF is -1. a and b are read only at the start of the
+  /// expansion and dst is written only by its last instruction, so dst may
+  /// alias a or b.
+  ///
+  /// Throws std::invalid_argument, before emitting anything, if dst or a
+  /// register operand is not exactly one register or is an AGPR, if an
+  /// immediate does not fit 32 bits, or if dst is an SGPR and an operand is a
+  /// VGPR.
+  void divsi32(RegisterRef dst, Operand a, Operand b, bool useIEEE);
+
   // The comparisons below share these rules.
   //
   // A destination of one SGPR holds a uniform bool, 0 or 1, and needs scalar

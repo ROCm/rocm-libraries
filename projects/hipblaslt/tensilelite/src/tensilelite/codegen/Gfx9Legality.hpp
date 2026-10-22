@@ -32,6 +32,13 @@ constexpr int64_t maxInlineInteger = 64;
 /// SALU carry chains through SCC need none.
 constexpr int valuWriteSgprReadWaitStates = 2;
 
+/// Wait states a VALU read of a transcendental result (v_rcp_f32,
+/// v_rcp_iflag_f32) needs on gfx940 and gfx950, per LLVM's hazard recognizer.
+constexpr int transResultWaitStates = 1;
+/// Wait states v_readfirstlane_b32 needs after a VALU instruction wrote its
+/// source VGPR on gfx940 and gfx950, per LLVM's hazard recognizer.
+constexpr int valuWriteVgprReadlaneWaitStates = 1;
+
 bool isInlineConstant(int64_t value);
 /// True if operand is an immediate that is not an inline constant.
 bool isLiteral(Operand operand);

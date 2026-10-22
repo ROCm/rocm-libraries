@@ -56,6 +56,12 @@ using Temporaries = std::vector<RegisterRange>;
 Operand copyToTemporary(IRBuilder &builder, RegisterKind kind, int width,
                         Operand source, Temporaries &temps);
 
+/// Copies literals, and the second of two distinct SGPRs, into VGPR temporaries
+/// so that a and b suit a VOP3 instruction, which takes no literals and one
+/// constant bus read.
+void legalizeVop3Sources(IRBuilder &builder, Operand &a, Operand &b,
+                         Temporaries &temps);
+
 } // namespace rocm::tensilelite::codegen::detail
 
 #endif // ROCM_TENSILELITE_CODEGEN_OPERANDUTILS_HPP

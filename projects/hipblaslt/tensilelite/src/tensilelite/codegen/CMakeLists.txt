@@ -23,6 +23,7 @@ target_sources(tensilelite-codegen
         "${CMAKE_CURRENT_SOURCE_DIR}/Arith.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BufferResource.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Compare.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Divide.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Gfx9Legality.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IRBuilder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Kernel.cpp"

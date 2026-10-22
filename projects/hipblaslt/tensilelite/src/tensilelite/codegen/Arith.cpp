@@ -20,6 +20,7 @@
 
 using namespace rocm::tensilelite::codegen;
 using detail::copyToTemporary;
+using detail::legalizeVop3Sources;
 using detail::Temporaries;
 using detail::toInput;
 
@@ -106,19 +107,6 @@ void emitSalu(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
     b = copyToTemporary(builder, RegisterKind::sgpr, 1, b, temps);
   assert(gfx9::isLegalSop2(a, b) && "illegal salu operands");
   createSalu(builder, op, dst, a, b);
-}
-
-// Copies literals and an excess SGPR into VGPRs so that a and b suit VOP3,
-// which takes no literals.
-void legalizeVop3Sources(IRBuilder &builder, Operand &a, Operand &b,
-                         Temporaries &temps) {
-  if (gfx9::isLiteral(a))
-    a = copyToTemporary(builder, RegisterKind::vgpr, 1, a, temps);
-  if (gfx9::isLiteral(b))
-    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
-  // Two distinct SGPRs exceed the constant bus.
-  if (!gfx9::isLegalVop3(a, b))
-    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
 }
 
 // v_mul_lo_u32 is VOP3 only, so it takes no literals.

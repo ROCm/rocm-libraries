@@ -87,4 +87,15 @@ Operand copyToTemporary(IRBuilder &builder, RegisterKind kind, int width,
   return Operand(temps.back());
 }
 
+void legalizeVop3Sources(IRBuilder &builder, Operand &a, Operand &b,
+                         Temporaries &temps) {
+  if (gfx9::isLiteral(a))
+    a = copyToTemporary(builder, RegisterKind::vgpr, 1, a, temps);
+  if (gfx9::isLiteral(b))
+    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
+  // Two distinct SGPRs exceed the constant bus.
+  if (!gfx9::isLegalVop3(a, b))
+    b = copyToTemporary(builder, RegisterKind::vgpr, 1, b, temps);
+}
+
 } // namespace rocm::tensilelite::codegen::detail
