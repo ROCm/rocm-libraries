@@ -181,7 +181,30 @@ static void ll_wrapping_binop(rocke_lower_t* L,
 }
 static void _op_arith_add(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Python: an explicit no-unsigned-wrap add is "add nuw"; otherwise the
+     * type's default (nsw for signed values, no flag for unsigned ones). */
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", wrap_error);
+        return;
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    if(wrap && strcmp(wrap, "nuw") == 0)
+    {
+        rocke_ll_binop(L, op, "add nuw");
+        return;
+    }
     ll_wrapping_binop(L, op, "add nsw", "add");
+}
+/* Python _op_arith_assume_range: emits nothing; rocke_ll_operand prints the
+ * marked value (operand 0) at every use of the marker's result. */
+static void _op_arith_assume_range(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)L;
+    (void)op;
 }
 static void _op_arith_sub(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -231,7 +254,9 @@ static void _op_arith_fneg(rocke_lower_t* L, const rocke_op_t* op)
         L, "  %s = fneg %s %s", res->name, rocke_ll_llvm_type(L, v->type), rocke_ll_operand(L, v));
 }
 
-/* Python _op_arith_fabs -> llvm.fabs.<ty>. */
+/* Python _op_arith_fabs -> llvm.fabs.<ty>. Unlike fma / fmax3, fabs also
+ * accepts f64 (a sign-bit clear), so f64 is admitted here rather than in
+ * the shared ll_fp_llvm_ty table. */
 static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -241,7 +266,8 @@ static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
     }
     const rocke_value_t* v = op->operands[0];
     const char* ty_name = v->type ? v->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(
@@ -890,6 +916,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT, _op_arith_constant);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT_VEC, _op_arith_constant_vec);
     rocke_ll_set_handler(ROCKE_OP_ARITH_ADD, _op_arith_add);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_ASSUME_RANGE, _op_arith_assume_range);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SUB, _op_arith_sub);
     rocke_ll_set_handler(ROCKE_OP_ARITH_MUL, _op_arith_mul);
     rocke_ll_set_handler(ROCKE_OP_ARITH_DIV, _op_arith_div);
