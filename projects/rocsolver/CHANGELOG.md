@@ -682,4 +682,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 - Switched to use all rocBLAS types and enumerations
 - Major library refactoring to achieve better integration and rocBLAS support
-- hip-clang is now default compi
+- hip-clang is now default compiler
+
+### Deprecated
+- rocSOLVER types and enumerations
+- hcc compiler support
