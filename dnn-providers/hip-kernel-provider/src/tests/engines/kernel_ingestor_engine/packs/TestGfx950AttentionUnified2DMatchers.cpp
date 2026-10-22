@@ -147,6 +147,22 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAnyOperandThatIsNotDenseBshd)
     expectEveryCaseDeclines(cases);
 }
 
+/// A ragged (RFC-0014) operand packs its tokens behind an offsets tensor, padded per
+/// sequence; read as dense BSHD it gives wrong elements in bounds. Each operand on its own.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesARaggedOperand)
+{
+    ASSERT_TRUE(graphMatches(GraphSpec{}));
+    std::vector<DeclineCase> cases;
+    for(const auto& [role, uid] : std::vector<std::pair<std::string, int64_t>>{
+            {"Q", Q_UID}, {"K", K_UID}, {"V", V_UID}, {"O", O_UID}})
+    {
+        GraphSpec spec;
+        spec.raggedOperand = uid;
+        cases.push_back({"ragged " + role, spec});
+    }
+    expectEveryCaseDeclines(cases);
+}
+
 /// A single head is byte-identically BSHD and BHSD while the two spellings disagree on the head
 /// stride, so declining it would refuse a graph the kernel serves perfectly.
 TEST(TestGfx950AttentionUnified2DMatchers, AcceptsASingleHeadInEitherSpelling)
