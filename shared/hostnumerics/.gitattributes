@@ -1,2 +1,0 @@
-# Preserve whitespace in the unmodified upstream header.
-include/roc/hostnumerics/compat/tl/expected.hpp whitespace=-blank-at-eol
