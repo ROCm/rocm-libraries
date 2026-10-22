@@ -30,10 +30,6 @@
 # whole SDPA surface is safe.
 _common_excludes: &common_excludes
   - "*DISABLED*"
-  # These sweeps still use rank-3 LSE, which the CPU backward reference rejects. See #14009.
-  - "standard_*SdpaBackward*"
-  - "comprehensive_*SdpaBackward*"
-  - "full_*SdpaBackward*"
 
 test_categories:
   quick:
