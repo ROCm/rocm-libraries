@@ -354,6 +354,42 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
     endforeach()
 
+    # Elementwise bias (1) and ALiBi (2): both head dimensions on every page-id lookup, P128 dense,
+    # and P128/D128 with the sink instance (bias seeds the row max with the sink logit).
+    foreach(bias_kind IN ITEMS 1 2)
+        if(bias_kind EQUAL 1)
+            set(bias_name bias)
+        else()
+            set(bias_name alibi)
+        endif()
+        foreach(variant IN ITEMS p16_d64_causal p16_d128_causal p64_d128_causal p128_d64_causal
+                                 p128_d128_causal p128_d128_dense p128_d128_causal_sink)
+            string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)(_sink)?$" _ ${variant})
+            set(page ${CMAKE_MATCH_1})
+            set(head_dim ${CMAKE_MATCH_2})
+            if(CMAKE_MATCH_3 STREQUAL "causal")
+                set(causal 1)
+            else()
+                set(causal 0)
+            endif()
+            if(CMAKE_MATCH_4)
+                set(sink 1)
+            else()
+                set(sink 0)
+            endif()
+            set(target test_ck_tile_fmha_batch_prefill_page_tile_${variant}_${bias_name})
+            add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+            target_compile_definitions(${target} PRIVATE
+                CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+                CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+                CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+                CK_TILE_FMHA_PAGE_TILE_TEST_SINK=${sink}
+                CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=${bias_kind})
+            target_compile_options(${target} PRIVATE -Wno-float-equal
+                -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+        endforeach()
+    endforeach()
+
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
     # mask).

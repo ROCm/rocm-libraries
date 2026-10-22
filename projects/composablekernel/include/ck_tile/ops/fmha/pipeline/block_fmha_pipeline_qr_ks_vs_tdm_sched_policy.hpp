@@ -479,9 +479,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Softmax = ScoreSoftmax;
         using Mapping = typename Softmax::Mapping;
 
-        static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        // A logits soft cap is applied to the scores before the softmax (paged core only; the
-        // forward core rejects it).
+        // Bias, ALiBi and a logits soft cap are applied to the scores before the softmax (paged
+        // core only; the forward core rejects them); with bias the caller passes a unit scale.
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 
@@ -523,9 +522,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Softmax = ScoreSoftmax;
         using Mapping = typename Softmax::Mapping;
 
-        static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        // A logits soft cap is applied to the scores before the softmax (paged core only; the
-        // forward core rejects it).
+        // Bias, ALiBi and a logits soft cap are applied to the scores before the softmax (paged
+        // core only; the forward core rejects them); with bias the caller passes a unit scale.
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 
@@ -639,8 +637,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         // The problem must describe exactly this policy's geometry (dtypes, block tile, wave
         // layout, WMMA tiles). Both GEMMs share one wave layout: P stays in the lanes that
         // produced S.
-        return Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-               std::is_same_v<FmhaTdmSchedGeometryFor<Problem, Geometry::kQkSuColumns>, Geometry> &&
+        return std::is_same_v<FmhaTdmSchedGeometryFor<Problem, Geometry::kQkSuColumns>, Geometry> &&
                Shape::Gemm1BlockWarps::at(number<0>{}) == Shape::Gemm0BlockWarps::at(number<0>{}) &&
                Shape::Gemm1BlockWarps::at(number<1>{}) == Shape::Gemm0BlockWarps::at(number<1>{}) &&
                Shape::Gemm1BlockWarps::at(number<2>{}) == Shape::Gemm0BlockWarps::at(number<2>{}) &&
