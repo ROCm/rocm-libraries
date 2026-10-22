@@ -627,6 +627,39 @@ void testing_matmul(Arguments arg)
         }
     }
 
+    if(isW4A16Scaling(arg.scaleA))
+    {
+        const int   groupSize = w4a16GroupSize(arg.scaleA);
+        const char* why       = nullptr;
+        if(arg.a_type != HIP_R_4I)
+            why = "requires --a_type i4_r";
+        else if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+            why = "requires a bf16 or f16 B";
+        else if(arg.c_type != arg.b_type || arg.d_type != arg.b_type)
+            why = "requires C and D to have B's type";
+        else if(arg.transA != 'T' || arg.transB != 'N')
+            why = "requires TN (--transA T --transB N)";
+        else if(arg.grouped_gemm > 0)
+            why = "does not support grouped GEMM";
+        else if(arg.batch_count > 1)
+            why = "does not support batch_count > 1 (the scale tensor has no batch dimension)";
+        else if(arg.lda[0] < arg.K[0] || arg.lda[0] % 8 != 0)
+            why = "requires lda >= K and lda % 8 == 0";
+        else if(arg.K[0] % groupSize != 0)
+            why = "requires K to be a multiple of the scale group size";
+        else if(arg.K[0] % 8 != 0)
+            why = "requires K to be a multiple of 8 (one dword of int4 per global load)";
+        if(why)
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << "w4a16 " << why;
+#else
+            hipblaslt_cout << "Skipping w4a16: " << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     const bool lowPrecisionInput
         = (realDataTypeSize(arg.a_type) == 1 || realDataTypeSize(arg.b_type) == 1)
           && dataTypes.computeScalar != HIP_R_32I;
@@ -1752,15 +1785,20 @@ void testing_matmul_with_bias(const Arguments&                                  
         if(isW4A16Scaling(arg.scaleA))
         {
             // Keep dequantized A for the reference GEMM.
-            refA.emplace_back(generateW4A16Input(hA[i].buf(),
-                                                 hScaleA[i].buf(),
-                                                 TiB,
-                                                 M[i],
-                                                 K[i],
-                                                 lda[i],
-                                                 w4a16GroupSize(arg.scaleA),
-                                                 isW4A16ZeroPoint(arg.scaleA),
-                                                 arg.int4_encoding));
+            const auto dequantized = generateW4A16Input(hA[i].buf(),
+                                                        hScaleA[i].buf(),
+                                                        TiB,
+                                                        problem.m,
+                                                        problem.k,
+                                                        problem.a.leadingDimension(),
+                                                        w4a16GroupSize(arg.scaleA),
+                                                        isW4A16ZeroPoint(arg.scaleA),
+                                                        arg.int4_encoding);
+            refA.push_back({roc::hostnumerics::Tensor::copyNativeStorage(
+                roc::hostnumerics::Layout(roc::hostnumerics::Shape{static_cast<size_t>(problem.k),
+                                                                   static_cast<size_t>(problem.m)},
+                                          {1, problem.a.leadingDimension()}),
+                std::span<const float>(dequantized))});
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
         }
@@ -2023,7 +2061,9 @@ void testing_matmul_with_bias(const Arguments&                                  
                                              {input.layout().stride(1), input.layout().stride(0)},
                                              input.layout().offset()));
                       };
-                freivaldsA[i] = isBlockScaling(arg.scaleA) ? refA[i] : batches(hA[i], problem.a);
+                freivaldsA[i] = isBlockScaling(arg.scaleA) || isW4A16Scaling(arg.scaleA)
+                                    ? refA[i]
+                                    : batches(hA[i], problem.a);
                 freivaldsB[i] = isBlockScaling(arg.scaleB) ? refB[i] : batches(hB[i], problem.b);
                 transpose(freivaldsA[i], problem.operationA);
                 transpose(freivaldsB[i], problem.operationB);
@@ -2391,6 +2431,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                     primaryMatmul, attr, &scaleA_addr, sizeof(void*)));
 
                 hipblasLtMatmulMatrixScale_t mode = hipblaslt::client::matmulScaleMode(arg.scaleA);
+                if(isW4A16Scaling(arg.scaleA))
+                    CHECK_HIPBLASLT_ERROR(
+                        hipblasLtMatmulDescSetAttribute(primaryMatmul,
+                                                        HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                        &arg.int4_encoding,
+                                                        sizeof(arg.int4_encoding)));
 
                 if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
                 {
@@ -3435,7 +3481,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             const auto&      problem         = matmulProblems[gemmIdx];
             const auto&      preparedProblem = preparedProblems[gemmIdx];
             const ScalarType computeTypeA
-                = isBlockScaling(arg.scaleA)
+                = isBlockScaling(arg.scaleA) || isW4A16Scaling(arg.scaleA)
                       ? typeA
                       : hipblaslt::hostnumerics::referenceComputeType(dataTypes.computeInputA);
             const ScalarType computeTypeB

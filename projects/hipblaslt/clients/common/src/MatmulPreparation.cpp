@@ -5,6 +5,7 @@
 
 #include "hipblaslt_datatype2string.hpp"
 #include "utility.hpp"
+#include "w4a16_datagen.hpp"
 
 #include <array>
 #include <stdexcept>
@@ -91,6 +92,8 @@ namespace hipblaslt::client
         case hipblaslt_scaling_format::Scalar:
             return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
         default:
+            if(isW4A16Scaling(format))
+                return static_cast<hipblasLtMatmulMatrixScale_t>(format);
             throw std::invalid_argument("Invalid hipBLASLt matrix scaling format.");
         }
     }
@@ -320,6 +323,11 @@ namespace hipblaslt::client
                     preparedProblem.a.scaleElements = 1;
                 else if(arguments.scaleA == hipblaslt_scaling_format::Vector)
                     preparedProblem.a.scaleElements = problem.m;
+                else if(isW4A16Scaling(arguments.scaleA))
+                    preparedProblem.a.scaleElements = w4a16::scaleBytes(
+                        problem.m,
+                        divideRoundUp(problem.k, w4a16GroupSize(arguments.scaleA)),
+                        isW4A16ZeroPoint(arguments.scaleA));
                 else if(isBlockScaling(arguments.scaleA))
                 {
                     const size_t scaleBlock = blockSize(arguments.scaleA);
@@ -377,7 +385,7 @@ namespace hipblaslt::client
                       : problem.c.allocationElements * realDataTypeSize(problem.c.apiType);
             const auto scaleBytes
                 = [&](const PreparedMatmulOperand& operand, hipblaslt_scaling_format format) {
-                      return isBlockScaling(format)
+                      return isBlockScaling(format) || isW4A16Scaling(format)
                                  ? operand.scaleElements * static_cast<size_t>(problem.batchCount)
                                  : operand.scaleElements * realDataTypeSize(dataTypes.coefficient);
                   };
