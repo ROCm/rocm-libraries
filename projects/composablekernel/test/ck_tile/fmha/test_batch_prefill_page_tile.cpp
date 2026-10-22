@@ -57,6 +57,10 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SINK
 #define CK_TILE_FMHA_PAGE_TILE_TEST_SINK 0
 #endif
+// 1: the tanh logits soft cap instance (every forward test runs with the cap below).
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP
+#define CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP 0
+#endif
 
 namespace {
 
@@ -70,9 +74,12 @@ constexpr int kMantissaBits = kFp16 ? 10 : 7;
 
 constexpr index_t kPage = CK_TILE_FMHA_PAGE_TILE_TEST_PAGE;
 static_assert(kPage == 16 || kPage == 64 || kPage == 128 || kPage == 256 || kPage == 1024);
-constexpr bool kSglang = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
-constexpr bool kLse    = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
-constexpr bool kSink   = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
+constexpr bool kSglang  = CK_TILE_FMHA_PAGE_TILE_TEST_SGLANG != 0;
+constexpr bool kLse     = CK_TILE_FMHA_PAGE_TILE_TEST_LSE != 0;
+constexpr bool kSink    = CK_TILE_FMHA_PAGE_TILE_TEST_SINK != 0;
+constexpr bool kSoftcap = CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP != 0;
+// Scaled scores of the random inputs are about N(0, 1), so a cap of 1.5 bends most of them.
+constexpr float kSoftcapValue = 1.5f;
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
@@ -95,7 +102,7 @@ struct Model
             true,
             false,
             false,
-            false,
+            kSoftcap,
             ck_tile::BlockAttentionBiasEnum::NO_BIAS,
             false,
             kLse,
@@ -122,7 +129,8 @@ struct Model
         typename TypeConfig::ODataType,
         Shape,
         true,
-        ck_tile::ComposedAttention<false, CK_TILE_FMHA_FWD_FAST_EXP2>,
+        ck_tile::ComposedAttention<kSoftcap ? ck_tile::LOGITS_SOFT_CAP : 0u,
+                                   CK_TILE_FMHA_FWD_FAST_EXP2>,
         ck_tile::SimplifiedGenericAttentionMask<Causal>,
         false,
         static_cast<int>(kPage),
@@ -151,7 +159,7 @@ struct ModelNames
     {
         return "P" + std::to_string(kPage) + "D" + std::to_string(M::kHeadDim) +
                (M::kCausal ? "Causal" : "Dense") + (kSglang ? "Sglang" : "") + (kLse ? "Lse" : "") +
-               (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "");
+               (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "") + (kSoftcap ? "Softcap" : "");
     }
 };
 
@@ -254,6 +262,7 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.lse_ptr                  = d.lse;
     a.nhead_stride_lse         = l.seqstart_q.back(); // LSE is [Hq, total_q]
     a.batch_stride_lse         = 0;
+    a.logits_soft_cap          = kSoftcap ? kSoftcapValue : 0.f;
     a.sink_size                = M::kCausal ? w.sink : 0;
     a.sink_ptr                 = w.sink_logits ? d.sink : nullptr;
     a.window_size_left         = M::kCausal ? w.left : -1;
@@ -789,6 +798,10 @@ reference::Metrics CompareWithReference(const HostProblem& h,
         s.query_dimension = D;
         s.value_dimension = D;
         s.score_scale     = 1.0f / std::sqrt(static_cast<float>(D));
+        if(kSoftcap)
+            s.score_transform = [](std::size_t, std::size_t, std::size_t, float x) {
+                return kSoftcapValue * std::tanh(x / kSoftcapValue);
+            };
         if(causal)
         {
             // Key k is visible to query q when q + offset - left <= k <= q + offset + right.

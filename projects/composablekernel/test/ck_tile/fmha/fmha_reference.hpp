@@ -58,6 +58,11 @@ struct Sequence
     // Optional per-query-head logits for one extra softmax term with V=0.
     // These logits are already scaled; -infinity is equivalent to no sink.
     std::vector<float> sink_logits;
+
+    // Optional transform of each visible scaled score (after score_scale, before the softmax):
+    // (query head, query row, key, score) -> score. Logits soft cap, bias and ALiBi are
+    // expressed here; empty means the identity.
+    std::function<float(std::size_t, std::size_t, std::size_t, float)> score_transform;
 };
 
 struct ReferenceRow
@@ -331,7 +336,10 @@ inline Reference Compute(const std::vector<Sequence>& sequences, std::size_t key
                                          sequence.k(kv_head, begin + key, dim) * sequence.k_descale,
                                          dot);
                         }
-                        scores[key]           = dot * sequence.score_scale;
+                        scores[key] = dot * sequence.score_scale;
+                        if(sequence.score_transform)
+                            scores[key] =
+                                sequence.score_transform(head, row, begin + key, scores[key]);
                         result.score_roundoff = std::max(
                             result.score_roundoff,
                             std::abs(static_cast<double>(sequence.score_scale)) *

@@ -92,7 +92,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                   "scale_s");
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "qr_tdm_sched does not implement attention bias");
-    static_assert(!kHasLogitsSoftCap, "qr_tdm_sched does not implement logits soft cap");
+    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "the logits soft cap applies to unbiased scores");
     static_assert(!kHasDropout, "qr_tdm_sched does not support dropout");
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
                   "qr_tdm_sched does not implement quantized attention yet");
@@ -254,7 +255,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         void* __restrict__ smem_ptrk1,
         void* __restrict__ smem_ptrv0,
         void* __restrict__ smem_ptrv1,
-        float sink_v) const
+        float sink_v,
+        float logits_soft_cap) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -906,6 +908,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
             };
 
             auto process_score = [&]() {
+                if constexpr(kHasLogitsSoftCap)
+                {
+                    // Tanh soft cap of the existing kernels. scale_s already holds
+                    // scale * log2(e), so s <- (cap * log2(e) / scale_s) * tanh(s * scale / cap)
+                    // gives log2(e) * cap * tanh(scale * s / cap) after the softmax's scale_s.
+                    const float cap_in  = scale_s * log2e_rcp_v<float> / logits_soft_cap;
+                    const float cap_out = logits_soft_cap * log2e_v<float> / scale_s;
+                    tile_elementwise_inout(
+                        [&](auto& x) { x = cap_out * tanh_fast<float>(x * cap_in); }, s_acc);
+                }
                 // QK scores are ready for bias, masking, and softmax.
                 // STAGE 2: scale_s, add bias (as in the scheduled TDM pipeline)
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1353,6 +1365,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                         PositionEncoding position_encoding,
                                         float scale_s,
                                         float sink_v,
+                                        float logits_soft_cap,
                                         void* smem_ptrk0,
                                         void* smem_ptrk1,
                                         void* smem_ptrv0,
@@ -1370,7 +1383,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                    smem_ptrk1,
                    smem_ptrv0,
                    smem_ptrv1,
-                   sink_v);
+                   sink_v,
+                   logits_soft_cap);
     }
 };
 

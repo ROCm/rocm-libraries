@@ -23,8 +23,8 @@ namespace ck_tile {
 // Experimental, gfx1250 only: BF16 or FP16, group mode, linear [page, token, kv_head, dim] K/V
 // pools, D64/V64 or D128/V128, no mask or a left/right window aligned to the top-left or
 // bottom-right corner (causal is left unbounded, right 0; a bounded left is a sliding window),
-// optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional LSE output, no
-// dropout or bias. Build each instance in its own translation unit
+// optional sink tokens (sink_size) and per-head sink logits (sink_ptr), optional tanh logits soft
+// cap, optional LSE output, no dropout or bias. Build each instance in its own translation unit
 // with the scheduled-TDM FMHA flags (-mllvm -amdgpu-expert-scheduling-mode
 // -fgpu-flush-denormals-to-zero): the launch contract below rests on measurements of that generated
 // code, and the generated code was observed to change when several instances share a translation
@@ -57,6 +57,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     // Sink tokens (sink_size, StreamingLLM) and the per-head sink logit (sink_ptr) share one
     // instance, as in the existing batch prefill kernel; sink tokens need a mask.
     static constexpr bool kHasSink = FmhaPipeline::kHasSink;
+    // Tanh logits soft cap (no bias), as in the existing batch prefill kernel.
+    static constexpr bool kHasLogitsSoftCap = FmhaPipeline::kHasLogitsSoftCap;
     static_assert(!kHasSink || FmhaMask::IsMasking, "sink tokens need a masked instance");
     static constexpr auto kKVLookupTable = Base::kKVLookupTable;
     static constexpr index_t kBlockPerCu = Base::kBlockPerCu;
@@ -214,6 +216,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         }
         if constexpr(!kHasSink)
             require(kargs.sink_ptr == nullptr, "sink logits need a sink instance");
+        if constexpr(kHasLogitsSoftCap)
+            require(kargs.logits_soft_cap > 0.f, "a soft-cap instance needs logits_soft_cap > 0");
     }
 
     // Checked launch path: owns the dynamic LDS request, so a launcher cannot issue a value
@@ -412,6 +416,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             else
                 return -numeric<float>::infinity();
         }();
+        const float logits_soft_cap = [&]() {
+            if constexpr(kHasLogitsSoftCap)
+                return kargs.logits_soft_cap;
+            else
+                return 0.f;
+        }();
         auto o_acc_tile = FmhaPipeline{}(q_window,
                                          k_window,
                                          v_window,
@@ -421,6 +431,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                          EmptyPositionEncoding<SaccDataType>{},
                                          kargs.scale_s,
                                          sink_value,
+                                         logits_soft_cap,
                                          smem_ptr + Policy::GetLdsOffsetK0(),
                                          smem_ptr + Policy::GetLdsOffsetK1(),
                                          smem_ptr + Policy::GetLdsOffsetV0(),

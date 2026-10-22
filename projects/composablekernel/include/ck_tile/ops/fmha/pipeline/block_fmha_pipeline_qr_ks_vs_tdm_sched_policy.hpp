@@ -480,7 +480,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Mapping = typename Softmax::Mapping;
 
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        static_assert(!Problem::kHasLogitsSoftCap);
+        // A logits soft cap is applied to the scores before the softmax (paged core only; the
+        // forward core rejects it).
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 
@@ -523,7 +524,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         using Mapping = typename Softmax::Mapping;
 
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
-        static_assert(!Problem::kHasLogitsSoftCap);
+        // A logits soft cap is applied to the scores before the softmax (paged core only; the
+        // forward core rejects it).
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == 2);
 
