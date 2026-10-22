@@ -26,6 +26,7 @@
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
+    "fabs.f64": "llvm.fabs.f64",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
     "fmuladd.f32": "llvm.fmuladd.f32",
@@ -121,6 +122,8 @@
     "smax.i32": "llvm.smax.i32",
     "smin.i32": "llvm.smin.i32",
     "sqrt.f32": "llvm.sqrt.f32",
+    "umax.i8": "llvm.umax.i8",
+    "umin.i8": "llvm.umin.i8",
     "update.dpp.i32": "llvm.amdgcn.update.dpp.i32",
     "wmma.f32.16x16x16.bf16": "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
     "wmma.f32.16x16x16.f16": "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
@@ -261,8 +264,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.bf8.f32",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -300,8 +302,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.f32.bf8",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -339,8 +340,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.f32.fp8",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -378,8 +378,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.fp8.f32",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -417,8 +416,8 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.scalef32.pk.f32.bf8",
-        "status": "arch_absent",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -456,8 +455,8 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.scalef32.pk.f32.fp8",
-        "status": "arch_absent",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -2122,6 +2121,41 @@
       }
     },
     "fabs.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "fabs.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm20"
@@ -6058,8 +6092,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.dscnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6141,8 +6174,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.expcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6182,8 +6214,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.kmcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6223,8 +6254,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.loadcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6264,8 +6294,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.storecnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6668,6 +6697,76 @@
       "gfx950": {
         "evidence": "not an intrinsic in llvm20",
         "status": "name_absent",
+        "verified_on": "llvm20"
+      }
+    },
+    "umax.i8": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "umin.i8": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm20"
       }
     },

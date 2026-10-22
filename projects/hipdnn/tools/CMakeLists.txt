@@ -6,6 +6,13 @@ add_executable(hipdnn_list_engines ListEngines.cpp)
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
+# CMAKE_INSTALL_RPATH_USE_LINK_PATH adds only link directories outside the build tree, so it
+# never adds the directory of the in-tree hipdnn_backend; without this the installed tool
+# needs LD_LIBRARY_PATH to start. Same layout as hipdnn_sample_dynamic_backend_loading
+# (samples/CMakeLists.txt): bin/ -> lib/.
+set_target_properties(
+    hipdnn_list_engines PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
@@ -142,9 +149,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # provider trees under dnn-providers/ exist only after a per-architecture packing rule
     # has run, which a hipDNN-only build need not configure.
     if(NOT HIPDNN_SKIP_TESTS)
-        set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT
-            "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/fixtures/validate_descriptors/valid"
+        set(HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES
+            "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/fixtures/validate_descriptors"
         )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/valid")
 
         # The `name` the bundle's UED authors, and the engine tests/test_round_trip.py
         # names. Passed as --expect-engine so a bundle whose engine the loader drops exits
@@ -194,6 +202,78 @@ if(namePosition EQUAL -1)
         "'${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}'")
 endif()
 ]])
+
+        # The role fixtures: the exit status, and every model_checks entry's role and verdict
+        # in report order. HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS is a comma-separated list
+        # of <role>=<true|false>, comma rather than semicolon so it survives add_test().
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
+if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
+   OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
+   OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ENGINE
+   OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_EXIT
+   OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS)
+    message(FATAL_ERROR
+        "HIPDNN_VALIDATE_DESCRIPTORS_TOOL, HIPDNN_VALIDATE_DESCRIPTORS_ROOT, "
+        "HIPDNN_VALIDATE_DESCRIPTORS_ENGINE, HIPDNN_VALIDATE_DESCRIPTORS_EXIT and "
+        "HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS are required")
+endif()
+
+execute_process(
+    COMMAND "${HIPDNN_VALIDATE_DESCRIPTORS_TOOL}" "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}"
+            --expect-engine "${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}" --json
+    OUTPUT_VARIABLE toolStdout
+    ERROR_VARIABLE toolStderr
+    RESULT_VARIABLE toolResult
+)
+
+message(STATUS "hipdnn_validate_descriptors stdout:\n${toolStdout}")
+message(STATUS "hipdnn_validate_descriptors stderr:\n${toolStderr}")
+
+if(NOT toolResult STREQUAL HIPDNN_VALIDATE_DESCRIPTORS_EXIT)
+    message(FATAL_ERROR
+        "hipdnn_validate_descriptors exited with '${toolResult}' on "
+        "${HIPDNN_VALIDATE_DESCRIPTORS_ROOT}; expected '${HIPDNN_VALIDATE_DESCRIPTORS_EXIT}'")
+endif()
+
+string(JSON engines ERROR_VARIABLE jsonError GET "${toolStdout}" engines)
+if(jsonError)
+    message(FATAL_ERROR "hipdnn_validate_descriptors printed no JSON report: ${jsonError}")
+endif()
+string(FIND "${engines}" "\"${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}\"" namePosition)
+if(namePosition EQUAL -1)
+    message(FATAL_ERROR
+        "'${HIPDNN_VALIDATE_DESCRIPTORS_ENGINE}' did not load; its model checks never ran")
+endif()
+
+string(REPLACE "," ";" expectedChecks "${HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS}")
+list(LENGTH expectedChecks expectedCount)
+string(JSON checkCount LENGTH "${toolStdout}" model_checks)
+if(NOT checkCount EQUAL expectedCount)
+    message(FATAL_ERROR
+        "hipdnn_validate_descriptors reported ${checkCount} model checks; expected "
+        "${expectedCount} (${HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS})")
+endif()
+
+set(index 0)
+foreach(expected IN LISTS expectedChecks)
+    string(REPLACE "=" ";" expectedPair "${expected}")
+    list(GET expectedPair 0 expectedRole)
+    list(GET expectedPair 1 expectedSuccess)
+    string(JSON role GET "${toolStdout}" model_checks ${index} role)
+    string(JSON success GET "${toolStdout}" model_checks ${index} success)
+    if(success)
+        set(success true)
+    else()
+        set(success false)
+    endif()
+    if(NOT role STREQUAL expectedRole OR NOT success STREQUAL expectedSuccess)
+        message(FATAL_ERROR
+            "model_checks[${index}] is role=${role} success=${success}; expected "
+            "role=${expectedRole} success=${expectedSuccess}")
+    endif()
+    math(EXPR index "${index} + 1")
+endforeach()
+]])
         # cmake-format: on
 
         add_test(
@@ -205,16 +285,46 @@ endif()
                 "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
                 -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
         )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
+
+        # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
+        # predict_engine model is admitted only through the L1 guards, so a static_order
+        # estimate fails the run while a static_order kernel ranker does not. A ranker whose
+        # features need a sample, run without one, is admitted with extraction skipped.
+        foreach(
+            roleFixture
+            "l2_static_order:0:sort_kernel_catalog=true"
+            "l2_dynamic_features:0:sort_kernel_catalog=true"
+            "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
+            "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
+        )
+            string(REPLACE ":" ";" roleFixture "${roleFixture}")
+            list(GET roleFixture 0 fixtureName)
+            list(GET roleFixture 1 fixtureExit)
+            list(GET roleFixture 2 fixtureChecks)
+            add_test(
+                NAME hipdnn_validate_descriptors_${fixtureName}
+                COMMAND
+                    ${CMAKE_COMMAND}
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/${fixtureName}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_EXIT=${fixtureExit}"
+                    "-DHIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS=${fixtureChecks}"
+                    -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake"
+            )
+            list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${fixtureName})
+        endforeach()
 
         # The tool walks one small directory and parses its JSON, so anything past a few
         # seconds is a hang. Fail fast rather than ctest's 1500 s default.
-        set_tests_properties(hipdnn_validate_descriptors_smoke PROPERTIES TIMEOUT 120)
+        set_tests_properties(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS} PROPERTIES TIMEOUT 120)
 
-        # add_hipdnn_test() assumes a gtest executable registered as the test command; this
-        # test runs a CMake driver script, so its one run-time prerequisite (the tool
+        # add_hipdnn_test() assumes a gtest executable registered as the test command; these
+        # tests run CMake driver scripts, so their one run-time prerequisite (the tool
         # binary) is appended to CHECK_DEPENDS_GLOBAL by hand.
         # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are left untouched for the
-        # reason given at hipdnn_list_engines_smoke above; this test is build-tree only.
+        # reason given at hipdnn_list_engines_smoke above; these tests are build-tree only.
         set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_validate_descriptors
             CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
         )
@@ -229,7 +339,7 @@ endif()
         # validator registers stubs for the native symbols rather than loading a plugin.
         if(DEFINED TEST_ENVIRONMENT)
             set_tests_properties(
-                hipdnn_validate_descriptors_smoke PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"
+                ${HIPDNN_VALIDATE_DESCRIPTORS_TESTS} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"
             )
         endif()
 
@@ -237,11 +347,11 @@ endif()
         # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced.
         if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
             set_tests_properties(
-                hipdnn_validate_descriptors_smoke
+                ${HIPDNN_VALIDATE_DESCRIPTORS_TESTS}
                 PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
             )
         endif()
 
-        _apply_hipdnn_test_category_labels(hipdnn_validate_descriptors_smoke)
+        _apply_hipdnn_test_category_labels(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS})
     endif()
 endif()
