@@ -45,6 +45,34 @@ using KernelTypesCompTDMLdsPadding = ::testing::Types<
     // K-contiguous operands whose LDS row (tile_k) is not a power of two
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I64,         I64,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<4, 4>>,
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I64,         I64,         I96,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // K-contiguous tile_k 192 with two block-gemm K sub-tiles of 96 elements: the pad interval
+    // divides the 48-dword sub-tile (16 dwords), not only the 96-dword row (32 dwords)
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // K-contiguous tile_k 96, one sub-tile, 16-dword interval
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // 8-bit K-contiguous rows that are not a power of two (warp K 64): 48-dword rows of tile_k 192
+    // (one sub-tile), 96-dword rows of tile_k 384 split into two 48-dword sub-tiles
+    std::tuple<    Row,     Col,     Row,        F8,        F8,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,        F8,        F8,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,        F8,        F8,         F32,       F16,        I128,        I128,        I384,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,        F8,        F8,         F32,       F16,        I128,        I128,        I384,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      INT8,      INT8,       INT32,     INT32,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,      INT8,      INT8,       INT32,     INT32,        I128,        I128,        I192,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // fp32 tile_k 96 (warp K 4): 96-dword rows split into two 48-dword sub-tiles
+    std::tuple<    Row,     Col,     Row,       F32,       F32,         F32,       F32,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,       F32,       F32,         F32,       F32,        I128,        I128,         I96,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    // packed fp4 tile_k 384 (gfx125 has fp4 WMMA only for 32x16 / 32x32, warp K 128): 48-dword
+    // rows; fp8 x fp4 pads A (96-dword rows) and B (48-dword rows) at different intervals
+    std::tuple<    Row,     Col,     Row,        F4,        F4,         F32,       F16,        I128,        I128,        I384,        I32,        I32, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,        F4,        F4,         F32,       F16,        I128,        I128,        I384,        I32,        I32, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<3, 3>>,
+    std::tuple<    Row,     Col,     Row,        F8,        F4,         F32,       F16,        I128,        I128,        I384,        I32,        I32, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<4, 3>>,
+    std::tuple<    Row,     Col,     Row,        F8,        F4,         F32,       F16,        I128,        I128,        I384,        I32,        I32, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<4, 3>>,
     // K-contiguous tile_k 1024: the pad interval does not fit the TDM descriptor's 3-bit field
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I32,         I32,       I1024,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<7, 7>>,
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I32,         I32,       I1024,        I16,        I16, Intrawave,    CompTDMV2, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<7, 7>>,
@@ -73,6 +101,32 @@ using KernelTypesCompTDMLdsPadding = ::testing::Types<
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I96,        I512,        I128,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<kKeep, kDrop>>
 >;
 // clang-format on
+
+// Whether pads within the K-contiguous LDS rows of an operand repeat at the same offsets in every
+// block-gemm sub-tile: the gfx125 LDS reads (tile_window::load_with_offset) take a sub-tile's
+// offsets as those of sub-tile 0 plus a constant, so the pad interval must divide the sub-tile.
+template <typename Policy, typename Problem, bool IsA>
+__device__ constexpr bool lds_pads_repeat_per_sub_tile()
+{
+    using DataType =
+        std::conditional_t<IsA, typename Problem::ADataType, typename Problem::BDataType>;
+    constexpr bool is_tr_load = IsA ? Policy::Base::template is_a_load_tr<Problem>
+                                    : Policy::Base::template is_b_load_tr<Problem>;
+    if constexpr(is_tr_load || !Policy::template IsKLdsPaddedPerChunk<Problem, IsA>())
+    {
+        return true;
+    }
+    else
+    {
+        constexpr auto config = Policy::template GetLdsPaddingConfig<Problem, IsA>();
+        constexpr ck_tile::index_t interval_dwords = 1 << (config[ck_tile::number<2>{}] + 1);
+        constexpr ck_tile::index_t sub_tile_dwords =
+            Problem::BlockGemmShape::kK / Policy::template GetPipelineSubTileNum<Problem>().value *
+            ck_tile::index_t{sizeof(DataType)} / ck_tile::numeric_traits<DataType>::PackedSize /
+            ck_tile::index_t{sizeof(int32_t)};
+        return sub_tile_dwords % interval_dwords == 0;
+    }
+}
 
 // The base and the TDM LDS padding configs (padded, pad_amount, pad_interval) of A and B, in that
 // order. Both depend on is_a_load_tr / is_b_load_tr and the LDS bank count, the TDM one also on
@@ -105,6 +159,10 @@ __global__ void tdm_lds_padding_probe(ck_tile::index_t* out)
                       Policy::template GetLdsPaddingConfig<Problem, false>()) ==
                   Policy::template MakeBLdsBlockDescriptor<Problem>().get_element_space_size() *
                       sizeof(BLdsType) / ck_tile::numeric_traits<BLdsType>::PackedSize);
+    static_assert(lds_pads_repeat_per_sub_tile<Policy, Problem, true>(),
+                  "A: LDS pad interval does not divide the block-gemm K sub-tile");
+    static_assert(lds_pads_repeat_per_sub_tile<Policy, Problem, false>(),
+                  "B: LDS pad interval does not divide the block-gemm K sub-tile");
 #else
     static_cast<void>(out);
 #endif
@@ -124,6 +182,8 @@ template <typename T>
 class TestCkTileGemmPipelineCompTDMLdsPadding
     : public TestCkTileGemmPipelineWmmaBase<T, TestCkTileGemmPipelineCompTDMLdsPadding<T>>
 {
+    using Base = TestCkTileGemmPipelineWmmaBase<T, TestCkTileGemmPipelineCompTDMLdsPadding<T>>;
+
     protected:
     // These instances use the regular (non-cluster) launch, which also works on
     // asicRevision=0, so the base-class TDM revision skip does not apply here.
@@ -133,6 +193,18 @@ class TestCkTileGemmPipelineCompTDMLdsPadding
     {
         static_assert(TestCkTileGemmPipelineCompTDMLdsPadding<T>::check_data_type(),
                       "unsupported data type combination: this case would pass without running");
+        // Dedicated WMMA F4 instructions are not supported on gfx1250 A0. Only the revision is
+        // checked: this test is built for gfx125 only, and is_gfx125_supported() is false on
+        // devices named gfx1250-strict.
+        if constexpr(std::is_same_v<typename Base::ADataType, F4> &&
+                     std::is_same_v<typename Base::BDataType, F4>)
+        {
+            if(ck_tile::get_device_revision() == 0)
+            {
+                GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test on "
+                                "gfx1250 asicRevision=0.";
+            }
+        }
         this->k_batches_ = {1};
     }
 };
