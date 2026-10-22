@@ -83,8 +83,8 @@ test_categories:
       - "*Sdpa*"
     exclude:
       - "*DISABLED*"
-      # dnn-benchmarking workloads run in their own category (too slow for full).
-      - "dnn_benchmarking_*"
+      # dnn-benchmarking workloads run in their own `workloads` category (too slow for full).
+      - "workloads_*"
     labels:
       - "full"
       - "all"

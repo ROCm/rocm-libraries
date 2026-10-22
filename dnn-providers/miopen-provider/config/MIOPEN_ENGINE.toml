@@ -86,7 +86,7 @@ rtol = 0.01
 # of elements) on all 8 shapes on gfx90a, so the default tolerance rejects them.
 # atol/rtol cover one bf16 step across the magnitudes seen.
 [[tolerance_overrides]]
-filters = ["dnn_benchmarking_bnorm_bwd.*"]
+filters = ["workloads_bnorm_bwd.*"]
 atol = 0.01
 rtol = 0.02
 
@@ -95,7 +95,7 @@ rtol = 0.02
 # by up to 4.9e-5 at |y|~4 (0.14% of elements), above the default atol=rtol=1e-5
 # (SDXL_VAE dec_conv_out_3x3_1024 / _1536).
 [[tolerance_overrides]]
-filters = ["dnn_benchmarking_conv_*.*fp32*"]
+filters = ["workloads_conv_*.*fp32*"]
 atol = 2e-4
 rtol = 1e-4
 
@@ -107,6 +107,6 @@ rtol = 1e-4
 # engine's bf16 dgrad, not a wrong result. atol=0.2 leaves ~1.6x over the worst
 # diff seen.
 [[tolerance_overrides]]
-filters = ["dnn_benchmarking_conv_dgrad.Wav2Vec2__bf16_ncl_bwd_feat_conv1d_k10_s5_bf16_dgrad"]
+filters = ["workloads_conv_dgrad.Wav2Vec2__bf16_ncl_bwd_feat_conv1d_k10_s5_bf16_dgrad"]
 atol = 0.2
 rtol = 0.03

@@ -257,8 +257,8 @@ jobs:
       # was pulled, so this MUST also precede configure. This lane builds on a
       # runner with no GPU and does not execute the workloads, so what it proves
       # is that the pinned pointers can be fetched and the archives extract. On a
-      # GPU machine, run them with the dnn-benchmarking category
-      # (`ctest -L dnn_benchmarking`); the `full` category excludes them.
+      # GPU machine, run them with the workloads category
+      # (`ctest -L workloads`); the `full` category excludes them.
       # This runs on the nightly schedule and on manual runs, and on a PR only
       # when it changes the pinned pointers.
       - name: Select dnn-benchmarking workloads

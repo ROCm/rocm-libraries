@@ -146,11 +146,11 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
 # from the dnn-benchmarking repo; `dvc pull -R workloads` (run in this directory) fetches
 # them. Each pulled archive is extracted as plain graph .json files under the
 # bundle root (outside the tier folders), where discovery registers them as
-# graph-only tests named dnn_benchmarking_<archive>_<subdir>.<graph>. An archive whose top-level
+# graph-only tests named workloads_<archive>_<subdir>.<graph>. An archive whose top-level
 # folder repeats its own name (conv/ in conv.tar.gz) is flattened so the name is
 # not repeated. With nothing pulled this is a no-op.
 set(HIPDNN_IT_WORKLOAD_ROOT
-    "${CMAKE_BINARY_DIR}/lib/integration-test-bundles/dnn-benchmarking")
+    "${CMAKE_BINARY_DIR}/lib/integration-test-bundles/workloads")
 file(REMOVE_RECURSE "${HIPDNN_IT_WORKLOAD_ROOT}")
 file(GLOB HIPDNN_IT_WORKLOAD_ARCHIVES "${CMAKE_CURRENT_SOURCE_DIR}/workloads/*.tar.gz")
 foreach(archive IN LISTS HIPDNN_IT_WORKLOAD_ARCHIVES)

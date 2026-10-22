@@ -232,7 +232,7 @@ jobs:
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       # A manual run with a test_filter: label uses the category setup resolved
-      # from it (for example test_filter:dnn_benchmarking). Every other run,
+      # from it (for example test_filter:workloads). Every other run,
       # including every pull request, keeps the category from configure.
       test_type: ${{ contains(inputs.pr_labels, 'test_filter:') && needs.setup.outputs.test_type || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
