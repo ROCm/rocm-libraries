@@ -58,7 +58,6 @@
 // analysis stage and csr2bsr or bsr2csr in its compute stage, for 32- and 64-bit
 // indices.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit

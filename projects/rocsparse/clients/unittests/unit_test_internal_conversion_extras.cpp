@@ -33,7 +33,6 @@
 // buffer-size / nnz / compute pipeline on a tiny matrix plus a few bad-argument
 // branches.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"

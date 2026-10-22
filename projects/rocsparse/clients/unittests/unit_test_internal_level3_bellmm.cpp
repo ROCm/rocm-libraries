@@ -58,7 +58,6 @@
 // equal B + fill and the check can be an exact comparison. beta = 1 makes every
 // update accumulate, so a column visited twice differs from a column visited once.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"

@@ -33,7 +33,6 @@
 // binary (links hip::device) and must run on a GPU (via the serializer, e.g.
 // HIP_VISIBLE_DEVICES=0 gpu-run ./rocsparse-unit-test-device).
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "rocsparse_common.hpp" // ROCSPARSE_DEVICE_ILF / ROCSPARSE_KERNEL / rocsparse::fma
 #include "unit_test_utils.hpp"
 

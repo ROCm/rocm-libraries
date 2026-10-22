@@ -27,7 +27,6 @@
 // (rocsparse::dichotomic_search and rocsparse::popc). Split out of
 // unit_test_internal_collectives.cpp by collective family.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "unit_test_internal_collectives_common.hpp"

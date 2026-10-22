@@ -48,7 +48,6 @@
 //
 // TARGET: rocsparse-unit-test-device.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit

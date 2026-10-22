@@ -55,7 +55,6 @@
 // TARGET: rocsparse-unit-test-device. The tests drive the public rocsparse_spgemm
 // entry point and need the complete handle type to shrink the grid limit.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit

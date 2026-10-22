@@ -31,7 +31,6 @@
 // run through the public API (so host dispatch/validation/orchestration is
 // counted), plus bad-argument branches.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"

@@ -68,7 +68,6 @@
 // TARGET: rocsparse-unit-test-device. The tests drive the public rocsparse_spmv
 // entry point and need the complete handle type to reach handle->properties.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse_handle.hpp"

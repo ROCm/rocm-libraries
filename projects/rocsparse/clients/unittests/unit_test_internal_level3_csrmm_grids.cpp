@@ -86,7 +86,6 @@
 // rocsparse_spmm entry point, so nothing hidden in librocsparse is needed, but
 // they do need a real device and the complete handle type.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 // ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit the

@@ -33,7 +33,6 @@
 // applicable) on a tiny problem, so the host dispatch/validation/orchestration
 // in library/src/level2 is counted.
 //
-#include "../include/rocsparse_clients_log.hpp"
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
