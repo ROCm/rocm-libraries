@@ -18,11 +18,11 @@
 # suites.
 #
 # Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
-# runs the same coverage. The source-only arch-domain reproducibility gate is
-# intentionally standard-tier: it probes the external LLVM toolchain across
-# the full intrinsic/architecture matrix and does not belong in quick or FFM.
-# The target is currently source-build-only, so this category applies only to
-# build-tree CTest; installed provider artifacts do not register it.
+# runs the same coverage. The arch-domain reproducibility gate is intentionally
+# standard-tier: it probes the external LLVM toolchain across the full
+# intrinsic/architecture matrix and does not belong in quick or FFM. It is
+# registered in both build-tree and installed-artifact CTest, so developers and
+# provider CI execute the same logical gate against their respective package data.
 #
 # The pinned GPU reference entries are regex patterns, unlike the other
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -118,7 +118,7 @@ test_categories:
       - "ffm-full"
 
   standard:
-    description: "rocKE source generated-artifact reproduction checks"
+    description: "rocKE generated-artifact reproduction checks"
     test_patterns:
       - "rocke_arch_domain_reproducibility"
     labels:

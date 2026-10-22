@@ -401,13 +401,19 @@ disables the lookup.
 ### 4.6 Does the measured arch-domain artifact reproduce?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. The source-only
-`rocke_arch_domain_reproducibility` CTest runs
-`tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
-for the host flavor and compares the result with the committed column. This is
-an artifact-reproduction gate backed by the host toolchain, not a Python unit
-test: it owns external compiler processes, a dedicated timeout and resource
+host's toolchain reproduces them. The `rocke_arch_domain_reproducibility` CTest
+runs `tools/gen_arch_domain.py --check` over the full intrinsic/architecture
+matrix for the host flavor and compares the result with the committed column.
+This is an artifact-reproduction gate backed by the host toolchain, not a Python
+unit test: it owns external compiler processes, a dedicated timeout and resource
 policy, and an explicit CTest skip result.
+
+The gate is registered in both execution environments. A developer build runs
+the source tool against the source package data. Provider CI runs a packaged,
+test-only copy of the same implementation against the column in the relocated
+installed `rocke` package. This follows the library-side test contract: CMake
+stages every input, CTest supplies artifact-relative paths, and the test never
+configures or reaches back into a source checkout.
 
 The result mapping deliberately preserves the former pytest item's behavior:
 no clang, no committed host-flavor column, and a clang/resolved-flavor mismatch
@@ -415,13 +421,14 @@ skip; a partial or internally inconsistent LLVM installation fails. Flavor
 auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
-The fast structure and generator units remain in
+The fast structure and generator units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
-`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The CTest is
-not installed because the generator is source-only. It is categorized as
-standard where source-build CTests are selected, but current installed-artifact
-CI does not contain it; final CI enrollment and tier policy remain open testing
-strategy decisions.
+`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
+CTest is categorized as standard in both build-tree and installed manifests, so
+current installed-artifact CI gains the reproduction coverage without adding the
+external process sweep to the quick or FFM pytest pools. Keeping one generator
+implementation behind two thin registrations preserves local coverage while
+avoiding duplicated test logic.
 
 ---
 

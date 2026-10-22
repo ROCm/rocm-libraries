@@ -68,7 +68,7 @@ Four distinct things run here; don't conflate them:
    above) -> `ctest` when any registered test executable is built in `--build-root`
    for the selected `--config`. CTest supplies the executable paths, including
    configuration directories and platform suffixes. The entire registered suite
-   runs, including the source-only `rocke_arch_domain_reproducibility` toolchain
+   runs, including the build-tree `rocke_arch_domain_reproducibility` toolchain
    gate, so a partial build exposes missing tests as failures. No configured test
    build or no built registered tests is reported explicitly as a skipped stage.
 2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
@@ -87,6 +87,11 @@ Four distinct things run here; don't conflate them:
 pytest: the sweep starts external compiler/linker processes, has its own timeout
 and resource contract, and is independent of `ROCKE_BACKEND`.
 
+The same logical gate has two registrations: the build-tree entry invokes the
+source tool and committed source column, while the installed entry invokes a
+packaged test-only copy of the tool and the column in the relocated `rocke`
+package. This matches the library-side CI model: CMake stages every input, CTest
+owns execution, and no test reconstructs or reaches back into the source tree.
 The migration preserves the former pytest item's result mapping:
 
 | Condition | CTest result |
@@ -106,22 +111,25 @@ Run it from a configured platform build with:
 ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V
 ```
 
-#### Migration status and known limitations
+#### CI enrollment and known limitations
 
-This move exposes the sweep as one independently schedulable CTest; it does not
-settle its final CI or toolchain policy.
+This move exposes the sweep as one independently schedulable CTest in both local
+builds and installed provider CI.
 
-- The target is source-build only because the generator is not installed. It is
-  absent from the installed test artifact used by current provider CI.
-- Its standard-tier categorization applies only where source-build CTests are
-  selected. Final CI enrollment and tier placement remain open decisions.
+- The installed test package carries only the generator and its test-time Python
+  dependencies; they remain test assets rather than production `rocke` APIs.
+- The installed gate reads the committed column through package resources, so it
+  verifies the exact relocated data consumed by CI. The build-tree gate resolves
+  the same resource from the source package.
+- Standard-tier categorization keeps the external compiler sweep out of quick and
+  FFM lanes. Registration itself is pinned by the source runner contract test;
+  installed CI then exercises the generated CTest entry end to end.
 - Exit code 77 is an orchestration adapter preserving the old pytest skip
   behavior, not yet a typed semantic outcome from the generator.
 - Flavor auto-detection can fail before a skip result when COMGR evidence is
   unavailable; this preserves existing behavior for the migration.
-- Probe batching, worker tuning, caching, timeout/retry policy, and automated
-  end-to-end provider-tier selection checks are deferred until the standalone
-  target provides enough evidence to evaluate them.
+- Probe batching, worker tuning, caching, and timeout/retry policy remain future
+  efficiency work now that CI supplies execution evidence for the standalone gate.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 

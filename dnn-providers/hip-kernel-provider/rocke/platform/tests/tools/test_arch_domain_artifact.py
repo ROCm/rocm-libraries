@@ -30,9 +30,10 @@ recorded as "the answer is no". Same reason the artifact distinguishes
 ``toolchain_crash`` and ``toolchain_timeout`` (no data).
 
 This file contains **source-tree** unit and structure tests and is excluded
-from the installed test tree by ``CMakeLists.txt``: it imports the generator out
-of the uninstalled ``tools/``. The regeneration CTest is source-only for the
-same reason. Keep both registrations in step if either path is renamed.
+from the installed test tree by ``CMakeLists.txt``. The regeneration CTest has
+both build-tree and installed-artifact registrations; CMake stages a test-only
+copy of the generator and its discovery helpers for the latter. Keep both
+registrations and the packaged helper list in step if either path is renamed.
 """
 
 from __future__ import annotations

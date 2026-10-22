@@ -14,10 +14,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
-  # Source artifact-reproduction gate, deliberately separate from pytest. It
-  # re-probes the full intrinsic/architecture matrix and therefore has a
-  # different timeout, resource, and skip contract from Python unit tests.
-  # It is source-tree-only: the generator is not part of installed artifacts.
+  # Build-tree artifact-reproduction gate, deliberately separate from pytest.
+  # It re-probes the full intrinsic/architecture matrix and therefore has a
+  # different timeout, resource, and skip contract from Python unit tests. The
+  # installed test manifest registers the same logical gate against its staged
+  # generator and relocated package data.
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility

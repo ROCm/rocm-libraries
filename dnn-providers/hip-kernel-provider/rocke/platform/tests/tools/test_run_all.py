@@ -274,6 +274,8 @@ def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_
 
 
 def test_arch_domain_ctest_registration_contract(runner, tmp_path):
+    if not (runner.ROCKE / "CMakeLists.txt").is_file():
+        pytest.skip("source CMake project is absent from the installed test artifact")
     if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
         pytest.skip("CMake and CTest required for registration regression")
 
@@ -299,6 +301,21 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     assert properties["TIMEOUT"] == 1800.0
     assert "integration" in properties["LABELS"]
     assert "standard" in properties["LABELS"]
+
+    # Provider CI runs the generated installed manifest, not this build-tree
+    # registration. Pin both halves of the contract so a local run cannot be
+    # green while packaging silently drops the gate.
+    installed_manifest = (build / "CTestTestfile.cmake.install").read_text()
+    assert "add_test(rocke_arch_domain_reproducibility" in installed_manifest
+    assert "tests/arch_domain/gen_arch_domain.py" in installed_manifest
+    assert "--check --unvalidated-exit-code 77" in installed_manifest
+    assert "SKIP_RETURN_CODE 77" in installed_manifest
+    assert "RUN_SERIAL TRUE" in installed_manifest
+    assert "TIMEOUT 1800" in installed_manifest
+    assert (
+        'LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"'
+        in installed_manifest
+    )
 
 
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):

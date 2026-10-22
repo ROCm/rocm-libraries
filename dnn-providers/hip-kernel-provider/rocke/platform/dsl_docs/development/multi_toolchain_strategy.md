@@ -337,9 +337,10 @@ R1 and R2 change **zero emitted bytes**, need no golden re-bless, and are fully
 verifiable on a host without cmake.
 
 **R1 — generate an `arch_domain` artifact from the toolchain; do not hand-write
-it. — SHIPPED** as `tools/gen_arch_domain.py`, with structure coverage in
+it. — SHIPPED** as `tools/gen_arch_domain.py`, with source structure coverage in
 `tests/tools/test_arch_domain_artifact.py` and regeneration gated by the
-`rocke_arch_domain_reproducibility` CTest.
+`rocke_arch_domain_reproducibility` CTest in both developer build trees and
+relocated provider test artifacts.
 
 Uses the link probe (declare + call + `store volatile`, compile **and link**;
 prototype validated, §2.4), at **`-O0`** — at `-O3` the optimiser can delete the

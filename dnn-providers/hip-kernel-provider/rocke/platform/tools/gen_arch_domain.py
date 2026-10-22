@@ -83,6 +83,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import NamedTuple
 
@@ -94,12 +95,18 @@ ROCKE = HERE.parent  # tools -> rocke/platform
 
 
 def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+    """Import rocke from a checkout or a relocated provider test artifact.
+
+    Source execution finds ``python/`` beside ``tools/``. Installed provider
+    tests stage this script below ``tests/arch_domain`` and the package at the
+    artifact root. A standalone install supplies its site-packages directory
+    through the CTest environment. Only existing layouts are added, so normal
+    package resolution remains authoritative everywhere else.
+    """
+    candidates = (ROCKE / "python", HERE.parents[1])
+    for path in candidates:
+        if (path / "rocke").is_dir() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
 # At import time, not in main(): the status vocabulary and the schema string
@@ -110,7 +117,10 @@ _bootstrap_sys_path()
 from rocke.core.arch import domain as _domain
 
 SCHEMA = _domain.SCHEMA
-DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+# The committed columns are package data, not source-tree data. Resolving them
+# through the imported package makes ``--check`` compare the exact payload CI
+# tests after relocation while retaining the same path in a source checkout.
+DATA_DIR = Path(str(resource_files("rocke.core.arch") / "data"))
 
 
 def default_out(flavor: str) -> Path:

@@ -248,7 +248,10 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 module, compiles **and links** it in a **subprocess**, and classifies the
 outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
 its structure and the `rocke_arch_domain_reproducibility` CTest asserts
-regeneration is a no-op. This is exactly how golden is managed.
+regeneration is a no-op. The CTest is registered for both developer build trees
+and relocated provider test artifacts; the installed form checks the package
+data CI actually consumes without requiring a source checkout. This is exactly
+how golden is managed.
 
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host
