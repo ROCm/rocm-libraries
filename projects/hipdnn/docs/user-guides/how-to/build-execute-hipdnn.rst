@@ -64,12 +64,12 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   // class is provided for assistance. This class ensures sufficient memory is
   // allocated on the host and GPU for each tensor and uses the MigratableMemory
   // class to facilitate synchronizing data between host and device.
-  utilities::Tensor<DataType_t::FLOAT> xTensor(x->get_dim(), TensorLayout::NCHW);
-  utilities::Tensor<DataType_t::FLOAT> scaleTensor(scale->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> biasTensor(bias->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> meanTensor(mean->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> invVarianceTensor(inv_var->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> yTensor(y->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> xTensor(x->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> scaleTensor(scale->get_dim());
+  utilities::Tensor<float> biasTensor(bias->get_dim());
+  utilities::Tensor<float> meanTensor(mean->get_dim());
+  utilities::Tensor<float> invVarianceTensor(inv_var->get_dim());
+  utilities::Tensor<float> yTensor(y->get_dim(), TensorLayout::NCHW);
 
   // [... populate Tensor input data on host ...]
 
@@ -87,7 +87,7 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   variantPack[y->get_uid()] = yTensor.memory().deviceData();
 
   // Execute the graph
-  graph.execute(handle, variant_pack, workspace);
+  graph.execute(handle, variantPack, workspace);
 
   // Make graph output avaialble on host.
   yTensor.memory().markDeviceModified();
