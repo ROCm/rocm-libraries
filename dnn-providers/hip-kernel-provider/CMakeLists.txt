@@ -314,8 +314,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # Two test descriptor roots, one per test binary. The unit root holds two packed
-    # subtrees and the integration root holds three, all five wired in
-    # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
+    # subtrees and the integration root holds three, and a sixth packed set sits beside both
+    # roots, all six wired in descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
     # binary and JIT-compiled at load; for one of those the packer stamps the shard
@@ -408,6 +408,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # still serves, which needs the two archives to be separate files.
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
+    # Packed beside the unit and integration roots rather than into either: the engine it
+    # declares is loaded only from a scratch tree the unit binary writes at run time, so no
+    # Container may list it.
+    set(HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH "multi_launch")
 
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR

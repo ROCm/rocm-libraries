@@ -1,8 +1,9 @@
 # Test descriptors
 
-Authored descriptor sets for the hip-kernel-provider test suites. The build packs each set
-into one of two discovery roots. The unit binary reads the `unit` root. The integration
-binary reads the `integration` root. The two roots stay disjoint.
+Authored descriptor sets for the hip-kernel-provider test suites. The build packs all but
+one set into one of two discovery roots. The unit binary reads the `unit` root. The
+integration binary reads the `integration` root. The two roots stay disjoint. The one other
+set, `multi_launch/`, stages outside both roots and no Container loads it.
 
 Every set is a top-level folder here, and every one is packed whole.
 
@@ -12,8 +13,9 @@ Every set is a top-level folder here, and every one is packed whole.
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
 | `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/` | the integration binary |
+| `multi_launch/` | `two_stage/` | `hip` | `multi_launch/` | the unit binary, from a scratch tree |
 
-The packer runs five times over these four sets. `shared/` feeds both binaries, and each other
+The packer runs six times over these five sets. `shared/` feeds both binaries, and each other
 folder feeds one binary. Every descriptor in these sets applies to each packed architecture.
 Each set therefore stages one architecture folder for each packed architecture.
 
@@ -103,3 +105,33 @@ Two rules follow for a test author:
 
 - Name the engine id when you assert which engine served a graph.
 - Do not assert the size of the applicable-engine list for a pointwise ADD/f32 graph.
+
+## `multi_launch/`
+
+The inputs of the end-to-end case for a multi-launch kernel, `TestMultiLaunchEndToEnd.cpp`.
+A multi-launch kernel is a UKD 1.1 whose `sources` map names each of its launches. The
+packer cannot pack that form from a `hip` descriptor, so this set holds the single-launch
+form of it: one `hip` UKD whose translation unit exports two kernels. The UKD describes
+`MultiLaunchProduce`. `MultiLaunchConsume` is named by no descriptor and is in the same code
+object, as the launches of one rocKE kernel are. Keep it undescribed: a descriptor of its own
+would pack it under a second toc_key and into a second archive entry.
+
+The set stages to `multi_launch/<arch>/` beside the `unit` and `integration` roots rather than
+into either. Its engine, `hipkernel:multi_launch_probe`, names a dispatch symbol and a graph
+match symbol that only the test registers, so a Container that loaded this set would drop the
+engine at load. The set therefore sits where no Container looks, and the engine lists of both
+binaries do not change. The unit binary reaches the staged folder through a path relative to
+itself and gives the case the packed archive, the toc_key and the digest.
+
+The case copies one packed architecture folder into a scratch tree and rewrites the packed
+UKD into the two-launch form. It builds a `sources` map with one launch per exported kernel,
+and each launch is the packed source with its own `symbol`. Both kernels take the same four
+arguments, so the signature the packer recorded for the described kernel stands in for the
+other.
+
+`MultiLaunchProduce` writes `2x + 1` to the workspace. `MultiLaunchConsume` reads the
+workspace and writes `3 * ws + x` to the output. The output is `7x + 3` only when both ran,
+the first ran first, and the second read the workspace the first wrote.
+
+Keep the descriptors in the `two_stage/` child folder, for the nesting reason given above.
+Edit the kernel arguments in step with `twoStageSignature()` in the test.

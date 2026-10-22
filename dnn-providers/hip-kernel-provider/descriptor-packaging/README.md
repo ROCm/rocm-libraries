@@ -70,13 +70,13 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires six roots: production, plus five over the four authored test sets
+The provider wires seven roots: production, plus six over the five authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
 
 | Root | Source | Ships |
 |---|---|---|
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
-| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture,multi_launch}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
 Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
 `pipeline.offered_engines`, under the base interpreter, with the same filters) which
