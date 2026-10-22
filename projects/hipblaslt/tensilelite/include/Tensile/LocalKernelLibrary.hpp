@@ -277,6 +277,13 @@ namespace TensileLite
          * shipped library, a JIT library or this one has already indexed is
          * shared with that library and is rejected, not renumbered.
          *
+         * Callers must finish initializing metadata and predicates and have
+         * exclusive access to the incoming objects during registration.
+         * After registration, they must not change the index,
+         * tag, problem type, launch metadata or predicates, including through
+         * pointers returned by lookups. Snapshots share these objects; they
+         * do not copy them or synchronize changes to their fields.
+         *
          * Each is also tagged Equal here, before it is published, because a
          * local kernel is selected only through an exact mapping; selection then
          * never writes to a solution that concurrent lookups share.
