@@ -1038,12 +1038,12 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     const hipdnn_data_sdk::utilities::TensorBase<float>* maskPtr = &mask;
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, maskPtr, false, &lse);
 
-    // sq=0: all masked → LSE = -inf (or NaN due to -inf - (-inf) in exp)
+    // sq=0: all masked → O = 0 and LSE = -inf, never NaN (cuDNN contract, register SEM-010)
     const float lse0 = lse.getHostValue(0, 0, 0, 0);
-    // When all scores are -inf: maxVal = -inf, exp(-inf - (-inf)) = exp(NaN) = NaN
-    // So LSE may be NaN rather than -inf. Both indicate "no valid attention weights"
-    EXPECT_TRUE((std::isinf(lse0) && lse0 < 0) || std::isnan(lse0))
-        << "LSE should be -inf or NaN for fully masked row, got: " << lse0;
+    EXPECT_TRUE(std::isinf(lse0) && lse0 < 0)
+        << "LSE should be -inf for fully masked row, got: " << lse0;
+    EXPECT_EQ(o.getHostValue(0, 0, 0, 0), 0.0);
+    EXPECT_EQ(o.getHostValue(0, 0, 0, 1), 0.0);
 
     // sq=1: normal → LSE finite
     const float lse1 = lse.getHostValue(0, 0, 1, 0);

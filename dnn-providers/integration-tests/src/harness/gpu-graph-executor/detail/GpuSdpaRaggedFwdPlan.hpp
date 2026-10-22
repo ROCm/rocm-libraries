@@ -464,44 +464,9 @@ public:
         const auto* descaleKPtr = descalePtr(nodeAttributes->descale_k_tensor_uid());
         const auto* descaleVPtr = descalePtr(nodeAttributes->descale_v_tensor_uid());
 
-        int64_t leftBound = (nodeAttributes->left_bound().has_value())
-                                ? nodeAttributes->left_bound().value()
-                                : -1;
-        int64_t rightBound = (nodeAttributes->right_bound().has_value())
-                                 ? nodeAttributes->right_bound().value()
-                                 : -1;
-
-        if(leftBound < -1 || rightBound < -1)
-        {
-            throw std::invalid_argument(
-                "GpuSdpaRaggedFwdPlan: left_bound and right_bound must be >= -1 (got left_bound="
-                + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
-        }
-
-        bool isTopLeft = nodeAttributes->diagonal_alignment()
-                         == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
-
-        // Validate mutually exclusive deprecated attributes
-        if(nodeAttributes->causal_mask() && nodeAttributes->causal_mask_bottom_right())
-        {
-            throw std::invalid_argument("Cannot set both causal_mask and causal_mask_bottom_right. "
-                                        "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
-                                        "left_bound=-1, right_bound=0 instead.");
-        }
-
-        // Deprecated causal flags override the bounds and alignment.
-        if(nodeAttributes->causal_mask())
-        {
-            leftBound = -1;
-            rightBound = 0;
-            isTopLeft = true;
-        }
-        if(nodeAttributes->causal_mask_bottom_right())
-        {
-            leftBound = -1;
-            rightBound = 0;
-            isTopLeft = false;
-        }
+        // Same resolution as the dense GPU and CPU references: a deprecated causal flag composes
+        // with explicit bounds the way cuDNN's setters do, rather than overriding them.
+        const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaRaggedFwdPlan");
 
         // isApplicable checked that every primary has a ragged_offset aux. fpropRagged checks
         // that o and v share the per-batch lengths of q and k.
@@ -521,9 +486,9 @@ public:
                                    *tensorMap.at(vAttr->ragged_offset_tensor_uid().value()),
                                    *tensorMap.at(oAttr->ragged_offset_tensor_uid().value()),
                                    std::move(scaleTensor),
-                                   leftBound,
-                                   rightBound,
-                                   isTopLeft,
+                                   band.leftBound,
+                                   band.rightBound,
+                                   band.topLeftAlignment,
                                    lsePtr,
                                    raggedOffsetLsePtr,
                                    descaleQPtr,

@@ -1285,6 +1285,93 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteBottomRightBandMatchesCpu)
     checkPlanMaskAgainstCpu(attrs, 1, 0, /*expectedTopLeft=*/false);
 }
 
+// A deprecated causal flag composes with explicit bounds and alignment the way cuDNN's setters do
+// (PlanUtils.hpp extractDiagonalBandParams), matching the dense GPU and CPU references: the flag
+// sets right_bound = 0, then any left_bound, any right_bound >= 0 and (for causal_mask) the
+// alignment apply on top. Register SEM-002.
+struct RaggedDeprecatedCausalCase
+{
+    const char* name;
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    DiagonalAlignment alignment;
+    int64_t expectedLeftBound;
+    int64_t expectedRightBound;
+    bool expectedTopLeft;
+};
+
+class TestGpuSdpaRaggedFwdPlanDeprecatedCausal
+    : public ::testing::TestWithParam<RaggedDeprecatedCausalCase>
+{
+};
+
+TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausal, ComposesWithExplicitBounds)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& p = GetParam();
+    SdpaAttributesT attrs;
+    attrs.causal_mask = p.causalMask;
+    attrs.causal_mask_bottom_right = p.causalMaskBottomRight;
+    attrs.left_bound = p.leftBound;
+    attrs.right_bound = p.rightBound;
+    attrs.diagonal_alignment = p.alignment;
+    checkPlanMaskAgainstCpu(attrs, p.expectedLeftBound, p.expectedRightBound, p.expectedTopLeft);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaRaggedFwdPlanDeprecatedCausal,
+                         ::testing::Values(RaggedDeprecatedCausalCase{"CausalWithLeftBound",
+                                                                      true,
+                                                                      false,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithRightBound",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      1,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithUnboundedRight",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      -1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{
+                                               "CausalWithBottomRightAlignment",
+                                               true,
+                                               false,
+                                               std::nullopt,
+                                               std::nullopt,
+                                               DiagonalAlignment::BOTTOM_RIGHT,
+                                               -1,
+                                               0,
+                                               false},
+                                           RaggedDeprecatedCausalCase{"BottomRightWithLeftBound",
+                                                                      false,
+                                                                      true,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      false}),
+                         [](const ::testing::TestParamInfo<RaggedDeprecatedCausalCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
 // Both deprecated causal flags, or a bound below -1, are rejected when the plan is built.
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)
 {

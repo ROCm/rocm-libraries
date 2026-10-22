@@ -64,6 +64,45 @@ class TestGenerateSdpaFwdGoldenScale(unittest.TestCase):
 
 
 @unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestGenerateSdpaFwdGoldenMask(unittest.TestCase):
+    """The golden keep-mask must follow the bounds the graph serializes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.gen = load_generator_module()
+
+    def keep(self, mask):
+        return [[bool(x) for x in row] for row in mask.tolist()]
+
+    def test_causal_alone_keeps_up_to_diagonal(self):
+        mask = self.gen.build_mask(3, 3, "top_left", -1, -1)
+        self.assertEqual(
+            self.keep(mask),
+            [[True, False, False], [True, True, False], [True, True, True]],
+        )
+
+    def test_explicit_right_bound_replaces_causal_right_bound(self):
+        # The graph serializes causal + window_right=1 as right_bound=1, so one key past the
+        # diagonal is visible; ANDing with causal would wrongly keep right_bound at 0.
+        mask = self.gen.build_mask(3, 4, "top_left", -1, 1)
+        self.assertEqual(
+            self.keep(mask),
+            [
+                [True, True, False, False],
+                [True, True, True, False],
+                [True, True, True, True],
+            ],
+        )
+
+    def test_bottom_right_causal_shifts_diagonal(self):
+        mask = self.gen.build_mask(2, 4, "bottom_right", -1, -1)
+        self.assertEqual(
+            self.keep(mask),
+            [[True, True, True, False], [True, True, True, True]],
+        )
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
 class TestGenerateSdpaFwdGoldenRaggedHelpers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

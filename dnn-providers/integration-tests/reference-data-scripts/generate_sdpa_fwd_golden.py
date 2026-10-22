@@ -209,13 +209,17 @@ def build_mask(s_q, s_kv, causal, window_left, window_right):
     # Bottom-right alignment shifts the diagonal by (S_kv - S_q).
     offset = 0 if causal != "bottom_right" else (s_kv - s_q)
 
+    # Resolve the bounds exactly as build_graph serializes them (cuDNN setter composition):
+    # causal sets right_bound = 0, and an explicit window bound replaces it. ANDing causal with
+    # the window instead would keep right_bound at 0 while the graph says window_right.
+    left_bound = window_left
+    right_bound = window_right if window_right >= 0 else (0 if has_causal else -1)
+
     mask = torch.ones(s_q, s_kv, dtype=torch.bool)
-    if has_causal:
-        mask &= col <= (row + offset)
-    if window_left >= 0:
-        mask &= (row + offset - col) <= window_left
-    if window_right >= 0:
-        mask &= (col - (row + offset)) <= window_right
+    if left_bound >= 0:
+        mask &= (row + offset - col) <= left_bound
+    if right_bound >= 0:
+        mask &= (col - (row + offset)) <= right_bound
     return mask
 
 

@@ -655,6 +655,12 @@ public:
                         // Efficient recomputation using LSE from forward pass
                         const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq, 0});
 
+                        // A row with no live key has LSE = -inf (+inf from kernels that use
+                        // that convention). Its probabilities are all zero, so it contributes
+                        // nothing to any gradient; exp(score - lse) would give NaN for a
+                        // -inf score.
+                        const bool deadRow = std::isinf(lseVal);
+
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
                             // Apply sliding-window / causal mask
@@ -692,8 +698,9 @@ public:
                             // P[skv] = exp(score[skv] - lse)
                             // where lse = maxVal + log(sumExp)
                             probs[static_cast<size_t>(skv)]
-                                = std::exp(scores[static_cast<size_t>(skv)]
-                                           - static_cast<ComputeDataType>(lseVal));
+                                = deadRow ? static_cast<ComputeDataType>(0.0)
+                                          : std::exp(scores[static_cast<size_t>(skv)]
+                                                     - static_cast<ComputeDataType>(lseVal));
                         }
                     }
                     else
@@ -752,9 +759,13 @@ public:
                                 sumExp += probs[static_cast<size_t>(skv)];
                             }
                         }
-                        for(int64_t skv = 0; skv < seqKv; ++skv)
+                        // A fully masked row leaves every probability at zero (sumExp == 0).
+                        if(sumExp > static_cast<ComputeDataType>(0.0))
                         {
-                            probs[static_cast<size_t>(skv)] /= sumExp;
+                            for(int64_t skv = 0; skv < seqKv; ++skv)
+                            {
+                                probs[static_cast<size_t>(skv)] /= sumExp;
+                            }
                         }
                     }
 
