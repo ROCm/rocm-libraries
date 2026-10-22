@@ -143,7 +143,8 @@ axes. This is a terminal-native cousin of CuTe's `print_layout`. Use
 These mirror the cpp examples 1:1 where the API allows, with pure-Python
 fallbacks (clearly labelled, ~10 lines each) for algebra ops that
 mosaic's C++ side exposes but the Python JIT hasn't surfaced yet
-(`blocked_product`, `chiplet_transform_chunk`, `gemm_grid_transform`).
+(`blocked_product`). `gemm_grid/` also keeps local integer helpers for
+the chiplet remap; those are not part of the C++ library.
 
 | Directory               | Cpp source                            | What it shows |
 | ----------------------- | ------------------------------------- | ------------- |

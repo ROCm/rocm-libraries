@@ -303,24 +303,18 @@ See [examples/cpp/slice/](../examples/cpp/slice/) for a runnable demo.
 
 ## Worked example: tiled GEMM grid scheduling
 
-For a GEMM kernel on AMD Instinct GPUs (like MI300/MI350), you typically want workgroup
-IDs grouped onto the same XCD (chiplet) for L2 cache locality, then arranged
-within each XCD to maximize tile reuse. Mosaic provides two pieces:
+For a GEMM kernel, consecutive workgroup IDs should cover a small tile of
+the output grid before moving on. Mosaic expresses that schedule with
+`blocked_product`:
 
 ```cpp
 #include <mosaic/mosaic.hpp>
-#include <mosaic/algorithms.hpp>   // chiplet_transform_*, gemm_grid_transform
 
-__device__ void kernel(int wgid, int grid_h, int grid_w, int num_xcds,
-                         int& pid_m, int& pid_n) {
+__device__ void kernel(int wgid, int grid_h, int grid_w,
+                       int& pid_m, int& pid_n) {
     constexpr int L2_TILE_Y = 8;
     constexpr int L2_TILE_X = 4;
 
-    // Step 1: remap WG IDs so consecutive IDs land on the same XCD.
-    wgid = mosaic::chiplet_transform_chunk(
-        wgid, grid_h * grid_w, /*chunk=*/32, num_xcds);
-
-    // Step 2: define a hierarchical tile schedule and apply it.
     auto block = mosaic::row_major(L2_TILE_Y, L2_TILE_X);
     auto tiler = mosaic::column_major(grid_h / L2_TILE_Y, grid_w / L2_TILE_X);
     auto schedule = mosaic::blocked_product(block, tiler);
@@ -331,17 +325,12 @@ __device__ void kernel(int wgid, int grid_h, int grid_w, int num_xcds,
 }
 ```
 
-**Key operators:**
-- `chiplet_transform_chunk(wgid, total, chunk, num_xcds)` — chiplet-aware
-  ID remapping. AMD-specific, lives in `mosaic/algorithms.hpp`.
-- `blocked_product(block, tiler)` — "place a copy of block at every position
-  of tiler." This is the named operator for "tile a small block over a
-  grid" patterns.
-- `gemm_grid_transform(idx, layout, grid_h, grid_w, qy, qx)` — handles the
-  case where the grid isn't perfectly divisible by the tile dimensions
-  (boundary strips get default row-major mapping).
+`blocked_product(block, tiler)` places a copy of `block` at every position
+of `tiler`. That is the operator for tiling a small block over a grid.
+The grid in this snippet is assumed to divide evenly by the tile.
 
-Host-side schedule inspection: [examples/python/pymosaic/gemm_grid/](../examples/python/pymosaic/gemm_grid/).
+Host-side schedule inspection, including a chiplet remap written as local
+Python integer arithmetic: [examples/python/pymosaic/gemm_grid/](../examples/python/pymosaic/gemm_grid/).
 
 ---
 

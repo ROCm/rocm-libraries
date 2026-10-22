@@ -13,6 +13,10 @@ option(MOSAIC_BUILD_TESTS "Build mosaic gtest suite" ON)
 option(MOSAIC_BUILD_EXAMPLES "Build host-side C++ examples" ON)
 option(MOSAIC_BUILD_HIP_EXAMPLES "Build HIP/GPU examples (needs a HIP toolchain)" OFF)
 
+# include/mosaic/utils.hpp and the opt-in HIP examples include
+# <hip/hip_runtime.h>. hip::host provides that include path.
+find_package(hip REQUIRED)
+
 add_library(mosaic INTERFACE)
 add_library(roc::mosaic ALIAS mosaic)
 target_include_directories(mosaic INTERFACE
@@ -20,6 +24,11 @@ target_include_directories(mosaic INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(mosaic INTERFACE cxx_std_20)
+target_link_libraries(mosaic INTERFACE hip::host)
+
+if(MOSAIC_BUILD_HIP_EXAMPLES)
+    enable_language(HIP)
+endif()
 
 if(MOSAIC_BUILD_TESTS)
     enable_testing()

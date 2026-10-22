@@ -4,7 +4,6 @@
 #pragma once
 
 #include "mosaic/algebra.hpp"
-#include "mosaic/algorithms.hpp"
 #include "mosaic/composed.hpp"
 #include "mosaic/config.hpp"
 #include "mosaic/convenience.hpp"

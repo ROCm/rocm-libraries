@@ -17,10 +17,9 @@ What this script computes:
         l3_block        = blocked_product(block_l2, tiler_l3)
         gemm_grid_layout = blocked_product(l3_block, tiler_out)
   * The XCD-chiplet remap that runs first
-    (``chiplet_transform_chunk`` — pure integer arithmetic, ported
-    verbatim from include/mosaic/algorithms.hpp:46-72).
+    (``chiplet_transform_chunk`` — local integer arithmetic).
   * The boundary-strip handling for non-quantized grids
-    (``gemm_grid_transform`` — port of include/mosaic/algorithms.hpp:133-169).
+    (``gemm_grid_transform`` — local integer arithmetic).
 
 What this script prints:
 
@@ -41,7 +40,8 @@ from __future__ import annotations
 from pymosaic.layout import Layout
 
 # -------------------------------------------------------------------
-# Helpers — Python ports of include/mosaic/algorithms.hpp + algebra.hpp
+# Helpers — blocked_product mirrors mosaic algebra; the chiplet helpers
+# are local integer arithmetic for this example.
 # -------------------------------------------------------------------
 
 
@@ -69,9 +69,7 @@ def blocked_product(inner: Layout, outer: Layout) -> Layout:
 def chiplet_transform_chunk(
     wgid: int, num_wgs: int, chunk_size: int, num_xcds: int
 ) -> int:
-    """Port of include/mosaic/algorithms.hpp:46-72.
-
-    Groups ``chunk_size`` consecutive workgroup IDs onto the same XCD,
+    """Group ``chunk_size`` consecutive workgroup IDs onto the same XCD,
     so an L2 tile's worth of WGs all execute on the same chiplet. The
     tail (WGs that don't fit in a complete chunk-distributed cycle)
     keep their original ID.
@@ -89,7 +87,7 @@ def chiplet_transform_chunk(
 def gemm_grid_transform(
     index: int, L: Layout, grid_height: int, grid_width: int, qy: int, qx: int
 ) -> int:
-    """Port of include/mosaic/algorithms.hpp:133-169.
+    """Map a workgroup id through a quantized tile layout.
 
     ``L`` permutes IDs in the quantized ``qy x qx`` interior region.
     The non-quantized right strip (width ``grid_width - qx``) and

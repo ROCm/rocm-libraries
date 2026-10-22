@@ -48,7 +48,6 @@ nesting) with `NUM_XCDS=8`:
 ## What this port does NOT do
 
 * No actual GEMM — there's no kernel and no GPU work.
-* `blocked_product`, `chiplet_transform_chunk`, and `gemm_grid_transform`
-  are inlined as pure-Python helpers that mirror
-  `include/mosaic/algebra.hpp:462-499` and `include/mosaic/algorithms.hpp:46-169`.
-  Once the JIT exposes them, swap to the official APIs.
+* `blocked_product` is inlined as a pure-Python helper that mirrors
+  `include/mosaic/algebra.hpp`. `chiplet_transform_chunk` and
+  `gemm_grid_transform` are local integer helpers in this example.

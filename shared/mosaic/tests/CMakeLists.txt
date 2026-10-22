@@ -8,7 +8,6 @@ add_executable(mosaic_tests
     test_layout.cpp
     test_algebra.cpp
     test_tensor.cpp
-    test_algorithm.cpp
     test_swizzle.cpp
     test_partition.cpp
 )

@@ -6,4 +6,5 @@ if(NOT MOSAIC_BUILD_HIP_EXAMPLES)
 endif()
 
 add_executable(check_tiling check_tiling.cpp)
-target_link_libraries(check_tiling PRIVATE mosaic)
+set_source_files_properties(check_tiling.cpp PROPERTIES LANGUAGE HIP)
+target_link_libraries(check_tiling PRIVATE mosaic hip::host)

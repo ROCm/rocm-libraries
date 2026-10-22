@@ -26,11 +26,15 @@ MIT. See [LICENSE.md](LICENSE.md).
 
 - CMake 3.25+
 - A C++20 compiler
+- A HIP install that provides the `hip::host` CMake target. `include/mosaic/utils.hpp`
+  includes `<hip/hip_runtime.h>`, and the mosaic interface library links `hip::host`
+  so that include path is available to dependents.
 - [GoogleTest](https://github.com/google/googletest) (`find_package(GTest)`) for the C++ tests
 - For `pymosaic`: Python 3.10–3.13, `nanobind`, `ninja`
 
-HIP is optional and only needed for `MOSAIC_BUILD_HIP_EXAMPLES=ON`
-(`examples/cpp/basic_tiling`, `examples/cpp/mfma/mfma_example`).
+Device code is opt-in. `MOSAIC_BUILD_HIP_EXAMPLES=ON` builds
+`examples/cpp/basic_tiling` and `examples/cpp/mfma/mfma_example` as HIP
+and links `hip::host`.
 
 ## Build and test (C++)
 
@@ -79,9 +83,6 @@ auto tiled = mosaic::blocked_product(mosaic::row_major(2, 2),
                                      mosaic::column_major(4, 4));
 ```
 
-AMD-oriented helpers live in [`<mosaic/algorithms.hpp>`](include/mosaic/algorithms.hpp)
-(for example XCD-aware workgroup remapping).
-
 ## C++ examples
 
 - [basic_tiling/](examples/cpp/basic_tiling/) — 2-level workgroup tiling via `blocked_product` (HIP; opt-in)
@@ -102,7 +103,6 @@ mosaic/slice.hpp         Underscore (_), slice, dice
 mosaic/tensor.hpp        Tensor<Engine, Layout>, make_tensor
 mosaic/convenience.hpp   row_major, column_major, strided<>, make_hierarchical
 mosaic/algebra.hpp       blocked_product, right_inverse, ...
-mosaic/algorithms.hpp    AMD spatial helpers
 mosaic/print.hpp         print_layout helpers
 ```
 
