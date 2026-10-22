@@ -431,6 +431,11 @@ public:
     /// @param leftBound        Number of KV positions to the left that are unmasked (-1 = no mask)
     /// @param rightBound       Number of KV positions to the right that are unmasked (-1 = no mask)
     /// @param topLeftAlignment If true, diagonal at skv==sq; if false, at skv==sq+(seqKv-seqQ)
+    /// @param dBias            Optional output: gradient w.r.t. attnMask, same shape and dtype as
+    ///                         attnMask. As in cuDNN it is dS = P * (dP - D) before the attention
+    ///                         scale (the bias is added after scaling), summed over every dim the
+    ///                         mask broadcasts. Masked positions and dead rows contribute 0.
+    ///                         Requires attnMask.
     ///
     /// Note: For GQA (H_q > H_kv), multiple query heads accumulate gradients to
     /// the same KV heads. This implementation is sequential to ensure correctness.
@@ -444,28 +449,36 @@ public:
               class DVDataType,
               class ComputeDataType = float,
               class MaskDataType = ComputeDataType>
-    static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                         const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                         const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
-                         hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
-                         hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
-                         hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
-                         std::optional<float> attnScaleValue = std::nullopt,
-                         const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                         const hipdnn_data_sdk::utilities::TensorBase<
-                             typename NonDeduced<MaskDataType>::type>* attnMask
-                         = nullptr,
-                         int64_t leftBound = -1,
-                         int64_t rightBound = -1,
-                         bool topLeftAlignment = true)
+    static void backward(
+        const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+        hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+        hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+        hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+        std::optional<float> attnScaleValue = std::nullopt,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>*
+            attnMask
+        = nullptr,
+        int64_t leftBound = -1,
+        int64_t rightBound = -1,
+        bool topLeftAlignment = true,
+        hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>* dBias
+        = nullptr)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
         {
             throw std::invalid_argument(
                 "CpuFpReferenceSdpa::backward: q must be rank-4 [B, H_q, Sq, D]");
+        }
+        if(dBias != nullptr && (attnMask == nullptr || dBias->dims() != attnMask->dims()))
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::backward: dBias requires attnMask and must match its shape");
         }
         if(k.dims().size() != 4)
         {
@@ -618,6 +631,26 @@ public:
             return static_cast<size_t>(((bIdx * numHeadsV + hIdx) * seqKv + sIdx) * headDimV
                                        + dIdx);
         };
+
+        // dBias accumulator over the mask's own (possibly broadcast) shape, row-major.
+        std::vector<ComputeDataType> dBiasAccum;
+        auto dBiasIdx = [&](const std::vector<int64_t>& maskIndices) -> size_t {
+            int64_t linear = 0;
+            for(size_t i = 0; i < maskIndices.size(); ++i)
+            {
+                linear = linear * attnMask->dims()[i] + maskIndices[i];
+            }
+            return static_cast<size_t>(linear);
+        };
+        if(dBias != nullptr)
+        {
+            int64_t count = 1;
+            for(const auto dim : attnMask->dims())
+            {
+                count *= dim;
+            }
+            dBiasAccum.assign(static_cast<size_t>(count), ComputeDataType(0));
+        }
 
         // Sequential loop over [B, H_q, Sq]: multiple sq positions accumulate
         // into the same dK/dV entries, and in GQA multiple Q heads also share
@@ -798,6 +831,13 @@ public:
                         const ComputeDataType dsScaled
                             = dsVal * static_cast<ComputeDataType>(scale);
 
+                        // The bias is added after scaling, so its gradient is the unscaled dS.
+                        if(dBias != nullptr)
+                        {
+                            dBiasAccum[dBiasIdx(computeMaskIndex(attnMask->dims(), b, hQ, sq, skv))]
+                                += dsVal;
+                        }
+
                         // dQ[b, hQ, sq, d] += dS[skv] * K[b, kvHeadK, skv, d] * scale
                         for(int64_t d = 0; d < headDim; ++d)
                         {
@@ -879,6 +919,30 @@ public:
                     }
                 }
             }
+        }
+
+        if(dBias != nullptr)
+        {
+            const auto& maskDims = attnMask->dims();
+            std::vector<int64_t> idx(maskDims.size(), 0);
+            for(const auto value : dBiasAccum)
+            {
+                dBias->setHostValue(
+                    hipdnn_test_sdk::detail::safeConvert<typename NonDeduced<MaskDataType>::type>(
+                        value),
+                    idx);
+                // Advance idx row-major, matching dBiasIdx.
+                for(auto d = static_cast<int64_t>(maskDims.size()) - 1; d >= 0; --d)
+                {
+                    const auto du = static_cast<size_t>(d);
+                    if(++idx[du] < maskDims[du])
+                    {
+                        break;
+                    }
+                    idx[du] = 0;
+                }
+            }
+            dBias->memory().markHostModified();
         }
 
         dQ.memory().markHostModified();

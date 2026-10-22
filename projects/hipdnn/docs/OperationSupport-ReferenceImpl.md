@@ -132,7 +132,7 @@ dimension must be reduced.
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported |
 | Dropout (including `dropout_probability` alone) | Not supported | Not supported |
 | ALiBi / padding mask | Not supported | Not supported |
-| Bias gradient (`dbias` output) | - | Not supported |
+| Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache, block-sparse attention | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Ragged tensors | - | Rejected |

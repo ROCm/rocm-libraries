@@ -1729,6 +1729,114 @@ TEST(TestCpuFpReferenceSdpaGradCheck, AdditiveMask)
     checkGradient(v, dV, {BATCH, HEADS, SEQ_KV, HEAD_DIM_V}, fwdLoss, "dV (additive mask)");
 }
 
+// dBias against central finite differences of the forward w.r.t. the bias itself. Parameterized
+// over the bias shape: full rank-4, and a [Sq, Skv] bias broadcast over batch and heads (the
+// gradient is the sum over the broadcast dims). GQA with bottom-right causal and Sq < Skv keeps
+// the band and the group reduction in play.
+struct DBiasGradCase
+{
+    const char* name;
+    std::vector<int64_t> maskDims;
+};
+
+class TestCpuFpReferenceSdpaGradCheckDBias : public ::testing::TestWithParam<DBiasGradCase>
+{
+};
+
+TEST_P(TestCpuFpReferenceSdpaGradCheckDBias, MatchesFiniteDifferences)
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ_Q = 3;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr float SCALE = 0.6f;
+    const auto& maskDims = GetParam().maskDims;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> mask(maskDims);
+    q.fillWithRandomValues(-0.5f, 0.5f, 9000);
+    k.fillWithRandomValues(-0.5f, 0.5f, 9001);
+    v.fillWithRandomValues(-0.5f, 0.5f, 9002);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 9003);
+    mask.fillWithRandomValues(-0.5f, 0.5f, 9004);
+
+    // Bottom-right causal: rightBound = 0, topLeftAlignment = false.
+    CpuFpReferenceSdpa::forward(q, k, v, o, SCALE, &mask, -1, 0, false);
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dBias(maskDims);
+    CpuFpReferenceSdpa::backward(
+        q, k, v, o, dO, dQ, dK, dV, SCALE, nullptr, &mask, -1, 0, false, &dBias);
+
+    auto fwdLoss = [&]() -> double {
+        CpuFpReferenceSdpa::forward(q, k, v, o, SCALE, &mask, -1, 0, false);
+        return computeDotProductLoss(dO, o);
+    };
+
+    checkGradient(mask, dBias, maskDims, fwdLoss, "dBias");
+    // dQ must be unaffected by also requesting dBias.
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (with dBias)");
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuFpReferenceSdpaGradCheckDBias,
+                         ::testing::Values(DBiasGradCase{"FullRank4", {2, 4, 3, 5}},
+                                           DBiasGradCase{"PerHead", {1, 4, 3, 5}},
+                                           DBiasGradCase{"BroadcastSqSkv", {3, 5}}),
+                         [](const ::testing::TestParamInfo<DBiasGradCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+// Positions removed by the band have no gradient, and a requested dBias must match the mask.
+TEST(TestCpuFpReferenceSdpaBwd, DBiasZeroOnBandMaskedPositions)
+{
+    Tensor<float> q({1, 1, 3, 4});
+    Tensor<float> k({1, 1, 3, 4});
+    Tensor<float> v({1, 1, 3, 4});
+    Tensor<float> o({1, 1, 3, 4});
+    Tensor<float> dO({1, 1, 3, 4});
+    Tensor<float> mask({3, 3});
+    q.fillWithRandomValues(-1.0f, 1.0f, 9100);
+    k.fillWithRandomValues(-1.0f, 1.0f, 9101);
+    v.fillWithRandomValues(-1.0f, 1.0f, 9102);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 9103);
+    mask.fillWithValue(0.0f);
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask, -1, 0, true);
+
+    Tensor<float> dQ({1, 1, 3, 4});
+    Tensor<float> dK({1, 1, 3, 4});
+    Tensor<float> dV({1, 1, 3, 4});
+    Tensor<float> dBias({3, 3});
+    CpuFpReferenceSdpa::backward(
+        q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, -1, 0, true, &dBias);
+    for(int64_t i = 0; i < 3; ++i)
+    {
+        for(int64_t j = i + 1; j < 3; ++j)
+        {
+            EXPECT_EQ(dBias.getHostValue(i, j), 0.0f) << "i=" << i << " j=" << j;
+        }
+    }
+
+    Tensor<float> wrongShape({1, 3, 3});
+    EXPECT_THROW(
+        CpuFpReferenceSdpa::backward(
+            q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, &mask, -1, 0, true, &wrongShape),
+        std::invalid_argument);
+    const TensorBase<float>* noMask = nullptr;
+    EXPECT_THROW(
+        CpuFpReferenceSdpa::backward(
+            q, k, v, o, dO, dQ, dK, dV, std::nullopt, nullptr, noMask, -1, 0, true, &dBias),
+        std::invalid_argument);
+}
+
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
 {
     // Combined: GQA + causal mask

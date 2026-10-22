@@ -4,9 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -40,10 +42,20 @@ namespace
 // When `maskDataType` is engaged (any dtype, including DataType::UNSET), a [1, 1, 4, 4] mask
 // tensor of that dtype is added under uid 10 and attrs.attn_mask_tensor_uid is set to 10. When
 // disengaged the mask is left as `attrs` has it, so a caller-set attn_mask_tensor_uid dangles.
-flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
-                                                   std::optional<DataType> maskDataType
-                                                   = std::nullopt)
+struct RawDbiasSpec
 {
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
+// When `dBias` is engaged, a dBias output tensor with that dtype and dims is added under uid 11
+// and attrs.dbias_tensor_uid is set to 11.
+flatbuffers::FlatBufferBuilder
+    makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
+                        std::optional<DataType> maskDataType = std::nullopt,
+                        const std::optional<RawDbiasSpec>& dBias = std::nullopt)
+{
+    constexpr int64_t DBIAS_UID = 11;
     constexpr int64_t Q_UID = 1;
     constexpr int64_t K_UID = 2;
     constexpr int64_t V_UID = 3;
@@ -97,6 +109,13 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs
     if(maskDataType.has_value())
     {
         addTensor(MASK_UID, "Mask", maskDataType.value(), maskStrides, maskDims);
+    }
+    std::vector<int64_t> dBiasStrides;
+    if(dBias.has_value())
+    {
+        attrs.dbias_tensor_uid = DBIAS_UID;
+        dBiasStrides = hipdnn_data_sdk::utilities::generateStrides(dBias->dims);
+        addTensor(DBIAS_UID, "dBias", dBias->dataType, dBiasStrides, dBias->dims);
     }
 
     auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
@@ -593,10 +612,91 @@ INSTANTIATE_TEST_SUITE_P(
            UnsupportedBwdAttributeCase{
                "DropoutProbability",
                [](SdpaBackwardAttributesT& a) { a.dropout_probability = 0.1F; }},
-           // The uid need not resolve: requesting the output is what must be declined.
+           // dBias has the bias tensor's shape, so it cannot be produced without a bias.
            UnsupportedBwdAttributeCase{
-               "DbiasOutput", [](SdpaBackwardAttributesT& a) { a.dbias_tensor_uid = 11; }}),
+               "DbiasWithoutMask", [](SdpaBackwardAttributesT& a) { a.dbias_tensor_uid = 11; }}),
     [](const TestParamInfo<UnsupportedBwdAttributeCase>& info) { return info.param.name; });
+
+// dBias must have exactly the mask's shape and dtype (cuDNN: the bias gradient is reduced back to
+// the bias tensor's shape). The raw graph's mask is FLOAT [1, 1, 4, 4].
+TEST(TestSdpaBwdPlanDbias, MatchingShapeAndDtypeIsApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST(TestSdpaBwdPlanDbias, DtypeMismatchIsNotApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::HALF, {1, 1, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+TEST(TestSdpaBwdPlanDbias, ShapeMismatchIsNotApplicable)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 2, 4, 4}});
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+}
+
+// The plan writes dBias, and it equals the reference called directly.
+TEST(TestSdpaBwdPlanDbias, ExecuteMatchesDirectReference)
+{
+    auto graphBuilder = makeRawSdpaBwdGraph(
+        SdpaBackwardAttributesT{}, DataType::FLOAT, RawDbiasSpec{DataType::FLOAT, {1, 1, 4, 4}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dO(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> stats({1, 2, 4, 1});
+    hipdnn_data_sdk::utilities::Tensor<float> mask({1, 1, 4, 4});
+    q.fillWithRandomValues(-1.0F, 1.0F, 91);
+    k.fillWithRandomValues(-1.0F, 1.0F, 92);
+    v.fillWithRandomValues(-1.0F, 1.0F, 93);
+    dO.fillWithRandomValues(-1.0F, 1.0F, 94);
+    mask.fillWithRandomValues(-1.0F, 1.0F, 95);
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask, -1, -1, true, &stats);
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQ(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dK(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dV(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dBias({1, 1, 4, 4});
+    dBias.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {5, dO.memory().hostData()},
+                                                            {6, stats.memory().hostData()},
+                                                            {7, dQ.memory().hostData()},
+                                                            {8, dK.memory().hostData()},
+                                                            {9, dV.memory().hostData()},
+                                                            {10, mask.memory().hostData()},
+                                                            {11, dBias.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> dQRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dKRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dVRef(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dBiasRef({1, 1, 4, 4});
+    CpuFpReferenceSdpa::backward(
+        q, k, v, o, dO, dQRef, dKRef, dVRef, std::nullopt, &stats, &mask, -1, -1, true, &dBiasRef);
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(dBias, dBiasRef));
+    EXPECT_TRUE(exactValidation.allClose(dQ, dQRef));
+}
 
 TEST(TestSdpaBwdPlanMask, DanglingMaskUidIsNotApplicable)
 {

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <optional>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -34,6 +35,8 @@ struct SdpaBwdParams
                   int64_t rightBound,
                   bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
+                  = nullptr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dBiasAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
@@ -51,6 +54,9 @@ struct SdpaBwdParams
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
+        , dBiasTensor(dBiasAttributes != nullptr
+                          ? std::make_optional(unpackTensorAttributes(*dBiasAttributes))
+                          : std::nullopt)
     {
     }
 
@@ -68,6 +74,7 @@ struct SdpaBwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dBiasTensor;
 };
 
 template <typename QDataType,
@@ -89,7 +96,13 @@ public:
 
     std::vector<int64_t> getOutputTensorIds() const override
     {
-        return {_params.dqTensor.uid, _params.dkTensor.uid, _params.dvTensor.uid};
+        std::vector<int64_t> ids
+            = {_params.dqTensor.uid, _params.dkTensor.uid, _params.dvTensor.uid};
+        if(_params.dBiasTensor.has_value())
+        {
+            ids.push_back(_params.dBiasTensor->uid);
+        }
+        return ids;
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -118,6 +131,12 @@ public:
         {
             shallowAttnMaskTensor = createShallowTensor<Mask>(
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
+        }
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowDBiasTensor;
+        if(_params.dBiasTensor.has_value())
+        {
+            shallowDBiasTensor = createShallowTensor<Mask>(
+                *_params.dBiasTensor, variantPack.at(_params.dBiasTensor->uid));
         }
 
         std::optional<float> effectiveScale;
@@ -149,7 +168,8 @@ public:
                                                       shallowAttnMaskTensor.get(),
                                                       _params.leftBound,
                                                       _params.rightBound,
-                                                      _params.topLeftAlignment);
+                                                      _params.topLeftAlignment,
+                                                      shallowDBiasTensor.get());
     }
 
 private:
@@ -243,11 +263,26 @@ public:
             return false;
         }
 
-        // Unsupported: bias gradient. The reference does not compute dBias, so a graph asking
-        // for it would otherwise leave the output unwritten and unchecked.
+        // Bias gradient: cuDNN's dBias has the bias tensor's shape, so it needs a mask, the same
+        // dims, and (as the builder is keyed on the mask dtype) the mask's dtype.
         if(nodeAttributes->dbias_tensor_uid().has_value())
         {
-            return false;
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid().value());
+            const auto* dBias = tensorMap.at(nodeAttributes->dbias_tensor_uid().value());
+            const auto* mask = tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value());
+            if(dBias->data_type() != mask->data_type() || dBias->dims() == nullptr
+               || mask->dims() == nullptr
+               || !std::equal(dBias->dims()->begin(),
+                              dBias->dims()->end(),
+                              mask->dims()->begin(),
+                              mask->dims()->end()))
+            {
+                return false;
+            }
         }
 
         // Unsupported: dropout
@@ -309,7 +344,10 @@ public:
                              leftBound,
                              rightBound,
                              isTopLeft,
-                             attnMaskPtr);
+                             attnMaskPtr,
+                             nodeAttributes->dbias_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->dbias_tensor_uid().value())
+                                 : nullptr);
 
         return std::make_unique<SdpaBwdPlan<QDataType,
                                             KDataType,
