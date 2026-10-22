@@ -58,6 +58,8 @@ from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
+from ._attention_additive_bias import append_additive_bias_signature
+
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
 _apply_softcap = apply_softcap_log2
@@ -96,6 +98,7 @@ class UnifiedAttentionProblem:
     use_sinks: bool = False
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     use_fp8: bool = False
     fp8_fnuz: bool = False
     num_cus: int = 120
@@ -146,6 +149,13 @@ class UnifiedAttentionProblem:
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
+        # "false" must not silently enable it.
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
             )
 
     @property
@@ -576,6 +586,8 @@ def supports_native_unified_attention(
         return False, "ALiBi slopes are not enabled in CK DSL attention yet"
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
+    if problem.use_additive_bias:
+        return False, "Additive bias is not enabled in CK DSL attention yet"
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -597,6 +609,8 @@ def supports_native_unified_attention_tiled(
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
+    if problem.use_additive_bias and arch != "gfx950":
+        return False, "additive bias is only implemented on gfx950"
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
     gfx942_bf16_wide = _enable_gfx942_bf16_flash(problem, arch)
     if gfx942_bf16_wide:
@@ -676,6 +690,11 @@ def supports_native_unified_attention_tiled(
             if arch == "gfx942"
             else {}
         ),
+        # Additive bias is gfx950-only for now. Passed only for gfx950 for the same
+        # reason as above: no other arch's supports_tiled_2d declares it.
+        **(
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+        ),
     )
 
 
@@ -694,6 +713,8 @@ def supports_native_unified_attention_3d_tiled(
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
+    if problem.use_additive_bias and arch != "gfx950":
+        return False, "additive bias is only implemented on gfx950"
     *_, supports_tiled_3d = _tiled_3d_impl(arch)
     return supports_tiled_3d(
         head_size=problem.head_size,
@@ -706,6 +727,9 @@ def supports_native_unified_attention_3d_tiled(
         q_dtype=problem.q_dtype,
         kv_storage_dtype=_kv_storage_dtype(problem),
         arch=arch,
+        **(
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+        ),
     )
 
 
@@ -836,6 +860,15 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool
     return block_m <= _select_2d_tile_size(problem, arch)
 
 
+def _has_score_bias(problem: "UnifiedAttentionProblem") -> bool:
+    """Any additive score term: ALiBi, QQ bias or the additive bias.
+
+    Fast paths that skip per-score bias handling must exclude all of them, so
+    they test this one predicate rather than listing the terms.
+    """
+    return problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias
+
+
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
     """Arch-agnostic cohort for the gfx950 bf16 D256 prefill fast path.
 
@@ -850,8 +883,7 @@ def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
         and problem.sliding_window == 0
         and problem.softcap == 0
         and not problem.use_sinks
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
         and problem.max_seqlen_q > 1
     )
 
@@ -1017,8 +1049,7 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         and not problem.use_fp8
         and problem.softcap == 0
         and not problem.use_sinks
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
         and problem.max_seqlen_q > 1
         # The natural-QK builder uses i32 paged element addressing (like the
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
@@ -1617,6 +1648,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
+        bool(problem.use_additive_bias),
         (
             _select_gfx942_flash_num_warps(problem, arch)
             if _enable_gfx942_fp16_flash(problem, arch)
@@ -2108,8 +2140,7 @@ def _enable_gfx942_small_q_narrow(problem: UnifiedAttentionProblem, arch: str) -
         and problem.sliding_window == 0
         and not problem.use_sinks
         and problem.softcap == 0
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
     )
 
 
@@ -2134,8 +2165,7 @@ def _enable_gfx942_sink_prefill_tuned(
         and problem.use_sinks
         and problem.sliding_window == 0
         and problem.softcap == 0
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
     )
 
 
@@ -2162,8 +2192,7 @@ def _enable_gfx950_sink_prefill_wpe3(
         and problem.use_sinks
         and problem.sliding_window == 0
         and problem.softcap == 0
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
     )
 
 
@@ -2187,8 +2216,7 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
         and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
         # For GQA (num_queries_per_kv > 1) the light narrow path wins at short
         # context because the ring overhead is not amortised over a 1-2-tile KV
         # loop. For MHA (num_queries_per_kv == 1) the narrow path is pathologically
@@ -2235,8 +2263,7 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
         and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
         # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
         # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
         and problem.max_seqlen_q > 1
@@ -2641,7 +2668,7 @@ def _enable_register_pv(problem: UnifiedAttentionProblem, arch: str) -> bool:
         return False
     # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
     # the spec __post_init__ enforces this.
-    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
+    if problem.softcap > 0 or _has_score_bias(problem):
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -2735,8 +2762,8 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     if problem.sliding_window > 0:
         return False
     # use_transposed_mask_limit (and the other VALU sub-flags) do not support
-    # softcap, ALiBi or QQ bias; the spec __post_init__ enforces this.
-    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
+    # softcap, ALiBi, QQ bias, or additive bias; the spec __post_init__ enforces this.
+    if problem.softcap > 0 or _has_score_bias(problem):
         return False
     return _enable_transposed_qk_32x32(problem, arch)
 
@@ -3249,8 +3276,7 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
         and problem.sliding_window == 0
         and problem.softcap == 0
         and not problem.use_sinks
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
     ):
         return 32
     return 16
@@ -3583,8 +3609,7 @@ def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
         and problem.sliding_window == 0
         and problem.softcap == 0.0
         and not problem.use_sinks
-        and not problem.use_alibi
-        and not problem.use_qq_bias
+        and not _has_score_bias(problem)
     )
 
 
@@ -3849,6 +3874,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
+        bool(problem.use_additive_bias),
         _num_segments(problem, arch),
         _gfx942_3d_tile_size_override(problem, arch),
         _select_3d_waves_per_eu(problem, arch),
@@ -3879,7 +3905,11 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
 
 
 def _3d_signature(
-    dtype: str, *, kv_dtype: Optional[str] = None, strided_kv: bool = False
+    dtype: str,
+    *,
+    kv_dtype: Optional[str] = None,
+    strided_kv: bool = False,
+    include_additive_bias: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -3907,7 +3937,9 @@ def _3d_signature(
         .scalar("block_table_stride", "i32")
         .scalar("qq_bias_stride_0", "i32")
     )
-
+    # Conditional params, in the kernel's declaration order (bias, then strided KV).
+    if include_additive_bias:
+        append_additive_bias_signature(sb)
     if strided_kv:
         for prefix in ("k", "v"):
             sb.scalar(f"{prefix}_stride_batch_bytes", "i64")
@@ -3937,6 +3969,7 @@ def _attn_signature(
     *,
     include_bt_stride: bool,
     include_qq_bias_stride: bool = False,
+    include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
 ):
     from rocke.helpers.spec import SignatureBuilder
@@ -3969,6 +4002,9 @@ def _attn_signature(
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
         sb.scalar("qq_bias_stride_0", "i32")
+    # Appended last, matching the kernel's conditional param declarations.
+    if include_additive_bias:
+        append_additive_bias_signature(sb)
     return sb.build()
 
 
@@ -3991,11 +4027,17 @@ def _attn_values(
     qq_bias=None,
     qq_bias_stride_0: int = 0,
     include_qq_bias_stride: bool = False,
+    additive_bias=None,
+    additive_bias_batch_stride: int = 0,
+    additive_bias_head_stride: int = 0,
+    additive_bias_sq_stride: int = 0,
+    include_additive_bias_strides: bool = False,
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
     kv_addr_limit: _KvAddrLimit | None,
 ):
+    _require_additive_bias(problem, additive_bias)
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
     # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
@@ -4012,6 +4054,7 @@ def _attn_values(
         "seq_lens_ptr": seqused_k,
         "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
         "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
+        "additive_bias_ptr": additive_bias if additive_bias is not None else 0,
         "query_start_len_ptr": cu_seqlens_q,
         "scale": float(softmax_scale),
         "k_scale": float(k_scale),
@@ -4024,6 +4067,10 @@ def _attn_values(
         vals["block_table_stride"] = int(bt_stride)
     if include_qq_bias_stride:
         vals["qq_bias_stride_0"] = int(qq_bias_stride_0)
+    if include_additive_bias_strides:
+        vals["additive_bias_batch_stride"] = int(additive_bias_batch_stride)
+        vals["additive_bias_head_stride"] = int(additive_bias_head_stride)
+        vals["additive_bias_sq_stride"] = int(additive_bias_sq_stride)
     return vals
 
 
@@ -4185,6 +4232,10 @@ def _run_3d_tiled_on_stream(
     alibi_slopes=None,
     qq_bias=None,
     qq_bias_stride_0: int = 0,
+    additive_bias=None,
+    additive_bias_batch_stride: int = 0,
+    additive_bias_head_stride: int = 0,
+    additive_bias_sq_stride: int = 0,
     stream: int = 0,
     k_scale: float = 1.0,
     v_scale: float = 1.0,
@@ -4238,8 +4289,12 @@ def _run_3d_tiled_on_stream(
                     sinks,
                     alibi_slopes,
                     qq_bias,
+                    additive_bias,
                 )
             ),
+            int(additive_bias_batch_stride),
+            int(additive_bias_head_stride),
+            int(additive_bias_sq_stride),
         )
         if execution._identity is None:
             if capturing:
@@ -4270,6 +4325,10 @@ def _run_3d_tiled_on_stream(
                 alibi_slopes=alibi_slopes,
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
+                additive_bias=additive_bias,
+                additive_bias_batch_stride=additive_bias_batch_stride,
+                additive_bias_head_stride=additive_bias_head_stride,
+                additive_bias_sq_stride=additive_bias_sq_stride,
                 stream=stream,
                 k_scale=k_scale,
                 v_scale=v_scale,
@@ -4308,6 +4367,7 @@ def _run_3d_tiled_on_stream(
         segm_expsum.zero_()
         segm_output.zero_()
 
+    _require_additive_bias(problem, additive_bias)
     seg_vals = {
         "segm_output_ptr": segm_output,
         "segm_max_ptr": segm_max,
@@ -4320,6 +4380,7 @@ def _run_3d_tiled_on_stream(
         "seq_lens_ptr": seqused_k,
         "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
         "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
+        "additive_bias_ptr": additive_bias if additive_bias is not None else 0,
         "query_start_len_ptr": cu_seqlens_q,
         "scale": float(softmax_scale),
         "k_scale": float(k_scale),
@@ -4328,6 +4389,9 @@ def _run_3d_tiled_on_stream(
         "num_seqs": int(problem.num_seqs),
         "block_table_stride": int(bt_stride),
         "qq_bias_stride_0": int(qq_bias_stride_0),
+        "additive_bias_batch_stride": int(additive_bias_batch_stride),
+        "additive_bias_head_stride": int(additive_bias_head_stride),
+        "additive_bias_sq_stride": int(additive_bias_sq_stride),
     }
     if kv_cache_layout is not None:
         seg_vals.update(kv_cache_layout.arguments())
@@ -4380,6 +4444,10 @@ def _run_3d_graph(
     alibi_slopes,
     qq_bias,
     qq_bias_stride_0,
+    additive_bias,
+    additive_bias_batch_stride,
+    additive_bias_head_stride,
+    additive_bias_sq_stride,
     stream,
     k_scale,
     v_scale,
@@ -4411,6 +4479,7 @@ def _run_3d_graph(
                 sinks,
                 alibi_slopes,
                 qq_bias,
+                additive_bias,
             )
         ),
         id(q),
@@ -4423,12 +4492,16 @@ def _run_3d_graph(
         id(sinks) if sinks is not None else 0,
         id(alibi_slopes) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
+        id(additive_bias) if additive_bias is not None else 0,
         float(softmax_scale),
         float(k_scale),
         float(v_scale),
         float(softcap),
         int(bt_stride),
         int(qq_bias_stride_0),
+        int(additive_bias_batch_stride),
+        int(additive_bias_head_stride),
+        int(additive_bias_sq_stride),
     )
     graphs = _3D_GRAPHS if execution is None else execution._graphs
     entry = graphs.get(graph_key)
@@ -4465,6 +4538,10 @@ def _run_3d_graph(
             alibi_slopes=alibi_slopes,
             qq_bias=qq_bias,
             qq_bias_stride_0=qq_bias_stride_0,
+            additive_bias=additive_bias,
+            additive_bias_batch_stride=additive_bias_batch_stride,
+            additive_bias_head_stride=additive_bias_head_stride,
+            additive_bias_sq_stride=additive_bias_sq_stride,
             stream=stream,
             k_scale=k_scale,
             v_scale=v_scale,
@@ -4497,6 +4574,10 @@ def _run_3d_graph(
                     alibi_slopes=alibi_slopes,
                     qq_bias=qq_bias,
                     qq_bias_stride_0=qq_bias_stride_0,
+                    additive_bias=additive_bias,
+                    additive_bias_batch_stride=additive_bias_batch_stride,
+                    additive_bias_head_stride=additive_bias_head_stride,
+                    additive_bias_sq_stride=additive_bias_sq_stride,
                     # torch.cuda.graph captures on its own current stream;
                     # launching on the caller's raw stream records no nodes.
                     stream=int(torch.cuda.current_stream().cuda_stream),
@@ -4524,6 +4605,7 @@ def _run_3d_graph(
                 sinks,
                 alibi_slopes,
                 qq_bias,
+                additive_bias,
             ),
             q.device,
             int(stream),
@@ -4662,7 +4744,7 @@ def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
     excluded for now. The dispatcher only engages an internal graph when the
     caller is not already capturing (frameworks that graph the whole forward
     take precedence)."""
-    if problem.use_sinks or problem.use_alibi or problem.use_qq_bias:
+    if problem.use_sinks or _has_score_bias(problem):
         return False
     if problem.softcap > 0 or problem.sliding_window > 0 or problem.use_fp8:
         return False
@@ -4686,7 +4768,7 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem, arch: str) -> bool
         # exercised (``HIPDNN_GFX1250_3D_GRAPH=1``).
         if problem.max_seqlen_q > 768:
             return False
-        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
+        if _has_score_bias(problem) or problem.softcap > 0:
             return False
         if problem.sliding_window > 0:
             return False
@@ -4741,6 +4823,7 @@ def _cheap_2d_sig(problem) -> Tuple:
         float(problem.softcap),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
+        bool(problem.use_additive_bias),
         bool(problem.use_fp8),
         int(problem.total_q),
     ) + _mask_key(problem)
@@ -4763,6 +4846,10 @@ def _run_2d_graphed(
     alibi_slopes,
     qq_bias,
     qq_bias_stride_0,
+    additive_bias,
+    additive_bias_batch_stride,
+    additive_bias_head_stride,
+    additive_bias_sq_stride,
     k_scale,
     v_scale,
     out_scale,
@@ -4790,12 +4877,16 @@ def _run_2d_graphed(
         id(sinks) if sinks is not None else 0,
         id(alibi_slopes) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
+        id(additive_bias) if additive_bias is not None else 0,
         float(softmax_scale),
         float(k_scale),
         float(v_scale),
         float(softcap),
         int(bt_stride),
         int(qq_bias_stride_0),
+        int(additive_bias_batch_stride),
+        int(additive_bias_head_stride),
+        int(additive_bias_sq_stride),
     )
     graph = _2D_GRAPHS.get(graph_key)
     if graph is not None:
@@ -4829,6 +4920,11 @@ def _run_2d_graphed(
         qq_bias=qq_bias,
         qq_bias_stride_0=qq_bias_stride_0,
         include_qq_bias_stride=True,
+        additive_bias=additive_bias,
+        additive_bias_batch_stride=additive_bias_batch_stride,
+        additive_bias_head_stride=additive_bias_head_stride,
+        additive_bias_sq_stride=additive_bias_sq_stride,
+        include_additive_bias_strides=True,
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
@@ -4860,6 +4956,7 @@ def _run_2d_graphed(
         sinks,
         alibi_slopes,
         qq_bias,
+        additive_bias,
     )
     graph.replay()
     return None
@@ -5007,6 +5104,7 @@ def _get_3d_pipeline(
                 if tuning_spec is not None
                 else _kv_storage_dtype(problem)
             ),
+            include_additive_bias=problem.use_additive_bias,
         ),
         cache_key=("3d_seg",) + cache_key,
     )
@@ -5188,6 +5286,7 @@ def _get_2d_launcher(
             problem.dtype,
             include_bt_stride=True,
             include_qq_bias_stride=True,
+            include_additive_bias=problem.use_additive_bias,
             kv_dtype=(
                 tuning_spec.kernel_spec.kv_storage_dtype
                 if tuning_spec is not None
@@ -5378,6 +5477,107 @@ def _get_scalar_launcher(
     return launcher
 
 
+def _require_additive_bias(problem: UnifiedAttentionProblem, additive_bias) -> None:
+    """Reject a bias-enabled launch without a tensor (it would pack a null ptr)."""
+    if problem.use_additive_bias and additive_bias is None:
+        raise ValueError(
+            "problem.use_additive_bias=True requires an additive_bias tensor"
+        )
+
+
+_I32_LIMIT = 2**31
+
+
+def _validate_additive_bias(
+    problem: UnifiedAttentionProblem,
+    additive_bias,
+    batch_stride: int,
+    head_stride: int,
+    sq_stride: Optional[int],
+    q_device,
+) -> int:
+    """Check the additive-bias launch args against ``problem``.
+
+    Returns the Sq stride to pack (0 when bias is off). ``sq_stride`` has no
+    default when bias is on: 0 broadcasts one bias row over every query row,
+    so a forgotten stride would silently apply row 0 everywhere. Pass 0
+    explicitly to broadcast, else a row pitch ``>= max_seqlen_k``.
+
+    The kernels index the bias in i32, so the largest element index the
+    launch can read must stay below 2**31 (8 GiB of f32 bias). Larger
+    layouts are rejected rather than wrapping into an out-of-bounds read.
+    That index must also fall inside the tensor's storage, which catches
+    strides that do not match the tensor passed.
+
+    ``q_device`` is the launch's Q device; a mismatch would pack a pointer
+    from the wrong device and fault at launch rather than at this check.
+    Pass ``None`` to skip the device check (used by host-only validation
+    tests that have no Q tensor).
+    """
+    if not problem.use_additive_bias:
+        if additive_bias is not None:
+            raise ValueError(
+                "additive_bias was passed but problem.use_additive_bias is False"
+            )
+        return 0
+    _require_additive_bias(problem, additive_bias)
+    if str(additive_bias.dtype) != "torch.float32":
+        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
+    if q_device is not None and additive_bias.device != q_device:
+        raise ValueError(
+            f"additive_bias must be on the same device as q, got "
+            f"{additive_bias.device} vs {q_device}"
+        )
+    if additive_bias.stride(-1) != 1:
+        raise ValueError(
+            "additive_bias must be contiguous along Sk (stride(-1) == 1), "
+            f"got strides {tuple(additive_bias.stride())}"
+        )
+    if sq_stride is None:
+        raise ValueError(
+            "problem.use_additive_bias=True requires additive_bias_sq_stride "
+            "(pass 0 to broadcast the bias over Sq)"
+        )
+    sq_stride = int(sq_stride)
+    if sq_stride != 0 and sq_stride < problem.max_seqlen_k:
+        raise ValueError(
+            f"additive_bias_sq_stride={sq_stride} must be 0 (broadcast over Sq) "
+            f"or >= max_seqlen_k={problem.max_seqlen_k}"
+        )
+    batch_stride, head_stride = int(batch_stride), int(head_stride)
+    for name, stride in (
+        ("additive_bias_batch_stride", batch_stride),
+        ("additive_bias_head_stride", head_stride),
+        ("additive_bias_sq_stride", sq_stride),
+    ):
+        if not 0 <= stride < _I32_LIMIT:
+            raise ValueError(f"{name}={stride} must be in [0, 2**31)")
+    max_idx = (
+        (problem.num_seqs - 1) * batch_stride
+        + (problem.num_query_heads - 1) * head_stride
+        + (problem.max_seqlen_q - 1) * sq_stride
+        + (problem.max_seqlen_k - 1)
+    )
+    if max_idx >= _I32_LIMIT:
+        raise NotImplementedError(
+            f"additive_bias max element index {max_idx} exceeds the kernels' "
+            "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
+            "dimension (stride 0) or split the launch"
+        )
+    # Strides are passed separately from the tensor, so a mismatch would read
+    # past its storage; check the reach against the elements actually backed.
+    avail = (
+        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
+        - additive_bias.storage_offset()
+    )
+    if max_idx >= avail:
+        raise ValueError(
+            f"additive_bias strides reach element {max_idx} but the tensor "
+            f"only backs {avail} elements from its storage offset"
+        )
+    return sq_stride
+
+
 def run_unified_attention_torch(
     *,
     problem: UnifiedAttentionProblem,
@@ -5394,6 +5594,10 @@ def run_unified_attention_torch(
     alibi_slopes=None,
     qq_bias=None,
     qq_bias_stride_0: int = 0,
+    additive_bias=None,
+    additive_bias_batch_stride: int = 0,
+    additive_bias_head_stride: int = 0,
+    additive_bias_sq_stride: Optional[int] = None,
     warmup: int = 0,
     attempts: int = 1,
     backend: str = "auto",
@@ -5427,6 +5631,15 @@ def run_unified_attention_torch(
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
 
+    ``additive_bias`` is an f32 tensor read as
+    ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
+    (element strides, Sk contiguous); it is required iff
+    ``problem.use_additive_bias``. A stride of 0 broadcasts that dimension.
+    ``additive_bias_sq_stride`` must be given explicitly when bias is on.
+    The bias is indexed in i32, so the largest index the launch can read must
+    be below 2**31 (8 GiB of f32); larger layouts raise ``NotImplementedError``.
+    Strided-KV decode (``kv_layout="strided"``) does not support it.
+
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
     initialization and both launches use that stream. Eager calls own separate
@@ -5449,6 +5662,16 @@ def run_unified_attention_torch(
     _launch_arch = _resolve_attention_arch()
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
+        # The spec's kernel declares the bias params iff its use_additive_bias is
+        # set; the launcher packs them iff problem.use_additive_bias is. Kernargs
+        # are packed by position, so a mismatch either drops the bias or leaves
+        # the kernel reading bias args that were never passed.
+        spec_bias = bool(getattr(tuning_spec.kernel_spec, "use_additive_bias", False))
+        if spec_bias != problem.use_additive_bias:
+            raise ValueError(
+                f"tuning spec use_additive_bias={spec_bias} disagrees with "
+                f"problem.use_additive_bias={problem.use_additive_bias}"
+            )
         if tuning_spec.arch != _launch_arch:
             raise ValueError(
                 f"tuning spec targets {tuning_spec.arch}, running on {_launch_arch}"
@@ -5460,6 +5683,16 @@ def run_unified_attention_torch(
                 f"backend {backend!r}"
             )
         backend = implied
+    # After the spec-contract checks, so a spec/problem bias mismatch is reported
+    # as such rather than as a bias-argument error.
+    additive_bias_sq_stride = _validate_additive_bias(
+        problem,
+        additive_bias,
+        additive_bias_batch_stride,
+        additive_bias_head_stride,
+        additive_bias_sq_stride,
+        None if q is None else q.device,
+    )
 
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
@@ -5479,11 +5712,16 @@ def run_unified_attention_torch(
             or problem.use_sinks
             or problem.use_alibi
             or problem.use_qq_bias
+            or problem.use_additive_bias
             or sinks is not None
             or alibi_slopes is not None
             or qq_bias is not None
+            or additive_bias is not None
         ):
-            raise ValueError("strided KV decode does not support fp8, sinks or bias")
+            raise ValueError(
+                "strided KV decode does not support fp8, sinks, alibi, qq_bias "
+                "or additive bias"
+            )
         if k_scale != 1.0 or v_scale != 1.0 or out_scale != 1.0:
             raise ValueError("strided decode does not support K/V/output scaling")
         if (softcap > 0) != (problem.softcap > 0):
@@ -5636,6 +5874,10 @@ def run_unified_attention_torch(
                 alibi_slopes=alibi_slopes,
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
+                additive_bias=additive_bias,
+                additive_bias_batch_stride=additive_bias_batch_stride,
+                additive_bias_head_stride=additive_bias_head_stride,
+                additive_bias_sq_stride=additive_bias_sq_stride,
                 stream=int(stream),
                 k_scale=k_scale,
                 v_scale=v_scale,
@@ -5672,6 +5914,10 @@ def run_unified_attention_torch(
                 alibi_slopes=alibi_slopes,
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
+                additive_bias=additive_bias,
+                additive_bias_batch_stride=additive_bias_batch_stride,
+                additive_bias_head_stride=additive_bias_head_stride,
+                additive_bias_sq_stride=additive_bias_sq_stride,
                 k_scale=k_scale,
                 v_scale=v_scale,
                 out_scale=out_scale,
@@ -5719,6 +5965,11 @@ def run_unified_attention_torch(
                 qq_bias=qq_bias,
                 qq_bias_stride_0=qq_bias_stride_0,
                 include_qq_bias_stride=True,
+                additive_bias=additive_bias,
+                additive_bias_batch_stride=additive_bias_batch_stride,
+                additive_bias_head_stride=additive_bias_head_stride,
+                additive_bias_sq_stride=additive_bias_sq_stride,
+                include_additive_bias_strides=True,
                 k_scale=k_scale,
                 v_scale=v_scale,
                 out_scale=out_scale,
