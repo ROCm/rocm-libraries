@@ -576,7 +576,7 @@ class Runtime:
         """
         s = int(stream)
         self.stream_sync(s)
-        self._pending_bound_args.pop(self._bound_stream_key(s), None)
+        self._release_bound_for_stream(s)
         bucket = self._pending_args.pop(s, None)
         if not bucket:
             return
@@ -615,13 +615,24 @@ class Runtime:
         only need the bookkeeping cleanup.
         """
         s = int(stream)
-        self._pending_bound_args.pop(self._bound_stream_key(s), None)
+        self._release_bound_for_stream(s)
         bucket = self._pending_args.pop(s, None)
         if not bucket:
             return
         for _refs, evt in bucket:
             if evt is not None:
                 evt.destroy()
+
+    def _release_bound_for_stream(self, stream: int) -> None:
+        if stream in (0, 1, 2):
+            # HIP default-stream sentinels are shared across devices.
+            self._pending_bound_args.pop(self._bound_stream_key(stream), None)
+            return
+        # Explicit handles identify the stream independently of the caller's
+        # current device. Use the device keys recorded at retention time.
+        for key in list(self._pending_bound_args):
+            if key[1] == stream:
+                self._pending_bound_args.pop(key, None)
 
     @staticmethod
     def _bound_stream_key(stream: int):

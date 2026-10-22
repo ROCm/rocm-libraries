@@ -297,3 +297,92 @@ def test_reused_pair_still_requires_additive_bias(eager):
         with pytest.raises(ValueError, match="requires an additive_bias tensor"):
             au._run_3d_tiled(**args)
     assert len(bindings) == 2 and len(launches) == 2
+
+
+@pytest.mark.parametrize("cleanup", ["wait_stream", "release_pending_for_stream"])
+def test_explicit_stream_cleanup_after_caller_device_restored(monkeypatch, cleanup):
+    import gc
+    import weakref
+
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args = {}
+    rt._pending_bound_args = {}
+    device = [1]
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    drains = []
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: drains.append(stream))
+    storage = Tensor(8192)
+    storage_ref = weakref.ref(storage)
+    first, second = object(), object()
+    rt.retain_until_drain(17, first, resources=lambda: (storage,))
+    rt.retain_until_drain(29, second)
+    del storage
+    device[0] = 0  # the launch wrapper restored the caller's device
+    getattr(rt, cleanup)(17)
+    gc.collect()
+    assert storage_ref() is None
+    assert rt._pending_bound_args == {(1, 29): {id(second): second}}
+    assert device[0] == 0
+    assert drains == ([17] if cleanup == "wait_stream" else [])
+
+
+@pytest.mark.parametrize("stream", [0, 1, 2])
+@pytest.mark.parametrize("cleanup", ["wait_stream", "release_pending_for_stream"])
+def test_default_stream_cleanup_stays_device_scoped(monkeypatch, stream, cleanup):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args = {}
+    rt._pending_bound_args = {}
+    device = [0]
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
+    first, second = object(), object()
+    rt.retain_until_drain(stream, first)
+    device[0] = 1
+    rt.retain_until_drain(stream, second)
+    getattr(rt, cleanup)(stream)
+    assert rt._pending_bound_args == {(0, stream): {id(first): first}}
+
+
+def test_cross_device_failed_drain_keeps_retained_storage(monkeypatch):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args = {}
+    rt._pending_bound_args = {}
+    device = [1]
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    owner = object()
+    rt.retain_until_drain(17, owner)
+    device[0] = 0
+
+    def fail(stream):
+        raise RuntimeError("drain failed")
+
+    monkeypatch.setattr(rt, "stream_sync", fail)
+    with pytest.raises(RuntimeError, match="drain failed"):
+        rt.wait_stream(17)
+    assert rt._pending_bound_args == {(1, 17): {id(owner): owner}}
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
+    rt.wait_stream(17)
+    assert not rt._pending_bound_args
+
+
+def test_device_drain_keeps_other_device_explicit_streams(monkeypatch):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args = {}
+    rt._pending_bound_args = {}
+    device = [0]
+    monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
+    monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", lambda: 0)
+    first, second = object(), object()
+    rt.retain_until_drain(17, first)
+    device[0] = 1
+    rt.retain_until_drain(29, second)
+    rt.sync()
+    assert rt._pending_bound_args == {(0, 17): {id(first): first}}
