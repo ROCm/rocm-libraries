@@ -171,6 +171,8 @@ load_block_count # BlockCount[q_block]
 IOSpecRule, validate_io
 SignatureBuilder, kernel_name_join
 ceil_div_grid, ptr_type_str, sig_param, sig_scalar
+ceil_div, align_up # host integer math (no IR)
+non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
 QDType, QUANT_MAX_ABS
@@ -352,6 +354,11 @@ b.clamp_f32(v, lo, hi) # fmin(hi, fmax(lo, v)) -- folds to v_med3_f32
 # and FMHA-backward dQ accumulate)
 b.global_atomic_add(ptr, idx, val, *, ordering="monotonic")
 b.lds_atomic_add(smem, [idx], val, *, ordering="monotonic")
+
+# : cross-workgroup synchronisation (stream-K fixup)
+b.fence(*, scope="agent", ordering="acq_rel") # memref.fence
+b.global_flag_store(ptr, idx, val_i32, *, scope="agent", ordering="release")
+b.global_flag_wait_eq(ptr, idx, expect_i32, *, scope="agent") # acquire spin
 
 # : bitwise integer helpers (also used by i4 unpack)
 b.xor(a, b) # arith.xor; same type on both operands

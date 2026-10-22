@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +18,7 @@ from reference_common.numeric import decode, encode
 from conv_reference.architectures import ARCHITECTURES, get_architecture
 from reference_common.session import reuse_workers
 from reference_common.paths import default_bundle_path
+from reference_common.targets import get_device_processor
 
 
 @pytest.fixture(scope="module")
@@ -27,18 +27,10 @@ def reference_bundle(pytestconfig):
     if operation and operation != "conv":
         pytest.skip("reference options select another operation")
     configured = pytestconfig.getoption("--rocke-reference-bundle")
-    from rocke.runtime.hip_module import get_device_arch
-
-    arch = get_device_arch()
-    declared = os.environ.get("AMDGPU_FAMILIES", "").lower()
+    arch = get_device_processor()
     if arch not in ARCHITECTURES:
-        expected = any(
-            family in declared
-            for name in ARCHITECTURES
-            for family in get_architecture(name).FAMILIES
-        )
         required = operation or configured
-        if expected or (not arch and required):
+        if not arch and required:
             pytest.fail("the required enrolled CONV GPU is not available")
         pytest.skip(f"no CONV reference cohort is enrolled for {arch}")
     target = get_architecture(arch)

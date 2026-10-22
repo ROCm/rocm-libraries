@@ -331,12 +331,20 @@ loaded with its UDD bound. When the caller opts into measurement, the builder in
 prepares the sampled candidates, each loaded and dispatch-ready in the same plan, with a UDD
 per pack they came from, so the measured winner can be chosen and cached.
 
-No new engine or plugin-ABI interfaces are introduced; the generic engine satisfies hipDNN's existing
-contracts using descriptor data, and the new machinery (the matcher, the expression interpreter, the
-selector, and the predicate and custom-plan registries) lives inside the provider behind those
-contracts.
+The generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery
+(the matcher, the expression interpreter, the selector, and the predicate and custom-plan registries)
+lives inside the provider behind those contracts. Two engine-plugin ABI entry points are added beside
+those contracts rather than inside the provider: **`hipdnnEnginePluginEnumerateCandidates`**, which pages
+an engine's matched catalog as complete knob tuples with stable candidate ids, and
+**`hipdnnEnginePluginGetPrediction`**, which describes or evaluates an engine-level or
+configuration-level performance prediction without benchmarking, tuning, or executing GPU work. Both
+are **owned by the plugin SDK**, not by this RFC
+([RFC 0019 §11.3](0019_UniversalHeuristicDescriptor.md#113-cross-engine-comparison)), and both are
+**optional exports an engine may decline**: an absent symbol, or `NOT_APPLICABLE`, means the engine does
+not offer that surface — not an empty catalog and not a missing prediction that changes applicability —
+so an engine that ignores both is unaffected by either.
 
-Four things change outside the provider, none altering an interface an engine implements, and each
+Four things change outside the provider, none altering an interface an engine must implement, and each
 additive:
 
 | Addition | Why it is needed |
@@ -534,11 +542,8 @@ solvers to compute a workspace default.
   "version": "1.0",
   "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by a UED heuristic role
   "name":   "Example attention LightGBM selector",
-  "kind":   "model",          // "model" | "static_order" | "custom_library"
-  "model": {
-    "framework": "lightgbm",  // tagged so other frameworks are additive
-    "artifact":  "example_attn/model.bin"
-  },
+  "adapter": "tree_data",     // the ranking mechanism, and the key of the body below (RFC 0019 §4.2)
+  "tree_data": {"artifact": "example_attn/model.bin"},  // a GBDT tree table exported as data, inside this descriptor's directory
   "features_signature": [     // ordered model inputs, bound like a UDD args_signature; order and form must match training
     "$device.cu_count",                          // device property
     "$device.lds_size",                          // device property
@@ -548,6 +553,12 @@ solvers to compute a workspace default.
     "$q.dims[2]",                                // graph tensor dim (query sequence length)
     {"*": ["$q.dims[0]", "$q.dims[1]"]}          // a derived feature: batch times head count
   ],
+  "features_hash": "sha256:…",  // fingerprint of the feature contract (RFC 0019 §6.3)
+  "trained_against": {          // the descriptor content revisions the model was trained on (RFC 0019 §8.1)
+    "ued": {"id": "efc9eae4-fe33-4cb0-a593-95d771dc13b2", "revision": "1.0"},
+    "kmd": {"id": "9ae0b215-32a7-49d1-96df-e9b05e1927ea", "revision": "1.0"},
+    "umd": [{"id": "…", "revision": "1.0"}]     // one entry per matcher
+  },
   "objective": "max"          // higher predicted score wins
 }
 ```
@@ -575,7 +586,9 @@ basis on which to prefer one over the other, and no answer to give. The catalog 
 therefore keyed on the tuple: a duplicate key is logged as an error and the colliding
 kernel dropped, rather than silently admitted into a set where selection cannot choose
 between its entries. Uniqueness is engine-wide, not per-pack, because the catalog spans
-every KDP that names the engine.
+every KDP that names the engine. A device sees at most one kernel per tuple: kernels sharing a
+tuple are resolved by arch tier (step 4 of the load flow, below), and only same-tier
+duplicates are errors.
 
 The remedy when two kernels must coexist is to add the KMD field that distinguishes them,
 so the schema grows to describe the variants the engine spans. This is additive and
@@ -1363,7 +1376,9 @@ sources arrive).
 
 This section covers the runtime order: what loads, when, why, and where the result is kept.
 Everything happens behind `IEngine` and `IPlan`, the contracts a hand-written engine already
-implements, so no new engine or plugin-ABI interface is introduced.
+implements, so this flow introduces no engine or plugin-ABI interface of its own. The two optional
+exports of [Section 3](#3-how-it-works) sit outside it: enumeration serves the generation tooling, and
+prediction serves selection, before the phases below begin.
 
 **hipDNN enforces this order.** Four host calls arrive, and each one can only arrive after the
 last:
@@ -1425,6 +1440,19 @@ provider's descriptor cache, reused by every later graph.
 contributes a matcher set, one dispatch-descriptor (**UDD**) id, and a kernel vector with each
 kernel's metadata values. A pack whose `arch` list excludes this device is dropped here. The
 dispatch descriptor is named but **not** loaded; nothing dispatches yet.
+
+*Arch tiers.* For one device, each kernel sits in one tier: an explicit arch id (e.g. `gfx1151`)
+outranks an LLVM generic target containing the device (e.g. `gfx11-generic`), which outranks an
+empty `arch` (unrestricted). When kernels sharing one metadata tuple are admitted for the device,
+the loader keeps the one in the best tier, so the tuple stays unique in the catalog. Two kernels
+with the same tuple in the *same* tier on a device (two explicit lists naming `gfx1151`, two
+generics sharing a member, two empty-`arch` kernels) are an identical definition with no basis to
+pick one, and the collision is an error. A family may ship a generic-target
+build for portability and a member-specialized build with identical metadata; the specialized build
+is expected to be better tuned for its device, so it wins there, and the generic remains the
+fallback on the other members. The same ranking picks which arch key of one kernel's archive is
+loaded: explicit before generic.
+
 *Stored:* the parsed packs, matchers, and kernel metadata, in the same descriptor cache.
 
 **5. Run the engine's `graph_match`, lazily, on the first pack that cleared the gate.** It either
@@ -1613,9 +1641,11 @@ from the descriptors instead of tracked beside them.
 
 ### 9.2 Heuristic Adapters
 
-Heuristic descriptors extend the same way: a heuristic names a `kind`, and an adapter interprets
-that content into a scorer. The first adapter is a **LightGBM model**; alongside it, a **custom
-heuristic library** adapter satisfies a small C-API, so a provider can supply a bespoke selector
+Heuristic descriptors extend the same way: a heuristic names an `adapter`, and that adapter interprets
+its content into a scorer ([RFC 0019 §4.2](0019_UniversalHeuristicDescriptor.md#42-adapter-summary)).
+The default adapter is a GBDT tree table shipped as data (`tree_data`), such as an exported LightGBM
+model; alongside it, a **custom heuristic library** adapter (`custom_library`) satisfies a small C-API,
+so a provider can supply a bespoke selector
 without a model file. Further adapters extend what a heuristic can reference (other model formats,
 or plain file types such as a static CSV lookup or a fixed static order) without changing the
 spec. A heuristic runs at selection time, so its adapter is always build-and-runtime, never
@@ -1701,7 +1731,7 @@ The provider surfaces:
   schema, every graph token resolves against the set the engine's pattern publishes, and every
   `$kernel.*` a matcher or dispatch formula reads exists in the engine's metadata schema);
   cross-descriptor references that resolve (a pack's `engine`, `matchers`, and `dispatch`; an
-  engine descriptor's `heuristic` and `metadata`); dispatch formulas that reference only fields the
+  engine descriptor's heuristic roles and `metadata`); dispatch formulas that reference only fields the
   engine's pattern binds; and launch slots that every referenced kernel source fills. Where
   a code object exposes its kernarg layout, the dispatch descriptor's argument signature is checked
   against it, catching an ABI mismatch here rather than at a corrupted launch. An unbound token, an
@@ -1891,8 +1921,8 @@ and are worth stating here:
   mask-mode state machine inverts into a boolean disjunction over `$kernel.mask_mode`, because the
   kernel's own metadata supplies the value the C++ would have computed and compared. That
   inversion is the general recipe for porting a classifier into criteria data. It carries one
-  obligation the recipe must state: the machine is first-match-wins, so each arm has to negate the
-  arms above it. Transcribing the arms in source order encodes a different function, and in this
+  obligation the recipe must state: a first-match-wins machine obliges each arm to negate the arms
+  above it (the mask machine was one until it became resolve-then-classify). Transcribing the arms in source order encodes a different function, and in this
   family it reproduces a defect that shipped — a windowed causal graph served as plain causal,
   with the window silently discarded.
 - **Per-instance geometry rides on `$kernel.*`.** Measured cohorts that a formula over graph
@@ -2492,7 +2522,7 @@ choices; none is a dependency.
   each assigned to an engine that satisfies it with its own applicability check and heuristic.
 - **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
   collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
-  `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
+  `engine`, and `dispatch`, and a UED's heuristic roles and `metadata`) use the id.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation used throughout this
