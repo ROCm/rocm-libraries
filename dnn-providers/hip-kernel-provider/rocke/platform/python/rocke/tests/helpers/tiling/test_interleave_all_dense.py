@@ -10,10 +10,11 @@ traits row and PROVE, for the rows the construction can drive, that
 for a single atom AND a 2x2-atom tile (``free_sub>1`` / multi-patch, e.g. the 32x32 atom's ``P=4``).
 
 Rows that CANNOT interleave are PROVEN to fail the SOT §9 interleavability gate (never skipped
-silently) -- only the non-square ``wmma_f32_32x16x128_f4`` does. gfx11 WMMA holds the whole K per lane and
-DUPLICATES the operand across the two 16-lane halves; that duplicate is modelled as a replication axis and
-proven cross-lane-free (per-lane element-set preservation + a within-one-copy ``reorder``). The exact
-population counts are asserted so a catalogue change (a new atom, a changed trait) trips the sweep.
+silently) -- only the non-square ``wmma_f32_32x16x128_f4`` does, and the interleaved construction refuses
+it by name. gfx11 WMMA holds the whole K per lane and DUPLICATES the operand across the two 16-lane halves;
+that duplicate is modelled as a replication axis and proven cross-lane-free (per-lane element-set
+preservation + a within-one-copy ``reorder``). The exact population counts are asserted so a catalogue
+change (a new atom, a changed trait) trips the sweep.
 
 Interleavability depends only on (shape, wave, element size), so bf8/fp8, bf16/f16 and f32/xf32 are
 equivalent — but every distinct dense row is still exercised.
@@ -60,8 +61,7 @@ def _operand_gate(t) -> bool:
     B's is N (free_lanes=n); both share ``k_lanes = K/ABK``. For EACH operand ``free_lanes * k_lanes``
     must DIVIDE the wave; the quotient is the broadcast/replication factor (1 for CDNA/gfx12; 2 for
     gfx11 WMMA, which holds the whole K per lane and DUPLICATES the operand across the two 16-lane
-    halves -- identical data, no cross-lane). Fails when EITHER operand OVER-subscribes the wave -- the
-    non-square f4 row does so on A (32*2 = 64 > 32) while B is fine (16*2 = 32), so the row is out.
+    halves -- identical data, no cross-lane). Fails when EITHER operand OVER-subscribes the wave.
     """
     k_lanes = t.k // t.layout_params.k_ab_per_lane
     return all(
@@ -118,8 +118,9 @@ _DENSE = sorted(
 _IDS = [t.op_id for t in _DENSE]
 
 # PROVEN-below boundary (asserted, not assumed): the ONLY dense row that cannot interleave.
-#   wmma_f32_32x16x128_f4 -- non-square (m=32 != n=16) AND free x K over-subscribes the wave
-#   (32*2 = 64 > 32, so no integer replication factor exists). Both failures are real.
+#   wmma_f32_32x16x128_f4 -- non-square (m=32 != n=16), and each lane holds 2 M blocks of A in its
+#   registers, which the interleaved construction does not model: AtomNumbers.from_traits refuses it
+#   with a named NotImplementedError.
 # (The 8 gfx11-era wmma_*_w32 rows hold the whole K per lane and DUPLICATE the operand across the two
 #  16-lane halves; modelling that duplicate as a replication axis makes them interleave cross-lane-free --
 #  proven via per-lane element-set preservation + a within-one-copy `reorder`.)
@@ -130,6 +131,15 @@ _CANNOT_INTERLEAVE = {
 
 @pytest.mark.parametrize("t", _DENSE, ids=_IDS)
 def test_dense_mma_interleavable(t):
+    # --- Boundary: A holds several M blocks per lane -> the construction refuses it by name ---
+    if t.layout_params.a_m_register_blocks > 1:
+        assert t.op_id in _CANNOT_INTERLEAVE
+        with pytest.raises(
+            NotImplementedError, match="InterleavedStyle cannot lay out"
+        ):
+            AtomNumbers.from_traits(t)
+        return
+
     a = AtomNumbers.from_traits(t)
     op_ok, acc_ok, square = _operand_gate(t), _accum_gate(t), (t.m == t.n)
 
