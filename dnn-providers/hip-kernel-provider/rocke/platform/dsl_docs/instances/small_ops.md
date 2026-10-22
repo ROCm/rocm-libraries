@@ -648,8 +648,8 @@ The MoE-sort kernels rely on three reusable helpers shared with the
 Quantisation-specific failure modes :
 
 - `eps` clamp on `amax` is missing: an all-zero row produces `+inf`
- for `1/yscale` and the `cvt_f32_to_<q>` saturates to the wrong
- sign on zero inputs.
+ for `1/yscale`, and the `cvt_f32_to_<q>` of the scaled zero
+ (NaN) is NaN: the fp8 / bf8 conversions do not saturate.
 - `quant_max` constant divergence vs CK Tile (`127.0f` for i8,
  `448.0f` for fp8e4m3, `57344.0f` for bf8e5m2). Use
  `helpers.quant.quant_max_abs(qdtype)` to stay aligned.

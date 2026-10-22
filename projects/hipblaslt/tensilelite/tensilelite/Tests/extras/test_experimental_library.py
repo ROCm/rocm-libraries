@@ -354,7 +354,7 @@ def test_detect_host_gfx_archs_keeps_the_stepping_the_enumerator_reported(monkey
     which tells the caller to build for an architecture whose code objects this
     host will reject -- and prints that name in the error when it refuses."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
+    import tensilelite.Common.Architectures as Arch
 
     class _Proc:
         returncode = 0
@@ -364,7 +364,7 @@ def test_detect_host_gfx_archs_keeps_the_stepping_the_enumerator_reported(monkey
     # fails by reporting exactly the truncation it was written to rule out.
     monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
     monkeypatch.setattr(
-        "Tensile.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
+        "tensilelite.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
     )
     monkeypatch.setattr(Arch, "run", lambda *a, **k: _Proc())
 
@@ -375,7 +375,7 @@ def test_host_arch_match_tells_the_two_steppings_apart(monkeypatch):
     """They share ISA (12,5,0), so matching on it answers True for each on the
     other's silicon and the caller benchmarks code objects the agent rejects."""
     pytest.importorskip("rocisa")
-    import Tensile.Common.Architectures as Arch
+    import tensilelite.Common.Architectures as Arch
 
     monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx1250-strict"])
     assert Arch.hostHasArch("gfx1250-strict") is True

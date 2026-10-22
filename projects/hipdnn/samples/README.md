@@ -35,17 +35,22 @@ cmake -G Ninja -DALLOW_FETCH_DEPS=ON \
 
 The combined prefixes must provide the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), HIP/HIPRTC, and GoogleTest including GoogleMock. A custom hipDNN install prefix alone is not necessarily sufficient. You can use `GTest_DIR` for an installed GoogleTest package instead of adding its prefix. The `ON` alternative only fetches GoogleTest, not hipDNN, HIP, or other SDK dependencies. This separate samples configure does not inherit the fetch setting from a previous hipDNN build; it forwards its own `ALLOW_FETCH_DEPS` to the nested plugin, including an explicit `OFF`.
 
-The sample executables will be created in the `build` directory.
+The sample executables will be created in the `build/bin` directory. Each executable name has the prefix `hipdnn_sample_` (for example, `hipdnn_sample_conv_fprop`).
 
 ## Running Samples
 
-All samples accept the following command line options:
-- `--verify-cpu` - Enable CPU reference validation of results
-- `--help` - Displays help message
+The batchnorm, convolution, SDPA, and serialization samples use the shared parser in [`utils/Helpers.hpp`](./utils/Helpers.hpp). They accept these command line options:
+- `--verify-cpu` (`-vc`) - Enable CPU reference validation of results
+- `--dtype <fp32|fp16|bf16>` - Run only one data type (default: all three)
+- `--layout <nchw|nhwc>` - Run only one layout (SDPA: `<bhsd|bshd>`)
+- `--engine-id <id>` or `--engine-name <name>` - Prefer a specific engine
+- `--help` (`-h`) - Displays help message and the full list of options for the sample
+
+The knobs, autotune, dynamic, and cuDNN shim samples have their own options. Use `--help` where the sample supports it.
 
 Example:
 ```bash
-./build/conv_forward --verify-cpu
+./build/bin/hipdnn_sample_conv_fprop --verify-cpu
 ```
 
 ## Profiling Samples
@@ -54,7 +59,7 @@ Samples can be profiled using ROCprofiler-SDK (`rocprofv3`), included in ROCm ve
 
 ```bash
 # Profile a sample with system trace and perfetto output format
-rocprofv3 --sys-trace -f pftrace -o ./profile_output -- ./bn_inference
+rocprofv3 --sys-trace -f pftrace -o ./profile_output -- ./build/bin/hipdnn_sample_bn_inference
 ```
 
 Since `rocprofv3` has limited host-side tracing, `hipDeviceSynchronize()` calls can be added to gauge granular performance.
@@ -69,7 +74,7 @@ HIP_CHECK(hipDeviceSynchronize()); // Await completion and record in trace for a
 
 ## Available Samples
 
-All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.
+The batchnorm, convolution, SDPA, and serialization samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.
 
 > [!TIP]
 > 💡 Set `HIPDNN_LOG_LEVEL=info` to observe detailed logs from the samples.
@@ -383,6 +388,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
 
 - Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
 - Configurations without engine support are gracefully skipped.
+- Built only when hipDNN is configured with `HIPDNN_ENABLE_SDPA`.
 
 ### [**`SerializationRoundTrip`**](./serialization/SerializationRoundTrip.cpp)
 
@@ -393,12 +399,11 @@ Demonstrates graph serialization and deserialization (round-trip) using hipDNN's
 Demonstrates how to use hipDNN's engine configuration knobs system for runtime parameter tuning.
 
 **What This Sample Shows:**
-1. **Querying Available Knobs**: How to discover what knobs an engine supports
+1. **Querying Available Knobs**: How to discover what knobs an engine supports (`get_knobs_for_engine` and `get_knob_lookup_for_engine`)
 2. **Knob Metadata**: Understanding knob types, constraints, and default values
-3. **Setting Knob Values**: Creating execution plans with custom knob settings
-4. **Knob Validation**: Validating settings against knob constraints
-5. **Knob Value Types**: Using integer, float, and string knobs
-6. **Real Execution**: Running graphs with different knob configurations
+3. **Setting Knob Values**: Creating execution plans with custom knob settings (`create_execution_plan_ext`)
+4. **Knob Validation**: Validating settings against knob constraints (`Knob::validate`)
+5. **Real Execution**: Running a batchnorm inference graph with default or benchmarking knob settings
 
 **Common Knobs:**
 - `global.benchmarking` (int64, 0-1): Enable MIOpen kernel benchmarking for optimal performance
@@ -406,33 +411,49 @@ Demonstrates how to use hipDNN's engine configuration knobs system for runtime p
 
 **Usage:**
 ```bash
-./knobs_usage                # Run all demonstrations including graph execution
-./knobs_usage --skip-execution  # Show knob API demonstrations only (faster)
+./build/bin/hipdnn_sample_knobs_usage              # Run all demonstrations with default knobs
+./build/bin/hipdnn_sample_knobs_usage --benchmark  # Execute with global.benchmarking=1
 ```
 
 **Key Features:**
-- Comprehensive demonstration of the knobs API
+- Demonstration of the knobs API
 - Shows both query and configuration workflows
 - Demonstrates validation and error handling
-- Includes real graph execution with different knob configurations
-- Educational sample with detailed console output
+- Includes real graph execution with the selected knob configuration
+- Educational sample with console output
 
 **Sample Output Sections:**
-- Section 1: Query available knobs and their metadata
-- Section 2: Use knob lookup map for specific knobs
-- Section 3: Create execution plan with default knobs
-- Section 4: Set custom knob values
-- Section 5: Validate knob settings against constraints
-- Section 6: Demonstrate different knob value types
-- Section 7-8: Execute graphs with different knob configurations
+- `Querying Knobs (vector)`: List available knobs and their metadata
+- `Querying Knobs (map)`: Use the knob lookup map for a specific knob
+- `Setting KnobSettings`: Create an execution plan with custom knob values
+- `Validating KnobSettings`: Validate knob settings against constraints
+- `Execution OK`: Execute the graph and print the first output values
 
 **Related Documentation:**
 - [hipDNN Knobs Documentation](../docs/Knobs.md) - Complete knobs guide
 - [HowTo Guide](../docs/HowTo.md#configuring-engine-knobs) - Quick start
-- [MIOpen Provider Knobs](../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+- [MIOpen Provider Knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
 
 > [!NOTE]
 > This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.
+
+### [**`AutotuneSample`**](./autotune/AutotuneSample.cpp)
+
+Demonstrates the hipDNN autotune API end-to-end on a convolution graph. The target is `hipdnn_sample_autotune`.
+
+The sample runs six scenarios. Use `--scenario=N` to run only one:
+1. Quick autotune (`add_all_engines`, then autotune and execute)
+2. Exhaustive autotune with a ranked result table
+3. Filtered autotune (`get_engine_configs`, workspace filter, `add_engine_configs`)
+4. Autotune with `AutotuneStorageConfig` to save results to a config file
+5. Compiled-plan autotune (`create_execution_plans`, `build_plans`, autotune)
+6. Manual benchmark loop with timing and workspace filtering
+
+Other options: `--large` (larger tensors), `--strategy=stable|average`, and `--iterations=N`. The sample accepts `--verify-cpu` but ignores it.
+
+### [**`DynamicBackendLoading`**](./dynamic/DynamicBackendLoading.cpp)
+
+Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample links only `hipdnn_frontend_dynamic`, not `libhipdnn_backend`. Creating the handle opens the backend at runtime. The sample runs an all-ones 1x1 convolution and checks that each output element equals the input channel count. The target is `hipdnn_sample_dynamic_backend_loading`. It takes no options.
 
 ## cuDNN Compatibility Shim Samples
 
