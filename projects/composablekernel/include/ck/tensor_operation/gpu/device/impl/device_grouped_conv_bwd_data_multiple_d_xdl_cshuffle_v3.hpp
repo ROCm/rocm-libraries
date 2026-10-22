@@ -1320,7 +1320,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
             if(get_warp_size() == 64)
             {
-                if constexpr(MXdlPerWave64 > 0)
+                if constexpr(MNXdlPerWave64 > 0)
                 {
                     if(arg.k_batch_ > 1)
                     {
@@ -1340,7 +1340,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             }
             else
             {
-                if constexpr(MXdlPerWave32 > 0)
+                if constexpr(MNXdlPerWave32 > 0)
                 {
                     if(arg.k_batch_ > 1)
                     {
@@ -1372,10 +1372,12 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     static bool IsSupportedArgument(const Argument& arg)
     {
         constexpr index_t ldsBufferCount =
-            BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
+            (BlkGemmPipelineVer == BlockGemmPipelineVersion::v4) || (WaveletEnabled && DirectLoad)
+                ? 2
+                : 1;
         if(get_warp_size() == 64)
         {
-            if constexpr(MXdlPerWave64 > 0)
+            if constexpr(MNXdlPerWave64 > 0)
             {
                 if(GridwiseGemm64::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount >
                    get_lds_size())
@@ -1386,7 +1388,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         }
         else
         {
-            if constexpr(MXdlPerWave32 > 0)
+            if constexpr(MNXdlPerWave32 > 0)
             {
                 if(GridwiseGemm32::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount >
                    get_lds_size())
@@ -1423,14 +1425,14 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         // Reject if the current warp size has no valid XDL configuration
         if(get_warp_size() == 64)
         {
-            if constexpr(MXdlPerWave64 == 0)
+            if constexpr(MNXdlPerWave64 == 0)
             {
                 return false;
             }
         }
         else
         {
-            if constexpr(MXdlPerWave32 == 0)
+            if constexpr(MNXdlPerWave32 == 0)
             {
                 return false;
             }
