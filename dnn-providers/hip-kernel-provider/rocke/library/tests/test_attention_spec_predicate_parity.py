@@ -224,3 +224,70 @@ def test_gfx942_2d_wrapper_sizes_lds_from_the_specs_flash_flags(
         **overrides,
     )
     assert mod.supports_tiled_2d_spec(spec)[0] is fits
+
+
+# The reduce kernel has no dispatcher gate of its own; it is only built beside the 3D
+# segment kernel the gate admitted, from that problem's own fields. So the predicate must
+# admit the reduce spec of every problem the 3D gate admits, or ``hkp_pack`` would refuse
+# a companion the dispatcher builds. The rejections are hand-built, because no admitted
+# problem can reach them.
+@pytest.mark.parametrize("num_segments", [1, 16, 128])
+def test_reduce_predicate_admits_the_reduce_spec_of_every_admitted_3d_problem(
+    num_segments, monkeypatch
+):
+    monkeypatch.setattr(au, "_RESOLVED_ATTENTION_ARCH", "gfx950")
+    mod = importlib.import_module("kernels.gfx950.attention_tiled_3d")
+    admitted = 0
+    for _variant, p in _problems("gfx950", window_grid=(0,)):
+        if not au.supports_native_unified_attention_3d_tiled(p, "gfx950")[0]:
+            continue
+        reduce_spec = mod.UnifiedAttentionReduceTiledSpec(
+            head_size=p.head_size,
+            num_query_heads=p.num_query_heads,
+            num_kv_heads=p.num_kv_heads,
+            dtype=p.dtype,
+            num_segments=num_segments,
+        )
+        assert mod.supports_tiled_reduce_spec(reduce_spec, arch="gfx950") == (
+            True,
+            "supported",
+        ), f"D{p.head_size} {p.dtype} h{p.num_query_heads}/{p.num_kv_heads}"
+        admitted += 1
+    assert admitted, "no admitted 3D problem was comparable"
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        (dict(dtype="fp32"), "fp16/bf16"),
+        (dict(head_size=96), "divisible by 64"),
+        (dict(num_query_heads=30, num_kv_heads=8), "divisible by num_kv_heads"),
+        (dict(num_segments=4097), "exceeds 4096"),
+    ],
+)
+def test_reduce_predicate_rejects_what_the_builder_assumes_away(overrides, reason):
+    """Each case is one assumption ``build_unified_attention_reduce_tiled`` makes
+    without checking, so the predicate is the only thing that refuses the spec."""
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        supports_tiled_reduce_spec,
+    )
+
+    base = dict(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    spec = UnifiedAttentionReduceTiledSpec(**{**base, **overrides})
+    ok, why = supports_tiled_reduce_spec(spec, arch="gfx950")
+    assert not ok and reason in why
+
+
+def test_reduce_predicate_rejects_a_non_gfx_target():
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        supports_tiled_reduce_spec,
+    )
+
+    spec = UnifiedAttentionReduceTiledSpec(
+        head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16", num_segments=16
+    )
+    assert not supports_tiled_reduce_spec(spec, arch="sm_90")[0]
