@@ -527,7 +527,7 @@ namespace rocisa
         SelectBit src1_sel;
     };
 
-    // dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
+    // dot2: for WaveSplitK reduction and cross-lane reductions. Only a subset of DPP modifiers are used here
     struct DPPModifiers : public Container
     {
         int              row_shr;
@@ -535,17 +535,29 @@ namespace rocisa
         int              bound_ctrl;
         std::vector<int> quad_perm;
         int              row_xmask;
+        bool             row_mirror;
+        bool             row_half_mirror;
+        int              row_mask;
+        int              bank_mask;
 
-        DPPModifiers(int                      row_shr    = -1,
-                     int                      row_bcast  = -1,
-                     int                      bound_ctrl = -1,
-                     const std::vector<int>&  quad_perm  = {},
-                     int                      row_xmask  = -1)
+        DPPModifiers(int                     row_shr         = -1,
+                     int                     row_bcast       = -1,
+                     int                     bound_ctrl      = -1,
+                     const std::vector<int>& quad_perm       = {},
+                     int                     row_xmask       = -1,
+                     bool                    row_mirror      = false,
+                     bool                    row_half_mirror = false,
+                     int                     row_mask        = -1,
+                     int                     bank_mask       = -1)
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
             , quad_perm(quad_perm)
             , row_xmask(row_xmask)
+            , row_mirror(row_mirror)
+            , row_half_mirror(row_half_mirror)
+            , row_mask(row_mask)
+            , bank_mask(bank_mask)
         {
         }
 
@@ -556,17 +568,26 @@ namespace rocisa
 
         std::string toString() const override
         {
+            // The modifier order follows what the LLVM assembler requires.
             std::string kStr;
             if(row_shr != -1)
                 kStr += " row_shr:" + std::to_string(row_shr);
             if(row_bcast != -1)
                 kStr += " row_bcast:" + std::to_string(row_bcast);
-            if(bound_ctrl != -1)
-                kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
             if(!quad_perm.empty())
                 kStr += " quad_perm:" + vectorToString(quad_perm);
             if(row_xmask != -1)
                 kStr += " row_xmask:" + std::to_string(row_xmask);
+            if(row_mirror)
+                kStr += " row_mirror";
+            if(row_half_mirror)
+                kStr += " row_half_mirror";
+            if(row_mask != -1)
+                kStr += " row_mask:" + toHexString(row_mask);
+            if(bank_mask != -1)
+                kStr += " bank_mask:" + toHexString(bank_mask);
+            if(bound_ctrl != -1)
+                kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
             return kStr;
         }
 
@@ -583,6 +604,14 @@ namespace rocisa
             }
             result += "]";
             return result;
+        }
+
+    private:
+        static std::string toHexString(int value)
+        {
+            std::ostringstream oss;
+            oss << "0x" << std::hex << value;
+            return oss.str();
         }
     };
 

@@ -12,6 +12,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -66,6 +67,57 @@ TEST(RocisaCore, EmitsScaledPackedFp8ToBf16Convert) {
   std::string text = module.toString();
   expectContains(text, "v_cvt_scalef32_pk_bf16_fp8 v78, v0, v76");
   expectContains(text, "v_cvt_scalef32_pk_bf16_fp8 v0, v0, v76 op_sel:[1,0,0]");
+}
+
+// Builds the cross-lane reduction forms: full bank mask and optional
+// bound_ctrl.
+rocisa::DPPModifiers reductionDpp(int rowBcast,
+                                  const std::vector<int> &quadPerm,
+                                  bool rowMirror, bool rowHalfMirror,
+                                  int rowMask, int boundCtrl) {
+  return rocisa::DPPModifiers(-1, rowBcast, boundCtrl, quadPerm, -1, rowMirror,
+                              rowHalfMirror, rowMask, 0xf);
+}
+
+TEST(RocisaCore, EmitsDppCrossLaneReduction) {
+  selectGfx950();
+  EXPECT_TRUE(rocisa::DPPModifiers().toString().empty());
+  EXPECT_EQ(rocisa::DPPModifiers(2, -1, 0).toString(),
+            " row_shr:2 bound_ctrl:0");
+
+  rocisa::Module module("dpp");
+  module.addT<rocisa::VAddF32>(
+      rocisa::vgpr(0), rocisa::vgpr(64), rocisa::vgpr(64),
+      reductionDpp(-1, {1, 0, 3, 2}, false, false, 0xf, 1));
+  module.addT<rocisa::VAddF32>(
+      rocisa::vgpr(0), rocisa::vgpr(0), rocisa::vgpr(0),
+      reductionDpp(-1, {2, 3, 0, 1}, false, false, 0xf, 1));
+  module.addT<rocisa::VAddF32>(rocisa::vgpr(0), rocisa::vgpr(0),
+                               rocisa::vgpr(0),
+                               reductionDpp(-1, {}, false, true, 0xf, 1));
+  module.addT<rocisa::VAddF32>(rocisa::vgpr(0), rocisa::vgpr(0),
+                               rocisa::vgpr(0),
+                               reductionDpp(-1, {}, true, false, 0xf, 1));
+  module.addT<rocisa::VAddF32>(rocisa::vgpr(0), rocisa::vgpr(0),
+                               rocisa::vgpr(0),
+                               reductionDpp(15, {}, false, false, 0xa, -1));
+  module.addT<rocisa::VAddF32>(rocisa::vgpr(0), rocisa::vgpr(0),
+                               rocisa::vgpr(0),
+                               reductionDpp(31, {}, false, false, 0xf, 1));
+  std::string text = module.toString();
+  expectContains(text,
+                 "v_add_f32 v0, v64, v64 quad_perm:[1,0,3,2] row_mask:0xf "
+                 "bank_mask:0xf bound_ctrl:1");
+  expectContains(text, "v_add_f32 v0, v0, v0 quad_perm:[2,3,0,1] row_mask:0xf "
+                       "bank_mask:0xf bound_ctrl:1");
+  expectContains(text, "v_add_f32 v0, v0, v0 row_half_mirror row_mask:0xf "
+                       "bank_mask:0xf bound_ctrl:1");
+  expectContains(text, "v_add_f32 v0, v0, v0 row_mirror row_mask:0xf "
+                       "bank_mask:0xf bound_ctrl:1");
+  expectContains(text, "v_add_f32 v0, v0, v0 row_bcast:15 row_mask:0xa "
+                       "bank_mask:0xf\n");
+  expectContains(text, "v_add_f32 v0, v0, v0 row_bcast:31 row_mask:0xf "
+                       "bank_mask:0xf bound_ctrl:1");
 }
 
 } // namespace
