@@ -204,7 +204,9 @@ class GESVDJ_NOTRANSV : public GESVDJ_NOTRANSV_BASE<GESVDJ_BCOUNT_SMALL>
 
 // TODO: batched version for GESVDJ_NOTRANSV is not implemented
 //
-// class GESVDJ_NOTRANSV_LARGE_BATCH : public GESVDJ_NOTRANSV_BASE<GESVDJ_BCOUNT> { };
+class GESVDJ_NOTRANSV_LARGE_BATCH : public GESVDJ_NOTRANSV_BASE<GESVDJ_BCOUNT>
+{
+};
 
 // non-batch tests
 
@@ -314,6 +316,8 @@ TEST_P(GESVDJ_LARGE_BATCH, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// strided batched
+
 TEST_P(GESVDJ_LARGE_BATCH, strided_batched__float)
 {
     run_tests<false, true, float>();
@@ -334,6 +338,28 @@ TEST_P(GESVDJ_LARGE_BATCH, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// gesvdj_notransv
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GESVDJ,
                          Combine(ValuesIn(large_size_range), ValuesIn(large_opt_range)));
@@ -350,4 +376,8 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          GESVDJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVDJ_NOTRANSV_LARGE_BATCH,
                          Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
