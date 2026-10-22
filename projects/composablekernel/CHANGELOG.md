@@ -2,6 +2,17 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## Composable Kernel 1.3.0 for ROCm 10.2.0
+
+### Added
+
+* Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
+* Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
+
+### Optimized
+
+* Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
+
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
 ### Added
@@ -12,7 +23,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added a batched contraction kernel with multiple ABD support to CK Tile.
 * Added CK Tile dispatcher support for more GEMM operators, including weight preshuffle GEMM, batched GEMM, batched contraction, grouped A-quantized and AB-quantized GEMM, grouped row-column and tensor quantized GEMM, and block scale quantized GEMM.
 * Added gfx1250 support to the CK Tile dispatcher GEMM operators, covering universal, grouped, multiple D, multiple ABD, batched, batched contraction, and grouped quantized GEMM.
-* Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
 * Added gfx1250 WMMA instance support to the CK backend for PyTorch Inductor, covering universal GEMM, batched GEMM, and grouped convolution forward.
 * Added the tanh approximation of GELU to the XDL two-stage MoE GEMM epilogue.
 * Added double-precision buffer atomic add support on gfx1250.
@@ -21,7 +31,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 * Improved FMHA forward performance for head dimension 128 on gfx11 and gfx12 targets by retuning tile selection.
 * Improved FMHA forward performance on gfx1250 for bf16 and fp16 head dimension 128 by padding the LDS layout in the qr_tdm pipeline.
-* Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
 * Improved memory coalescing of microscaling (MX) scale loads on gfx1250 by unifying the scale16 layout with scale32.
 
 ### Changed
@@ -44,6 +53,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results in the B preshuffle dequantized GEMM pipeline caused by the C transpose setting being ignored.
 * Fixed incorrect results from the CK Tile compute v3 intrawave GEMM pipeline with eight-warp block arrangements on gfx1250.
 * Fixed out-of-bounds asynchronous loads in the CK Tile compute async WMMA GEMM pipeline caused by a missing element validity check.
+* Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
 * Fixed accuracy loss in the bf16 fast GELU element-wise operation on gfx1250 by using the non-native implementation.
 * Fixed a build failure caused by the compiler change from vector to ext_vector types.
 * Fixed a CMake failure when building instance libraries for multiple offload targets.
@@ -55,7 +65,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Added multiple D (bias) and large tensor support to the CK Tile quantized GEMM kernel for row-column quantization.
-* Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 
 ### Changed
 

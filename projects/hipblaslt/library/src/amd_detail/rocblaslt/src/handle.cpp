@@ -81,6 +81,7 @@ _rocblaslt_handle::_rocblaslt_handle()
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);
+#endif
     const char* rocRollerEnvVal = std::getenv("HIPBLASLT_USE_ROCROLLER");
     if((std::string(properties.gcnArchName).find("gfx1250") != std::string::npos))
     {
@@ -101,7 +102,6 @@ _rocblaslt_handle::_rocblaslt_handle()
     {
         useRocRoller = -1;
     }
-#endif
 
     // HIPBLASLT_CHECK_NUMERICS: 1/info, 2/warn, 0/none/off. Anything else
     // (including the removed =4 fail bit) collapses to no_check.
