@@ -1041,17 +1041,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
         // whichever block carries the largest scale and collapse the effective key count.
         ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
             q_descale_host);
-        ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(
-            k_descale_host);
 
         if(ck_tile::is_gfx125_supported())
         {
-            // qr_tdm carries v_descale in an E8M0 operand, so sample exact powers of two.
+            // qr_tdm carries k_descale and v_descale in E8M0 operands, so sample exact powers
+            // of two. [max/2, max] spans two exponents: neighbours still differ, and the 2x
+            // spread keeps k_descale narrow for the reason above.
+            ck_tile::FillUniformScaleDistribution<ck_tile::e8m0_t>{
+                max_descale_k / 2.f, max_descale_k, next_seed()}(k_descale_host);
             ck_tile::FillUniformScaleDistribution<ck_tile::e8m0_t>{
                 max_descale_v / 8.f, max_descale_v, next_seed()}(v_descale_host);
         }
         else
         {
+            ck_tile::FillUniformDistribution<float>{
+                max_descale_k * 0.8f, max_descale_k, next_seed()}(k_descale_host);
             ck_tile::FillUniformDistribution<float>{
                 max_descale_v * 0.8f, max_descale_v, next_seed()}(v_descale_host);
         }
