@@ -330,19 +330,6 @@ namespace rocisa
             return (it != itemList.end()) ? std::distance(itemList.begin(), it) : -1;
         }
 
-        int findIndexByType(nb::object obj) const
-        {
-            for(size_t i = 0; i < itemList.size(); ++i)
-            {
-                nb::object itemobj = nb::cast(*itemList[i]);
-                if(nb::isinstance(itemobj, obj))
-                {
-                    return i;
-                }
-            }
-            return -1;
-        }
-
         void addComment(const std::string& comment)
         {
             /*
@@ -428,16 +415,6 @@ namespace rocisa
                 ostream += i->prettyPrint(indent + "|--");
             }
             return ostream;
-        }
-
-        int countType(const nb::object& obj) const override
-        {
-            int count = 0;
-            for(const auto& i : itemList)
-            {
-                count += i->countType(obj);
-            }
-            return count;
         }
 
         int countExactType(const std::type_info& targetType) const override
