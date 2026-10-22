@@ -193,6 +193,28 @@ double typeInfinity(ScalarType type, bool negative) {
                     : std::numeric_limits<double>::infinity();
 }
 
+namespace {
+template <ScalarType Type>
+double decodeEncodedExponentKnown(uint64_t raw) {
+    if constexpr (Type == ScalarType::Float64)
+        return std::bit_cast<double>(raw);
+    else if constexpr (Type == ScalarType::Float32)
+        return std::bit_cast<float>(static_cast<uint32_t>(raw));
+    else if constexpr (Type == ScalarType::Float16)
+        return decodeFloat16(static_cast<uint16_t>(raw));
+    else if constexpr (Type == ScalarType::BFloat16)
+        return decodeBFloat16(static_cast<uint16_t>(raw));
+    else if constexpr (Type == ScalarType::E8M0)
+        return decodeE8M0(static_cast<uint8_t>(raw));
+    else if constexpr (Type == ScalarType::E8M0Zero)
+        return decodeE8M0Zero(static_cast<uint8_t>(raw));
+    else if constexpr (IsBinaryFloatTypeV<Type>)
+        return decodeBinaryFloatKnown<Type>(static_cast<uint32_t>(raw));
+    else
+        throw std::runtime_error("Random encoded-exponent source type is unsupported.");
+}
+}  // namespace
+
 PreparedEncodedExponent prepareEncodedExponent(
     const RandomEncodedExponentGenerationParameters& parameters, ScalarType destinationType) {
     const ScalarType type =
@@ -204,33 +226,7 @@ PreparedEncodedExponent prepareEncodedExponent(
     if (parameters.lowerUnbiasedExponent > parameters.upperUnbiasedExponent)
         throw std::runtime_error("Random encoded-exponent lower bound exceeds upper bound.");
     const auto decode = visitScalarType(type, []<typename Tag>() -> double (*)(uint64_t) {
-        constexpr auto encoding = Tag::type;
-        if constexpr (encoding == ScalarType::Float64)
-            return +[](uint64_t raw) { return std::bit_cast<double>(raw); };
-        else if constexpr (encoding == ScalarType::Float32)
-            return +[](uint64_t raw) -> double {
-                return std::bit_cast<float>(static_cast<uint32_t>(raw));
-            };
-        else if constexpr (encoding == ScalarType::Float16)
-            return +[](uint64_t raw) -> double {
-                return decodeFloat16(static_cast<uint16_t>(raw));
-            };
-        else if constexpr (encoding == ScalarType::BFloat16)
-            return +[](uint64_t raw) -> double {
-                return decodeBFloat16(static_cast<uint16_t>(raw));
-            };
-        else if constexpr (encoding == ScalarType::E8M0)
-            return +[](uint64_t raw) -> double { return decodeE8M0(static_cast<uint8_t>(raw)); };
-        else if constexpr (encoding == ScalarType::E8M0Zero)
-            return +[](uint64_t raw) -> double {
-                return decodeE8M0Zero(static_cast<uint8_t>(raw));
-            };
-        else if constexpr (scalarTypeInfo(encoding).category == ScalarCategory::FloatingPoint)
-            return +[](uint64_t raw) -> double {
-                return decodeBinaryFloatKnown<Tag::type>(static_cast<uint32_t>(raw));
-            };
-        else
-            throw std::runtime_error("Random encoded-exponent source type is unsupported.");
+        return decodeEncodedExponentKnown<Tag::type>;
     });
     return {
         .lowerExponent = parameters.lowerUnbiasedExponent,
