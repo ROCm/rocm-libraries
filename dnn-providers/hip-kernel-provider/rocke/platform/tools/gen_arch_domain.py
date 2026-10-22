@@ -75,6 +75,7 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
+from _bounded_run import run_bounded, stop_all
 from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
@@ -487,13 +488,10 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
     proc = None
     for attempt in (1, 2):
         try:
-            proc = subprocess.run(
+            proc = run_bounded(
                 [opt, "-S", "-o", "-", str(src)],
-                capture_output=True,
-                text=True,
-                check=False,
                 timeout=PROBE_TIMEOUT_S,
-                cwd=str(scratch),
+                cwd=scratch,
             )
         except subprocess.TimeoutExpired:
             if attempt == 1:
@@ -710,18 +708,15 @@ def _probe(
         str(path),
     ]
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             argv,
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
             # Run from the scratch directory, not from wherever the sweep was
             # invoked. Probing is *expected* to crash clang -- that is what
             # `toolchain_crash` records -- and a crash on a host with core dumps
             # enabled drops a multi-megabyte `core` next to the caller. Run the
             # sweep from a checkout and those land in the worktree.
-            cwd=str(out.parent),
+            cwd=out.parent,
         )
     except subprocess.TimeoutExpired:
         return (
@@ -1198,10 +1193,17 @@ def main() -> int:
             record(key, arch, status, evidence)
 
     with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
-        for key, arch, status, evidence, imm in ex.map(run, work):
-            record(key, arch, status, evidence, imm)
-            if args.verbose and status != STATUS_OK:
-                print(f"     {key:44s} {arch:14s} {status}")
+        try:
+            for key, arch, status, evidence, imm in ex.map(run, work):
+                record(key, arch, status, evidence, imm)
+                if args.verbose and status != STATUS_OK:
+                    print(f"     {key:44s} {arch:14s} {status}")
+        except KeyboardInterrupt:
+            # Ctrl-C reaches only this thread; end the workers' compiles too,
+            # or leaving this block would wait out each one's timeout.
+            ex.shutdown(wait=False, cancel_futures=True)
+            stop_all()
+            raise
 
     # Second pass, serial: unclassified and crashed probes get one more chance
     # with no contention. A real result is stable under retry, a resource
