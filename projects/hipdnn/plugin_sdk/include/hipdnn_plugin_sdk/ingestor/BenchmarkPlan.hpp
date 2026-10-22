@@ -16,8 +16,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -102,6 +105,10 @@ public:
         std::unique_ptr<IPlan<THandle>> plan;
         DescriptorId packId{};
         DescriptorId dispatchId{};
+        /// Feature values for this (problem, kernel) pair, merged flat into the candidate's log
+        /// record. Keys are namespaced (`q.`, `kernel.`), so they cannot collide with the dotless
+        /// envelope keys. Supplied by the caller; empty adds nothing.
+        nlohmann::json features = nlohmann::json::object();
     };
 
     /// Times one execute() of a candidate, returning elapsed milliseconds or nullopt
@@ -118,13 +125,21 @@ public:
     ///        sweep, under _mutex, so it need not be thread-safe. When empty, each
     ///        comparison builds its own events and stall gate (see resolveChosen()).
     /// @throws HipdnnPluginException(INTERNAL_ERROR) if @p candidates is empty.
+    /// @param benchmarkId Opaque problem identity echoed on every candidate log record so an
+    ///        exporter can group one sweep's rows; empty means unidentified.
+    /// @param deviceIdentity Opaque device identity, echoed the same way and omitted when
+    ///        empty. Rows group by (benchmark, device), matching the winner cache key.
     BenchmarkPlan(std::vector<Candidate> candidates,
                   const THandle& handle,
                   Timer timer = {},
-                  RecordRankingFn recordRanking = {})
+                  RecordRankingFn recordRanking = {},
+                  std::string benchmarkId = {},
+                  std::string deviceIdentity = {})
         : _candidates(std::move(candidates))
         , _timer(std::move(timer))
         , _recordRanking(std::move(recordRanking))
+        , _benchmarkId(std::move(benchmarkId))
+        , _deviceIdentity(std::move(deviceIdentity))
     {
         if(_candidates.empty())
         {
@@ -175,11 +190,24 @@ private:
         bool timedOut = false;
     };
 
-    /// One candidate's result: a usable time, unusable (timeMs unset), or a request to
+    /// One candidate's sampled timings. Only `robustMeanMs` decides the ranking; the rest
+    /// are logged as UHD training signal (RFC 0019.13 §8.3).
+    struct CandidateTiming
+    {
+        double robustMeanMs = 0.0;
+        double minMs = 0.0;
+        double avgMs = 0.0;
+        double stddevMs = 0.0;
+        int iterations = 0;
+    };
+
+    /// One candidate's result: usable timings, unusable (timing unset), or a request to
     /// restart the whole comparison unstalled (see sampleCandidate()).
     struct SampleOutcome
     {
-        std::optional<double> timeMs;
+        std::optional<CandidateTiming> timing;
+        /// Why @c timing is unset: the `reason` of the candidate's failed log record.
+        std::string failureReason;
         bool restartUnstalled = false;
     };
 
@@ -320,6 +348,10 @@ private:
         // still serve the runner-up.
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
+        // Outcomes of the settling pass, logged only after it settles: a discarded stalled pass
+        // re-measures every candidate and would otherwise log each one twice.
+        std::vector<SampleOutcome> outcomes;
+        outcomes.reserve(_candidates.size());
 
         // Stalled and unstalled samples are not comparable. If any candidate cannot be
         // measured stalled (see sampleCandidate()), stop the pass and re-measure every
@@ -327,28 +359,30 @@ private:
         for(;;)
         {
             ranked.clear();
+            outcomes.clear();
             bool restartUnstalled = false;
             for(size_t index = 0; index < _candidates.size(); ++index)
             {
-                const auto outcome = sampleCandidate(index,
-                                                     handle,
-                                                     deviceBuffers,
-                                                     numDeviceBuffers,
-                                                     workspace,
-                                                     defaultTimer,
-                                                     stalled);
+                auto outcome = sampleCandidate(index,
+                                               handle,
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               workspace,
+                                               defaultTimer,
+                                               stalled);
                 if(stalled && outcome.restartUnstalled)
                 {
                     // Candidates after this index stay unsampled in this pass.
                     restartUnstalled = true;
                     break;
                 }
-                if(!outcome.timeMs.has_value())
+                // A failed candidate is omitted, never given a sentinel time: it must never
+                // be served ahead of the normal ranked path.
+                if(outcome.timing.has_value())
                 {
-                    // Omitted, never given a sentinel time that could outrank real ones.
-                    continue;
+                    ranked.emplace_back(outcome.timing->robustMeanMs, index);
                 }
-                ranked.emplace_back(*outcome.timeMs, index);
+                outcomes.push_back(std::move(outcome));
             }
 
             if(!restartUnstalled)
@@ -362,6 +396,19 @@ private:
                 "Discarding the pass and re-measuring every candidate unstalled.");
             // The unstalled pass cannot request a restart, so this runs at most once.
             stalled = false;
+        }
+
+        for(size_t index = 0; index < outcomes.size(); ++index)
+        {
+            const auto& outcome = outcomes[index];
+            if(outcome.timing.has_value())
+            {
+                logCandidateTiming(_candidates[index], *outcome.timing);
+            }
+            else
+            {
+                logCandidateFailure(_candidates[index], outcome.failureReason);
+            }
         }
 
         // stable_sort: ties resolve to the lowest candidate index.
@@ -404,8 +451,8 @@ private:
     }
 
     /// Times BENCHMARK_ITERATIONS executes after BENCHMARK_WARMUP_RUNS untimed ones and
-    /// reduces them with robustMean(), so an occasionally lucky kernel cannot win on one
-    /// fast sample.
+    /// ranks by robustMean(), so an occasionally lucky kernel cannot win on one fast
+    /// sample.
     ///
     /// - In a stalled pass, a watchdog timeout or an unstalled sample returns
     ///   restartUnstalled: the two populations must never be mixed. These checks precede
@@ -418,6 +465,9 @@ private:
     ///   pass unstalled, because dropping the candidate would exclude the fastest
     ///   kernels; in an unstalled pass it scores the candidate unusable. A negative value
     ///   never reaches the ranking or cache.
+    ///
+    /// Each failure path names its reason; resolveChosen() logs it once the comparison
+    /// settles.
     template <typename DefaultTimer>
     SampleOutcome sampleCandidate(size_t index,
                                   const THandle& handle,
@@ -442,7 +492,7 @@ private:
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                        << toString(candidate.kernelId)
                                        << "' failed to drain its warmup runs; scored unusable");
-                return {std::nullopt, false};
+                return {std::nullopt, "warmup-not-drained", false};
             }
 
             std::vector<double> samples;
@@ -470,14 +520,14 @@ private:
                                            << toString(candidate.kernelId)
                                            << "' hit a stall watchdog timeout; the whole "
                                               "comparison will restart unstalled");
-                    return {std::nullopt, true};
+                    return {std::nullopt, "stall-watchdog-timeout", true};
                 }
                 if(!sample.elapsedMs.has_value())
                 {
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                            << toString(candidate.kernelId)
                                            << "' failed to time a launch; scored unusable");
-                    return {std::nullopt, false};
+                    return {std::nullopt, "launch-not-timed", false};
                 }
                 if(stalled && !sample.stallUsed)
                 {
@@ -488,7 +538,7 @@ private:
                         << toString(candidate.kernelId)
                         << "' measured without an actual stall during a stalled pass; the "
                            "whole comparison will restart unstalled");
-                    return {std::nullopt, true};
+                    return {std::nullopt, "measured-unstalled", true};
                 }
                 if(!std::isfinite(*sample.elapsedMs))
                 {
@@ -497,7 +547,7 @@ private:
                         "ingestor: benchmarking candidate '"
                         << toString(candidate.kernelId)
                         << "' reported a non-finite elapsed time; scored unusable");
-                    return {std::nullopt, false};
+                    return {std::nullopt, "non-finite-elapsed-time", false};
                 }
                 if(*sample.elapsedMs < 0.0)
                 {
@@ -520,26 +570,26 @@ private:
                                                << MAX_NEGATIVE_SAMPLE_RETRIES
                                                << " retries; the whole comparison will "
                                                   "restart unstalled");
-                        return {std::nullopt, true};
+                        return {std::nullopt, "negative-stalled-elapsed-time", true};
                     }
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                            << toString(candidate.kernelId)
                                            << "' reported a negative elapsed time after exhausting "
                                            << MAX_NEGATIVE_SAMPLE_RETRIES
                                            << " retries; scored unusable");
-                    return {std::nullopt, false};
+                    return {std::nullopt, "negative-elapsed-time", false};
                 }
                 samples.push_back(*sample.elapsedMs);
                 ++iteration;
             }
-            return {hipdnn_data_sdk::utilities::detail::robustMean(samples), false};
+            return {summarize(samples), {}, false};
         }
         catch(const std::exception& error)
         {
             HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                    << toString(candidate.kernelId)
                                    << "' threw and is scored unusable: " << error.what());
-            return {std::nullopt, false};
+            return {std::nullopt, error.what(), false};
         }
         catch(...)
         {
@@ -549,13 +599,93 @@ private:
             HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                    << toString(candidate.kernelId)
                                    << "' threw a non-standard exception and is scored unusable");
-            return {std::nullopt, false};
+            return {std::nullopt, "non-standard-exception", false};
         }
+    }
+
+    /// min, mean, population stddev, and count alongside the ranking statistic. Population
+    /// stddev because the samples are every iteration that ran, not a draw.
+    static CandidateTiming summarize(const std::vector<double>& samples)
+    {
+        CandidateTiming timing;
+        timing.iterations = static_cast<int>(samples.size());
+        timing.robustMeanMs = hipdnn_data_sdk::utilities::detail::robustMean(samples);
+        timing.minMs = *std::min_element(samples.begin(), samples.end());
+
+        double total = 0.0;
+        for(const double sample : samples)
+        {
+            total += sample;
+        }
+        timing.avgMs = total / static_cast<double>(samples.size());
+
+        double squaredError = 0.0;
+        for(const double sample : samples)
+        {
+            const double error = sample - timing.avgMs;
+            squaredError += error * error;
+        }
+        timing.stddevMs = std::sqrt(squaredError / static_cast<double>(samples.size()));
+
+        return timing;
+    }
+
+    /// Logs one JSON record per timed candidate at INFO: the per-kernel measurement a UHD is
+    /// trained on, since the cache keeps only the winner. Nothing is built when INFO is off.
+    void logCandidateTiming(const Candidate& candidate, const CandidateTiming& timing) const
+    {
+        if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
+        {
+            return;
+        }
+        auto record = candidateRecord(candidate);
+        record["status"] = "ok";
+        record["min_ms"] = timing.minMs;
+        record["avg_ms"] = timing.avgMs;
+        record["stddev_ms"] = timing.stddevMs;
+        record["robust_mean_ms"] = timing.robustMeanMs;
+        record["iters"] = timing.iterations;
+        HIPDNN_PLUGIN_LOG_INFO(record.dump());
+    }
+
+    /// Logs a `failed` record with its reason (RFC 0019.13 §8.3). The winner cache drops
+    /// failed candidates, so this is the only place a failure is recorded.
+    void logCandidateFailure(const Candidate& candidate, const std::string& reason) const
+    {
+        if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
+        {
+            return;
+        }
+        auto record = candidateRecord(candidate);
+        record["status"] = "failed";
+        record["reason"] = reason;
+        HIPDNN_PLUGIN_LOG_INFO(record.dump());
+    }
+
+    /// The fields common to every candidate record, layered over the candidate's features.
+    /// `benchmark` plus `device` identify one problem, as the winner cache keys on both;
+    /// `device` is omitted when unidentified. The envelope is written last so a feature key
+    /// can never overwrite the row's identity.
+    nlohmann::json candidateRecord(const Candidate& candidate) const
+    {
+        nlohmann::json record = candidate.features;
+        record["event"] = "ingestor.benchmark.candidate";
+        record["benchmark"] = _benchmarkId;
+        if(!_deviceIdentity.empty())
+        {
+            record["device"] = _deviceIdentity;
+        }
+        record["kernel"] = toString(candidate.kernelId);
+        record["pack"] = toString(candidate.packId);
+        record["dispatch"] = toString(candidate.dispatchId);
+        return record;
     }
 
     std::vector<Candidate> _candidates;
     Timer _timer;
     RecordRankingFn _recordRanking;
+    std::string _benchmarkId;
+    std::string _deviceIdentity;
     size_t _workspaceBytes = 0;
     mutable std::atomic<size_t> _chosen{NOT_RESOLVED};
     mutable std::mutex _mutex;
