@@ -11,13 +11,17 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 ## Coverage
 
 - Architecture: gfx950 only.
-- Variants: 198 (all `kernel_source.kind = rocke`, compiled at pack time).
-- dtype: bf16, fp16.
-- head_size: 64, 128.
-- mask: no mask, top-left causal, bottom-right causal (KMD `mask_type` 0, 1, 2).
+- Variants: 216 (all `kernel_source.kind = rocke`, compiled at pack time): 198 at head_size 64 and
+  128, and 18 at head_size 256.
+- dtype: bf16, fp16 at head_size 64 and 128; bf16 only at head_size 256 (fp16 D256 is not served).
+- head_size: 64, 128, 256.
+- mask: no mask, top-left causal, bottom-right causal (KMD `mask_type` 0, 1, 2) at head_size 64 and
+  128; the two causal masks (1, 2) at head_size 256.
 - Query heads 4 to 128 and KV heads 1 to 128, varying per variant (group of 1 to 16).
-- One geometry per variant: narrow 16x16 MFMA, 4 warps x 16 rows (`block_m` 64), KV tile 64 tokens,
-  `block_size` 16, llvm backend.
+- One geometry per head size: narrow 16x16 MFMA, 4 warps x 16 rows (`block_m` 64) at head_size 64
+  and 128; the D256 prefill geometry (transposed 32x32, 2 warps x 32 rows, `block_m` 64, with the
+  production route's codegen constellation) at head_size 256. KV tile 64 tokens, `block_size` 16,
+  llvm backend in both.
 - Batch capacity 511: `num_seqs` 511 bakes 9 binary-search iterations, which resolve at most
   2^9 - 1 sequences. The engine declines a graph with a larger batch.
 - Fixed in every variant: no sliding window, no sinks, no ALiBi, no softcap, no fp8.
@@ -26,7 +30,7 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.26 MB, the 198 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | the 216 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_2d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_2d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp` |
