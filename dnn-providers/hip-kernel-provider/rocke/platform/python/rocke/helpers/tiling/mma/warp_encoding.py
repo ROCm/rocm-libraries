@@ -22,7 +22,43 @@ from __future__ import annotations
 from ..encoding import WarpDistributionEncoding
 from ..traits import MmaTraits
 
-__all__ = ["a_warp_encoding", "b_warp_encoding", "c_warp_encoding", "canonical_layouts"]
+__all__ = [
+    "a_warp_encoding",
+    "b_warp_encoding",
+    "c_warp_encoding",
+    "canonical_layouts",
+    "encoder_supports_layout",
+]
+
+
+def encoder_supports_layout(traits: MmaTraits) -> tuple[bool, str]:
+    """Say whether the encoder can lay out the instruction ``traits`` describes.
+
+    Returns ``(True, "")``, or ``(False, reason)`` naming the layout feature the encoder lacks:
+    an instruction that computes several independent blocks (``traits.b > 1``), or one whose lane
+    holds several M blocks of A in its registers (``a_m_register_blocks > 1``).
+    """
+    if traits.b > 1:
+        return False, (
+            f"it computes {traits.b} independent blocks per instruction and the block axis "
+            f"is not modelled"
+        )
+    a_m_blocks = traits.layout_params.a_m_register_blocks
+    if a_m_blocks > 1:
+        return False, (
+            f"each lane holds {a_m_blocks} M blocks of A in registers, which the encoder "
+            f"does not model"
+        )
+    return True, ""
+
+
+def _require_encodable(traits: MmaTraits) -> None:
+    supported, reason = encoder_supports_layout(traits)
+    if not supported:
+        raise NotImplementedError(
+            f"MMA instruction {traits.op_id!r} cannot be laid out by the tiling encoder: "
+            f"{reason} -- TODO: not implemented yet"
+        )
 
 
 def _require_divisible(numerator: int, denominator: int, what: str, op_id: str) -> int:
@@ -53,8 +89,9 @@ def c_warp_encoding(
             f"m_iter/n_iter must be positive -- op_id={traits.op_id!r}, "
             f"m_iter={m_iter}, n_iter={n_iter}"
         )
-    m_per_lane = traits.c_m_per_lane
-    m_num_access = traits.c_m_num_access
+    _require_encodable(traits)
+    m_per_lane = traits.layout_params.c_m_per_lane
+    m_num_access = traits.layout_params.c_m_num_access
     m_outer = _require_divisible(traits.m, m_per_lane, "M / c_m_per_lane", traits.op_id)
     m_inner = _require_divisible(
         m_per_lane, m_num_access, "c_m_per_lane / c_m_num_access", traits.op_id
@@ -183,11 +220,13 @@ def a_warp_encoding(
     """A operand encoding (dense StridedK). Major dim = M; repeat = a_repeat. A free-contiguous
     (interleaved) operand layout is a :class:`~rocke.helpers.tiling.mma.styles.InterleavedStyle`, not a
     flag here."""
+    _require_encodable(traits)
+    params = traits.layout_params
     return _ab_strided_k_encoding(
         major_dim_size=traits.m,
-        repeat=traits.a_repeat,
-        num_access=traits.a_k_num_access,
-        k_per_lane=traits.k_ab_per_lane,
+        repeat=params.a_repeat,
+        num_access=params.a_k_num_access,
+        k_per_lane=params.k_ab_per_lane,
         k_dim=traits.k,
         op_id=traits.op_id,
         major_iter=m_iter,
@@ -201,11 +240,13 @@ def b_warp_encoding(
     """B operand encoding (dense StridedK). Major dim = N; repeat = b_repeat. A free-contiguous
     (interleaved) operand layout is a :class:`~rocke.helpers.tiling.mma.styles.InterleavedStyle`, not a
     flag here."""
+    _require_encodable(traits)
+    params = traits.layout_params
     return _ab_strided_k_encoding(
         major_dim_size=traits.n,
-        repeat=traits.b_repeat,
-        num_access=traits.b_k_num_access,
-        k_per_lane=traits.k_ab_per_lane,
+        repeat=params.b_repeat,
+        num_access=params.b_k_num_access,
+        k_per_lane=params.k_ab_per_lane,
         k_dim=traits.k,
         op_id=traits.op_id,
         major_iter=n_iter,
