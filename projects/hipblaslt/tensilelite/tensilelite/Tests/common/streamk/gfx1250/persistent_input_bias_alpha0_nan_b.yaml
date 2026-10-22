@@ -43,6 +43,7 @@ BenchmarkProblems:
     Batched: true
     Gradient: true
     UseBias: 1
+    SetConstStrideBias: [[2, -1]]
     BiasSrc: A
   -
     BenchmarkCommonParameters:

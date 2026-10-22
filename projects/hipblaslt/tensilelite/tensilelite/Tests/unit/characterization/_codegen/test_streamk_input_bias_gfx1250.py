@@ -106,6 +106,8 @@ def test_input_bias_gradient_completion_assembles(tmp_path, strategy, source):
         assert_assembles(assembly, name)
         _assert_alpha_zero_tdm_inputs(assembly, source)
         _assert_alpha_zero_product_discarded(assembly)
+        assert re.search(r"s_mul_hi_u32.*sgprWorkGroup2.*sgprBiasStride", assembly)
+        assert re.search(r"s_addc_u32.*sgprSrdBias\+1.*bias batch base carry", assembly)
         bias_store = assembly.index("global store bias")
         # Wave 0/1 may read partials written by wave 2 for BiasSrc=B. A
         # barrier alone does not complete those stores on gfx1250.
