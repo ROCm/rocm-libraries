@@ -241,8 +241,8 @@ performance, so the best of the ones it reached is usually not the shape's best 
 not searched again in the same process, and runs on default selection. To tune it, raise or clear
 ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and run it in tune mode again; as a rough guide a
 2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
-Within a single process a shape is benchmarked at most once in any case, including when an attempt
-fails after ``tuning-start``.
+A failed attempt after ``tuning-start`` is not repeated in the same process. A completed search can
+be repeated if its saved winner does not support a later call, for example with less workspace.
 
 The ceiling is checked between candidates, since a batch of launches already submitted cannot be
 recalled. One candidate may therefore overrun it by as much as its own measurement takes.
