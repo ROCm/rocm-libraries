@@ -10,7 +10,8 @@ namespace ck_tile {
 
 // Owns its page-ID schedule and keeps the M128/N128 compute geometry of the scheduled TDM pipeline.
 // The physical allocation page may differ from the logical N128 tile: P>=128
-// uses a slice of one physical page, P16 assembles eight page-local fragments.
+// uses a slice of one physical page, P64 two pages (one per pair of waves), P16 assembles
+// eight page-local fragments.
 template <typename Problem_>
 struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     : BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_, FmhaTdmSchedPolicyFor<Problem_>, false>
@@ -20,10 +21,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     using Problem = typename Base::Problem;
     static_assert(Problem::kIsGroupMode);
     // Physical page support. The supported set is P % N == 0 or N % P == 0:
-    // P256/P1024 slice one page, P128 maps one page to one tile, P16 bundles
-    // eight independently mapped fragments.
-    static_assert(Problem::kPageBlockSize == 16 || Problem::kPageBlockSize == 128 ||
-                      Problem::kPageBlockSize == 256 || Problem::kPageBlockSize == 1024,
+    // P256/P1024 slice one page, P128 maps one page to one tile, P64 maps two pages to one
+    // tile, P16 bundles eight independently mapped fragments.
+    static_assert(Problem::kPageBlockSize == 16 || Problem::kPageBlockSize == 64 ||
+                      Problem::kPageBlockSize == 128 || Problem::kPageBlockSize == 256 ||
+                      Problem::kPageBlockSize == 1024,
                   "unsupported physical page size for the batch-prefill page-tile core");
     static_assert(Problem::kPageBlockSize % Problem::BlockFmhaShape::kN0 == 0 ||
                       Problem::BlockFmhaShape::kN0 % Problem::kPageBlockSize == 0,

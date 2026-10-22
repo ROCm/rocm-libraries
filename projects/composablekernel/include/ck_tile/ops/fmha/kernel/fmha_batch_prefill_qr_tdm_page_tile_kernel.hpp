@@ -62,8 +62,9 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static_assert(kSglangTable ||
                   kKVLookupTable == BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
     // The physical allocation page may differ from the logical N128 tile.
-    static_assert(FmhaPipeline::kPageBlockSize == 16 || FmhaPipeline::kPageBlockSize == 128 ||
-                  FmhaPipeline::kPageBlockSize == 256 || FmhaPipeline::kPageBlockSize == 1024);
+    static_assert(FmhaPipeline::kPageBlockSize == 16 || FmhaPipeline::kPageBlockSize == 64 ||
+                  FmhaPipeline::kPageBlockSize == 128 || FmhaPipeline::kPageBlockSize == 256 ||
+                  FmhaPipeline::kPageBlockSize == 1024);
     static_assert(FmhaPipeline::kPageBlockSize % FmhaPipeline::kN0 == 0 ||
                   FmhaPipeline::kN0 % FmhaPipeline::kPageBlockSize == 0);
     using PageTileTraits =
