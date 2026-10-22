@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/instances/attention_dense_spec_host.cpp -- C parity for the shared
+ * tests/instances/test_attention_dense_spec.cpp -- C parity for the shared
  * dense attention spec contract (rocke/instance_attention_dense_spec.h).
  *
  * The validator and preflight reasons never reach the emitted IR, so the
@@ -745,9 +745,9 @@ int main()
     check_name_buffer_too_small();
     if(g_failures != 0)
     {
-        std::fprintf(stderr, "rocke_attention_dense_spec_host: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "rocke_attention_dense_spec: %d failure(s)\n", g_failures);
         return 1;
     }
-    std::printf("rocke_attention_dense_spec_host: OK\n");
+    std::printf("rocke_attention_dense_spec: OK\n");
     return 0;
 }

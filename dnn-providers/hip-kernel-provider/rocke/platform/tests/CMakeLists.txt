@@ -469,21 +469,21 @@ if(BUILD_TESTING)
   # Shared dense attention spec (validator, preflight, kernel name): the reject
   # reasons never reach the emitted IR, so the byte-identity gate cannot see a
   # divergence in them; the C port is pinned to Python reference vectors here.
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_dense_spec_host.cpp")
-    add_executable(rocke_attention_dense_spec_host instances/attention_dense_spec_host.cpp)
-    target_link_libraries(rocke_attention_dense_spec_host PRIVATE rocke_core)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
+    add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
+    target_link_libraries(rocke_attention_dense_spec PRIVATE rocke_core)
     if(UNIX)
-      target_link_libraries(rocke_attention_dense_spec_host PRIVATE m)
+      target_link_libraries(rocke_attention_dense_spec PRIVATE m)
     endif()
-    add_test(NAME rocke_attention_dense_spec_host COMMAND rocke_attention_dense_spec_host)
-    set_tests_properties(rocke_attention_dense_spec_host PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec_host)
-    set_target_properties(rocke_attention_dense_spec_host
+    add_test(NAME rocke_attention_dense_spec COMMAND rocke_attention_dense_spec)
+    set_tests_properties(rocke_attention_dense_spec PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec)
+    set_target_properties(rocke_attention_dense_spec
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-    install(TARGETS rocke_attention_dense_spec_host
+    install(TARGETS rocke_attention_dense_spec
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-                 rocke_attention_dense_spec_host)
+                 rocke_attention_dense_spec)
   endif()
 
   # RDNA split-KV WMMA decode host helpers (split count, pack groups, row
