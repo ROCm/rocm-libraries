@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "harness/Benchmark.hpp"
+#include "harness/BenchmarkReport.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -152,6 +154,85 @@ TEST(TestResolveBenchmark, ModesThatDoNotExecuteAreRefused)
     }
 }
 
+// ---- selectEngineResult ---------------------------------------------------
+
+namespace
+{
+
+AutotuneResult resultFor(int64_t engineId, bool excludedByCaller = false)
+{
+    auto result = successfulResult();
+    result.engineId = engineId;
+    result.excludedByCaller = excludedByCaller;
+    return result;
+}
+
+const hipdnn_frontend::Error K_GOOD{hipdnn_frontend::ErrorCode::OK, ""};
+const hipdnn_frontend::Error K_NO_ENGINE_SUCCEEDED{hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
+                                                   "no engine succeeded"};
+
+} // namespace
+
+TEST(TestSelectEngineResult, ReturnsTheResultOfTheRequestedEngine)
+{
+    auto other = resultFor(7);
+    other.minTimeMs = 99.0f;
+    auto wanted = resultFor(42);
+    wanted.minTimeMs = 1.0f;
+
+    const auto selected = selectEngineResult(42, {other, wanted}, K_GOOD);
+
+    EXPECT_EQ(selected.engineId, 42);
+    EXPECT_TRUE(selected.succeeded);
+    EXPECT_FLOAT_EQ(selected.minTimeMs, 1.0f);
+}
+
+TEST(TestSelectEngineResult, TheEngineOwnFailureWinsOverTheAutotuneStatus)
+{
+    auto failed = resultFor(42);
+    failed.succeeded = false;
+    failed.errorMessage = "Benchmark failed on iteration 2";
+
+    const auto selected = selectEngineResult(42, {failed}, K_NO_ENGINE_SUCCEEDED);
+
+    EXPECT_FALSE(selected.succeeded);
+    EXPECT_EQ(selected.errorMessage, "Benchmark failed on iteration 2");
+}
+
+TEST(TestSelectEngineResult, NeverReportsAnExcludedOrDifferentEngine)
+{
+    for(const auto& results : {std::vector<AutotuneResult>{resultFor(42, true)},
+                               std::vector<AutotuneResult>{resultFor(7)}})
+    {
+        const auto selected = selectEngineResult(42, results, K_GOOD);
+
+        EXPECT_FALSE(selected.succeeded);
+        EXPECT_EQ(selected.engineId, 42);
+        EXPECT_EQ(selected.errorMessage, "autotune returned no result for the engine under test");
+    }
+}
+
+TEST(TestSelectEngineResult, NoResultsReportsTheAutotuneStatus)
+{
+    const auto good = selectEngineResult(42, {}, K_GOOD);
+    const auto bad = selectEngineResult(42, {}, K_NO_ENGINE_SUCCEEDED);
+
+    EXPECT_FALSE(good.succeeded);
+    EXPECT_EQ(good.errorMessage, "autotune returned no result for the engine under test");
+    EXPECT_FALSE(bad.succeeded);
+    EXPECT_EQ(bad.errorMessage, "no engine succeeded");
+}
+
+// ---- toString(TimingQuality) ------------------------------------------------
+
+TEST(TestTimingQualityName, NamesEveryValueAndRefusesUnknownValues)
+{
+    EXPECT_STREQ(toString(TimingQuality::DEVICE_ONLY), "DEVICE_ONLY");
+    EXPECT_STREQ(toString(TimingQuality::UNSTALLED), "UNSTALLED");
+    EXPECT_STREQ(toString(TimingQuality::INVALID), "INVALID");
+    EXPECT_THROW(toString(static_cast<TimingQuality>(99)), std::invalid_argument);
+}
+
 // ---- reportBenchmark ------------------------------------------------------
 
 TEST(TestReportBenchmark, RecordsTheResultAsProperties)
@@ -231,6 +312,7 @@ struct OracleCase
     const char* name;
     VerificationMode mode;
     bool hasGoldenOutput;
+    Verifier verifier;
 
     friend void PrintTo(const OracleCase& oracleCase, std::ostream* os)
     {
@@ -241,9 +323,9 @@ struct OracleCase
 /// AUTO with golden data and explicit GOLDEN compare against the golden file.
 /// AUTO without golden data falls through to the reference oracle chain.
 const std::array<OracleCase, 3> ORACLE_CASES{{
-    {"AutoGolden", VerificationMode::AUTO, true},
-    {"AutoReference", VerificationMode::AUTO, false},
-    {"GoldenMode", VerificationMode::GOLDEN, true},
+    {"AutoGolden", VerificationMode::AUTO, true, Verifier::GOLDEN},
+    {"AutoReference", VerificationMode::AUTO, false, Verifier::GPU_REFERENCE},
+    {"GoldenMode", VerificationMode::GOLDEN, true, Verifier::GOLDEN},
 }};
 
 /// Expectations are checked after the harness returns: a gmock or EXPECT failure
@@ -260,18 +342,27 @@ protected:
     /// the verified output tensor.
     std::vector<BenchmarkSettings> _benchmarkCalls;
     bool _sawVerifiedOutput = false;
+    /// When set, the mocked runner throws it from benchmark().
+    std::optional<std::string> _benchmarkThrows;
+    /// The verifier the harness reported for each bundle it ran.
+    std::vector<Verifier> _verifiers;
 
     void SetUp() override
     {
         using ::testing::_;
         testing_support::ensureTestConfigInitialized();
         _scopedDir.emplace(hipdnn_test_sdk::utilities::claimScratchDirectory("bundle_benchmark"));
+        testing_support::captureVerifiers(_mocks.reporter, _verifiers);
 
         ON_CALL(_mocks.engineRunner, benchmark(_, _, _))
             .WillByDefault(
                 [this](GraphSession&, VariantPack& variantPack, const BenchmarkSettings& s) {
                     _benchmarkCalls.push_back(s);
                     _sawVerifiedOutput = variantPack.count(fixtures::K_OUTPUT_UID) == 1;
+                    if(_benchmarkThrows.has_value())
+                    {
+                        throw std::runtime_error(*_benchmarkThrows);
+                    }
                     return _benchmarkResult;
                 });
 
@@ -319,6 +410,7 @@ TEST_P(TestBundleHarnessBenchmark, AVerifiedPassIsTimedWithThePolicySettings)
     EXPECT_EQ(_benchmarkCalls[0].timedIterations, 4);
     EXPECT_EQ(_benchmarkCalls[0].warmupIterations, 1);
     EXPECT_TRUE(_sawVerifiedOutput) << "the benchmark must run on the verified tensors";
+    EXPECT_EQ(_verifiers, std::vector<Verifier>{GetParam().verifier});
 }
 
 TEST_P(TestBundleHarnessBenchmark, AMismatchIsNotTimed)
@@ -362,6 +454,24 @@ TEST_P(TestBundleHarnessBenchmark, ABenchmarkFailureFailsAVerifiedBundle)
                                                          "failed: device lost"),
               std::string::npos)
         << testing_support::allMessages(results);
+}
+
+// A throw from the benchmark must not turn the verified PASS into a harness failure,
+// which would also change the support-claim verdict.
+TEST_P(TestBundleHarnessBenchmark, AThrowingBenchmarkFailsButKeepsTheVerifiedOutcome)
+{
+    _benchmarkThrows = "hipMalloc failed";
+
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE, settings(4, 1), &results);
+
+    EXPECT_EQ(_benchmarkCalls.size(), 1u);
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("benchmark failed: hipMalloc failed"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+    EXPECT_EQ(_verifiers, std::vector<Verifier>{GetParam().verifier})
+        << "the outcome the harness recorded must still be the verified pass";
 }
 
 INSTANTIATE_TEST_SUITE_P(Oracles,

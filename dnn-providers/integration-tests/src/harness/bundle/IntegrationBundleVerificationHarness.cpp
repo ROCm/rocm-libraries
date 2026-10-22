@@ -880,8 +880,19 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
     {
         return;
     }
-    auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
-    _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+    // A throw here must not reach TestBody()'s catch: it would replace the verified
+    // PASS with a harness failure and change the support-claim verdict.
+    try
+    {
+        auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+        _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+    }
+    catch(const std::exception& e)
+    {
+        hipdnn_frontend::AutotuneResult failed;
+        failed.errorMessage = e.what();
+        _benchmark = failed;
+    }
 }
 
 // ---- comparison ------------------------------------------------------------

@@ -12,7 +12,6 @@
 #include <memory>
 #include <sstream>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -33,6 +32,7 @@
 #include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -557,14 +557,12 @@ public:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        int64_t workspaceSize;
-        auto result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        std::string error;
+        auto workspace = allocatePlanWorkspace(graph, error);
+        ASSERT_TRUE(workspace.has_value()) << error;
 
         auto variantPack = bundle.toDeviceVariantPack();
-        result = graph.execute(handle, variantPack, workspace.get());
+        auto result = graph.execute(handle, variantPack, workspace->get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 

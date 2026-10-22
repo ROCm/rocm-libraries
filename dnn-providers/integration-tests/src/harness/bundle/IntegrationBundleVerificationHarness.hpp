@@ -24,6 +24,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"

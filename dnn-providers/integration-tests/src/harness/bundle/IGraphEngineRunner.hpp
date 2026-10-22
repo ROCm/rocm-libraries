@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+
 #include "harness/Benchmark.hpp"
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"

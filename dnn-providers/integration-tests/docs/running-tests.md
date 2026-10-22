@@ -145,14 +145,14 @@ build/bin/hipdnn_integration_tests \
     --test-article build/lib/hipdnn_plugins/engines/libmiopen_plugin.so \
     --test-engine  MIOPEN_ENGINE \
     --gtest_filter='quick_ConvolutionFwd_Default.*' \
-    --benchmark --benchmark-iterations 50 \
+    --benchmark \
     --gtest_output=json:benchmark.json
 ```
 
 Each timed test prints one line:
 
 ```text
-[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE tuned=0 timing=DEVICE_ONLY samples=20 min=0.0182 ms robust=0.0184 ms mean=0.0185 ms stddev=0.0003 ms
+[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE tuned=0 timing=DEVICE_ONLY samples=20 min=0.0181 ms robust=0.0184 ms mean=0.0184 ms stddev=0.0002 ms
 ```
 
 - Autotune runs `--benchmark-warmup` untimed executions (default 30). Then it

@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 #include "harness/Benchmark.hpp"
+#include "harness/BenchmarkReport.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/VariantPack.hpp"
 
@@ -47,20 +48,9 @@ inline hipdnn_frontend::AutotuneResult benchmarkGraph(hipdnn_frontend::graph::Gr
     config.warmupIterations = settings.warmupIterations;
     config.engineIdFilter = {engineId};
 
-    // autotune() returns an error when no engine succeeds. The engine's own result
-    // explains why, so look for it first.
     std::vector<hipdnn_frontend::AutotuneResult> results;
     const auto status = graph.autotune(handle, variantPack, workspace->get(), config, {}, &results);
-    for(const auto& result : results)
-    {
-        if(result.engineId == engineId && !result.excludedByCaller)
-        {
-            return result;
-        }
-    }
-    failed.errorMessage = status.is_good() ? "autotune returned no result for the engine under test"
-                                           : status.get_message();
-    return failed;
+    return selectEngineResult(engineId, results, status);
 }
 
 } // namespace hipdnn_integration_tests
