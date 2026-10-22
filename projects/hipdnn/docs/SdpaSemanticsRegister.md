@@ -81,6 +81,16 @@ batch when `seq_len_q/kv` are set).
 - **Contract:** to be decided together with SEM-001. Under cuDNN's meaning `left_bound = 0` masks every key,
   so it must be rejected.
 
+### SEM-007: Boolean attention masks
+
+- **Status:** Adapter.
+- **cuDNN:** a boolean bias is rejected ("Bias mask data type cannot be boolean",
+  cudnn-frontend `node/sdpa_support_surface.h:78-80`).
+- **PyTorch:** `attn_mask` may be bool (True = attend). The math backend converts it to an additive mask of
+  0 / -inf before softmax.
+- **Contract:** cuDNN. The PyTorch adapter converts a bool mask to a 0 / -inf additive bias (or, for pure
+  causal/band patterns, to the diagonal-band attributes). The references need no bool-mask path.
+
 ### SEM-006: Bias combined with a band or bottom-right causal
 
 - **Status:** Extension (hipDNN is more permissive).
@@ -141,6 +151,20 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:** C++ references and golden data use 1.0. rocKE `sdpa_reference.py` defaults to
   1/sqrt(D).
 - **Contract:** cuDNN.
+
+### SEM-014: Bias gradient (dBias)
+
+- **Status:** Aligned (CPU reference); no GPU backward reference yet.
+- **cuDNN:** dBias is a reduction (ADD) of dS into the dBias tensor, which has the bias tensor's shape
+  (cudnn-frontend `node/scaled_dot_product_flash_attention.h`, `red_dP_dBias`). dS is taken before the attention
+  scale because the bias is added after scaling. cuDNN's own tests compare it with autograd for a
+  `(1, H, Sq, Skv)` bias (`test/python/sdpa/fp16.py`).
+- **PyTorch (AOTriton mem-efficient):** returns the gradient of the expanded `(B, Hq, Sq, Skv)` bias, and autograd
+  sums it back to the user's broadcast shape. Same values after that reduction.
+- **hipDNN today:** the CPU backward computes dBias in the bias tensor's shape and dtype, summing over broadcast
+  dims. Band-masked positions and dead rows give 0. Pinned by finite differences
+  (`TestCpuFpReferenceSdpaGradCheckDBias`, mutation-checked against using the scaled dS).
+- **Contract:** cuDNN. A dBias whose shape or dtype differs from the bias is declined.
 
 ## Score modifiers (extensions and conventions)
 
