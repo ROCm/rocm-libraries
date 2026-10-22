@@ -29,8 +29,9 @@ set.
 Each parameter resolves independently, first match wins:
 
 1. An explicit value you set.
-2. For `ClusterBarrierRule3SignalLeadCycles`: the knob heuristic, computed from the
-   main loop (`loopWithPrefetch`) when it has both WMMAs and ds_loads.
+2. For `ClusterBarrierRule3SignalLeadCycles` and `ReduceClusterBarrierPerLoop`: the knob
+   heuristic, computed from the main loop (`loopWithPrefetch`) when it has both WMMAs
+   and ds_loads. `ReduceClusterBarrierPerLoop`'s heuristic is currently a constant off.
 3. The per-arch scheduling default (`CDNA5Config`).
 4. The hardware fact (`HWModel`).
 
@@ -156,6 +157,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 |---|---|---|---|
 | `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
+| `ReduceClusterBarrierPerLoop` | -1 → heuristic, currently off | – | `1`: one Rule 3 handshake per enclosing loop (later HalfPLR / ExpandPointerSwap copies share it). `0`: every loop trigger handshakes. Unset uses `propose()`, which is disabled until the shape heuristic lands. |
 | *CLI only* `mergeBarrierThreshold` | 0 → 11 | `--merge-barrier-threshold=N` | Max cycle distance for `StinkyMergeBarrierPass` to merge adjacent barrier groups. |
 
 ## Arch defaults and hardware facts

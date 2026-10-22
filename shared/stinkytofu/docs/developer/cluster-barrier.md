@@ -128,6 +128,11 @@ load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
 
 Multiple loads sharing the same workgroup signal receive one handshake.
 
+`ReduceClusterBarrierPerLoop` (module option, `<0` unset, `0` off, `>0` on) can
+further limit this to the first trigger of each enclosing loop. Unset resolves
+through `SchedulingKnobHeuristics`. `propose()` currently leaves it off, so
+every loop trigger still gets a handshake.
+
 ### Anchor resolution
 
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
