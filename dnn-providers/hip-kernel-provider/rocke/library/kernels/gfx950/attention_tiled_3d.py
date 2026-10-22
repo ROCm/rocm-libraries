@@ -291,6 +291,22 @@ class UnifiedAttention3DTiledSpec:
             return 32
         return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
 
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value, as
+        ``UnifiedAttention2DTiledSpec.mask_type`` reports it: 0 no mask, 1 top-left causal,
+        2 bottom-right causal, 3 any other band (a sliding window or a right bound above
+        zero).
+
+        A bound method so ``hkp_pack`` can observe it as an effective accessor. Note the
+        dispatcher builds no 0 at ``seqlen_q == 1``: full attention with one query row is
+        the bottom-right causal computation, and ``normalize_band`` folds it to that.
+        """
+        if self.sliding_window > 0 or self.right_bound > 0:
+            return 3
+        if self.right_bound < 0:
+            return 0
+        return 1 if self.causal_top_left else 2
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
