@@ -156,3 +156,36 @@ def test_cache_reader_surfaces_the_layout_decision(tmp_path):
     legacyPath = str(tmp_path / "legacy.yaml")
     LibraryIO.writeYAML(legacyPath, cacheData)
     assert _readCacheIfValid(legacyPath, step, "{path}")["MXScalesPacked"] is False
+
+
+def test_packed_and_preswizzled_scales_are_refused_together():
+    """The client must reject the two contradictory scale declarations.
+
+    ``mx-scales-packed`` says the scale buffer is a row-major array with no
+    slack. ``mx-scale-format 1`` says it went through the gfx950 permutation,
+    which is not a row-major array and has no row pitch. Both reach
+    ``ClientProblemFactory`` as independent options, so a caller can ask for
+    both.
+
+    Letting either win silently produces a false pass rather than an error:
+    every externally captured kernel is NoSwizzle, and the upload path keys off
+    the selected kernel's format rather than the option, so the run uploads
+    canonical scales and reports success for a pre-swizzle test that permuted
+    nothing. Measured with the check removed, that is exactly what happens.
+    """
+    factory = os.path.join(
+        os.path.dirname(os.path.dirname(_KERNEL_ROOT)),
+        "client", "src", "ClientProblemFactory.cpp",
+    )
+    with open(factory, encoding="utf-8") as f:
+        src = f.read()
+
+    assert "if(m_mxScalesPacked && m_mxScaleHostPreSwizzle)" in src, (
+        "the two scale-layout declarations must be checked against each other"
+    )
+    guard = src.split("if(m_mxScalesPacked && m_mxScaleHostPreSwizzle)", 1)[1][:400]
+    assert "throw std::invalid_argument" in guard, (
+        "the contradictory pair must be refused, not resolved by precedence"
+    )
+    for option in ("mx-scales-packed", "mx-scale-format"):
+        assert option in guard, f"the error must name {option}"
