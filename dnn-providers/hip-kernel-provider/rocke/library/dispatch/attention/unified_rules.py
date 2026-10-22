@@ -53,6 +53,8 @@ from .tuning_specs import (
 from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
 
 TUNING_ALGORITHM = "unified_tuning"
+# The codepath of the one geometry that carries the D256 prefill constellation.
+D256_CODEPATH = "d256"
 
 
 @dataclass(frozen=True)
@@ -467,9 +469,26 @@ class UnifiedSpace(WavesPerEuSpace):
         )
 
 
+@dataclass(frozen=True)
+class D256Space(UnifiedSpace):
+    """The D256 geometry's space: the production route's waves-per-EU leads.
+
+    Production builds the D256 cohort at ``waves_per_eu=2`` (the Triton
+    reference's value), so that is this space's default spec; ``None`` and 4
+    remain in the production sweep behind it.
+    """
+
+    def outer_values(self, base, level):
+        values = super().outer_values(base, level)
+        if level != "production":
+            return values
+        return (2,) + tuple(v for v in values if v != 2)
+
+
 @lru_cache(maxsize=None)
 def unified_space(variant: AttentionGeometryVariant) -> UnifiedSpace:
-    return UnifiedSpace(
+    space_type = D256Space if variant.codepath == D256_CODEPATH else UnifiedSpace
+    return space_type(
         abi=ATTENTION_ABI_VERSION,
         arch=variant.arch,
         path=variant.path,

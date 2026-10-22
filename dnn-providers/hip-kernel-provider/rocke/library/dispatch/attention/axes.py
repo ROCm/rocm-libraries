@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Mapping, Tuple
 
+from kernels.common.attention_unified import _d256_gfx950_spec_overrides
 from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
 
 from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rules)
@@ -380,6 +381,10 @@ _CODEPATH_KNOBS: Mapping[Tuple[str, str], Mapping[str, object]] = {
         "use_mfma_32x32": True,
         "use_transposed_qk_32x32": True,
     },
+    # The bf16 D256 prefill constellation, shared with the production route
+    # (``attention_unified._d256_gfx950_spec_overrides``), so the executable
+    # geometry cannot drift from the kernel the route builds.
+    ("gfx950", "d256"): _d256_gfx950_spec_overrides(),
     ("gfx942", "wide32x8"): {"use_mfma_32x32x8": True},
     ("gfx942", "transposed_x8"): {
         "use_mfma_32x32x8": True,
@@ -469,6 +474,7 @@ _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = 
         ("r4_mlim_phase", {**_R4_MLIM, "use_mask_phase_split": True}),
         ("r4_hlpv_agpr0", {**_R4_HLPV, "use_agpr_alloc_zero": True}),
     ),
+    ("gfx950", "d256"): (("d256", {}),),
     ("gfx942", "narrow"): (
         ("baseline", {}),
         ("regpv", {"use_register_pv": True}),

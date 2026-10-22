@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from kernels.common.attention_unified import supports_native_unified_attention
+from kernels.common.attention_unified import (
+    _d256_gfx950_cohort,
+    supports_native_unified_attention,
+)
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
@@ -29,7 +32,12 @@ from .common import (
     _tuning_problem,
 )
 from .dense_rules import DenseSpace, DenseSupports
-from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
+from .unified_rules import (
+    D256_CODEPATH,
+    TUNING_ALGORITHM,
+    AttentionGeometryVariant,
+    unified_space,
+)
 
 # The dense selectors. gfx942 has one candidate whose space covers both bodies;
 # on gfx950 the grid and persistent bodies serve different features, so each
@@ -39,7 +47,21 @@ DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
 
 
+# The D256 geometry serves the cohort the production route's D256 candidate does:
+# bf16 only (ATT-34 keeps fp16 D256 off it) and causal masks.
+_D256_FEATURES = frozenset({"causal", "causal_bottom_right"})
+
+
 def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
+    d256 = variant.codepath == D256_CODEPATH
+
+    def precheck(req):
+        problem = _tuning_problem(req)
+        ok, why = supports_native_unified_attention(problem, arch=variant.arch)
+        if ok and d256 and not _d256_gfx950_cohort(problem):
+            return False, "not the gfx950 bf16 D256 prefill cohort"
+        return ok, why
+
     def build(spec, arch):
         from .tuning_specs import validate_explicit_fp8_encoding
 
@@ -81,19 +103,17 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
         priority=30,
         capability=Capability(
             arches=(variant.arch,),
-            dtypes=UNIFIED_DTYPES,
+            dtypes=("bf16",) if d256 else UNIFIED_DTYPES,
             shapes=(
-                ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
+                ShapeRange("hdim_q", allowed=(256,) if d256 else UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=ATTENTION_FEATURES,
+            supports_features=_D256_FEATURES if d256 else ATTENTION_FEATURES,
         ),
         space=unified_space(variant),
         base=_tuning_problem,
         request_errors=_request_errors,
-        precheck=lambda req: supports_native_unified_attention(
-            _tuning_problem(req), arch=variant.arch
-        ),
+        precheck=precheck,
         signature=signature,
         build=build,
         bind_torch=bind_torch,

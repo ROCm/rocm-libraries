@@ -31,7 +31,7 @@ from .common import (
 )
 from .candidate import make_tuning_candidate
 from .tuning_specs import NUM_SEGMENTS
-from .unified_rules import AttentionGeometryVariant
+from .unified_rules import D256_CODEPATH, AttentionGeometryVariant
 
 
 # Absolute T=64/128 points are already represented by one of these multipliers
@@ -72,6 +72,19 @@ def _variants():
                         block_m_per_warp=32,
                         compile_backend=backend,
                     )
+    # The bf16 D256 prefill kernel: transposed 32x32, 2 warps x 32 rows, a 64-token KV
+    # tile at every block size, and the production route's codegen constellation (see
+    # ``_CODEPATH_KNOBS``).
+    yield AttentionGeometryVariant(
+        arch="gfx950",
+        path="2d",
+        codepath=D256_CODEPATH,
+        builder_kind="tiled",
+        tile_policy="64",
+        num_warps=2,
+        block_m_per_warp=32,
+        compile_backend="llvm",
+    )
     # gfx950 3D has fixed BLOCK_M=16; the KV tile spans 1, 2, 4 or 8 pages
     # (multi-page tiles), and the segment count is the load-balancing
     # geometry exposed by the kernel: a fixed count, or 0 for the

@@ -53,6 +53,7 @@ params). Correctness rests entirely on the key.
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
 | 10 | `attention_unified_3d` | all | `generic.py` | generic 3D decode fallback |
 | 30 | `attention_gfx{942,950}_u{2d,3d}_*` | one arch each | `gfx942_unified.py`, `gfx950_unified.py` | explicit geometry/codepath candidates; sweep/opt-in only |
+| 30 | `attention_gfx950_u2d_d256_nw2_mw32_t64_llvm` | gfx950 | `gfx950_unified.py` | the executable form of `attention_gfx950_d256`: bf16 D256 causal prefill as a concrete kernel spec (codepath `d256`, constellation from `_d256_gfx950_spec_overrides`, `waves_per_eu=2` default); opt-in, never auto-selected |
 
 Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.

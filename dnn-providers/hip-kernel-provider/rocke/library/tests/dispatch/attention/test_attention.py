@@ -382,10 +382,13 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertTrue(tuning)
         for candidate in tuning:
             with self.subTest(candidate=candidate.name):
-                self.assertEqual(
-                    set(candidate.capability.supports_features),
-                    set(ATTENTION_FEATURES),
+                # The D256 geometry serves what the route's D256 candidate does.
+                want = (
+                    EXPECTED_FEATURES["attention_gfx950_d256"]
+                    if "_u2d_d256_" in candidate.name
+                    else set(ATTENTION_FEATURES)
                 )
+                self.assertEqual(set(candidate.capability.supports_features), want)
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the
