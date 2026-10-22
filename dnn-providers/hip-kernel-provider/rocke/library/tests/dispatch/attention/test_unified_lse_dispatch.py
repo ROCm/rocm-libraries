@@ -78,11 +78,13 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 
 
 # What a long-lived cache stored for ``_decode_request`` before emit_lse existed:
-# the unpinned spec_hash, and the split-KV pin with its spec_hash.
+# the unpinned spec_hash, and the split-KV pin with its spec_hash. These are
+# develop's own values (gfx950's split-KV config_key moved with #13120's
+# additive-bias field); emit_lse must leave them exactly as develop computes them.
 _PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
 _PRE_LSE_PIN = {
     "gfx942": ("splitkv_seg16_t1xb_wpenone@d50574be81e67c73", "8dc6060ed42707f6"),
-    "gfx950": ("splitkv_seg16_t1xb_wpenone@57868e64315f8eb1", "c534bcdedc7b30db"),
+    "gfx950": ("splitkv_seg16_t1xb_wpenone@79ee1d118140d024", "b9c537be7298900c"),
 }
 
 
