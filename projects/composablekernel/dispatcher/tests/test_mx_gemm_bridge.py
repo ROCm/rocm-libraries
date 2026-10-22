@@ -628,6 +628,12 @@ class TestMxArchitectureKernels(unittest.TestCase):
             replace(default_fp8_config("gfx950", "weight_preshuffle"), warp_m=2),
             replace(default_fp4_config("gfx950", "weight_preshuffle"), tile_n=256),
             replace(default_fp8_config("gfx950", "weight_preshuffle"), tile_k=128),
+            replace(
+                default_fp8_config("gfx950", "weight_preshuffle"),
+                tile_m=128,
+                tile_n=512,
+                tile_k=512,
+            ),
             replace(default_fp8_config("gfx1250", "comp_tdm_v2"), persistent=True),
             replace(default_fp8_config("gfx1250", "comp_tdm_v2"), pad_k=True),
             replace(default_fp8_config("gfx1250", "comp_tdm_v2"), epilogue="cshuffle"),
@@ -637,6 +643,68 @@ class TestMxArchitectureKernels(unittest.TestCase):
                 self.assertFalse(cfg.is_valid())
                 with self.assertRaises(ValueError):
                     _validate(cfg.to_codegen_config())
+
+    def test_gfx950_fp8_weight_preshuffle_vmcnt_limit(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _load_mx_builder, _validate
+
+        _load_mx_builder()
+        from gemm_validation_utils import validate_gemm_mx
+
+        def check(cfg):
+            return validate_gemm_mx(
+                cfg.tile_m,
+                cfg.tile_n,
+                cfg.tile_k,
+                cfg.warp_m,
+                cfg.warp_n,
+                cfg.warp_k,
+                cfg.warp_tile_m,
+                cfg.warp_tile_n,
+                cfg.warp_tile_k,
+                cfg.datatype,
+                cfg.datatype,
+                "fp16",
+                cfg.pipeline,
+                cfg.layout,
+                cfg.gpu_target,
+            )
+
+        rejected = replace(
+            default_fp8_config("gfx950", "weight_preshuffle"),
+            tile_m=32,
+            tile_n=512,
+            tile_k=512,
+        )
+        valid, error = check(rejected)
+        self.assertFalse(valid)
+        self.assertIn("vmcnt exceeds 63", error)
+        self.assertFalse(rejected.is_valid())
+        with self.assertRaises(ValueError):
+            _validate(rejected.to_codegen_config())
+
+        kept = [
+            replace(rejected, tile_k=256),
+            replace(rejected, tile_m=128, tile_n=256),
+            replace(
+                default_fp4_config("gfx950", "weight_preshuffle"),
+                tile_m=128,
+                tile_n=512,
+                tile_k=512,
+            ),
+            replace(
+                default_fp8_config("gfx1250", "weight_preshuffle"),
+                tile_m=128,
+                tile_n=512,
+                tile_k=512,
+            ),
+        ]
+        for cfg in kept:
+            with self.subTest(cfg=cfg):
+                valid, error = check(cfg)
+                self.assertTrue(valid, error)
+                self.assertTrue(cfg.is_valid())
+                _validate(cfg.to_codegen_config())
 
     def test_gfx1250_default_covers_both_tdm_pipelines(self):
         from collections import Counter
@@ -1091,6 +1159,23 @@ class TestSweepWorker(unittest.TestCase):
         res = self._run(run)
         self.assertTrue(res["ok"])
         self.assertFalse(res["verified"])
+        self.assertGreater(res["mismatch_count"], 0)
+        self.assertEqual(len(res["max_error_index"]), 2)
+        self.assertGreater(res["max_abs"], 0)
+
+    def test_mismatch_dump_contains_gpu_and_reference_outputs(self):
+        def run(self, prob, a, b, sa, sb):
+            c = np.ones((prob.M, prob.N), dtype=np.float16)
+            return mx.MxGemmResult(C=c, time_ms=0.5, kernel_name="fake")
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"MX_GEMM_MISMATCH_DUMP_DIR": tmp}
+        ):
+            res = self._run(run)
+            dump = np.load(res["mismatch_dump"])
+            self.assertEqual(dump["got"].shape, (64, 32))
+            self.assertEqual(dump["reference"].shape, (64, 32))
+            self.assertEqual(dump["abs_error"].shape, (64, 32))
 
     def test_unsupported_shape_is_skipped_not_failed(self):
         def run(self, prob, a, b, sa, sb):

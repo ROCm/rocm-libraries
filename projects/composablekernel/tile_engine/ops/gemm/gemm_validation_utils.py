@@ -1869,6 +1869,26 @@ def validate_gemm_mx(
             return False, "MX weight preshuffle requires tiles divisible by 32x128x256"
         if b_datatype == "fp4" and tile_n % 512:
             return False, "MX FP4 weight preshuffle requires N tiles divisible by 512"
+        # gfx950 is wave64. MXGemmPreshufflePipelineAGmemBGmemCRegV1 passes
+        # Bload_num + ScaleAload_num + ScaleBload_num to s_waitcnt, and that
+        # field is 6 bits (max 63). FP8 tile K 512 with tile N 512 exceeds it
+        # (32x512x512 -> 74, 64x512x512 -> 76, 128x512x512 -> 80).
+        # To actually support K=512, split the B and scale prefetches in
+        # wp_mx_pipeline_agmem_bgmem_creg_v1.hpp so each s_waitcnt is asked to
+        # leave at most 63 loads outstanding.
+        if arch == "gfx950" and a_datatype == "fp8" and b_datatype == "fp8":
+            wave_size = 64
+            n_warp = 4
+            bk1 = 16
+            k_iter = tile_k // warp_tile_k
+            bload_num = tile_n * warp_tile_k // n_warp // bk1 // wave_size * k_iter
+            scale_bload_num = tile_n * tile_k // n_warp // 32 // 2 // 2 // wave_size
+            scale_aload_num = tile_m * tile_k // warp_m // 32 // 2 // 2 // wave_size
+            if bload_num + scale_aload_num + scale_bload_num > 63:
+                return (
+                    False,
+                    "gfx950 FP8 weight preshuffle s_waitcnt vmcnt exceeds 63",
+                )
         return True, ""
 
     if arch == "gfx1250":
