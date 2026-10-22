@@ -2300,9 +2300,9 @@ fails the composite closed **at applicability**: the composite declines and engi
 on, the same free decline any engine gets at that stage. Comparing whole chains never arises,
 since those alternatives are separate engines the existing chain already ranks.
 
-Kernel slots (RFC 0021) are orthogonal to `sources`: a slot selects among kernel descriptors, and a
-kernel descriptor with `sources` is one selection that launches several kernels of one multi-stage
-kernel.
+Kernel slots, a separate draft RFC not yet in this tree, are orthogonal to `sources`: a slot
+selects among kernel descriptors, and a kernel descriptor with `sources` is one selection that
+launches several kernels of one multi-stage kernel.
 
 Cross-step correctness is the new surface, validated at build and load: every read of an
 intermediate is preceded by a write with matching dtype and shape, every region is written before
@@ -2322,9 +2322,11 @@ every mandatory stage's engine can satisfy its child graph on that architecture.
 The only new descriptor kind is the composite descriptor (UCD). The dispatch-descriptor half of the
 design adds no new plugin interfaces and no hipDNN core changes: a multi-step program is a dispatch
 descriptor with several Launches, and a decomposition is one composite descriptor whose child graphs
-are answered by ordinary engines. The kernel-descriptor half that ships adds two members to the
+are answered by ordinary engines. The kernel-descriptor half that ships adds three members to the
 plugin SDK's ingestor headers: a defaulted `launchNames()` on the dispatch handler interface
-(provisional until `launches[]` exists) and a `sources` field on the SDK's kernel definition.
+(provisional until `launches[]` exists), a `sources` field on the SDK's kernel definition and a
+`sources` field on its kernel descriptor, together with the UKD 1.1 version bump that gates the
+key.
 
 ---
 
