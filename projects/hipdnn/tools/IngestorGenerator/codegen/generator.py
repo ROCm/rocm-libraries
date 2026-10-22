@@ -350,10 +350,12 @@ def _candidate_identity(kernel: KernelSpec) -> str:
     """What a candidate is beyond its tuple: two entries sharing a completed
     tuple are the same candidate only if they name the same binary at the same
     priority. A knob absent from ``kernel_source.spec`` and one pinned to the
-    value the policy chose are different binaries under one tuple."""
+    value the policy chose are different binaries under one tuple. A kernel's
+    launches are part of what it names: two kernels differing only in a launch
+    are different candidates."""
     return json.dumps(
         {
-            "kernel_source": kernel.kernel_source.as_document(),
+            **kernel.kernel_source.descriptor_fields(),
             "priority": kernel.priority,
         },
         sort_keys=True,
@@ -523,12 +525,14 @@ def build_kdp(
             }
         )
         entry = {
-            "version": "1.0",
+            # 1.1 only on a UKD carrying `sources`; every other stays 1.0.
+            "version": kernel.kernel_source.ukd_version,
             "id": ids[("kernel", pack_index, index)],
             "name": kernel.name,
             # Per-kind keys, never the union: the runtime loader hard-fails an
-            # unknown key and hkp_pack validates a closed set per kind.
-            "kernel_source": kernel.kernel_source.as_document(),
+            # unknown key and hkp_pack validates a closed set per kind. A
+            # multi-launch kernel writes `sources` in place of `kernel_source`.
+            **kernel.kernel_source.descriptor_fields(),
             "metadata": metadata,
             "priority": kernel.priority,
         }

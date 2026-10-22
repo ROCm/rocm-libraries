@@ -277,7 +277,7 @@ Steps
 
 2. Implement the plugin API functions.
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``engine_plugin_api.h``. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``EnginePluginApi.h``. However, the common architectural pattern consists of:
 
    - **Engine manager**: Manages available engines and their capabilities.
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique ``int64_t`` ID).
@@ -492,9 +492,9 @@ After creating a hipDNN handle, you can query which engine plugins were successf
 
   hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(
       hipdnnHandle_t handle,
-      size_t* num_plugin_paths,
-      char** plugin_paths,
-      size_t* max_string_len
+      size_t* numPluginPaths,
+      char** pluginPaths,
+      size_t* maxStringLen
   );
 
 This function uses a two-call pattern:
