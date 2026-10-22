@@ -1308,12 +1308,11 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
             f"persistent={persistent}, Sq={sq}, Skv={skv}"
         )
 
-        max_abs = (out.float() - ref).abs().max().item()
-
-        assert max_abs < tol, (
-            f"{dtype} {knobs}, persistent={persistent}, "
-            f"Sq={sq}, Skv={skv}: "
-            f"max_abs={max_abs:.6g} >= {tol}"
+        torch.testing.assert_close(
+            out.float(),
+            ref,
+            atol=tol,
+            rtol=tol,
         )
 
 
@@ -1396,11 +1395,41 @@ def test_cfvst_knob_matrix_numeric(
     out = torch.full_like(q, float("nan"))
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
-    max_abs = (out.float() - ref).abs().max().item()
-    assert max_abs < 1e-2, (
-        f"{knobs} nbuf={lds_num_buffers} vpf={v_reg_prefetch}: "
-        f"max_abs={max_abs:.3e}"
+    torch.testing.assert_close(
+        out.float(),
+        ref,
+        atol=1e-2,
+        rtol=1e-2,
     )
+    # KDB and VPF are performance-only changes. Compare their outputs
+    # against the same CFVST kernel with both optimizations disabled.
+    if lds_num_buffers == 2 or v_reg_prefetch:
+        baseline_spec = dataclasses.replace(
+            spec,
+            lds_num_buffers=1,
+            v_reg_prefetch=False,
+        )
+
+        baseline_out = torch.full_like(q, float("nan"))
+
+        run_attention_dense_torch(
+            spec=baseline_spec,
+            q=q,
+            k=k,
+            v=v,
+            out=baseline_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+
+        assert torch.equal(
+            out.view(torch.int16),
+            baseline_out.view(torch.int16),
+        ), (
+            f"KDB/VPF changed BF16 output bits: "
+            f"{knobs}, nbuf={lds_num_buffers}, "
+            f"vpf={v_reg_prefetch}"
+        )
 
 
 @requires_gfx942_gpu

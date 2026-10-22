@@ -280,7 +280,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     ---------------------------------------------------------
     ``use_cfvst`` / ``use_exp2_fast`` / ``v_row_pad`` / ``use_v_swizzle`` default to
     ``None``, which resolves through the shipping policy (:func:`_use_cfvst`,
-    :func:`_use_exp2_fast`, :func:`_v_row_pad`, :func:`_use_v_swizzle`). That
+    :func:`_use_exp2_fast`, :func:`_v_row_pad`, and the spec's
+    :meth:`resolved_use_v_swizzle`). That
     tri-state is load-bearing: a harness that omits a VALUED field freezes the config
     at whatever the default happened to be the day it was written and then silently
     reports a stale verdict (that is exactly how a real regression got mis-reported
@@ -376,7 +377,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     # use_v_swizzle: force the V^T XOR bank-conflict swizzle on/off, INDEPENDENTLY of
     #   the pad value -- so the pad-value sweep can vary ``v_row_pad`` without silently
     #   toggling the swizzle (an explicit non-derived pad used to turn it off by making
-    #   the row non-pow2). None (default) -> :func:`_use_v_swizzle` (the cfvst path).
+    #   the row non-pow2). None (default) -> enabled on the resolved CFVST path.
     #   Only the transposed-V (D128) store has a V_lds to swizzle; forcing it ON
     #   off that path, or with a pad that leaves V_LDROW non-pow2 / < 64, is REJECTED
     #   by supports_attention_dense rather than silently mis-addressing LDS.
@@ -518,7 +519,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         """Resolved V^T bank-conflict swizzle. Gated on the cfvst path (only the
         transposed-V store has a V_lds to swizzle), and within it independent of
         ``v_row_pad`` so the pad sweep never silently toggles it. ``None`` -> policy
-        (:func:`_use_v_swizzle`)."""
+        (enabled when resolved CFVST is active)."""
         if not self.resolved_use_cfvst():
             return False
         if self.use_v_swizzle is None:
@@ -907,15 +908,6 @@ def _v_swizzle_width(block_n: int) -> int:
     silently dropping the swizzle.
     """
     return max(64, 1 << (block_n - 1).bit_length())
-
-
-def _use_v_swizzle(head_size: int, dtype: str) -> bool:
-    """Default V^T bank-conflict swizzle policy for FP16 D128.
-
-    Explicit BF16 D128 CFVST enables the swizzle through
-    Gfx942AttentionDenseSpec.resolved_use_v_swizzle().
-    """
-    return _use_cfvst(head_size, dtype)
 
 
 def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
