@@ -8,6 +8,13 @@
 
 #include <type_traits>
 
+// Vectorized KV lean issue (P >= 64; the D64 lean loop and P64 D128): 1 (default) derives the
+// per-wave TDM descriptor inputs once (as the linear tdm_issue_lean) instead of from the warp
+// index and the page-id queue value on every tile; 0 keeps tdm_issue_vectorized.
+#ifndef CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
+#define CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE 1
+#endif
+
 namespace ck_tile {
 
 // The page-tile schedule reads page metadata once for each logical tile and supplies
@@ -584,6 +591,103 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         });
     }
 
+#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
+    // tdm_issue_vectorized for one fragment per wave (P >= 64) from the per-wave state of
+    // make_lean_issue_state: per tile only the page address and the valid rows change, and the
+    // rows are wave-uniform so the descriptor and the group/tail split stay scalar.
+    template <typename TDMConfig, typename LdsWindow, typename State>
+    CK_TILE_DEVICE void tdm_issue_vectorized_lean(const TDMConfig& config,
+                                                  const LdsWindow& lds_window,
+                                                  const State& state) const
+    {
+        static_assert(PageSize_ >= 64 && kFragmentsPerWave == 1);
+        static_assert(sizeof(DataType) == 2, "the vectorized layout is 8 x 16-bit wide");
+        using Writer           = FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>;
+        constexpr index_t kVec = 8;
+        const index_t wave     = state.wave_row0;
+        const index_t rows     = [&]() {
+            // P >= 128: from the scalar tile origin (no sinks on the lean loop). Reading the
+            // queue value into a scalar instead spills on P128 D64 (VGPR limit ~320). A
+            // look-ahead past the loop end can get rows > 0 here while its queue entry is empty;
+            // it then loads the dummy page 0, which nothing reads.
+            if constexpr(PageSize_ >= 128)
+                return clamp(seqlen_k_ - static_cast<index_t>(origin_[0]) - kSliceRows * wave,
+                             index_t{0},
+                             index_t{kSliceRows});
+            else
+                return amd_wave_read_first_lane(Writer::fragment_valid_rows(wave, 0, page_id_));
+        }();
+        const index_t physical_page = rows > 0 ? page_id_.owned[0].physical_page : 0;
+        // Tiles start on 128-token boundaries: only pages larger than a tile add the tile's
+        // offset inside its page (as tdm_issue_lean).
+        index_t t0 = kSliceRows * wave;
+        if constexpr(PageSize_ == 64)
+            t0 = t0 % PageSize_;
+        else if constexpr(PageSize_ > 128)
+            t0 += static_cast<index_t>(origin_[0] % PageSize_);
+        auto* lds_base = lds_window.get_bottom_tensor_view().get_buffer_view().p_data_;
+        auto* lds_ptr  = lds_base + state.lds_elem_offset;
+        const DataType* page_ptr =
+            pool_ptr_ + static_cast<long_index_t>(physical_page) * page_stride_;
+        if constexpr(KVKind_ == FmhaPageTileKVKind::kVectorizedK)
+        {
+            const uint32_t dims[2]    = {static_cast<uint32_t>(rows * kVec),
+                                         static_cast<uint32_t>(HeadDim_ / kVec)};
+            const uint64_t strides[2] = {static_cast<uint64_t>(PageSize_) * kVec, 1};
+            constexpr uint16_t box[2] = {kFragmentRows * kVec, HeadDim_ / kVec};
+            amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                createTDMDescriptor<remove_cvref_t<DataType>, 2>(
+                    page_ptr + static_cast<long_index_t>(t0) * kVec,
+                    lds_ptr,
+                    dims,
+                    strides,
+                    box,
+                    config));
+        }
+        else
+        {
+            const index_t full_groups = rows / kVec;
+            const index_t tail_rows   = rows % kVec;
+            const DataType* slice_ptr =
+                page_ptr + static_cast<long_index_t>(t0 / kVec) * HeadDim_ * kVec;
+            const uint32_t dims[2]    = {static_cast<uint32_t>(HeadDim_ * kVec),
+                                         static_cast<uint32_t>(full_groups)};
+            const uint64_t strides[2] = {static_cast<uint64_t>(HeadDim_) * kVec, 1};
+            constexpr uint16_t box[2] = {HeadDim_ * kVec, kFragmentRows / kVec};
+            amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                createTDMDescriptor<remove_cvref_t<DataType>, 2>(
+                    slice_ptr, lds_ptr, dims, strides, box, config));
+            if(tail_rows != 0)
+            {
+                // Same serialized partial-group copy as tdm_issue_vectorized (tail tile only).
+                s_wait_tensorcnt<0>();
+                const auto lds_view         = lds_window.get_bottom_tensor_view();
+                const auto lds_origin       = lds_window.get_window_origin();
+                const uint32_t tail_dims[3] = {
+                    static_cast<uint32_t>(tail_rows), static_cast<uint32_t>(HeadDim_), 1};
+                const uint64_t tail_strides[3] = {kVec, static_cast<uint64_t>(HeadDim_) * kVec, 0};
+                constexpr uint16_t tail_box[3] = {kVec, HeadDim_, 1};
+                const long_index_t tail_offset =
+                    static_cast<long_index_t>(full_groups) * HeadDim_ * kVec;
+                const auto tail_coord = make_tensor_coordinate(
+                    lds_view.get_tensor_descriptor(),
+                    make_multi_index(lds_origin.at(number<0>{}) +
+                                         Writer::fragment_destination_row(wave, 0) +
+                                         full_groups * kVec,
+                                     lds_origin.at(number<1>{})));
+                amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
+                    createTDMDescriptor<remove_cvref_t<DataType>, 3>(slice_ptr + tail_offset,
+                                                                     lds_base +
+                                                                         tail_coord.get_offset(),
+                                                                     tail_dims,
+                                                                     tail_strides,
+                                                                     tail_box,
+                                                                     config));
+            }
+        }
+    }
+#endif
+
     // ---- lean whole-tile TDM issue (P >= 64) ----
     // The per-wave inputs of a page-tile TDM descriptor that do not change between tiles: the
     // wave's (row, column) origin inside the 128-row tile and its LDS element offset. The
@@ -601,6 +705,25 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     {
         static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         static_assert(!std::is_void_v<Distribution>);
+#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
+        if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
+        {
+            // wave_row0: the wave index; lds_elem_offset: the wave slice's LDS destination
+            // (same coordinate tdm_issue_vectorized forms per tile).
+            using Writer     = FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>;
+            const index_t w  = get_warp_id();
+            const auto view  = lds_window.get_bottom_tensor_view();
+            const auto o     = lds_window.get_window_origin();
+            const auto coord = make_tensor_coordinate(
+                view.get_tensor_descriptor(),
+                make_multi_index(o.at(number<0>{}) + Writer::fragment_destination_row(w, 0),
+                                 o.at(number<1>{})));
+            LeanIssueState state;
+            state.wave_row0       = amd_wave_read_first_lane(w);
+            state.lds_elem_offset = amd_wave_read_first_lane(coord.get_offset());
+            return state;
+        }
+#endif
         constexpr auto distribution = Distribution{};
         // Same thread coordinate as tile_window_with_static_distribution::prepare_coords.
         const auto coord =
@@ -628,8 +751,12 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
         {
+#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
+            tdm_issue_vectorized_lean(config, lds_window, state);
+#else
             (void)state;
             tdm_issue_vectorized(config, lds_window);
+#endif
             return;
         }
         constexpr auto raw_box =
