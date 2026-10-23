@@ -1041,9 +1041,38 @@ namespace
         EXPECT_EQ(indexesOf(legacy.findLegacy(key)), (std::vector<int32_t>{1, 2}));
     }
 
-    // A repeated row refreshes its entry, which can mark a search
-    // finished and so change which entry find returns first: the generation
-    // moves for it as it does for an addition.
+    TEST_F(TuningStore, PartialRefreshKeepsTheSameKernelsCompletedSearch)
+    {
+        const ProblemOverride key      = halfKey();
+        const auto            complete = tunedEntry(1, "same", true, 0, rankedSearch(2));
+        const auto            partial  = tunedEntry(1, "same", false, 1000, rankedSearch(16));
+        OverrideMap           live;
+        live.addIfAbsent(key, complete);
+        live.addIfAbsent(key, partial);
+        OverrideMap reopened;
+        loadInto(reopened, fileOf({tunedRow(key, complete), tunedRow(key, partial)}));
+        for(const auto* map : {&live, &reopened})
+        {
+            const auto found = map->find(key);
+            ASSERT_EQ(found.size(), 2u);
+            EXPECT_TRUE(found[0].complete);
+            EXPECT_FALSE(found[1].complete);
+            ASSERT_TRUE(found[0].search.has_value());
+            EXPECT_EQ(found[0].search->maxCandidates, 2);
+            EXPECT_FALSE(map->needsRetune(key, rankedSearch(2), 0));
+            EXPECT_FALSE(map->needsRetune(key, rankedSearch(16), 1000));
+            EXPECT_TRUE(map->needsRetune(key, rankedSearch(16), 0));
+        }
+
+        OverrideMap competing;
+        competing.addIfAbsent(key, tunedEntry(2, "older", true, 0, rankedSearch(2)));
+        competing.addIfAbsent(key, complete);
+        competing.addIfAbsent(key, partial);
+        EXPECT_EQ(competing.find(key).front().solutionIndex, 1);
+    }
+
+    // Refreshing a row updates the metadata that replay caches.
+    // The generation moves for it as it does for an addition.
     TEST_F(TuningStore, RefreshingAnEntryMovesTheGeneration)
     {
         const ProblemOverride key = halfKey();
@@ -1052,11 +1081,12 @@ namespace
         ASSERT_TRUE(map.addIfAbsent(key, tunedEntry(1, "kernel", false, 1000)));
         const uint64_t added = map.generation();
 
-        EXPECT_FALSE(map.addIfAbsent(key, tunedEntry(1, "kernel", true, 0)));
+        EXPECT_FALSE(map.addIfAbsent(key, tunedEntry(1, "kernel", false, 2000)));
         EXPECT_NE(map.generation(), added);
         const auto found = map.find(key);
         ASSERT_EQ(found.size(), 1u);
-        EXPECT_TRUE(found[0].complete);
+        EXPECT_FALSE(found[0].complete);
+        EXPECT_EQ(found[0].budgetMs, 2000);
     }
 
     // The file starts with the build stamp once, and every appended row reads

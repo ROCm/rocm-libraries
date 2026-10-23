@@ -393,7 +393,7 @@ namespace TensileLite
         std::optional<TuningSearch> search;
 
         /**
-         * Two rows are the same entry only when the index and both names
+         * Two rows refer to the same algorithm only when the index and both names
          * agree. Two rows can share an index while naming different kernels,
          * and only one of them can still be valid.
          */
@@ -539,8 +539,9 @@ namespace TensileLite
 
         /**
          * Insert unless this key already holds the same entry, so a file that
-         * repeats a row does not stack duplicates. The repeat is the later row
-         * of an append-only file, so it refreshes the stored metadata. Returns
+         * repeats a row does not stack duplicates. Complete and partial results
+         * for the same algorithm are kept separately. The repeat is the later
+         * row of an append-only file, so it refreshes the stored metadata. Returns
          * true only when a distinct entry was inserted.
          */
         bool addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
@@ -600,8 +601,8 @@ namespace TensileLite
 
         /**
          * Changes whenever an entry is added or refreshed, or the map is
-         * cleared. A refresh counts because it can mark a search finished, which
-         * changes the order find returns. Lets a caller that derives something
+         * cleared. A refresh changes the search metadata used by retuning and
+         * can change the order find returns. Lets a caller that derives something
          * from a key's entries tell, without the lock, that it has to derive it
          * again.
          */
@@ -649,7 +650,8 @@ namespace TensileLite
         {
             auto range = entries.equal_range(key);
             for(auto it = range.first; it != range.second; ++it)
-                if(it->second.sameIdentity(entry))
+                if(it->second.sameIdentity(entry)
+                   && (&entries == &m_legacy || it->second.complete == entry.complete))
                 {
                     if(&entries == &m_legacy)
                         it->second = entry;
