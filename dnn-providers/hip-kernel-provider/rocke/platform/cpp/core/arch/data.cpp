@@ -1208,6 +1208,37 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      &lm_mfma_operand_32_4_a,
      &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
+    /* bf16 without the _1k suffix: two bf16 values of A and of B per lane. */
+    {"mma",
+     "bf16",
+     "bf16",
+     "fp32",
+     16,
+     16,
+     8,
+     "mfma_f32_16x16x8_bf16",
+     2,
+     2,
+     4,
+     64,
+     &lm_mfma_operand_16_2_a,
+     &lm_mfma_operand_16_2_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "bf16",
+     "bf16",
+     "fp32",
+     32,
+     32,
+     4,
+     "mfma_f32_32x32x4_bf16",
+     2,
+     2,
+     16,
+     64,
+     &lm_mfma_operand_32_2_a,
+     &lm_mfma_operand_32_2_b,
+     &lm_mfma_32x32x8_c},
     {"mma",
      "fp32",
      "fp32",
@@ -2645,9 +2676,43 @@ constexpr const rocke_layout_map_t* gfx950_f8f6f4_map(int format, bool for_b, bo
 constexpr int k_gfx950_listed_count
     = (int)(sizeof(k_mma_gfx950_listed) / sizeof(k_mma_gfx950_listed[0]));
 
+/* The same instructions for each 8-bit x 8-bit format pair (Python
+ * gfx950_eight_bit_f8f6f4_op_ids), fp8 x fp8 at 16x16x128 under
+ * k_rocke_gfx950_fp8_16x16x128_op_id. Appended after the narrow pairs. */
+constexpr int k_gfx950_eight_bit_pairs = 4;
+static_assert(k_rocke_eight_bit_matrix_format_pairs.count == k_gfx950_eight_bit_pairs);
+constexpr auto k_gfx950_eight_bit_16x16_ids
+    = rocke_make_gfx950_eight_bit_f8f6f4_op_ids("mfma_f32_16x16x128_f8f6f4", true);
+constexpr auto k_gfx950_eight_bit_32x32_ids
+    = rocke_make_gfx950_eight_bit_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4", false);
+
+/* One gfx950 f8f6f4 row: (a, b) -> f32 at 16x16x128 (`m16`) or 32x32x64, 32
+ * values of A and of B per lane, each in the operand layout of its own format,
+ * and the shape's f32 accumulator. */
+constexpr rocke_mma_op_t
+    gfx950_f8f6f4_row(const rocke_matrix_format_pair& pair, bool m16, const char* op_id)
+{
+    return {"mma",
+            k_rocke_matrix_formats[pair.a],
+            k_rocke_matrix_formats[pair.b],
+            "fp32",
+            m16 ? 16 : 32,
+            m16 ? 16 : 32,
+            m16 ? 128 : 64,
+            op_id,
+            32,
+            32,
+            m16 ? 4 : 16,
+            64,
+            gfx950_f8f6f4_map(pair.a, false, m16),
+            gfx950_f8f6f4_map(pair.b, true, m16),
+            m16 ? &lm_mfma_16x16x16_c : &lm_mfma_32x32x8_c};
+}
+
 struct gfx950_catalog
 {
-    rocke_mma_op_t ops[k_gfx950_listed_count + 2 * k_gfx950_f8f6f4_pairs];
+    rocke_mma_op_t
+        ops[k_gfx950_listed_count + 2 * k_gfx950_f8f6f4_pairs + 2 * k_gfx950_eight_bit_pairs];
 };
 consteval gfx950_catalog make_gfx950_catalog()
 {
@@ -2659,24 +2724,23 @@ consteval gfx950_catalog make_gfx950_catalog()
         const bool m16 = shape == 0;
         for(int i = 0; i < k_gfx950_f8f6f4_pairs; ++i)
         {
-            const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
             result.ops[k_gfx950_listed_count + shape * k_gfx950_f8f6f4_pairs + i]
-                = {"mma",
-                   k_rocke_matrix_formats[pair.a],
-                   k_rocke_matrix_formats[pair.b],
-                   "fp32",
-                   m16 ? 16 : 32,
-                   m16 ? 16 : 32,
-                   m16 ? 128 : 64,
-                   m16 ? k_gfx950_f8f6f4_16x16_ids.ids[i] : k_gfx950_f8f6f4_32x32_ids.ids[i],
-                   32,
-                   32,
-                   m16 ? 4 : 16,
-                   64,
-                   gfx950_f8f6f4_map(pair.a, false, m16),
-                   gfx950_f8f6f4_map(pair.b, true, m16),
-                   m16 ? &lm_mfma_16x16x16_c : &lm_mfma_32x32x8_c};
+                = gfx950_f8f6f4_row(k_rocke_narrow_matrix_format_pairs.pairs[i],
+                                    m16,
+                                    m16 ? k_gfx950_f8f6f4_16x16_ids.ids[i]
+                                        : k_gfx950_f8f6f4_32x32_ids.ids[i]);
         }
+    }
+    for(int shape = 0; shape < 2; ++shape)
+    {
+        const bool m16 = shape == 0;
+        for(int i = 0; i < k_gfx950_eight_bit_pairs; ++i)
+            result.ops[k_gfx950_listed_count + 2 * k_gfx950_f8f6f4_pairs
+                       + shape * k_gfx950_eight_bit_pairs + i]
+                = gfx950_f8f6f4_row(k_rocke_eight_bit_matrix_format_pairs.pairs[i],
+                                    m16,
+                                    m16 ? k_gfx950_eight_bit_16x16_ids.ids[i]
+                                        : k_gfx950_eight_bit_32x32_ids.ids[i]);
     }
     return result;
 }
@@ -3209,6 +3273,68 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
+    /* The same pairs at K 128: 64 values of A and of B per lane; no A or B map
+     * is checked against an independent source yet. */
+    {"wmma",
+     "fp8e4m3",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_fp8_fp8",
+     64,
+     64,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "fp8e4m3",
+     "bf8e5m2",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_fp8_bf8",
+     64,
+     64,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "bf8e5m2",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_bf8_fp8",
+     64,
+     64,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "bf8e5m2",
+     "bf8e5m2",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_bf8_bf8",
+     64,
+     64,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
     /* fp8 / bf8 -> f16 (K 64 and K 128) and i8 -> i32 in every operand
      * signedness (K 64), counted in logical values per lane. */
     gfx1250_unmapped_wmma_row(
@@ -3240,7 +3366,7 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
 namespace
 {
 constexpr int k_scaled_count = 86;
-constexpr int k_unscaled_count = 22;
+constexpr int k_unscaled_count = 26;
 constexpr const char* k_inputs[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 constexpr const char* k_input_dtypes[] = {"fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"};
 constexpr const char* k_scales[] = {"e8m0", "e5m3", "e4m3"};

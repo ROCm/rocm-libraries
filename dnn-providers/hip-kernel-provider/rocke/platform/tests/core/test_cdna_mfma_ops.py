@@ -3,10 +3,11 @@
 """The CDNA MFMA instructions each target gained beyond f16 / bf16 / fp8 / bf8.
 
 gfx908 gained i8 and the bf16 MFMAs without the ``_1k`` suffix; gfx90a the f32,
-i8 and f64 MFMAs; gfx942 and gfx950 i8 and the mixed fp8 x bf8 / bf8 x fp8
-MFMAs, and gfx950 f64 and its wider i8 forms (gfx942 already had f64; its row
-is pinned with the others). Each case below pins, for one target and one
-instruction:
+i8 and f64 MFMAs and the same bf16 MFMAs (smaller K than its ``_1k`` ones, so
+selection keeps the ``_1k`` ones); gfx942 and gfx950 i8 and the mixed fp8 x bf8
+/ bf8 x fp8 MFMAs, and gfx950 f64 and its wider i8 forms (gfx942 already had
+f64; its row is pinned with the others). Each case below pins, for one target
+and one instruction:
 
 - the catalog row (dtypes, shape, fragment lengths per lane);
 - the lowered call in both engines at every LLVM flavor: the intrinsic and the
@@ -70,6 +71,20 @@ _CDNA12_I8 = {
     ),
 }  # fmt: skip
 
+# bf16 without the _1k suffix: two bf16 per lane as <2 x i16>.
+_CDNA12_BF16 = {
+    "mfma_f32_16x16x8_bf16": _Case(
+        "bf16", "bf16", "fp32", (16, 16, 8), (2, 2, 4),
+        "llvm.amdgcn.mfma.f32.16x16x8bf16", "<2 x i16>", "<4 x float>",
+        "v_mfma_f32_16x16x8bf16",
+    ),
+    "mfma_f32_32x32x4_bf16": _Case(
+        "bf16", "bf16", "fp32", (32, 32, 4), (2, 2, 16),
+        "llvm.amdgcn.mfma.f32.32x32x4bf16", "<2 x i16>", "<16 x float>",
+        "v_mfma_f32_32x32x4bf16",
+    ),
+}  # fmt: skip
+
 
 # The instructions gfx942 and gfx950 share.
 _CDNA3 = {
@@ -115,16 +130,7 @@ _CDNA3 = {
 _CASES: dict[str, dict[str, _Case]] = {
     "gfx908": {
         **_CDNA12_I8,
-        "mfma_f32_16x16x8_bf16": _Case(
-            "bf16", "bf16", "fp32", (16, 16, 8), (2, 2, 4),
-            "llvm.amdgcn.mfma.f32.16x16x8bf16", "<2 x i16>", "<4 x float>",
-            "v_mfma_f32_16x16x8bf16",
-        ),
-        "mfma_f32_32x32x4_bf16": _Case(
-            "bf16", "bf16", "fp32", (32, 32, 4), (2, 2, 16),
-            "llvm.amdgcn.mfma.f32.32x32x4bf16", "<2 x i16>", "<16 x float>",
-            "v_mfma_f32_32x32x4bf16",
-        ),
+        **_CDNA12_BF16,
     },
     "gfx90a": {
         "mfma_f32_16x16x4_f32": _Case(
@@ -143,6 +149,7 @@ _CASES: dict[str, dict[str, _Case]] = {
             "llvm.amdgcn.mfma.f64.16x16x4f64", "double", "<4 x double>",
             "v_mfma_f64_16x16x4f64",
         ),
+        **_CDNA12_BF16,
     },
     "gfx942": _CDNA3,
     "gfx950": {
@@ -280,3 +287,14 @@ def test_the_f64_accumulator_holds_rows_four_apart():
     assert lane_placements(op.c_layout(), 64) == [
         (4 * slot + lane // 16, lane % 16) for lane in range(64) for slot in range(4)
     ]
+
+
+def test_gfx90a_bf16_selection_keeps_the_1k_mfmas():
+    """The bf16 MFMAs without the ``_1k`` suffix have the smaller K at their
+    shape on gfx90a, so the largest-K selection is unchanged."""
+    catalog = ArchTarget.from_gfx("gfx90a").mma
+    for m, op_id in ((16, "mfma_f32_16x16x16_bf16"), (32, "mfma_f32_32x32x8_bf16")):
+        selected = catalog.select_largest_k(
+            a_dtype="bf16", b_dtype="bf16", c_dtype="fp32", m=m, n=m
+        )
+        assert selected.op_id == op_id

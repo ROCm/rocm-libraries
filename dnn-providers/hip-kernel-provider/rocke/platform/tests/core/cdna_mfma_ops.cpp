@@ -3,10 +3,10 @@
 /*
  * tests/core/cdna_mfma_ops.cpp -- the C++ engine's catalog rows and lane maps
  * for the CDNA MFMA instructions each target gained beyond f16 / bf16 / fp8 /
- * bf8: i8 and the bf16 MFMAs without the _1k suffix on gfx908; f32, i8 and f64
- * on gfx90a; i8 and mixed fp8 x bf8 / bf8 x fp8 on gfx942 and gfx950, plus
- * gfx950's f64 and wider i8 forms (gfx942 already had f64; its row is pinned
- * with the others).
+ * bf8: i8 and the bf16 MFMAs without the _1k suffix on gfx908; f32, i8, f64
+ * and the same bf16 MFMAs on gfx90a; i8 and mixed fp8 x bf8 / bf8 x fp8 on
+ * gfx942 and gfx950, plus gfx950's f64 and wider i8 forms (gfx942 already had
+ * f64; its row is pinned with the others).
  *
  * For each one: the catalog row (dtypes, shape, fragment lengths), the
  * tile.mma result rocke_b_mma builds from the bare op_id, and the lane maps,
@@ -59,6 +59,8 @@ static const Case k_cases[] = {
     {"gfx90a", "mfma_i32_16x16x16_i8", "i8", "i8", "i32", 16, 16, 16, 4, 4, 4},
     {"gfx90a", "mfma_i32_32x32x8_i8", "i8", "i8", "i32", 32, 32, 8, 4, 4, 16},
     {"gfx90a", "mfma_f64_16x16x4_f64", "fp64", "fp64", "fp64", 16, 16, 4, 1, 1, 4},
+    {"gfx90a", "mfma_f32_16x16x8_bf16", "bf16", "bf16", "fp32", 16, 16, 8, 2, 2, 4},
+    {"gfx90a", "mfma_f32_32x32x4_bf16", "bf16", "bf16", "fp32", 32, 32, 4, 2, 2, 16},
     {"gfx942", "mfma_i32_16x16x32_i8", "i8", "i8", "i32", 16, 16, 32, 8, 8, 4},
     {"gfx942", "mfma_i32_32x32x16_i8", "i8", "i8", "i32", 32, 32, 16, 8, 8, 16},
     {"gfx942", "mfma_f64_16x16x4_f64", "fp64", "fp64", "fp64", 16, 16, 4, 1, 1, 4},

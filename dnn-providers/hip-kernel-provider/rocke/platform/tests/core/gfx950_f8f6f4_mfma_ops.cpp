@@ -4,8 +4,10 @@
  * tests/core/gfx950_f8f6f4_mfma_ops.cpp -- the C++ engine's gfx950 f8f6f4
  * 16x16x128 and 32x32x64 MFMA instructions.
  *
- * - Each catalog row (dtypes, shape, fragment lengths), one per narrow format
- *   pair and shape.
+ * - Each catalog row (dtypes, shape, fragment lengths), one per format pair and
+ *   shape; fp8 x fp8 at 16x16x128 is mfma_f32_16x16x128_fp8, which its
+ *   hand-written handler lowers, so it has no MATRIX_CALLS entry. An 8-bit x
+ *   8-bit row is what selection picks for its pair and shape.
  * - Its A and B maps evaluated on every (lane, slot) of a 64-lane wave against
  *   its formats' f8f6f4 operand layouts (four groups of 16 lanes at
  *   16x16x128, two groups of 32 at 32x32x64), and the shape's f32 accumulator
@@ -156,19 +158,40 @@ static void check_shape(const rocke_arch_target_t* arch, const shape_t& shape)
     CHECK(acc_op != NULL, shape.accumulator_op);
     const Placements acc_expected
         = acc_op ? placements(rocke_mma_op_c_layout(acc_op, NULL)) : Placements();
-    for(int i = 0; i < k_rocke_narrow_matrix_format_pairs.count; ++i)
+    std::vector<rocke_matrix_format_pair> pairs(k_rocke_narrow_matrix_format_pairs.pairs,
+                                                k_rocke_narrow_matrix_format_pairs.pairs
+                                                    + k_rocke_narrow_matrix_format_pairs.count);
+    pairs.insert(pairs.end(),
+                 k_rocke_eight_bit_matrix_format_pairs.pairs,
+                 k_rocke_eight_bit_matrix_format_pairs.pairs
+                     + k_rocke_eight_bit_matrix_format_pairs.count);
+    CHECK(pairs.size() == 25, "every format pair");
+    for(const rocke_matrix_format_pair& pair : pairs)
     {
-        const int a = k_rocke_narrow_matrix_format_pairs.pairs[i].a;
-        const int b = k_rocke_narrow_matrix_format_pairs.pairs[i].b;
-        const std::string op_id = "mfma_f32_" + std::to_string(shape.m) + "x"
-                                  + std::to_string(shape.n) + "x" + std::to_string(shape.k)
-                                  + "_f8f6f4_" + k_rocke_matrix_formats[a] + "_"
-                                  + k_rocke_matrix_formats[b];
+        const int a = pair.a;
+        const int b = pair.b;
+        const bool hand_written = shape.m == 16 && a == 0 && b == 0;
+        const std::string op_id
+            = hand_written ? std::string(k_rocke_gfx950_fp8_16x16x128_op_id)
+                           : "mfma_f32_" + std::to_string(shape.m) + "x" + std::to_string(shape.n)
+                                 + "x" + std::to_string(shape.k) + "_f8f6f4_"
+                                 + k_rocke_matrix_formats[a] + "_" + k_rocke_matrix_formats[b];
         const char* id = op_id.c_str();
         const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(&arch->mma, id);
         CHECK(op != NULL, id);
         if(!op)
             continue;
+        if(rocke_matrix_format_bits(a) == 8 && rocke_matrix_format_bits(b) == 8)
+            CHECK(rocke_mma_catalog_select_largest_k(&arch->mma,
+                                                     "mma",
+                                                     k_rocke_matrix_formats[a],
+                                                     k_rocke_matrix_formats[b],
+                                                     "fp32",
+                                                     shape.m,
+                                                     shape.n,
+                                                     -1)
+                      == op,
+                  id);
         CHECK(strcmp(op->family, "mma") == 0 && strcmp(op->a_dtype, k_rocke_matrix_formats[a]) == 0
                   && strcmp(op->b_dtype, k_rocke_matrix_formats[b]) == 0
                   && strcmp(op->c_dtype, "fp32") == 0 && op->dst_dtype == NULL,
@@ -189,9 +212,10 @@ static void check_shape(const rocke_arch_target_t* arch, const shape_t& shape)
         CHECK(placements(rocke_mma_op_b_layout(op, NULL)) == b_expected, id);
         CHECK(placements(rocke_mma_op_c_layout(op, NULL)) == acc_expected, id);
 
+        check_result(id, shape.results);
         /* The call: (A, B, C, format A, format B, 0, 0, 0, 0). */
         const rocke_matrix_call_t* call = rocke_matrix_call_for(id);
-        CHECK(call != NULL, id);
+        CHECK((call == NULL) == hand_written, id);
         if(!call)
             continue;
         CHECK(strcmp(call->intrinsic, shape.intrinsic) == 0, id);
@@ -215,7 +239,6 @@ static void check_shape(const rocke_arch_target_t* arch, const shape_t& shape)
                   && is_register(call->c, "f32", shape.results)
                   && is_register(call->result, "f32", shape.results),
               id);
-        check_result(id, shape.results);
     }
 }
 

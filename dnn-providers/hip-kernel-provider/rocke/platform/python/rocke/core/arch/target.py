@@ -32,7 +32,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..dtypes import normalize_dtype
 from ..storage import MatrixFragmentLayout
 from . import domain as arch_domain
-from .mfma_scale import matrix_operand_layout, narrow_matrix_format_pairs
+from .mfma_scale import (
+    eight_bit_matrix_format_pairs,
+    matrix_operand_layout,
+    narrow_matrix_format_pairs,
+)
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
@@ -935,6 +939,11 @@ def integer_mma_op_ids(op_id: str, bits: int) -> Tuple[str, str, str, str]:
     )
 
 
+def _f8f6f4_op_ids(op_id: str, pairs) -> dict[str, tuple[str, str]]:
+    """``{op_id + "_<a>_<b>": (a, b)}`` for each (A, B) format pair of ``pairs``."""
+    return {f"{op_id}_{a}_{b}": (a, b) for a, b in pairs}
+
+
 def narrow_f8f6f4_op_ids(op_id: str) -> dict[str, tuple[str, str]]:
     """The op_ids of one f8f6f4 instruction, one per format pair it owns.
 
@@ -945,7 +954,38 @@ def narrow_f8f6f4_op_ids(op_id: str) -> dict[str, tuple[str, str]]:
     ``wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1``. Returns
     ``{op_id: (a, b)}`` in pair order.
     """
-    return {f"{op_id}_{a}_{b}": (a, b) for a, b in narrow_matrix_format_pairs()}
+    return _f8f6f4_op_ids(op_id, narrow_matrix_format_pairs())
+
+
+# The op_id the gfx950 fp8 x fp8 f8f6f4 MFMA at 16x16x128 had before the
+# catalog listed the instruction's other formats; a hand-written handler lowers
+# it.
+GFX950_FP8_16X16X128_OP_ID = "mfma_f32_16x16x128_fp8"
+
+
+def gfx950_eight_bit_f8f6f4_op_ids(
+    shape: tuple[int, int, int],
+) -> dict[str, tuple[str, str]]:
+    """The op_ids of the gfx950 f8f6f4 MFMA at ``shape`` ``(16, 16, 128)`` or
+    ``(32, 32, 64)`` for each pair of
+    :func:`~rocke.core.arch.mfma_scale.eight_bit_matrix_format_pairs`.
+
+    Each is ``mfma_f32_<M>x<N>x<K>_f8f6f4`` with ``_<a>_<b>`` appended, for
+    example ``mfma_f32_32x32x64_f8f6f4_fp8e4m3_bf8e5m2``, except fp8 x fp8 at
+    16x16x128, which is :data:`GFX950_FP8_16X16X128_OP_ID`. Returns
+    ``{op_id: (a, b)}`` in pair order.
+    """
+    m, n, k = shape
+    return {
+        (
+            GFX950_FP8_16X16X128_OP_ID
+            if (shape, a, b) == ((16, 16, 128), "fp8e4m3", "fp8e4m3")
+            else op_id
+        ): (a, b)
+        for op_id, (a, b) in _f8f6f4_op_ids(
+            f"mfma_f32_{m}x{n}x{k}_f8f6f4", eight_bit_matrix_format_pairs()
+        ).items()
+    }
 
 
 def _lane_map_from_fragment_layout(layout: MatrixFragmentLayout, role: str):
@@ -1121,14 +1161,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "mfma_i32_32x32x32_i8": _FragInfo(
         16, 16, 16, 64, *_mfma_operand_map(32, 16), _mfma_acc_32x32
     ),
-    # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
-    # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
-    # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
-    # same fragment widths as the f8f6f4 sibling below. Registered here so the
-    # op_id resolves to correct fragment lengths (this table is the SSOT that
-    # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
-    # instead of hitting the zero-length _frag_info fallback.
-    "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(
@@ -1304,6 +1336,16 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
+    # The same fp8 / bf8 pairs at K 128: 64 values of A and of B per lane,
+    # counted in logical values; the accumulator map as at K 64. No A or B
+    # lane map until one is checked against an independent source.
+    **{
+        f"wmma_gfx1250_f32_16x16x128_{a}_{b}": _FragInfo(
+            64, 64, 8, 32, None, None, _wmma_gfx12_acc_16x16
+        )
+        for a in ("fp8", "bf8")
+        for b in ("fp8", "bf8")
+    },
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
         16,
@@ -1371,6 +1413,20 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
             32, 32, 16, 64, *_f8f6f4_operand_maps(a, b, 8, 2, 32), _mfma_acc_32x32
         )
         for op_id, (a, b) in narrow_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4").items()
+    },
+    # The same instructions for each 8-bit x 8-bit format pair, fp8 x fp8 at
+    # 16x16x128 under GFX950_FP8_16X16X128_OP_ID.
+    **{
+        op_id: _FragInfo(
+            32, 32, 4, 64, *_f8f6f4_operand_maps(a, b, 8, 4, 16), _mfma_acc_16x16
+        )
+        for op_id, (a, b) in gfx950_eight_bit_f8f6f4_op_ids((16, 16, 128)).items()
+    },
+    **{
+        op_id: _FragInfo(
+            32, 32, 16, 64, *_f8f6f4_operand_maps(a, b, 8, 2, 32), _mfma_acc_32x32
+        )
+        for op_id, (a, b) in gfx950_eight_bit_f8f6f4_op_ids((32, 32, 64)).items()
     },
 }
 
