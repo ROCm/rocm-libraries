@@ -5,17 +5,23 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
-## MIOpen 3.6.2 for ROCm 10.2.0
-
 ### Resolved Issues
-* [Conv] Fixed the grouped CK xdlops convolution solvers (2D and 3D; forward, backward-data and
-  backward-weights) skipping `valid_kernels[0]` during exhaustive tuning: the populate branch fell
-  through instead of emitting the seeded first config, so GenericSearch began enumeration at
-  `valid_kernels[1]` and the first applicable CK instance was never tuned.
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
+  `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
+  the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
+  applicable CK instance was never tuned.
 * [Conv] Fixed deterministic-mode tuning of the 3D grouped backward-weights CK xdlops solver, which
   used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
   first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
   one applicable CK instance the enumeration never terminated.
+
+## MIOpen 3.6.2 for ROCm 10.2.0
+
+### Resolved Issues
+* [Conv] Fixed the 2D grouped CK xdlops convolution solvers (forward/backward-data/backward-weights)
+  skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue` returned the first config
+  unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and the first applicable CK
+  instance was never tuned.
 * [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
   and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
   elements, which produced incorrect results. Such tensors are now rejected with
