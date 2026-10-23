@@ -38,6 +38,8 @@
 #include <miopen/tensor.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -45,6 +47,24 @@
 using namespace group_conv;
 
 namespace {
+
+// Coverage signal: DbRestoredConfigStaysTF32 skips where the CK build runs TF32 identically to
+// FP32, so a run in which *every* case skipped verified nothing. Track it and warn loudly at exit,
+// so a green CI on a no-distinct-TF32 build cannot be mistaken for the regression being exercised.
+std::atomic<int> g_reuse_attempted{0};
+std::atomic<int> g_reuse_observed{0};
+struct ReuseCoverageReporter
+{
+    ~ReuseCoverageReporter()
+    {
+        if(g_reuse_attempted.load() > 0 && g_reuse_observed.load() == 0)
+            std::cerr
+                << "[TF32Reuse] WARNING: all " << g_reuse_attempted.load()
+                << " DbRestoredConfigStaysTF32 case(s) skipped (TF32 numerically identical to "
+                   "FP32 on this build/device); the perf-db TF32 reuse fix was NOT exercised\n";
+    }
+};
+const ReuseCoverageReporter g_reuse_reporter;
 
 template <unsigned NDIM, Direction DIR>
 struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
@@ -192,12 +212,14 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
 
         // Some CK builds carry no numerically distinct TF32 kernel for this instance on this
         // device; there TF32 == FP32 and the reuse property is unobservable, so skip rather than
-        // false-fail.
+        // false-fail. Count attempts/observations so an all-skipped run is reported at exit.
+        g_reuse_attempted.fetch_add(1);
         if(miopen::rms_range(out_fp32, out_ref) <= 1e-5)
         {
             test_skipped = true;
             GTEST_SKIP() << "CK runs TF32 identically to FP32 on this device; cannot observe reuse";
         }
+        g_reuse_observed.fetch_add(1);
 
         // The fix: a db-restored config must still run TF32 -- matching the pristine TF32 result
         // and diverging from FP32 -- not silently fall back to FP32.
