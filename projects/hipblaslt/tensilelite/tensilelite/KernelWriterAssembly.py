@@ -6514,6 +6514,13 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddU32(dst=vgpr("LocalReadAddrB+1"), src0=sgpr("BRotateLRDelta"), src1=vgpr("LocalReadAddrB+0"), \
                          comment="B-rotate: other component"))
       return module
+    windows = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindows" + tc)
+    if windows is not None:
+      assert len(windows) == numLra and windows[0] == 0
+      for i, window in enumerate(windows[1:], 1):
+        module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=window * maxOff,
+                           src1=vgpr("LocalReadAddr%s"%tc), comment="Reachable LDS read window %u" % window))
+      return module
     for i in range(1, numLra):
       module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=(i * maxOff), \
         src1=vgpr("LocalReadAddr%s"%tc), comment="Final Offset Plus %uK"%((i * maxOff) / 1024)))
@@ -6541,10 +6548,12 @@ class KernelWriterAssembly(KernelWriter):
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
       if tc == "B" and kernel.get("LDSSegmentBRotate"):
-        # B-rotate: SIMD pair 1 (odd wave) reads B half h from component 1-h. LocalRead reaches
-        # half h through LocalReadAddrB+h with immediate (h*S + within) - h*64K, S = component
-        # stride. So pair p needs +0 = root + p*S and +1 = +0 + 64K - p*2S (the per-wave delta).
+        # B-rotate: SIMD pair 1 (odd wave) reads B half h from component 1-h.
+        # LocalRead uses logical stride R; the physical LDS component stride is S.
+        # Pair p needs +0 = root + p*S and +1 = +0 + S - (R % 64K) - p*2S.
         compStride = _segOff["writeStrideBytes"]
+        readStride = _segOff.get("readStrideBytesB", compStride)
+        baseDelta = compStride - readStride % self.states.regCaps["maxLDSConstOffset"]
         with self.allocTmpSgpr(1, tag="bRotatePair") as tmpSgprInfo:
           pairSgpr = sgpr(tmpSgprInfo.idx)
           module.add(VReadfirstlaneB32(dst=pairSgpr, src=vgpr("Serial"), comment="B-rotate: tId"))
@@ -6553,8 +6562,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=pairSgpr, src0=pairSgpr, src1=1, comment="B-rotate: pair = wave id & 1"))
           module.add(SMulI32(dst=sgpr("BRotateLRDelta"), src0=pairSgpr, src1=2 * compStride, \
                              comment="B-rotate: pair * 2S"))
-          module.add(SSubU32(dst=sgpr("BRotateLRDelta"), src0=self.states.regCaps["maxLDSConstOffset"], \
-                             src1=sgpr("BRotateLRDelta"), comment="B-rotate: delta = 64K - pair*2S"))
+          module.add(SSubU32(dst=sgpr("BRotateLRDelta"), src0=baseDelta, \
+                             src1=sgpr("BRotateLRDelta"), comment="B-rotate: component delta minus pair*2S"))
           module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=compStride, comment="B-rotate: pair * S"))
           module.add(VAddU32(dst=vgpr("LocalReadAddrB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrB+0"), \
                              comment="B-rotate: pair 1 reads the other component first"))
@@ -6583,6 +6592,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["StoreSwapAddr"]:
       _lrSwapBlk = self._decoupledSwapStride(kernel, tc) if self._dcpDivergent(kernel) \
                    else kernel["LdsOffsetA_Blk"]
+      if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+        _lrSwapBlk = kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc]
       module.add(VAddU32(dst=vgpr("LocalReadSwapAddr%s"%tc), src0=_lrSwapBlk, src1=vgpr("LocalReadAddr%s"%tc), \
                          comment="Calculate starting lds addr of second buffer" ))
       module.add(VXorB32(dst=vgpr("LocalReadSwapAddr%s"%tc), \
@@ -12585,6 +12596,13 @@ class KernelWriterAssembly(KernelWriter):
 
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
+
+    if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+      module = Module("TDM LDS swap (paired buffers)")
+      swapMask = "BRotateTDMScaleSwap" if tc.startswith("MXS") else "BRotateTDMSwap"
+      module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(swapMask),
+                         "Swap the owning wave's paired TDM buffers"))
+      return module
 
     if self._dcpDivergent(kernel):
       return self._tdmSwapLdsOffsetDecoupled(kernel, tP, ldsAddrSgprName)
@@ -20707,6 +20725,13 @@ class KernelWriterAssembly(KernelWriter):
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+      if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+        # Each descriptor set has one per-wave mask; scales own a separate set.
+        swapMask = "BRotateTDMScaleSwap" if isMX else "BRotateTDMSwap"
+        mod.add(SAddU32(sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                         kernel["LDSSegInterleaveOffsets"]["bufferStride" + tc], "Paired TDM buffer base"))
+        mod.add(SXorB32(sgpr(swapMask), sgpr(swapMask), sgpr(waveOffsetSgprIdx),
+                         "Per-wave paired TDM buffer swap mask"))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
