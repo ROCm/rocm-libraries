@@ -549,6 +549,8 @@ if(BUILD_CODE_COVERAGE)
   #
   add_custom_target(coverage_cleanup
     COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report/profraw
+    COMMAND ${CMAKE_COMMAND} -E rm -f ./coverage-report/rocsparse.profdata ./coverage-report/unit.profdata ./coverage-report/integration.profdata
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()

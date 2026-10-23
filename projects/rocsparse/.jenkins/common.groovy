@@ -167,6 +167,8 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     if make coverage_split; then
                         /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-unit.info --name rocm-libraries-unit --flags rocSPARSE-unit --sha ${commitSha} || true
                         /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-integration.info --name rocm-libraries-integration --flags rocSPARSE-integration --sha ${commitSha} || true
+                    else
+                        echo "coverage_split failed; rocSPARSE-unit and rocSPARSE-integration not uploaded"
                     fi
                 """
 
