@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <numeric>
 #include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/layout.hpp>
@@ -54,6 +55,8 @@ class IndexIteration {
     }
 
     void coordinates(size_t index, std::span<size_t> result) const noexcept {
+        assert(result.size() == m_extents.size());
+        assert(index < m_count);
         for (auto axis = m_axes.rbegin(); axis != m_axes.rend(); ++axis) {
             result[*axis] = index % m_extents[*axis];
             index /= m_extents[*axis];
@@ -61,12 +64,14 @@ class IndexIteration {
     }
 
     size_t linearIndex(std::span<const size_t> indices) const noexcept {
+        assert(validCoordinates(indices));
         size_t result = 0;
         for (size_t axis : m_axes) result = result * m_extents[axis] + indices[axis];
         return result;
     }
 
     bool advance(std::span<size_t> indices) const noexcept {
+        assert(validCoordinates(indices));
         for (auto axis = m_axes.rbegin(); axis != m_axes.rend(); ++axis) {
             if (++indices[*axis] < m_extents[*axis]) return true;
             indices[*axis] = 0;
@@ -75,6 +80,13 @@ class IndexIteration {
     }
 
    private:
+    bool validCoordinates(std::span<const size_t> indices) const noexcept {
+        if (indices.size() != m_extents.size() || m_count == 0) return false;
+        for (size_t axis = 0; axis < indices.size(); ++axis)
+            if (indices[axis] >= m_extents[axis]) return false;
+        return true;
+    }
+
     std::vector<size_t> m_extents;
     std::vector<size_t> m_axes;
     size_t m_count;
@@ -86,11 +98,15 @@ class IndexIteration {
 // and nonnegative for coordinates in that validated tensor.
 inline ptrdiff_t preparedElementOffset(const Layout& layout,
                                        std::span<const size_t> indices) noexcept {
+    assert(indices.size() == layout.shape().rank());
     using Unsigned = std::make_unsigned_t<ptrdiff_t>;
     Unsigned offset = static_cast<Unsigned>(layout.offset());
     const auto strides = layout.strides();
-    for (size_t axis = 0; axis < indices.size(); ++axis)
+    for (size_t axis = 0; axis < indices.size(); ++axis) {
+        assert(indices[axis] < layout.shape().dimensions()[axis]);
         offset += static_cast<Unsigned>(indices[axis]) * static_cast<Unsigned>(strides[axis]);
+    }
+    assert(offset <= static_cast<Unsigned>(std::numeric_limits<ptrdiff_t>::max()));
     return static_cast<ptrdiff_t>(offset);
 }
 }  // namespace roc::hostnumerics::detail

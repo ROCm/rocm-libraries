@@ -34,7 +34,7 @@ namespace hipblaslt::hostnumerics
     // ScalarType is the conversion hub for HostNumerics. Each external type
     // system maps to it once; runtime dispatch should not add pairwise
     // hipDataType-to-C++-type mappings.
-    inline std::optional<ScalarType> tryScalarType(hipDataType type) noexcept
+    inline std::optional<ScalarType> getScalarType(hipDataType type) noexcept
     {
         // hipBLASLt also defines integer-valued extension constants that are not
         // members of hipDataType (for example HIP_R_8F_E5M3_EXT). Normalize the
@@ -96,7 +96,7 @@ namespace hipblaslt::hostnumerics
 
     inline ScalarType scalarType(hipDataType type)
     {
-        if(const auto mapped = tryScalarType(type))
+        if(const auto mapped = getScalarType(type))
             return *mapped;
         throw std::runtime_error("hipBLASLt data type has no HostNumerics scalar mapping.");
     }
@@ -106,10 +106,10 @@ namespace hipblaslt::hostnumerics
     {
         using Type = std::remove_cv_t<T>;
 
-        if constexpr(
-            std::is_same_v<
-                Type,
-                uint8_t> || std::is_same_v<Type, int8_t> || std::is_same_v<Type, int32_t> || std::is_same_v<Type, float> || std::is_same_v<Type, double> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>)
+        if constexpr(std::is_same_v<Type, uint8_t> || std::is_same_v<Type, int8_t>
+                     || std::is_same_v<Type, int32_t> || std::is_same_v<Type, float>
+                     || std::is_same_v<Type, double> || std::is_same_v<Type, std::complex<float>>
+                     || std::is_same_v<Type, std::complex<double>>)
             return nativeScalarType<Type>;
         else if constexpr(std::is_same_v<Type, char>)
             return std::is_signed_v<char> ? ScalarType::Int8 : ScalarType::UInt8;

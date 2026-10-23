@@ -36,7 +36,7 @@ void testOutputSelection() {
 
     // SIZE_MAX is composite for the supported 32/64-bit size_t widths. The
     // candidate cannot advance to another odd value without wrapping.
-    require(!detail::tryNextPrimeStride(std::numeric_limits<size_t>::max()).has_value(),
+    require(!detail::getNextPrimeStride(std::numeric_limits<size_t>::max()).has_value(),
             "Prime-stride overflow did not return a failure.");
     requireError([] { (void)detail::nextPrimeStride(std::numeric_limits<size_t>::max()); },
                  "Terminal prime-stride overflow did not throw a generic error.");

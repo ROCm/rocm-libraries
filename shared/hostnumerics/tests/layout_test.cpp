@@ -23,24 +23,34 @@ void testLayoutBasics() {
     const ptrdiff_t maximumOffset = std::numeric_limits<ptrdiff_t>::max();
     const ptrdiff_t minimumOffset = std::numeric_limits<ptrdiff_t>::min();
     const std::array<size_t, 1> edgeIndex{1};
-    require(Layout(Shape{2}, {maximumOffset}, minimumOffset).elementOffset(edgeIndex) == -1,
+    const auto positiveEdge =
+        Layout(Shape{2}, {maximumOffset}, minimumOffset).elementOffset(edgeIndex);
+    const auto negativeEdge =
+        Layout(Shape{2}, {minimumOffset}, maximumOffset).elementOffset(edgeIndex);
+    require(positiveEdge && *positiveEdge == -1,
             "Layout rejected an exactly representable positive offset contribution.");
-    require(Layout(Shape{2}, {minimumOffset}, maximumOffset).elementOffset(edgeIndex) == -1,
+    require(negativeEdge && *negativeEdge == -1,
             "Layout rejected an exactly representable negative offset contribution.");
 
     const std::array<size_t, 1> overflowIndex{2};
     const Layout positiveMultiplyOverflow(Shape{3}, {maximumOffset});
-    requireError([&] { (void)positiveMultiplyOverflow.elementOffset(overflowIndex); },
-                 "Layout element offset accepted positive multiplication overflow.");
+    const auto positiveMultiply = positiveMultiplyOverflow.elementOffset(overflowIndex);
+    require(!positiveMultiply &&
+                positiveMultiply.error().error == detail::LayoutError::OffsetMultiplyOverflow,
+            "Layout element offset accepted positive multiplication overflow.");
     const Layout negativeMultiplyOverflow(Shape{3}, {minimumOffset});
-    requireError([&] { (void)negativeMultiplyOverflow.elementOffset(overflowIndex); },
-                 "Layout element offset accepted negative multiplication overflow.");
+    const auto negativeMultiply = negativeMultiplyOverflow.elementOffset(overflowIndex);
+    require(!negativeMultiply &&
+                negativeMultiply.error().error == detail::LayoutError::OffsetMultiplyOverflow,
+            "Layout element offset accepted negative multiplication overflow.");
     const Layout positiveAddOverflow(Shape{2}, {1}, maximumOffset);
-    requireError([&] { (void)positiveAddOverflow.elementOffset(edgeIndex); },
-                 "Layout element offset accepted positive addition overflow.");
+    const auto positiveAdd = positiveAddOverflow.elementOffset(edgeIndex);
+    require(!positiveAdd && positiveAdd.error().error == detail::LayoutError::OffsetAddOverflow,
+            "Layout element offset accepted positive addition overflow.");
     const Layout negativeAddOverflow(Shape{2}, {-1}, minimumOffset);
-    requireError([&] { (void)negativeAddOverflow.elementOffset(edgeIndex); },
-                 "Layout element offset accepted negative addition overflow.");
+    const auto negativeAdd = negativeAddOverflow.elementOffset(edgeIndex);
+    require(!negativeAdd && negativeAdd.error().error == detail::LayoutError::OffsetAddOverflow,
+            "Layout element offset accepted negative addition overflow.");
 
     requireError(
         [&] { (void)storageBytesForLayout(ScalarType::Float32, positiveMultiplyOverflow); },

@@ -81,7 +81,7 @@ inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestinatio
 }
 
 template <typename Floating>
-Expected<Floating, ConversionFailure> tryRoundForIntegerConversion(
+Expected<Floating, ConversionFailure> getRoundForIntegerConversion(
     Floating value, IntegerRounding rounding) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
     switch (rounding) {
@@ -132,7 +132,7 @@ bool integralIsBelowIntegerDestination(Integral value, uint32_t bits,
 }
 
 template <typename Integral>
-Expected<uint64_t, ConversionFailure> tryConvertIntegralToIntegerBits(
+Expected<uint64_t, ConversionFailure> getConvertIntegralToIntegerBits(
     Integral value, uint32_t bits, bool signedDestination,
     const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_integral_v<Integral>);
@@ -161,7 +161,7 @@ Expected<uint64_t, ConversionFailure> tryConvertIntegralToIntegerBits(
 }
 
 template <typename Floating>
-Expected<uint64_t, ConversionFailure> tryConvertFloatingToIntegerBits(
+Expected<uint64_t, ConversionFailure> getConvertFloatingToIntegerBits(
     Floating value, uint32_t bits, bool signedDestination,
     const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
@@ -183,7 +183,7 @@ Expected<uint64_t, ConversionFailure> tryConvertFloatingToIntegerBits(
         return Unexpected(
             ConversionFailure{ConversionError::InvalidRounding, bits, signedDestination});
     }
-    const auto roundedResult = tryRoundForIntegerConversion(value, options.integerRounding);
+    const auto roundedResult = getRoundForIntegerConversion(value, options.integerRounding);
     if (!roundedResult) return Unexpected(roundedResult.error());
     const Floating rounded = *roundedResult;
     const int rangeExponent =
@@ -218,24 +218,24 @@ Expected<uint64_t, ConversionFailure> tryConvertFloatingToIntegerBits(
 }
 
 template <typename Source>
-Expected<uint64_t, ConversionFailure> tryConvertToIntegerBits(
+Expected<uint64_t, ConversionFailure> getConvertToIntegerBits(
     Source source, uint32_t bits, bool signedDestination,
     const ScalarConversionOptions& options) noexcept {
     using Value = std::remove_cvref_t<Source>;
     if constexpr (RuntimeIsComplexV<Value>) {
         if (source.imag() != typename Value::value_type{0})
             return Unexpected(ConversionFailure{ConversionError::Nonreal, bits, signedDestination});
-        return tryConvertToIntegerBits(source.real(), bits, signedDestination, options);
+        return getConvertToIntegerBits(source.real(), bits, signedDestination, options);
     } else if constexpr (std::is_same_v<Value, bool>) {
-        return tryConvertIntegralToIntegerBits(static_cast<uint8_t>(source), bits,
+        return getConvertIntegralToIntegerBits(static_cast<uint8_t>(source), bits,
                                                signedDestination, options);
     } else if constexpr (std::is_enum_v<Value>) {
-        return tryConvertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
+        return getConvertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
                                        signedDestination, options);
     } else if constexpr (std::is_integral_v<Value>) {
-        return tryConvertIntegralToIntegerBits(source, bits, signedDestination, options);
+        return getConvertIntegralToIntegerBits(source, bits, signedDestination, options);
     } else if constexpr (std::is_floating_point_v<Value>) {
-        return tryConvertFloatingToIntegerBits(source, bits, signedDestination, options);
+        return getConvertFloatingToIntegerBits(source, bits, signedDestination, options);
     } else {
         static_assert(AlwaysFalseV<Value>, "Scalar integer conversion requires a numeric source.");
     }
@@ -263,17 +263,17 @@ Target integerFromBits(uint64_t raw) noexcept {
 }
 
 template <typename Target, typename Source>
-Expected<Target, ConversionFailure> tryConvertToInteger(
+Expected<Target, ConversionFailure> getConvertToInteger(
     Source source, const ScalarConversionOptions& options) noexcept {
     using Value = std::remove_cv_t<Target>;
     static_assert(std::is_integral_v<Value> && !std::is_same_v<Value, bool>);
     constexpr uint32_t bits = std::numeric_limits<std::make_unsigned_t<Value>>::digits;
-    const auto result = tryConvertToIntegerBits(source, bits, std::is_signed_v<Value>, options);
+    const auto result = getConvertToIntegerBits(source, bits, std::is_signed_v<Value>, options);
     if (!result) return Unexpected(result.error());
     return integerFromBits<Value>(*result);
 }
 template <typename Target, typename Source>
-Expected<Target, ConversionFailure> tryConvertScalarValue(Source source,
+Expected<Target, ConversionFailure> getConvertScalarValue(Source source,
                                                           const ScalarConversionOptions& options) {
     using Destination = std::remove_cv_t<Target>;
     using Value = std::remove_cvref_t<Source>;
@@ -281,24 +281,24 @@ Expected<Target, ConversionFailure> tryConvertScalarValue(Source source,
     if constexpr (RuntimeIsComplexV<Destination>) {
         using Component = typename Destination::value_type;
         if constexpr (RuntimeIsComplexV<Value>) {
-            const auto real = tryConvertScalarValue<Component>(source.real(), options);
+            const auto real = getConvertScalarValue<Component>(source.real(), options);
             if (!real) return Unexpected(real.error());
-            const auto imaginary = tryConvertScalarValue<Component>(source.imag(), options);
+            const auto imaginary = getConvertScalarValue<Component>(source.imag(), options);
             if (!imaginary) return Unexpected(imaginary.error());
             return Destination(*real, *imaginary);
         } else {
-            const auto real = tryConvertScalarValue<Component>(source, options);
+            const auto real = getConvertScalarValue<Component>(source, options);
             if (!real) return Unexpected(real.error());
             return Destination(*real, Component{0});
         }
     } else if constexpr (RuntimeIsComplexV<Value>) {
         if (source.imag() != typename Value::value_type{0})
             return Unexpected(ConversionFailure{ConversionError::Nonreal});
-        return tryConvertScalarValue<Destination>(source.real(), options);
+        return getConvertScalarValue<Destination>(source.real(), options);
     } else if constexpr (std::is_same_v<Destination, bool>) {
         return source != Value{0};
     } else if constexpr (std::is_integral_v<Destination>) {
-        return tryConvertToInteger<Destination>(source, options);
+        return getConvertToInteger<Destination>(source, options);
     } else {
         return static_cast<Destination>(source);
     }

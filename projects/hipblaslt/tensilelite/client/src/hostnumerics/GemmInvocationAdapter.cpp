@@ -42,11 +42,11 @@ namespace TensileLite::Client::hostnumerics
             return {code, std::move(reason)};
         }
 
-        inline std::optional<ptrdiff_t> tryMultiply(size_t left, size_t right) noexcept
+        inline std::optional<ptrdiff_t> getMultiply(size_t left, size_t right) noexcept
         {
             if(!std::in_range<ptrdiff_t>(right))
                 return std::nullopt;
-            return roc::hostnumerics::detail::tryOffsetMultiply(left,
+            return roc::hostnumerics::detail::getOffsetMultiply(left,
                                                                 static_cast<ptrdiff_t>(right));
         }
 
@@ -75,7 +75,7 @@ namespace TensileLite::Client::hostnumerics
             ptrdiff_t rowStride    = static_cast<ptrdiff_t>(strides[rowAxis]);
             ptrdiff_t columnStride = static_cast<ptrdiff_t>(strides[columnAxis]);
             auto      offset       = pointerArray ? std::optional<ptrdiff_t>(0)
-                                                  : tryMultiply(batch, strides[batchAxis]);
+                                                  : getMultiply(batch, strides[batchAxis]);
             if(!offset)
             {
                 return Unexpected(DescriptorFailure(DescriptorError::OffsetMultiplyOverflow));
@@ -85,12 +85,12 @@ namespace TensileLite::Client::hostnumerics
                                bool       mirror) -> std::optional<DescriptorFailure> {
                 if(!mirror || extent == 0)
                     return std::nullopt;
-                const auto delta = roc::hostnumerics::detail::tryOffsetMultiply(extent - 1, stride);
+                const auto delta = roc::hostnumerics::detail::getOffsetMultiply(extent - 1, stride);
                 if(!delta)
                 {
                     return DescriptorFailure(DescriptorError::OffsetMultiplyOverflow);
                 }
-                offset = roc::hostnumerics::detail::tryOffsetAdd(*offset, *delta);
+                offset = roc::hostnumerics::detail::getOffsetAdd(*offset, *delta);
                 if(!offset)
                 {
                     return DescriptorFailure(DescriptorError::OffsetAddOverflow);
@@ -131,15 +131,18 @@ namespace TensileLite::Client::hostnumerics
             const bool compatible = std::visit(
                 [&](const auto& item) {
                     using Value = std::remove_cvref_t<decltype(item)>;
-                    if constexpr(std::is_same_v<
-                                     Value,
-                                     std::complex<
-                                         float>> || std::is_same_v<Value, std::complex<double>>)
+                    if constexpr(std::is_same_v<Value, std::complex<float>>
+                                 || std::is_same_v<Value, std::complex<double>>)
                         return complex;
                     else if(complex)
                         return std::is_same_v<Value, float> || std::is_same_v<Value, double>;
                     else
-                        return std::is_same_v<Value, float> || std::is_same_v<Value, double> || std::is_same_v<Value, Half> || std::is_same_v<Value, int32_t> || std::is_same_v<Value, BFloat16> || std::is_same_v<Value, int8_t> || std::is_same_v<Value, Float8> || std::is_same_v<Value, BFloat8> || std::is_same_v<Value, Float8_fnuz> || std::is_same_v<Value, BFloat8_fnuz>;
+                        return std::is_same_v<Value, float> || std::is_same_v<Value, double>
+                               || std::is_same_v<Value, Half> || std::is_same_v<Value, int32_t>
+                               || std::is_same_v<Value, BFloat16> || std::is_same_v<Value, int8_t>
+                               || std::is_same_v<Value, Float8> || std::is_same_v<Value, BFloat8>
+                               || std::is_same_v<Value, Float8_fnuz>
+                               || std::is_same_v<Value, BFloat8_fnuz>;
                 },
                 value);
             if(!compatible)
@@ -160,7 +163,7 @@ namespace TensileLite::Client::hostnumerics
             case rocisa::DataType::Int32:
             {
                 const double real = constVariantCast<double>(value);
-                const auto   bits = roc::hostnumerics::detail::tryConvertFloatingToIntegerBits(
+                const auto   bits = roc::hostnumerics::detail::getConvertFloatingToIntegerBits(
                     real, 32, true, roc::hostnumerics::detail::implicitNativeConversionOptions());
                 if(!bits)
                     return std::nullopt;
@@ -188,12 +191,12 @@ namespace TensileLite::Client::hostnumerics
         }
 
         inline Expected<Tensor, DescriptorFailure>
-            trySnapshot(ScalarType type, const void* pointer, size_t elements)
+            getSnapshot(ScalarType type, const void* pointer, size_t elements)
         {
-            auto layout = roc::hostnumerics::detail::tryContiguousLayout(Shape{elements}, false);
+            auto layout = Layout::getContiguousLayout(Shape{elements});
             if(!layout)
                 return Unexpected(DescriptorFailure(layout.error()));
-            const auto bytes = roc::hostnumerics::detail::tryStorageBytesForLayout(type, *layout);
+            const auto bytes = roc::hostnumerics::detail::getStorageBytesForLayout(type, *layout);
             if(!bytes)
                 return Unexpected(DescriptorFailure(bytes.error()));
             if(*bytes != 0 && pointer == nullptr)
@@ -299,7 +302,7 @@ namespace TensileLite::Client::hostnumerics
         inline Expected<std::pair<Layout, ptrdiff_t>, DescriptorFailure>
             rebaseLayoutToByteAlignedStorage(ScalarType type, const Layout& layout)
         {
-            const auto bounds = roc::hostnumerics::detail::tryElementBounds(layout);
+            const auto bounds = roc::hostnumerics::detail::getElementBounds(layout);
             if(!bounds)
                 return Unexpected(DescriptorFailure(bounds.error()));
             if(bounds->second < bounds->first)
@@ -315,8 +318,8 @@ namespace TensileLite::Client::hostnumerics
             const size_t bits          = scalarTypeInfo(type).storageBits;
             const size_t alignment     = 8 / std::gcd<size_t>(8, bits);
             const size_t alignedOffset = static_cast<size_t>(lowerOffset) / alignment * alignment;
-            const auto   byteOffset = tryMultiply(alignedOffset / alignment, alignment * bits / 8);
-            const auto   rebasedOffset = roc::hostnumerics::detail::tryOffsetAdd(
+            const auto   byteOffset = getMultiply(alignedOffset / alignment, alignment * bits / 8);
+            const auto   rebasedOffset = roc::hostnumerics::detail::getOffsetAdd(
                 layout.offset(), -static_cast<ptrdiff_t>(alignedOffset));
             if(!byteOffset || !rebasedOffset)
             {
@@ -339,7 +342,7 @@ namespace TensileLite::Client::hostnumerics
             if(!rebased)
                 return Unexpected(DescriptorFailure(rebased.error()));
             const auto required
-                = roc::hostnumerics::detail::tryStorageBytesForLayout(type, rebased->first);
+                = roc::hostnumerics::detail::getStorageBytesForLayout(type, rebased->first);
             if(!required)
                 return Unexpected(DescriptorFailure(required.error()));
             if(*required == 0)
@@ -349,7 +352,7 @@ namespace TensileLite::Client::hostnumerics
                 return Unexpected(DescriptorFailure(DescriptorError::NullStorage));
             }
             const auto offset
-                = roc::hostnumerics::detail::tryOffsetAdd(byteOffset, rebased->second);
+                = roc::hostnumerics::detail::getOffsetAdd(byteOffset, rebased->second);
             if(!offset)
             {
                 return Unexpected(DescriptorFailure(DescriptorError::OffsetAddOverflow));
@@ -431,7 +434,7 @@ namespace TensileLite::Client::hostnumerics
                                "ScaleAB mode must be empty, Scalar, or Vector.");
             }
 
-            auto mapType = [](rocisa::DataType type) { return tryToHostNumericsScalarType(type); };
+            auto mapType = [](rocisa::DataType type) { return getHostNumericsScalarType(type); };
             auto assignType = [&](ScalarType& destination, rocisa::DataType source) {
                 auto mapped = mapType(source);
                 if(!mapped)
@@ -505,7 +508,7 @@ namespace TensileLite::Client::hostnumerics
             if(concreteActivation == ActivationType::All
                || concreteActivation == ActivationType::Hipblaslt_all)
                 concreteActivation = problem.getParams().activationEnum();
-            auto mappedActivation = tryToHostNumericsActivation(concreteActivation, useGradient);
+            auto mappedActivation = getHostNumericsActivation(concreteActivation, useGradient);
             if(!mappedActivation)
                 return failure(TranslationFailureCode::UnsupportedActivation,
                                "Activation has no runtime HostNumerics mapping.");
@@ -551,12 +554,11 @@ namespace TensileLite::Client::hostnumerics
 
             if(batches != 0 && m != 0 && n != 0)
             {
-                auto contiguous
-                    = roc::hostnumerics::detail::tryContiguousLayout(Shape{m, n}, false);
+                auto contiguous = Layout::getContiguousLayout(Shape{m, n});
                 if(!contiguous)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(contiguous.error())));
-                const auto bytes = roc::hostnumerics::detail::tryStorageBytesForLayout(
+                const auto bytes = roc::hostnumerics::detail::getStorageBytesForLayout(
                     operationAccumulatorType, *contiguous);
                 if(!bytes)
                     return failure(TranslationFailureCode::InvalidDescriptor,
@@ -567,8 +569,8 @@ namespace TensileLite::Client::hostnumerics
             mxBlockB = problem.mxBlockB();
             if(mxBlockA > 0)
             {
-                const auto mappedA = tryToHostNumericsMxScaleType(problem.mxTypeA());
-                const auto mappedB = tryToHostNumericsMxScaleType(problem.mxTypeB());
+                const auto mappedA = getHostNumericsMxScaleType(problem.mxTypeA());
+                const auto mappedB = getHostNumericsMxScaleType(problem.mxTypeB());
                 if(!mappedA || !mappedB)
                     return failure(TranslationFailureCode::UnsupportedDataType,
                                    "rocisa data type has no MX scale HostNumerics mapping.");
@@ -588,7 +590,7 @@ namespace TensileLite::Client::hostnumerics
                 = requiresCompleteD ? OutputSelection::all(outputSelection.indexOrder())
                                     : std::move(outputSelection);
             const auto logicalCount
-                = roc::hostnumerics::detail::ShapeAccess::tryElementCount(problem.d().sizes());
+                = roc::hostnumerics::detail::ShapeAccess::getElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");
@@ -762,16 +764,16 @@ namespace TensileLite::Client::hostnumerics
             {
                 auto const& descriptor = problem.tensors()[ContractionProblemGemm::TENSOR::AMAXD];
                 ScalarType  amaxType;
-                const auto  mappedType = tryToHostNumericsScalarType(descriptor.dataType());
+                const auto  mappedType = getHostNumericsScalarType(descriptor.dataType());
                 if(!mappedType)
                     return failure(TranslationFailureCode::UnsupportedDataType,
                                    "rocisa data type has no scalar HostNumerics mapping.");
                 amaxType              = *mappedType;
-                auto descriptorLayout = tryHostnumericsLayout(descriptor);
+                auto descriptorLayout = getHostnumericsLayout(descriptor);
                 if(!descriptorLayout)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(descriptorLayout.error())));
-                const auto bytes = roc::hostnumerics::detail::tryStorageBytesForLayout(
+                const auto bytes = roc::hostnumerics::detail::getStorageBytesForLayout(
                     amaxType, *descriptorLayout);
                 if(!bytes)
                     return failure(TranslationFailureCode::InvalidDescriptor,
@@ -790,7 +792,7 @@ namespace TensileLite::Client::hostnumerics
             if(computeProduct && problem.useScaleAlphaVec())
             {
                 auto scaleAlphaResult
-                    = detail::trySnapshot(alphaType, inputs.scaleAlphaVec, scaleAlphaLength);
+                    = detail::getSnapshot(alphaType, inputs.scaleAlphaVec, scaleAlphaLength);
                 if(!scaleAlphaResult)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(scaleAlphaResult.error())));
@@ -799,12 +801,12 @@ namespace TensileLite::Client::hostnumerics
             if(computeProduct && scaleABMode != detail::ScaleABMode::None)
             {
                 const bool vector = scaleABMode == detail::ScaleABMode::Vector;
-                auto scaleAResult = detail::trySnapshot(alphaType, inputs.scaleA, vector ? m : 1);
+                auto scaleAResult = detail::getSnapshot(alphaType, inputs.scaleA, vector ? m : 1);
                 if(!scaleAResult)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(scaleAResult.error())));
                 scaleA            = std::move(*scaleAResult);
-                auto scaleBResult = detail::trySnapshot(alphaType, inputs.scaleB, vector ? n : 1);
+                auto scaleBResult = detail::getSnapshot(alphaType, inputs.scaleB, vector ? n : 1);
                 if(!scaleBResult)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(scaleBResult.error())));
@@ -876,26 +878,26 @@ namespace TensileLite::Client::hostnumerics
                 void*         currentD = inputs.batchD == nullptr ? inputs.d : inputs.batchD[batch];
 
                 auto borrowedA = readA ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                     typeA, layoutA, currentA, batchOffsetA)
+                                             typeA, layoutA, currentA, batchOffsetA)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                           detail::BorrowedConstTensor{layoutA, {}});
+                                             detail::BorrowedConstTensor{layoutA, {}});
                 if(!borrowedA)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedA.error())));
                 auto borrowedB = readB ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                     typeB, layoutB, currentB, batchOffsetB)
+                                             typeB, layoutB, currentB, batchOffsetB)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                           detail::BorrowedConstTensor{layoutB, {}});
+                                             detail::BorrowedConstTensor{layoutB, {}});
                 if(!borrowedB)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedB.error())));
                 auto borrowedC = readC ? detail::makeBorrowedTensor<detail::BorrowedConstTensor>(
-                                     typeC, layoutC, currentC, batchOffsetC)
+                                             typeC, layoutC, currentC, batchOffsetC)
                                        : detail::Expected<detail::BorrowedConstTensor,
                                                           detail::DescriptorFailure>(
-                                           detail::BorrowedConstTensor{layoutC, {}});
+                                             detail::BorrowedConstTensor{layoutC, {}});
                 if(!borrowedC)
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedC.error())));
@@ -921,7 +923,7 @@ namespace TensileLite::Client::hostnumerics
                     const size_t runtimeBiasLength = problem.bias().sizes()[0];
                     if(inputs.batchBias == nullptr && problem.bias().dimensions() > 2)
                     {
-                        auto offset = detail::tryMultiply(batch, problem.bias().strides()[2]);
+                        auto offset = detail::getMultiply(batch, problem.bias().strides()[2]);
                         if(!offset)
                             return failure(TranslationFailureCode::InvalidDescriptor,
                                            "TensileLite adapter offset multiplication overflow.");
@@ -1216,8 +1218,8 @@ namespace TensileLite::Client::hostnumerics
 
     GemmInvocationAdapter::GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept = default;
 
-    GemmInvocationAdapter&
-        GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept = default;
+    GemmInvocationAdapter& GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept
+        = default;
 
     void TranslatedGemmBatch::runGemm(roc::hostnumerics::GemmBackend backend) const
     {
@@ -1348,7 +1350,7 @@ namespace TensileLite::Client::hostnumerics
                                "converted to real.");
             if(accumulatorType == ScalarType::Int32)
             {
-                const auto converted = roc::hostnumerics::detail::tryConvertFloatingToIntegerBits(
+                const auto converted = roc::hostnumerics::detail::getConvertFloatingToIntegerBits(
                     value.real(),
                     32,
                     true,
@@ -1541,7 +1543,7 @@ namespace TensileLite::Client::hostnumerics
                                 ContractionInputs const&      inputs,
                                 size_t                        elementsToValidate)
     {
-        auto selection = tryReferenceOutputSelection(problem.d(), elementsToValidate);
+        auto selection = getReferenceOutputSelection(problem.d(), elementsToValidate);
         if(!selection)
             return detail::failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(selection.error())));

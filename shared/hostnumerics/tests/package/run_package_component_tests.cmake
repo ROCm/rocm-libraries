@@ -111,14 +111,14 @@ function(_install_project build_dir install_dir label)
         )
     endif()
 
-    # The descriptor adapters reuse Shape's predicates through this installed
-    # internal bridge. No other implementation headers belong in the package.
+    # Public metadata headers and descriptor adapters need these two internal
+    # headers. Operation implementation headers stay outside the package.
     file(GLOB_RECURSE _installed_detail_headers
         LIST_DIRECTORIES FALSE
         RELATIVE "${install_dir}/include/roc/hostnumerics/detail"
         "${install_dir}/include/roc/hostnumerics/detail/*"
     )
-    if(NOT _installed_detail_headers STREQUAL "shape_access.hpp")
+    if(NOT _installed_detail_headers STREQUAL "layout_offset.hpp;shape_access.hpp")
         message(FATAL_ERROR
             "${label} installed unexpected internal headers: "
             "${_installed_detail_headers}."
