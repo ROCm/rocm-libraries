@@ -272,3 +272,41 @@ void rocfft_field_t::reinterpret_as(rocfft_array_type new_array_type)
         relabeled_bricks.emplace_back(brick.layout.reinterpret_as(new_array_type), brick.location);
     std::swap(bricks, relabeled_bricks);
 }
+
+rocfft_field_t rocfft_field_t::get_field_for_lengths(const std::set<size_t>& len_dims) const
+{
+    std::vector<rocfft_brick_t> embedded_bricks;
+    embedded_bricks.reserve(bricks.size());
+    for(const auto& brick : bricks)
+        embedded_bricks.emplace_back(brick.layout.get_data_set_for_len_axes(len_dims),
+                                     brick.location);
+    // views of fewer length axes are complex (see data_set_t::get_data_set_for_len_axes)
+    return rocfft_field_t(std::move(embedded_bricks));
+}
+
+rocfft_field_t rocfft_field_t::get_embedding_field() const
+{
+    if(std::none_of(bricks.begin(), bricks.end(), [](const rocfft_brick_t& brick) {
+           return brick.layout.is_embedded();
+       }))
+    {
+        return *this;
+    }
+    std::vector<rocfft_brick_t> embedding_bricks;
+    embedding_bricks.reserve(bricks.size());
+    for(const auto& brick : bricks)
+        embedding_bricks.emplace_back(brick.layout.get_embedding_data_set(), brick.location);
+    return rocfft_field_t(std::move(embedding_bricks));
+}
+
+bool rocfft_field_t::is_same_up_to_hermitian_relabel(const rocfft_field_t& other) const
+{
+    const auto relabeled = [](rocfft_field_t field) {
+        if(field.get_array_type() == rocfft_array_type_hermitian_interleaved)
+            field.reinterpret_as(rocfft_array_type_complex_interleaved);
+        else if(field.get_array_type() == rocfft_array_type_hermitian_planar)
+            field.reinterpret_as(rocfft_array_type_complex_planar);
+        return field;
+    };
+    return relabeled(*this) == relabeled(other);
+}
