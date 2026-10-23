@@ -59,12 +59,19 @@ page-contained limitation.
 
 The runtime checks shapes, dtypes, contiguity, alignment, actual pool bounds,
 table capacity, matching architecture, and explicit segment/reducer semantics.
-It never reads device metadata to the host by default. Unmarked legacy specs
-retain the caller-validity contract: lengths
+It never reads device metadata to the host by default. Unmarked page-contained
+legacy runtime specs retain the caller-validity contract: lengths
 are in `[0,max_seqlen_k]`, query offsets are `[0,1,...,B]`, and referenced page
 IDs index the physical pools. Inactive table entries need not be initialized.
 Legacy C builders share this caller contract; metadata cannot be validated during
 source generation. `allow_unsupported` does not bypass runtime safety checks.
+
+The token-to-page mapping lives in shared architecture-independent helpers,
+mirrored by the native builders. The current descriptor `indirect` transform
+guards the lookup index but does not validate the returned physical page ID or
+publish a segment failure status. Integrating these checks with a descriptor
+transform is a separate authoring refactor; substituting the existing transform
+alone would not establish metadata containment.
 
 Explicit gfx942/gfx950 paged 3D specs must expose valid page/tile geometry and
 a boolean `uses_paged_gather` that agrees with it: `T > P` on gfx942, `T != P`
@@ -160,6 +167,10 @@ checks range proofs, pair admission and launch signatures. The
 checks invalid-to-valid recovery on unchanged buffers across execution modes,
 affected/unaffected sequences, zero lengths and Q/O canaries. The paged parity
 family appends 32 bounded segment/reducer cases to the original 66 configs.
+Its Python goldens and native byte-parity tests run in the installed
+`rocke_library_attention_cpu_pytest` gate, with the native extension required
+when pybind is built. This dedicated gate is separate from the platform's
+all-family byte-identity dashboard.
 
 ## Selection and validation
 
@@ -169,6 +180,10 @@ it preserves their default routing. Explicit `ExplicitAttention3DConfig`
 accepts `tile_policy="32"` from `TILE_POLICIES_3D`. Tile tokens share whitespace
 and case normalization; `resolve_tile_policy(..., path="3d")` selects the 3D
 vocabulary, while the default retains the existing 2D policies.
+Direct automatic execution selects its 3D specs in
+`run_unified_attention_torch`, independently of the Python dispatcher. Native
+3D builders consume supplied spec fields; a native problem-to-spec heuristic
+API remains deferred as described in [the dispatch rules](../../dispatch/AGENTS.md).
 The candidate binds without reading device metadata by default and keeps the
 original device tensors live across launches. Pass
 `unsafe_skip_paged_value_validation=False` to validate contents at bind time;
