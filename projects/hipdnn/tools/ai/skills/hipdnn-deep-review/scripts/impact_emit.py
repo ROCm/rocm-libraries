@@ -6,7 +6,7 @@
   run --repo DIR --base REV --head REV [--flavor F] [--timeout S] --out FILE.json
 
 REV is any commit or tree id. Each side is `git archive`d into a temp dir (the repo is
-only read) and a child interpreter with a scrubbed environment builds every shipped rocKE
+only read) and a child interpreter with an allow-listed environment builds every shipped rocKE
 variant there, lowers it to LLVM IR with the Python backend (no GPU, comgr or network),
 and records the kernarg list parsed from the IR `define` line plus the SHA-256 of the IR
 text. This EXECUTES rocKE code from the reviewed revisions, like building the head does.
@@ -22,8 +22,13 @@ target (`gfx11-generic`), so the shard arches that share it collapse into one fa
 differs, so it includes `params_changed`. A variant that fails to build is recorded under
 `failures` and takes no part in the comparison.
 
-The flavor defaults to the top rung of `_LLVM_FLAVOR_LADDER` in the head's
-`rocke/platform/python/rocke/core/lower_llvm.py`. Exit 0 when the analysis ran, whatever
+The flavor defaults to the newest flavor the head and the base both know (the top rung
+of `_LLVM_FLAVOR_LADDER` in `rocke/platform/python/rocke/core/lower_llvm.py`, else the last
+of `LLVM_FLAVORS`); with none shared it is the head's newest and the base fails loudly.
+The child gets an allow-listed environment and runs in its own process group, which
+`--timeout` kills as a whole. Each side's tree id (`base_tree`, `head_tree`, resolved once
+with `git rev-parse REV^{tree}` and the one that is archived) is recorded so impact.py
+can refuse a file made for other revisions. Exit 0 when the analysis ran, whatever
 it found; 1 with one line `impact_emit: <reason>` on stderr when it could not run.
 """
 
@@ -35,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -55,7 +61,6 @@ LOWER_LLVM = f"{ROCKE_PLATFORM}/rocke/core/lower_llvm.py"
 
 REQUIRED_TREES = (ROCKE_PLATFORM, ROCKE_LIBRARY, PACKAGING)
 OPTIONAL_TREES = (DESCRIPTORS, GENERATOR)
-SCRUBBED_PREFIXES = ("ROCKE_", "HIP_", "ROCM_", "PYTHON")
 
 
 class Fatal(Exception):
@@ -77,17 +82,25 @@ def git(repo, *args, text=True):
     return r.stdout.decode("utf-8", "replace") if text else r.stdout
 
 
+def resolve_tree(repo, rev):
+    """The tree id REV names (a commit or a tree); archived and recorded so that a
+    consumer can tell the file belongs to the revisions it asked about."""
+    return git(repo, "rev-parse", "--verify", f"{rev}^{{tree}}").strip()
+
+
 def existing_paths(repo, rev, paths):
     out = git(repo, "ls-tree", "--name-only", rev, "--", *paths)
     return set(out.splitlines())
 
 
-def extract(repo, rev, dest):
-    """`git archive` the trees needed from REV into DEST (regular files and dirs only)."""
+def extract(repo, rev, dest, name=None):
+    """`git archive` the trees needed from REV into DEST (regular files and dirs only).
+    NAME is how errors refer to REV."""
+    name = name or rev
     have = existing_paths(repo, rev, REQUIRED_TREES + OPTIONAL_TREES)
     missing = [p for p in REQUIRED_TREES if p not in have]
     if missing:
-        raise Fatal(f"{rev} lacks {', '.join(missing)}")
+        raise Fatal(f"{name} lacks {', '.join(missing)}")
     data = git(
         repo,
         "archive",
@@ -102,7 +115,7 @@ def extract(repo, rev, dest):
         for m in tf:
             target = (root / m.name).resolve()
             if root != target and root not in target.parents:
-                raise Fatal(f"{rev}: archive member escapes the extract: {m.name}")
+                raise Fatal(f"{name}: archive member escapes the extract: {m.name}")
             if m.isdir():
                 target.mkdir(parents=True, exist_ok=True)
             elif m.isfile():
@@ -110,15 +123,15 @@ def extract(repo, rev, dest):
                 target.write_bytes(tf.extractfile(m).read())
 
 
-def default_flavor(repo, rev):
-    """Top rung of `_LLVM_FLAVOR_LADDER` in REV's lower_llvm.py, parsed without importing.
-    Older trees have no ladder; their newest flavor is the last entry of `LLVM_FLAVORS`.
+def _known_flavors(src, where):
+    """Flavors of one lower_llvm.py source, oldest first, parsed without importing: the
+    rungs of `_LLVM_FLAVOR_LADDER` by major version; older trees have no ladder, so
+    their `LLVM_FLAVORS` in order.
     """
-    src = git(repo, "show", f"{rev}:{LOWER_LLVM}")
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
-        raise Fatal(f"cannot parse {LOWER_LLVM} at {rev}: {e}; pass --flavor")
+        raise Fatal(f"cannot parse {LOWER_LLVM} at {where}: {e}; pass --flavor")
     consts, ladder, flavors = {}, None, None
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -143,9 +156,9 @@ def default_flavor(repo, rev):
             for e in names
         ]
         if known and isinstance(known[-1], str):
-            return known[-1]
+            return [k for k in known if isinstance(k, str)]
         raise Fatal(
-            f"no _LLVM_FLAVOR_LADDER or LLVM_FLAVORS in {LOWER_LLVM} at {rev}; pass --flavor"
+            f"no _LLVM_FLAVOR_LADDER or LLVM_FLAVORS in {LOWER_LLVM} at {where}; pass --flavor"
         )
     rungs = []
     for el in ladder.elts:
@@ -161,8 +174,28 @@ def default_flavor(repo, rev):
         if isinstance(major, ast.Constant) and isinstance(flavor, str):
             rungs.append((major.value, flavor))
     if not rungs:
-        raise Fatal(f"cannot resolve _LLVM_FLAVOR_LADDER at {rev}; pass --flavor")
-    return max(rungs)[1]
+        raise Fatal(f"cannot resolve _LLVM_FLAVOR_LADDER at {where}; pass --flavor")
+    return [flavor for _, flavor in sorted(rungs)]
+
+
+def default_flavor(repo, rev):
+    """Newest flavor of REV: the top ladder rung, else the last entry of `LLVM_FLAVORS`."""
+    src = git(repo, "show", f"{rev}:{LOWER_LLVM}")
+    return _known_flavors(src, rev)[-1]
+
+
+def shared_default_flavor(repo, base, head):
+    """The head's newest flavor that the base also knows, so a base from before the head's
+    top rung is not failed wholesale. With none shared, the head's top (it then fails
+    loudly); a base whose flavors cannot be read leaves the head's top as well."""
+    head_known = _known_flavors(git(repo, "show", f"{head}:{LOWER_LLVM}"), head)
+    try:
+        base_known = set(
+            _known_flavors(git(repo, "show", f"{base}:{LOWER_LLVM}"), base)
+        )
+    except Fatal:
+        return head_known[-1]
+    return next((f for f in reversed(head_known) if f in base_known), head_known[-1])
 
 
 # ----------------------------------------------------------------------- IR parse
@@ -246,7 +279,7 @@ def parse_kernargs(ir_text):
 
 
 # -------------------------------------------------------------------------- child
-# Everything below up to `parent side` runs in the extract's scrubbed interpreter.
+# Everything below up to `parent side` runs in the extract's isolated interpreter.
 
 
 def _arch_list(value):
@@ -340,14 +373,10 @@ def _regenerate(base, dvc_dir):
     out = base / ".impact_emit" / f"{dvc_dir.name}.enum.yaml"
     out.parent.mkdir(exist_ok=True)
     try:
-        r = subprocess.run(
+        r = run_tree(
             [sys.executable, str(enum), "--manifest", str(manifest), "--out", str(out)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            int(os.environ.get("IMPACT_EMIT_ENUM_TIMEOUT", "600")),
             cwd=str(base),
-            timeout=int(os.environ.get("IMPACT_EMIT_ENUM_TIMEOUT", "600")),
         )
     except subprocess.TimeoutExpired:
         return None, "registry_enumerator.py timed out"
@@ -454,7 +483,7 @@ def child_main(root, out):
     t0 = time.time()
     variants, skipped = _discover(root)
     h = _Helpers()
-    fams = {}
+    fams, specs = {}, {}
     # One family per (compile arch, source, builder): the packer compiles once per
     # compile arch, so shard arches that share a generic target collapse into one family.
     for v in variants:
@@ -484,8 +513,15 @@ def child_main(root, out):
             if shard not in fam["members"]:
                 fam["members"].append(shard)
             if v["name"] in fam["names"]:
-                continue  # same variant reached through another member arch
+                # same variant reached through another member arch, unless the specs differ
+                if specs[key, v["name"]] != v["spec"]:
+                    fam["built"].pop(v["name"], None)
+                    fam["failures"][
+                        v["name"]
+                    ] = f"{v['name']}: two variants share this name with different specs"
+                continue
             fam["names"].append(v["name"])
+            specs[key, v["name"]] = v["spec"]
             if err:
                 fam["failures"][v["name"]] = err
                 continue
@@ -505,12 +541,22 @@ def child_main(root, out):
 # ------------------------------------------------------------------- parent side
 
 
-def scrubbed_env(root, flavor):
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.upper().startswith(SCRUBBED_PREFIXES)
-    }
+#: System, temp and locale variables, plus where Python finds user-site packages (`pip
+#: install --user` of Jinja2 or PyYAML): APPDATA on Windows, PYTHONUSERBASE anywhere.
+_ENV_KEEP = frozenset(
+    "PATH PATHEXT SYSTEMROOT SYSTEMDRIVE WINDIR COMSPEC TEMP TMP TMPDIR HOME "
+    "USERPROFILE APPDATA LOCALAPPDATA PYTHONUSERBASE LANG TZ".split()
+)
+_ENV_KEEP_PREFIXES = ("LC_", "IMPACT_EMIT_")
+
+
+def child_env(root, flavor):
+    """The child's environment: an allow-list of the parent's, then the pinned variables."""
+    env = {}
+    for k, v in os.environ.items():
+        name = k.upper() if os.name == "nt" else k
+        if name in _ENV_KEEP or name.startswith(_ENV_KEEP_PREFIXES):
+            env[k] = v
     base = Path(root)
     env["PYTHONPATH"] = os.pathsep.join(
         str(base / p) for p in (ROCKE_PLATFORM, ROCKE_LIBRARY, PACKAGING)
@@ -522,10 +568,65 @@ def scrubbed_env(root, flavor):
     return env
 
 
-def run_side(repo, rev, flavor, timeout, label):
+def _kill_tree(proc):
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True
+            )
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.kill()  # the leader, in case the tree kill did not reach it
+    except OSError:
+        pass
+
+
+def run_tree(cmd, timeout, **kw):
+    """subprocess.run with captured text output that, on timeout, kills the child's whole
+    process tree and raises TimeoutExpired without waiting for pipes a grandchild holds.
+    """
+    if os.name == "nt":
+        kw["creationflags"] = kw.get("creationflags", 0) | (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+    else:
+        kw["start_new_session"] = True
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **kw,
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            proc.wait(timeout=10)
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass  # give up on pipes some survivor still holds
+        raise
+    except BaseException:
+        _kill_tree(proc)
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def run_side(repo, rev, tree, flavor, timeout, label):
     tmp = tempfile.mkdtemp(prefix="impact_emit_")
     try:
-        extract(repo, rev, tmp)
+        extract(repo, tree, tmp, rev)
         out = Path(tmp) / ".impact_emit_side.json"
         cmd = [
             sys.executable,
@@ -537,16 +638,7 @@ def run_side(repo, rev, flavor, timeout, label):
             str(out),
         ]
         try:
-            r = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=tmp,
-                env=scrubbed_env(tmp, flavor),
-                timeout=timeout,
-            )
+            r = run_tree(cmd, timeout, cwd=tmp, env=child_env(tmp, flavor))
         except subprocess.TimeoutExpired:
             raise Fatal(f"{label} ({rev}) timed out after {timeout}s")
         if r.returncode or not out.is_file():
@@ -615,11 +707,14 @@ def cmd_run(a):
     repo = Path(a.repo)
     if not repo.is_dir():
         raise Fatal(f"--repo {a.repo} is not a directory")
-    flavor = a.flavor or default_flavor(repo, a.head)
+    # Resolve each side once; the same ids are archived and recorded.
+    base_tree = resolve_tree(repo, a.base)
+    head_tree = resolve_tree(repo, a.head)
+    flavor = a.flavor or shared_default_flavor(repo, base_tree, head_tree)
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=2) as pool:  # the sides are independent
-        fb = pool.submit(run_side, repo, a.base, flavor, a.timeout, "base")
-        fh = pool.submit(run_side, repo, a.head, flavor, a.timeout, "head")
+        fb = pool.submit(run_side, repo, a.base, base_tree, flavor, a.timeout, "base")
+        fh = pool.submit(run_side, repo, a.head, head_tree, flavor, a.timeout, "head")
         base_side, head_side = fb.result(), fh.result()
     families = compare(base_side, head_side)
     not_inspected = [
@@ -629,11 +724,13 @@ def cmd_run(a):
     ]
     seconds = round(time.time() - t0, 1)
     doc = {
-        "schema": 1,
+        "schema": 2,
         "tool": "impact_emit",
         "flavor": flavor,
         "base": a.base,
         "head": a.head,
+        "base_tree": base_tree,
+        "head_tree": head_tree,
         "families": families,
         "not_inspected": not_inspected,
         "seconds": seconds,
@@ -668,7 +765,7 @@ def main(argv=None):
     r.add_argument("--flavor")
     r.add_argument("--timeout", type=int, default=900, help="seconds per side")
     r.add_argument("--out", required=True)
-    c = sub.add_parser("child")  # internal: runs inside the scrubbed interpreter
+    c = sub.add_parser("child")  # internal: runs inside the isolated interpreter
     c.add_argument("--root", required=True)
     c.add_argument("--out", required=True)
     args = p.parse_args(argv)

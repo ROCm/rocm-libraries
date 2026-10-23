@@ -16,8 +16,8 @@ what each agent reads, and `lanes/` holds the briefs. `RUN` builds with
 [hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); install those skills alongside this one.
 
 Prerequisites: network access, an authenticated `gh` with read access, `git` 2.38 or later (`pin.py` uses `git merge-tree --write-tree`), and Python 3 (it runs the scripts under
-`$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. The `IMPACT` lane needs Python 3.10 or newer,
-PyYAML, and Jinja2 for its emitter. `RUN` and verifiers also need
+`$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. The `IMPACT` lane's `impact.py` needs
+Python 3.10 or newer and PyYAML (it reads the `*.engine.yaml` launch surfaces); its emitter also needs Jinja2. `RUN` and verifiers also need
 a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human
 `ACCEPTED-RISK` decisions, recorded with `ledger.py set` (`PIN.md` records `Build host`).

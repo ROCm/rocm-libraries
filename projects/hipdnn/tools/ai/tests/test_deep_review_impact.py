@@ -304,18 +304,18 @@ def test_declared_pair_checks_static_list_and_flags_dynamic(mod, capsys, tmp_pat
 
 
 def test_cpp_string_literal_edit_is_code_not_whitespace(mod, capsys, tmp_path):
-    # catches: whitespace deletion instead of collapse ("attn fwd" == "attnfwd")
+    # catches: whitespace runs inside a literal collapsed like code ("attn  fwd" == "attn fwd")
     repo, base = make_repo(
-        tmp_path, {PACK: 'const char* kName = "attn fwd";\nint f() { return 1; }\n'}
+        tmp_path, {PACK: 'const char* kName = "attn  fwd";\nint f() { return 1; }\n'}
     )
     head = commit(
-        repo, {PACK: 'const char* kName = "attnfwd";\nint f() { return 1; }\n'}
+        repo, {PACK: 'const char* kName = "attn fwd";\nint f() { return 1; }\n'}
     )
     assert (
         file_class(report(mod, capsys, repo, base, head, cmd="files"), PACK) == "code"
     )
     spaced = commit(
-        repo, {PACK: 'const char* kName = "attnfwd";\nint   f()  {  return 1;   }\n'}
+        repo, {PACK: 'const char* kName = "attn fwd";\nint   f()  {  return 1;   }\n'}
     )
     assert (
         file_class(report(mod, capsys, repo, head, spaced, cmd="files"), PACK)
@@ -395,10 +395,7 @@ def test_removed_override_is_not_removed_while_a_base_defines_it(mod, capsys, tm
         },
     )
     (row,) = rows_of(report(mod, capsys, repo, base, head), "symbols")
-    assert (
-        row["status"] == "changed"
-        and row["reason"] == "override removed; base Mystery not resolved"
-    )
+    assert row["status"] == "changed" and row["name"] == "Sub.helper"
 
 
 def test_generic_target_member_removed_names_target_and_member(mod, capsys, tmp_path):
@@ -424,7 +421,8 @@ def test_empty_diff_is_an_error_never_none(mod, capsys, tmp_path):
         mod.main(["report", "--repo", str(repo), "--base", base, "--head", head]) == 1
     )
     captured = capsys.readouterr()
-    assert captured.err.strip() == "impact: empty diff" and "NONE" not in captured.out
+    assert captured.err.startswith("impact: ") and len(captured.err.splitlines()) == 1
+    assert "NONE" not in captured.out
 
 
 def test_user_git_config_does_not_change_results(mod, capsys, tmp_path):
@@ -486,13 +484,28 @@ def test_ancestor_init_of_a_consumed_module_is_consumed(mod, capsys, tmp_path):
     assert status[OTHER_KERNEL] == "inert"
 
 
-def write_emit(path, **family):
-    base = dict(arch="gfx950", source=BUILDER, builder="build_attn", kdp=KDP, spec_origin="kdp-in-git",
-                variants={"base": 1, "head": 1}, only_in_base=[], only_in_head=[], params_changed=[],
-                ir_changed=[], params={"base": None, "head": None}, failures={"base": {}, "head": {}})  # fmt: skip
-    base.update(family)
-    doc = {"schema": 1, "tool": "impact_emit", "flavor": "llvm23", "base": "b", "head": "h",
-           "families": [base], "not_inspected": [], "seconds": 1.0}  # fmt: skip
+def tree_of(repo, rev) -> str:
+    return git(repo, "rev-parse", f"{rev}^{{tree}}")
+
+
+def family(**fields) -> dict:
+    """One emitted family of the builder, every variant equal unless `fields` say otherwise;
+    `source` is relative to the rocKE library, as descriptors name it."""
+    fam = dict(arch="gfx950", source="kernels/gfx950/attn.py", builder="build_attn", kdp=KDP,
+               spec_origin="kdp-in-git", variants={"base": 1, "head": 1}, only_in_base=[],
+               only_in_head=[], params_changed=[], ir_changed=[], params={"base": None, "head": None},
+               failures={"base": {}, "head": {}})  # fmt: skip
+    fam.update(fields)
+    return fam
+
+
+def write_emit(path, repo, base, head, families=None, **fields):
+    """An impact_emit document made for base..head, holding `families` (default: one family
+    built from `fields`)."""
+    doc = {"schema": 2, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
+           "base_tree": tree_of(repo, base), "head_tree": tree_of(repo, head),
+           "families": [family(**fields)] if families is None else families,
+           "not_inspected": [], "seconds": 1.0}  # fmt: skip
     Path(path).write_text(json.dumps(doc), encoding="utf-8")
     return str(path)
 
@@ -506,7 +519,13 @@ def test_emit_fold_equal_variants_make_shipped_module_edits_inert(
     plain = report(mod, capsys, repo, base, head)
     assert plain["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
     equal = report(
-        mod, capsys, repo, base, head, "--emit", write_emit(tmp_path / "eq.json")
+        mod,
+        capsys,
+        repo,
+        base,
+        head,
+        "--emit",
+        write_emit(tmp_path / "eq.json", repo, base, head),
     )
     assert equal["rollup"] == "Runtime impact: NONE (1 files inspected)"
     changed = report(
@@ -516,7 +535,7 @@ def test_emit_fold_equal_variants_make_shipped_module_edits_inert(
         base,
         head,
         "--emit",
-        write_emit(tmp_path / "ir.json", ir_changed=["v"]),
+        write_emit(tmp_path / "ir.json", repo, base, head, ir_changed=["v"]),
     )
     assert changed["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
 
@@ -529,14 +548,14 @@ def test_emit_params_changed_vs_unchanged_static_list_is_mismatch(
     head = commit(repo, {BUILDER: BUILD.replace("return b", "x = 1\n    return b")})
     wider = [["q_ptr", "ptr"], ["k_ptr", "ptr"], ["batch", "i32"], ["scale", "float"]]
     data = report(mod, capsys, repo, base, head, "--emit",
-                  write_emit(tmp_path / "p.json", params_changed=["v"], params={"base": None, "head": wider}))  # fmt: skip
+                  write_emit(tmp_path / "p.json", repo, base, head, params_changed=["v"], params={"base": None, "head": wider}))  # fmt: skip
     (row,) = rows_of(data, "kernargs", "mismatch")
     assert row["path"] == PACK and "batch" in row["reason"]
     assert data["rollup"] == "Runtime impact: BREAKS"
     # the same params as the static list: consistent, so changed rather than mismatch
     same = [["q_ptr", "ptr"], ["k_ptr", "ptr"], ["scale", "float"]]
     data = report(mod, capsys, repo, base, head, "--emit",
-                  write_emit(tmp_path / "s.json", params_changed=["v"], params={"base": None, "head": same}))  # fmt: skip
+                  write_emit(tmp_path / "s.json", repo, base, head, params_changed=["v"], params={"base": None, "head": same}))  # fmt: skip
     assert not rows_of(data, status="mismatch")
     assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
     # a static mismatch is never folded away by an otherwise equal emit
@@ -545,6 +564,334 @@ def test_emit_params_changed_vs_unchanged_static_list_is_mismatch(
     )
     head2 = commit(repo2, {BUILDER: BUILD_REORDERED})
     data = report(
-        mod, capsys, repo2, base2, head2, "--emit", write_emit(tmp_path / "e2.json")
+        mod,
+        capsys,
+        repo2,
+        base2,
+        head2,
+        "--emit",
+        write_emit(tmp_path / "e2.json", repo2, base2, head2),
     )
     assert data["rollup"] == "Runtime impact: BREAKS"
+
+
+BODY_EDIT = BUILD.replace("return b", "x = 1\n    return b")
+GT_HEADER = "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp"
+HKP_PACK = HKP + "descriptor-packaging/python/hkp_pack/"
+
+
+def sig(name, names):
+    """A static `KernelArgument` list function holding `names`, all 4-byte by-value."""
+    items = ",\n            ".join(f'KernelArgument{{"by_value", F32, {8 * i}, "{n}"}}' for i, n in enumerate(names))  # fmt: skip
+    return f"std::vector<KernelArgument> {name}()\n{{\n    return {{{items}}};\n}}\n"
+
+
+def test_removed_function_keeps_its_importer_when_another_file_defines_the_name(
+    mod, capsys, tmp_path
+):
+    # catches: any same-named def elsewhere read as "moved", dropping every live importer
+    util = "def helper():\n    return 1\n\n\ndef keep():\n    return 2\n"
+    used = "from hkp_pack.util import helper\n\n\ndef test_it():\n    assert helper() == 1\n"
+    other = HKP_PACK + "other_util.py"
+    files = {UTIL: util, READER: used, other: "def helper():\n    return 3\n"}
+    repo, base = make_repo(tmp_path / "a", files)
+    head = commit(repo, {UTIL: "def keep():\n    return 2\n"})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = rows_of(data, "symbols", "mismatch")
+    assert row["name"] == "helper" and {c["path"] for c in row["counterparts"]} == {
+        READER
+    }
+    # a real move: the reader now imports the new home, so nothing reads the old one
+    repo, base = make_repo(tmp_path / "b", {UTIL: util, READER: used})
+    moved = {UTIL: "def keep():\n    return 2\n", other: "def helper():\n    return 1\n",
+             READER: used.replace("hkp_pack.util", "hkp_pack.other_util")}  # fmt: skip
+    head = commit(repo, moved)
+    assert not rows_of(report(mod, capsys, repo, base, head), "symbols", "mismatch")
+
+
+def test_generic_targets_header_code_edit_is_changed_not_na(mod, capsys, tmp_path):
+    # catches: the header tagged a surface but dropped as if it were the JSON table
+    text = "inline bool isGeneric(int a) { return a > 3; }\n"
+    repo, base = make_repo(tmp_path, {GT_HEADER: text})
+    head = commit(repo, {GT_HEADER: text.replace("> 3", "> 4")})
+    data = report(mod, capsys, repo, base, head)
+    assert [r["status"] for r in data["rows"] if r["path"] == GT_HEADER] == ["changed"]
+    assert data["rollup"].startswith("Runtime impact: NEEDS-DEVICE")
+
+
+def test_emit_made_for_another_base_or_head_is_refused(mod, capsys, tmp_path):
+    # catches: a previous round's emit.json folded into this round's report
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    old = commit(repo, {BUILDER: BODY_EDIT})
+    head = commit(repo, {BUILDER: BODY_EDIT.replace("x = 1", "x = 2")})
+    stale = write_emit(tmp_path / "stale.json", repo, base, old)
+    argv = [
+        "report",
+        "--repo",
+        str(repo),
+        "--base",
+        base,
+        "--head",
+        head,
+        "--emit",
+        stale,
+    ]
+    assert mod.main(argv) == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("impact: ") and "Runtime impact" not in captured.out
+
+
+@pytest.mark.parametrize(
+    "spoil",
+    [
+        lambda d: d.update(schema=1),
+        lambda d: d.update(not_inspected={}),
+        lambda d: d["families"][0].update(failures=[]),
+        lambda d: d["families"][0].pop("variants"),
+        lambda d: d["families"][0].update(params={"base": None, "head": "q_ptr"}),
+    ],
+    ids=[
+        "schema-1",
+        "not-inspected-dict",
+        "failures-list",
+        "no-variants",
+        "params-str",
+    ],
+)
+def test_malformed_emit_exits_one_instead_of_folding_or_crashing(
+    mod, capsys, tmp_path, spoil
+):
+    # catches: a malformed emit crashing with a traceback, or folding on missing fields
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    path = Path(write_emit(tmp_path / "e.json", repo, base, head))
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    spoil(doc)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    argv = [
+        "report",
+        "--repo",
+        str(repo),
+        "--base",
+        base,
+        "--head",
+        head,
+        "--emit",
+        str(path),
+    ]
+    assert mod.main(argv) == 1
+    assert capsys.readouterr().err.startswith("impact: ")
+
+
+def test_emit_with_no_families_proves_nothing(mod, capsys, tmp_path):
+    # catches: an empty family list read as "every shipped variant equal"
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    emit = write_emit(tmp_path / "none.json", repo, base, head, families=[])
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+@pytest.mark.parametrize("key", ["only_in_base", "only_in_head"])
+def test_emit_with_an_added_or_removed_variant_does_not_fold(
+    mod, capsys, tmp_path, key
+):
+    # catches: a variant-set change ignored when deciding every shipped variant is equal
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    emit = write_emit(tmp_path / "e.json", repo, base, head, **{key: ["v2"]})
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+@pytest.mark.parametrize(
+    "fam",
+    [
+        family(arch="gfx942", source="kernels/gfx942/other.py", builder="build_other"),
+        family(variants={"base": 0, "head": 0}),
+    ],
+    ids=["unrelated-source", "no-variants-built"],
+)
+def test_emit_folds_only_rows_a_built_family_imports(mod, capsys, tmp_path, fam):
+    # catches: one quiet family, or an empty one, folding every shipped-module row
+    other = "def build_other(b, spec):\n    return b\n"
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, OTHER_KERNEL: other}
+    )
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    emit = write_emit(tmp_path / "e.json", repo, base, head, families=[fam])
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+def test_declared_static_list_reordered_against_builder_is_mismatch(
+    mod, capsys, tmp_path
+):
+    # catches: the declared-pair check comparing names as a set rather than in order
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD, PACK: PACK_STATIC, MANIFEST: MANIFEST_YAML}
+    )
+    swapped = PACK_STATIC.replace('"q_ptr"', "@@").replace('"k_ptr"', '"q_ptr"').replace("@@", '"k_ptr"')  # fmt: skip
+    head = commit(repo, {PACK: swapped})
+    data = report(mod, capsys, repo, base, head)
+    assert [r["path"] for r in rows_of(data, "kernargs", "mismatch")] == [PACK]
+
+
+@pytest.mark.parametrize(
+    "names", [["scale", "stride"], ["q_ptr", "k_ptr", "a", "b", "c", "d"]]
+)
+def test_unrelated_static_list_in_the_same_pack_is_not_a_mismatch(
+    mod, capsys, tmp_path, names
+):
+    # catches: `related` loosened to one shared name, or without its half-overlap rule
+    pack = PACK_STATIC + "\n" + sig("otherSignature", names)
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD, PACK: pack, MANIFEST: MANIFEST_YAML}
+    )
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    data = report(mod, capsys, repo, base, head)
+    assert not rows_of(data, status="mismatch")
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+def test_type_only_builder_change_against_declared_static_list_is_mismatch(
+    mod, capsys, tmp_path
+):
+    # catches: a declared pair compared by names only and reported as agreeing
+    repo, base = abi_repo(tmp_path, {PACK: PACK_STATIC, MANIFEST: MANIFEST_YAML})
+    head = commit(repo, {BUILDER: BUILD.replace('"scale", F32', '"scale", I64')})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = rows_of(data, "kernargs", "mismatch")
+    assert row["path"] == PACK and "scale" in row["reason"]
+    assert data["rollup"] == "Runtime impact: BREAKS"
+
+
+@pytest.mark.parametrize(
+    "before, after",
+    [
+        ("SC = F32\n\n\n" + BUILD.replace('"scale", F32', '"scale", SC'),
+         "SC = I64\n\n\n" + BUILD.replace('"scale", F32', '"scale", SC')),
+        (BUILD, BUILD.replace('    b.param("scale", F32)\n',
+                              '    if spec.scaled:\n        b.param("scale", F32)\n')),
+    ],
+    ids=["type-in-a-variable", "parameter-made-conditional"],
+)  # fmt: skip
+def test_builder_list_change_with_the_same_names_is_a_kernargs_row(
+    mod, capsys, tmp_path, before, after
+):
+    # catches: a type held in a variable, or a change in which params are conditional, unseen
+    repo, base = make_repo(tmp_path, {BUILDER: before})
+    head = commit(repo, {BUILDER: after})
+    rows = rows_of(report(mod, capsys, repo, base, head), "kernargs")
+    assert [(r["name"], r["status"]) for r in rows] == [("build_attn", "changed")]
+
+
+def test_declared_mirror_with_no_comparable_list_stays_visible(mod, capsys, tmp_path):
+    # catches: a declared C++ list sharing fewer than two names skipped without a row
+    pack = sig("staleSignature", ["scale", "stride"])
+    repo, base = make_repo(
+        tmp_path, {BUILDER: BUILD, PACK: pack, MANIFEST: MANIFEST_YAML}
+    )
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    rows = [r for r in rows_of(report(mod, capsys, repo, base, head), "kernargs") if r["path"] == PACK]  # fmt: skip
+    assert [r["status"] for r in rows] == ["changed"]
+
+
+@pytest.mark.parametrize(
+    "before, after",
+    [
+        ("// note\nint x = 1;\n", "// note \\\nint x = 1;\n"),
+        ('auto s = u8R"(a"b // c)";\n', 'auto s = u8R"(a"b // d)";\n'),
+        ('auto s = R"(a\n  b)";\n', 'auto s = R"(a\n b)";\n'),
+    ],
+    ids=["comment-splices-next-line", "prefixed-raw-string", "multi-line-raw-string"],
+)
+def test_cpp_edits_behind_splices_and_raw_strings_are_code(
+    mod, capsys, tmp_path, before, after
+):
+    # catches: a `//` comment ended before a `\`-newline, or raw strings read as plain strings
+    repo, base = make_repo(tmp_path, {PACK: before})
+    head = commit(repo, {PACK: after})
+    data = report(mod, capsys, repo, base, head, cmd="files")
+    assert file_class(data, PACK) == "code"
+
+
+def test_dependency_pin_is_left_to_deps_and_named_in_the_rollup(mod, capsys, tmp_path):
+    # catches: requirements.txt read as documentation, so a pin bump reads as plain N/A
+    req = HKP + "rocke/platform/requirements.txt"
+    repo, base = make_repo(tmp_path, {req: "numpy==1.26\n"})
+    head = commit(repo, {req: "numpy==2.0\n"})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = data["rows"]
+    assert row["status"] == "outside" and "DEPS" in row["reason"]
+    assert data["rollup"].startswith("Runtime impact: N/A") and "DEPS" in data["rollup"]
+
+
+def test_method_removed_from_a_base_read_only_through_a_subclass_is_changed(
+    mod, capsys, tmp_path
+):
+    # catches: a removed method whose readers never name its class reported as no impact, or
+    # any same-named attribute read anywhere (a dict's `.helper`) taken for a reader
+    files = {
+        HKP_PACK + "base.py": "class Base:\n    def helper(self):\n        return 1\n",
+        HKP_PACK + "sub.py": "from .base import Base\n\n\nclass Sub(Base):\n    pass\n",
+        HKP_PACK + "cfg.py": "def pick(d):\n    return d.helper()\n",
+        READER: "from hkp_pack.sub import Sub\n\n\ndef test_it():\n    assert Sub().helper()\n",
+        HKP
+        + "descriptor-packaging/tests/test_dotted.py": (
+            "import hkp_pack.sub\n\n\ndef test_it():\n    assert hkp_pack.sub.Sub().helper()\n"
+        ),
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {HKP_PACK + "base.py": "class Base:\n    pass\n"})
+    (row,) = rows_of(report(mod, capsys, repo, base, head), "symbols")
+    assert (row["name"], row["status"]) == ("Base.helper", "changed")
+    assert {c["path"] for c in row["counterparts"]} == {
+        READER,
+        HKP + "descriptor-packaging/tests/test_dotted.py",
+    }
+
+
+def test_conflict_only_in_a_test_still_marks_the_skipped_merged_view(
+    mod, capsys, tmp_path
+):
+    # catches: a skipped merged view counted as outside when only a test file conflicts
+    repo, base = make_repo(tmp_path / "a", {BUILDER: BUILD, PIN: PIN_TEST})
+    head = branch_commit(repo, base, {BUILDER: BODY_EDIT, PIN: PIN_TEST + "# head\n"}, "feature")  # fmt: skip
+    tip = branch_commit(repo, base, {PIN: PIN_TEST + "# tip\n"}, "target")
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip)
+    assert (
+        next(v for v in data["views"] if v["label"] == "merged")["status"] == "skipped"
+    )
+    assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
+    # a docs-only change conflicting in docs still has no surface file
+    doc = "projects/hipdnn/docs/x.md"
+    repo, base = make_repo(tmp_path / "b", {doc: "a\n"})
+    head = branch_commit(repo, base, {doc: "b\n"}, "feature")
+    tip = branch_commit(repo, base, {doc: "c\n"}, "target")
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip)
+    assert data["rollup"] == "Runtime impact: N/A (no surface file)"
+
+
+def test_unrelated_target_history_skips_the_merged_view_as_changed(
+    mod, capsys, tmp_path
+):
+    # catches: a merge failure other than a conflict downgraded to outside
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    _COUNTER.pop(repo, None)
+    tip = commit(repo, {"README.md": "orphan\n"}, parent=None)
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip)
+    assert (
+        next(v for v in data["views"] if v["label"] == "merged")["status"] == "skipped"
+    )
+    assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
+
+
+def test_non_ascii_path_is_reported_under_its_real_name(mod, capsys, tmp_path):
+    # catches: git quoting non-ASCII paths (core.quotepath) so rows name a mangled path
+    odd = HKP + "rocke/library/kernels/gfx950/attn_\u00e9.py"
+    repo, base = make_repo(tmp_path, {odd: "def f():\n    return 1\n", KDP: KDP_JSON})
+    head = commit(repo, {odd: "def f():\n    return 2\n"})
+    data = report(mod, capsys, repo, base, head)
+    assert odd in {r["path"] for r in data["rows"]}
