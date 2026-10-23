@@ -10,6 +10,7 @@
 #include <optional>
 #include <roc/hostnumerics/expected.hpp>
 #include <span>
+#include <string>
 
 namespace roc::hostnumerics::detail {
 enum class LayoutError {
@@ -28,18 +29,26 @@ struct LayoutFailure {
     size_t dimension = 0;
     size_t value = 0;
     size_t limit = 0;
+
+    // Formatting a diagnostic can allocate, so this operation can throw.
+    std::string message() const;
 };
 
 inline std::optional<ptrdiff_t> getOffsetMultiply(size_t value, ptrdiff_t factor) noexcept {
     if (value == 0 || factor == 0) return 0;
     const bool negative = factor < 0;
+    // -(factor + 1) is representable even for PTRDIFF_MIN. Add the missing one
+    // after converting to unsigned, where the full magnitude is representable.
     const uintmax_t magnitude =
         negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
+    // A negative result can have magnitude PTRDIFF_MAX + 1 (PTRDIFF_MIN).
     const uintmax_t limit = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) +
                             static_cast<uintmax_t>(negative);
+    // Test against the bound before multiplying, so the product cannot wrap.
     if (static_cast<uintmax_t>(value) > limit / magnitude) return std::nullopt;
     const uintmax_t product = static_cast<uintmax_t>(value) * magnitude;
     if (!negative) return static_cast<ptrdiff_t>(product);
+    // This magnitude has no positive ptrdiff_t representation to negate.
     if (product == limit) return std::numeric_limits<ptrdiff_t>::min();
     return -static_cast<ptrdiff_t>(product);
 }
