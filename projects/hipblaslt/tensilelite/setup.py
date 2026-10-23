@@ -64,14 +64,5 @@ class StampedSdist(sdist):
 
 setup(
     version=_metadata["distribution_version"]("5.0.0", _REVISION),
-    install_requires=[
-        "packaging",
-        "pyyaml",
-        "msgpack",
-        "joblib>=1.4.0",
-        "filelock",
-        "numpy",
-        "pandas",
-    ],
     cmdclass={"build_py": CleanBuildPy, "sdist": StampedSdist},
 )
