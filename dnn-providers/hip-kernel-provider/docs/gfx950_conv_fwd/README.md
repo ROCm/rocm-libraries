@@ -59,9 +59,9 @@ Shape-generic AOT instances, each one rocKE `KernelIdentity` built once against
 the AOT sweep's probe problem rather than a catalog shape, ship as a separate
 engine, `hipkernel:Gfx950ConvFwdAot`; see [AOT instances](aot_instances.md). Its
 catalog is a curated list of rocKE sweep kernels
-(`IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`): 366 implicit-GEMM and
-202 direct instances per dtype, in descriptor shards by dtype, pipeline and K loop. Which instances serve a given
-problem is decided at runtime. A test-only engine over a small seed of them,
+(`IngestorGenerator/configs/gfx950_conv_fwd_aot.labels.txt`): 239 implicit-GEMM and
+204 direct instances per dtype, in descriptor shards by dtype, pipeline and K loop.
+Which instances serve a given problem is decided at runtime. A test-only engine over a small seed of them,
 `hipkernel:Gfx950ConvFwdAotSeed`, is what the GPU suite pins instance by instance.
 
 [Verification and coverage](coverage.md) records what the shipped catalog is
@@ -100,9 +100,9 @@ cmake --install "$CONV_BUILD"
 ```
 
 Select the LLVM flavor matching the installed compiler; the example uses
-LLVM 22. The production pack compiles the full AOT catalog, over 168,000
-kernels; `-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=<n>` sets its worker count (empty,
-the default, sizes the pool to the machine). See
+LLVM 22. The production pack compiles the full AOT catalog, 886 kernels; the
+`HKP_PACK_JOBS` environment variable sets its worker count (unset, the packer sizes the
+pool to the machine). See
 [AOT instances](aot_instances.md#build-and-package-cost) for the sizes and times. Keep the same flavor and comgr library for direct comparisons.
 Producer selection is per descriptor `kernel_source.kind`, so no
 producer-specific packaging flag is needed.

@@ -397,7 +397,7 @@ The product pack compiles every instance, 886 variants for this engine.
 The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
 other product bundles), on one host with 96 pack workers
-(`-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=96`). They have not been re-measured for this
+(`HKP_PACK_JOBS=96`). They have not been re-measured for this
 catalog, which is more than a hundred times smaller:
 
 | Build output (earlier catalog) | Size |
@@ -409,9 +409,8 @@ catalog, which is more than a hundred times smaller:
 Packing all product bundles took about 7 minutes with a warm comgr cache and about
 23 minutes with an empty one; the comgr cache grew to about 14 GB. The packer holds
 every code object in memory before it writes the archive, so it peaked at about 16 GB
-of resident memory. `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS` sets the worker count of the
-production pack alone (empty, the default, lets the packer size its pool to the
-machine). The test roots keep their own small, fixed pools. The census compiles in
+of resident memory. `HKP_PACK_JOBS` sets the worker count of a pack (unset, the packer sizes its pool to the
+machine). The CMake test roots keep their own small, fixed pools. The census compiles in
 seconds, because it builds its name sets from constant arrays.
 
 Size limits the catalog stays within:
