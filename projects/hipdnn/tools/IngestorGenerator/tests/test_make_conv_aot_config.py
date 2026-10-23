@@ -110,11 +110,17 @@ def test_seed_config_is_what_the_tool_generates(seed_specs):
     )
 
 
+def _kdp_dir(folder):
+    """Where a bundle keeps its KDP shards: `artifacts/` when it has one (the DVC-tracked
+    layout of the shipped root), else the descriptor folder itself."""
+    return folder / "artifacts" if (folder / "artifacts").is_dir() else folder
+
+
 def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
     shipped = {}
-    for kdp in sorted(folder.glob("*.kdp.json")):
+    for kdp in sorted(_kdp_dir(folder).glob("*.kdp.json")):
         document = json.loads(kdp.read_text())
         shard = kdp.name[: -len(".kdp.json")][len(slug) + 1 :]
         assert document["name"] == f"hipkernel:{slug}_{shard}"
@@ -134,23 +140,28 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    # heuristics/ holds the UHD pipeline's trained ranking models, not descriptors.
+    # heuristics/ holds the UHD pipeline's trained ranking models and artifacts/ the KDP
+    # shards; neither is a descriptor of the folder itself.
     names = sorted(
         path.name
         for path in folder.iterdir()
-        if not (path.is_dir() and path.name == "heuristics")
+        if not (path.is_dir() and path.name in ("heuristics", "artifacts"))
     )
     shards = {tool.shard_name(spec, sharding) for spec in specs}
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
-        + [f"{slug}_{shard}.kdp.json" for shard in shards]
+        + [f"{slug}_{shard}.kdp.json" for shard in shards if _kdp_dir(folder) == folder]
         + ["kernel_dtype_matches_graph.umd.json"]
     )
+    assert sorted(p.name for p in _kdp_dir(folder).glob("*.kdp.json")) == sorted(
+        f"{slug}_{shard}.kdp.json" for shard in shards
+    )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
-    for path in folder.iterdir():
-        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
+    for path in [*folder.iterdir(), *_kdp_dir(folder).iterdir()]:
+        if path.is_file():
+            assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
     # No operation-scoped matcher: every shard names the shared kernel matcher only.
-    for kdp in folder.glob("*.kdp.json"):
+    for kdp in _kdp_dir(folder).glob("*.kdp.json"):
         assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
 
 

@@ -489,7 +489,7 @@ def test_existing_implicit_gemm_symbols_are_unchanged(overrides, tile_k, symbol)
 _KDP_PATH = (
     Path(__file__).resolve().parents[3]
     / "src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd"
-    / "gfx950_conv_fwd.kdp.json"
+    / "artifacts/gfx950_conv_fwd.kdp.json"
 )
 _FAMILY_FIELDS = ("kernel_family", "direct_variant", "block_w", "block_waves")
 
