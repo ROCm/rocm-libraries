@@ -28,6 +28,7 @@ BROAD_TRIGGER_PARTS = (
     "conftest.py",
     "__snapshots__",
     "pyproject.toml",
+    "uv.lock",
     "tox.ini",
     "setup.py",
     "requirements",
