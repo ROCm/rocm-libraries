@@ -35,6 +35,7 @@ from ..ir import I32, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
 from .matrix_call_lowering import emit_matrix_call
 from .matrix_calls import MATRIX_CALLS
+from .matrix_operand_forms import f8f6f4_operand_form
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -151,7 +152,7 @@ class ISABackend:
             lowerer._emit_gfx950_scaled_mfma(op)
             return
         if gfx1250_scaled_wmma(op_id) is not None:
-            self.emit_scaled_wmma(lowerer, op)
+            self.emit_scaled_wmma(lowerer, named)
             return
         self._emit_named_mma(lowerer, named)
 
@@ -239,13 +240,18 @@ class ISABackend:
         )
 
     def emit_scaled_wmma(self, lowerer, op) -> None:
-        """Emit a SCALE/SCALE16 WMMA call for a ``tile.mma`` op.
+        """Emit a SCALE/SCALE16 WMMA call for an MMA op named ``tile.<op_id>``.
 
         The op lowers on any target whose MMA catalog lists its atom and is
         refused on every other target -- the rule the C++ engine applies too.
-        The intrinsic comes from the resolved operand contract.
+        The intrinsic comes from the resolved operand contract. A and B each
+        reach their ``<16 x i32>`` register through the f8f6f4 form of their own
+        matrix format (:func:`~rocke.core.isa.matrix_operand_forms.f8f6f4_operand_form`):
+        the register words pass unchanged, 64 logical fp8 / bf8 values with one
+        ``bitcast``, and the packed words of 64 fp6 / bf6 / fp4 values are
+        zero-padded.
         """
-        spec = gfx1250_scaled_wmma(op.attrs["op_id"])
+        spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         name = f"tile.{spec.op_id}"
@@ -262,17 +268,20 @@ class ISABackend:
         intrinsic = signature.intrinsic
         scale_ty = signature.scale_type
         fmt0, fmt1 = spec.matrix_formats
-        a, b, c, a_scale, b_scale = op.operands
+        _, _, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
                 f"{name} expects {scale_ty} scale operands, got "
                 f"{a_scale.type.name}/{b_scale.type.name}"
             )
+        register_a, register_b = signature.matrix_registers
+        a = f8f6f4_operand_form(spec.atom.a_dtype, register_a).operand(lowerer, op, "a")
+        b = f8f6f4_operand_form(spec.atom.b_dtype, register_b).operand(lowerer, op, "b")
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
-            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
+            f"i32 {fmt0}, {signature.matrix_types[0]} {a}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {b}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
             f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
