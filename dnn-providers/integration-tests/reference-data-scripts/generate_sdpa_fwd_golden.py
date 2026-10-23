@@ -76,7 +76,10 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
 #         "float"); it is the MMA operand precision, and a float request on
 #         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
-GENERATOR_VERSION = "1.4.0"
+# 1.5.0 — --window-left is cuDNN's left_bound: it keeps that many keys including the
+#         diagonal (SdpaSemanticsRegister SEM-001); 0 is rejected. Windowed bundles from
+#         earlier versions keep one more key and must be regenerated
+GENERATOR_VERSION = "1.5.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -216,8 +219,9 @@ def build_mask(s_q, s_kv, causal, window_left, window_right):
     right_bound = window_right if window_right >= 0 else (0 if has_causal else -1)
 
     mask = torch.ones(s_q, s_kv, dtype=torch.bool)
+    # cuDNN's band: left_bound = L keeps L keys up to and including the diagonal.
     if left_bound >= 0:
-        mask &= (row + offset - col) <= left_bound
+        mask &= (row + offset - col) < left_bound
     if right_bound >= 0:
         mask &= (col - (row + offset)) <= right_bound
     return mask
@@ -641,7 +645,8 @@ def validate_against_aiter(
             dropout_p=0.0,
             softmax_scale=scale,
             is_causal=causal,
-            window_size_left=window_left,
+            # AITER/FA count the keys left of the diagonal: window_size_left = L - 1.
+            window_size_left=window_left - 1 if window_left > 0 else window_left,
             window_size_right=window_right,
             return_softmax_lse=stats,
             return_dropout_randval=False,
@@ -1084,7 +1089,8 @@ def main():
         "--window-left",
         type=int,
         default=-1,
-        help="Sliding window left bound, -1 = unbounded (default: -1)",
+        help="Sliding window left bound (cuDNN left_bound: keeps this many keys including "
+        "the diagonal; must be positive), -1 = unbounded (default: -1)",
     )
     parser.add_argument(
         "--window-right",
@@ -1149,6 +1155,8 @@ def main():
         help=f"Install aiter v{AITER_VERSION} wheel for the detected ROCm version",
     )
     args = parser.parse_args()
+    if args.window_left == 0:
+        parser.error("--window-left 0 keeps no keys (cuDNN rejects left_bound = 0)")
 
     if args.install_aiter:
         install_aiter()

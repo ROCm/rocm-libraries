@@ -94,6 +94,12 @@ class TestGenerateSdpaFwdGoldenMask(unittest.TestCase):
             ],
         )
 
+    def test_left_bound_keeps_that_many_keys_including_diagonal(self):
+        # cuDNN: left_bound = 2 keeps the diagonal and one key before it (query 5 -> keys 4, 5).
+        mask = self.gen.build_mask(6, 6, "top_left", 2, -1)
+        self.assertEqual([j for j in range(6) if mask[5][j]], [4, 5])
+        self.assertEqual([j for j in range(6) if mask[0][j]], [0])
+
     def test_bottom_right_causal_shifts_diagonal(self):
         mask = self.gen.build_mask(2, 4, "bottom_right", -1, -1)
         self.assertEqual(

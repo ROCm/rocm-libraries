@@ -20,25 +20,27 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-001: Meaning of `left_bound`
 
-- **Status:** Diverges.
+- **Status:** Matches cuDNN (fixed after a team decision; it used to keep one key too many).
 - **cuDNN:** `left_bound = L` keeps `j > i + off - L`, so each row sees **L** keys including the diagonal.
-  `set_sliding_window_length(L)` is the same field.
+  `set_sliding_window_length(L)` is the same field. `left_bound = 0` would keep no keys and is rejected.
   - Sources: cudnn-frontend `include/cudnn_frontend/utils/attn_score_modifiers.h:207-247` (retain
     `col + L > row`), `test/python/sdpa/fp16_ref.py:132-147`.
-- **hipDNN today:** keeps `j >= i + off - L`, which is **L + 1** keys.
-  - The CPU reference (`CpuFpReferenceSdpa.hpp` `isMasked`), the GPU reference (`GpuRefSdpaFwd.cpp`) and the
-    golden generator (`generate_sdpa_fwd_golden.py` `build_mask`) all use it.
-  - So do the hip-kernel-provider window mapping (`asm_sdpa_engine/plans/SdpaPlanUtils.hpp`) and rocKE
-    (`rocke/helpers/attention_band.py`).
-  - The convention is consistent inside hipDNN, so no test catches it. A cuDNN-shim user gets one extra key.
+- **hipDNN:** the same. `left_bound` must be positive or -1 (unbounded); the frontend nodes, the CPU/GPU graph
+  plans and the hip-kernel-provider band resolution reject 0 and values below -1.
+  - References: `CpuFpReferenceSdpa.hpp` / `CpuFpReferenceSdpaRagged.hpp` `isMasked`, `GpuRefSdpa{Fwd,RaggedFwd,Bwd}.cpp`,
+    golden generator `build_mask` (its `--window-left` is the graph's `left_bound`).
+  - Kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at the
+    boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
+    and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
+    `window_left`. The gfx950 dense pack declines windows.
+  - Before the fix every hipDNN component used `j >= i + off - L` (L + 1 keys). It was internally consistent, so no
+    test caught it: see `~/attn-ref-gaps/left-bound-divergence.md`.
 - **Other use cases:**
-  - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`, the current
-    hipDNN meaning.
+  - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.
+  - rocKE's own oracle and kernels use the FlashAttention convention; a rocKE kernel served through hipDNN gets
+    `L - 1` from the provider.
 - **Contract:** cuDNN's meaning.
-- **Fix needs a coordinated change** across the references, golden data and every provider window mapping.
-- **Deferred** pending a team decision. Until then, references and tests keep the current hipDNN meaning, and no
-  window tests are added that assume either convention.
 
 ### SEM-002: Deprecated `causal_mask` / `causal_mask_bottom_right` combined with explicit bounds
 

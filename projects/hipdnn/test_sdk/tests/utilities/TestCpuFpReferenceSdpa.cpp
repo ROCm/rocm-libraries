@@ -559,9 +559,36 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, LeftBoundCountsTheDiagonalKey)
+{
+    // cuDNN's left_bound = L keeps L keys up to and including the diagonal (SEM-001):
+    // L = 1 is diagonal only, L = 2 adds one key before it. Q=K=0, so O is the mean of kept V.
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 4, 1});
+    Tensor<double> v({1, 1, 4, 1});
+    Tensor<double> o({1, 1, 4, 1});
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        v.setHostValue(static_cast<double>(i + 1), 0, 0, i, 0);
+    }
+    const TensorBase<float>* noMask = nullptr;
+
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, 1, 0, true);
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        EXPECT_NEAR(o.getHostValue(0, 0, i, 0), static_cast<double>(i + 1), 1e-12) << "row " << i;
+    }
+
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, 2, 0, true);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-12);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0) / 2.0, 1e-12);
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 {
-    // Generic sliding window with leftBound=1, rightBound=1 (TopLeft alignment).
+    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
     // Square shape Sq=Skv=4. Window is centered at sq, width 3.
     // Q=K=0 → all unmasked scores equal → softmax is uniform over the window.
     // V = {1, 2, 3, 4} → output is the mean of unmasked V values.
@@ -593,7 +620,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -605,7 +632,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (TopLeft alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
     //
     // Expected mask (1=unmasked):
@@ -636,7 +663,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -648,10 +675,10 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (BottomRight alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
     // diagonal offset = Skv - Sq = 1.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq - 1)                  <= skv <= (sq + 2)
     //
     // Expected mask (1=unmasked):
@@ -682,7 +709,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -694,9 +721,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq + 1)                  <= skv <= (sq + 3)
     //
     // Expected mask (1=unmasked):
@@ -724,7 +751,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -734,9 +761,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
-    // Unmasked iff (sq - 2 - 1) <= skv <= (sq - 2 + 1)
+    // Unmasked iff (sq - 2 - 2) < skv <= (sq - 2 + 1)
     //         iff (sq - 3)      <= skv <= (sq - 1)
     //
     // Expected mask (1=unmasked):
@@ -764,7 +791,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 

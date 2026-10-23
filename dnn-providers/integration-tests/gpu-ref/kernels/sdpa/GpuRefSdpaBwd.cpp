@@ -46,7 +46,7 @@ __device__ inline bool isMaskedBand(
     {
         return true;
     }
-    return a.leftBound >= 0 && skv < sq + offset - a.leftBound;
+    return a.leftBound >= 0 && skv <= sq + offset - a.leftBound;
 }
 
 __device__ inline long long rowIndex(const SdpaBwdArgs& a, long long b, long long h, long long sq)

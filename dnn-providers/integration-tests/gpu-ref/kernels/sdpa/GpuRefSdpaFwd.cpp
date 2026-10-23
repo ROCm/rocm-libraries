@@ -181,7 +181,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         }
         if(args.leftBound >= 0)
         {
-            if(skv < sq + windowOffset - args.leftBound)
+            if(skv <= sq + windowOffset - args.leftBound)
             {
                 s = negInf;
             }

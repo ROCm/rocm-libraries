@@ -1255,6 +1255,8 @@ private:
 
     /// Returns true if position (sq, skv) should be masked given the window bounds.
     /// leftBound = -1 means no left mask; rightBound = -1 means no right mask.
+    /// cuDNN's band: leftBound = L keeps L keys up to and including the diagonal
+    /// (skv > sq + offset - L); rightBound = R keeps R keys past it (SdpaSemanticsRegister SEM-001).
     /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at
     /// skv==sq+(seqKv-seqQ).
     static bool isMasked(int64_t sq,
@@ -1270,7 +1272,7 @@ private:
         {
             return true;
         }
-        if(leftBound >= 0 && skv < sq + offset - leftBound)
+        if(leftBound >= 0 && skv <= sq + offset - leftBound)
         {
             return true;
         }

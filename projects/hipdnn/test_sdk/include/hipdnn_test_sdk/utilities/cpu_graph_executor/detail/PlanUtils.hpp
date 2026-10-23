@@ -44,6 +44,13 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
             std::string(planName) + ": left_bound and right_bound must be >= -1 (got left_bound="
             + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
+    // cuDNN's left_bound counts the diagonal key, so 0 would mask every key (cuDNN rejects it).
+    if(leftBound == 0)
+    {
+        throw std::invalid_argument(std::string(planName)
+                                    + ": left_bound must be positive or -1 (unbounded); 0 keeps "
+                                      "no keys");
+    }
 
     const bool isTopLeft = nodeAttributes.diagonal_alignment()
                            == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;

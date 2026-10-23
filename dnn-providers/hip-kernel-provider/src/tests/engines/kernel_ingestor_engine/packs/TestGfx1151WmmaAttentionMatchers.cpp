@@ -480,16 +480,42 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-// The deprecated causal flags override the bounds and alignment, as in the
-// hipDNN reference; otherwise a left bound would drop the causal limit.
-TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
+// cuDNN's left_bound counts the diagonal key, so 0 keeps no keys and is declined.
+TEST(TestGfx1151WmmaAttentionMatchers, LeftBoundZeroIsDeclined)
+{
+    GraphSpec spec;
+    spec.leftBound = 0;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    spec.leftBound = 1;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+}
+
+// The deprecated causal flags compose with the bounds the way cuDNN's setters do
+// (resolveDiagonalBand, the hipDNN references): right bound 0 unless one is set,
+// bottom-right for causal_mask_bottom_right. window_left is the kernel's count of
+// keys left of the diagonal, so cuDNN's left_bound = 7 becomes 6 (SEM-001).
+TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsComposeWithBounds)
 {
     using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
     for(const bool bottomRight : {false, true})
     {
+        GraphSpec windowed;
+        windowed.causalMask = !bottomRight;
+        windowed.causalMaskBottomRight = bottomRight;
+        windowed.rightBound = -1;
+        const auto window = matchGraph(windowed);
+        ASSERT_TRUE(window.has_value());
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.mask"), 2); // window
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_left"), 6);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_right"), 0);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.bottom_right"),
+                  bottomRight ? 1 : 0);
+
         GraphSpec spec;
         spec.causalMask = !bottomRight;
         spec.causalMaskBottomRight = bottomRight;
+        spec.leftBound = -1;
+        spec.rightBound = -1;
         const auto bound = matchGraph(spec);
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 1); // causal

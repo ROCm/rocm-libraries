@@ -1194,18 +1194,19 @@ TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWin
               .front()
               ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
 
+    // left_bound = 64 (cuDNN: 64 keys including the diagonal) is 63 keys left of it for the kernel.
     const auto band = plan_utils::resolveDiagonalBand(attrs);
-    EXPECT_EQ(band.leftBound, 64);
+    EXPECT_EQ(band.leftBound, 63);
     EXPECT_EQ(band.rightBound, 0);
     EXPECT_EQ(band.alignment, ALIGN_BOTTOM_RIGHT);
 
     constexpr int64_t SEQ_LEN_ABOVE_BOUND = 256;
     const auto windowed
         = plan_utils::makeCoveringBoundsUnbound(band, SEQ_LEN_ABOVE_BOUND, SEQ_LEN_ABOVE_BOUND);
-    EXPECT_EQ(windowed.leftBound, 64);
+    EXPECT_EQ(windowed.leftBound, 63);
     EXPECT_EQ(windowed.rightBound, 0);
 
-    constexpr int64_t SEQ_LEN_COVERED_BY_BOUND = 65;
+    constexpr int64_t SEQ_LEN_COVERED_BY_BOUND = 64;
     const auto covered = plan_utils::makeCoveringBoundsUnbound(
         band, SEQ_LEN_COVERED_BY_BOUND, SEQ_LEN_COVERED_BY_BOUND);
     EXPECT_EQ(covered.leftBound, -1);
