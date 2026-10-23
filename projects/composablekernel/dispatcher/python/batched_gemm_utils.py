@@ -464,7 +464,9 @@ class GpuBatchedGemmRunner:
         # Build (or reuse cached) A/B host buffers in the kernel's element dtype
         # and per-batch layout, paired with the (A, B) shape cache in
         # tile_engine/ops/gemm/run_one_batched_gemm_kernel.py.
-        A_h, B_h = _gu._encode_ab_cached(A, B, dtype, la, lb, self._use_ocp)
+        A_h, B_h = _gu._encode_ab_cached(
+            A, B, dtype, la, lb, self._use_ocp, self._kernel_name
+        )
         out_dtype, c_np = _gu._c_numpy_dtype(dtype)
         # F6: the host C buffer is memcpy'd byte-for-byte to/from the device
         # buffer the kernel writes as CDataType, so the numpy element size MUST

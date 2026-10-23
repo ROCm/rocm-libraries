@@ -1137,22 +1137,15 @@ def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
     return _fp8_decode_table(exp_bits, mant_bits, False)
 
 
-@functools.lru_cache(maxsize=None)
-def _fp8_encode_tables(exp_bits: int, mant_bits: int, use_ocp: bool):
-    """Build cached 64K uint8 lookup tables for fp32 -> 8-bit float encoding.
+def _fp8_encode_ladder(
+    x: np.ndarray, exp_bits: int, mant_bits: int, use_ocp: bool
+) -> np.ndarray:
+    """Reference fp32 -> 8-bit float encoder: float64 nearest-even ladder.
 
-    Every representable fp8/bf8 value and every exact midpoint between adjacent
-    values has all-zero low 16 mantissa bits in IEEE-754 float32 (exp_bits <= 5,
-    mant_bits <= 3, so midpoints use at most 4 mantissa bits out of the 7 kept
-    in the top 16 bits of float32). Consequently, the encoded byte for any
-    float32 value depends only on its top 16 bits (``hi16``) and whether its low
-    16 bits (``lo16``) are non-zero (which breaks odd-midpoint ties upward and
-    turns +/-Inf payload bits into NaN).
-
-    Precomputing ``lut0`` (``lo16 == 0``) and ``lut1`` (``lo16 != 0``) once over
-    the 65,536 ``hi16`` buckets replaces per-element float64 ``searchsorted``
-    with a 64 KB table lookup while remaining bit-identical to the float64
-    nearest-even ladder across all 2^32 float32 bit patterns.
+    Per-element ``searchsorted`` over the sorted finite magnitudes; too slow for
+    benchmark-sized operands, so :func:`_fp8_encode` only runs it over the
+    65,536 float32 top-16-bit buckets (see :func:`_fp8_encode_tables`). Also the
+    bit-exactness oracle in ``test_gemm_utils``.
     """
     table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
     sign_byte = np.uint8(1 << (exp_bits + mant_bits))  # 0x80
@@ -1167,42 +1160,67 @@ def _fp8_encode_tables(exp_bits: int, mant_bits: int, use_ocp: bool):
     order = finite[np.argsort(pos_mag[finite])]
     sorted_mag = pos_mag[order]
     sorted_byte = order.astype(np.uint8)
-    nan_byte = (
-        np.uint8(((1 << exp_bits) - 1) << mant_bits | ((1 << mant_bits) - 1))
-        if use_ocp
-        else sign_byte
-    )
 
-    def _ladder(u32: np.ndarray) -> np.ndarray:
-        xf = u32.view(np.float32)
-        with np.errstate(invalid="ignore"):
-            ax = np.abs(xf).astype(np.float64)
-        # Both neighbours come from the raw insertion point: raw==size saturates to
-        # the top magnitude (lo==hi), raw==0 pins to zero, otherwise compare the two.
-        raw = np.searchsorted(sorted_mag, ax)
-        hi = np.clip(raw, 0, sorted_mag.size - 1)
-        lo = np.clip(raw - 1, 0, sorted_mag.size - 1)
-        d_lo = np.abs(sorted_mag[lo] - ax)
-        d_hi = np.abs(sorted_mag[hi] - ax)
-        # Ties-to-even, not ties-toward-zero. Adjacent entries in `sorted_mag` are
-        # adjacent byte values (the positive half of both encodings is monotonic in
-        # the byte, subnormals through normals), so the mantissa LSB is just bit 0 of
-        # the byte.
-        lo_is_even = (sorted_byte[lo] & np.uint8(1)) == 0
-        pick_lo = np.where(d_lo == d_hi, lo_is_even, d_lo < d_hi)
-        chosen = np.where(pick_lo, lo, hi)
-        out = sorted_byte[chosen]
-        is_zero = sorted_mag[chosen] == 0
-        out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
-        out = np.where(np.isnan(xf), nan_byte, out)
-        return out.astype(np.uint8)
+    xf = np.ascontiguousarray(x, dtype=np.float32)
+    with np.errstate(invalid="ignore"):
+        ax = np.abs(xf).astype(np.float64)
+    # Both neighbours come from the raw insertion point: raw==size saturates to
+    # the top magnitude (lo==hi), raw==0 pins to zero, otherwise compare the two.
+    raw = np.searchsorted(sorted_mag, ax)
+    hi = np.clip(raw, 0, sorted_mag.size - 1)
+    lo = np.clip(raw - 1, 0, sorted_mag.size - 1)
+    d_lo = np.abs(sorted_mag[lo] - ax)
+    d_hi = np.abs(sorted_mag[hi] - ax)
+    # Ties-to-even, not ties-toward-zero. Adjacent entries in `sorted_mag` are
+    # adjacent byte values (the positive half of both encodings is monotonic in
+    # the byte, subnormals through normals), so the mantissa LSB is just bit 0 of
+    # the byte. Breaking ties toward `lo` instead -- as this did -- biases the
+    # host reference low on exactly the midpoints and disagrees with both the
+    # hardware convert and ml_dtypes on 63 of 256 e4m3 values.
+    #
+    # The degenerate ends are unaffected: raw==0 and raw==size both give lo==hi,
+    # so the tie branch picks the same index either way and saturation holds.
+    lo_is_even = (sorted_byte[lo] & np.uint8(1)) == 0
+    pick_lo = np.where(d_lo == d_hi, lo_is_even, d_lo < d_hi)
+    chosen = np.where(pick_lo, lo, hi)
+    out = sorted_byte[chosen]
 
+    # Apply sign. Under FNUZ 0x80 is the NaN slot rather than -0, so zeros must
+    # stay positive there; under OCP -0.0 is representable but +0 is equivalent
+    # for every consumer here, so keep the same rule for both.
+    is_zero = sorted_mag[chosen] == 0
+    out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
+    # NaN byte: 0x80 under FNUZ, all-1s exponent and mantissa under OCP.
+    nan_byte = np.uint8(((1 << exp_bits) - 1) << mant_bits | ((1 << mant_bits) - 1)) \
+        if use_ocp else sign_byte
+    out = np.where(np.isnan(xf), nan_byte, out)
+    return out.astype(np.uint8).reshape(np.shape(x))
+
+
+@functools.lru_cache(maxsize=None)
+def _fp8_encode_tables(exp_bits: int, mant_bits: int, use_ocp: bool):
+    """Cached 64K-entry uint8 lookup tables equivalent to :func:`_fp8_encode_ladder`.
+
+    Every representable fp8/bf8 value and every exact midpoint between adjacent
+    values has all-zero low 16 mantissa bits in IEEE-754 float32 (exp_bits <= 5,
+    mant_bits <= 3, so midpoints use at most 4 mantissa bits out of the 7 kept
+    in the top 16 bits of float32). No rounding boundary therefore falls strictly
+    inside a top-16-bit bucket, and the encoded byte depends only on the top 16
+    bits (``hi16``) and on whether the low 16 bits (``lo16``) are non-zero (which
+    breaks odd-midpoint ties upward and turns +/-Inf payload bits into NaN).
+
+    Returns ``(lut0, lut1, diff)``: the ladder evaluated at ``lo16 == 0`` and at
+    ``lo16 == 1`` (standing in for any non-zero ``lo16``) over all 65,536 ``hi16``
+    buckets, and the mask of the few buckets where the two disagree.
+    """
     top16 = np.arange(65536, dtype=np.uint32) << 16
-    lut0 = _ladder(top16)
-    lut1 = _ladder(top16 | np.uint32(1))
+    lut0 = _fp8_encode_ladder(top16.view(np.float32), exp_bits, mant_bits, use_ocp)
+    lut1 = _fp8_encode_ladder(
+        (top16 | np.uint32(1)).view(np.float32), exp_bits, mant_bits, use_ocp
+    )
     diff = lut0 != lut1
     for arr in (lut0, lut1, diff):
-        arr.flags.writeable = False
+        arr.flags.writeable = False  # shared cached instances -- do not mutate
     return lut0, lut1, diff
 
 
@@ -1217,20 +1235,19 @@ def _fp8_encode(
     (1e30 -> 448.0 for e4m3), while ``np.astype(ml_dtypes.float8_e4m3fn)``
     produces NaN.  Matching the kernel is the point, so the divergence stays;
     ``test_gemm_utils.TestFp8EncodeMatchesMlDtypes`` pins both halves of that.
+
+    Byte-identical to :func:`_fp8_encode_ladder` for every float32 bit pattern,
+    via the table lookup of :func:`_fp8_encode_tables`.
     """
     use_ocp = _resolve_use_ocp(use_ocp)
     lut0, lut1, diff = _fp8_encode_tables(exp_bits, mant_bits, use_ocp)
-    xf = np.ascontiguousarray(x, dtype=np.float32)
-    u16 = xf.view(np.uint16).reshape(-1, 2)
-    hi16 = u16[:, 1]
+    u32 = np.ascontiguousarray(x, dtype=np.float32).reshape(-1).view(np.uint32)
+    hi16 = (u32 >> np.uint32(16)).astype(np.uint16)
     out = lut0[hi16]
-    # Only odd-midpoint and +/-Inf top-16-bit buckets (~130 of 65536) depend on
-    # whether the low 16 float32 mantissa bits are non-zero.
+    # Only odd-midpoint and +/-Inf buckets (~130 of 65536) depend on lo16.
     cand = np.flatnonzero(diff[hi16])
-    if cand.size:
-        fix = cand[u16[cand, 0] != 0]
-        if fix.size:
-            out[fix] = lut1[hi16[fix]]
+    fix = cand[(u32[cand] & np.uint32(0xFFFF)) != 0]
+    out[fix] = lut1[hi16[fix]]
     return out.reshape(np.shape(x))
 
 
@@ -1344,7 +1361,10 @@ def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -
 # every kernel in a worker batch shares the same cached fp32 (A, B) matrices,
 # dtype, and layout; caching the encoded bytes avoids re-encoding A and B per
 # kernel while bounding the memory overhead to a single shape at a time.
-_ENCODED_AB_CACHE: Dict[Tuple[int, int, str, str, str, bool], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
+_ENCODED_AB_CACHE: Dict[
+    Tuple[int, int, str, str, str, bool],
+    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+] = {}
 
 
 def _encode_ab_cached(
@@ -1354,6 +1374,7 @@ def _encode_ab_cached(
     la: str,
     lb: str,
     use_ocp: Optional[bool],
+    kernel_name: str = "",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Return layout-arranged, dtype-encoded ``(A_h, B_h)`` for ``(A, B)``.
 
@@ -1366,7 +1387,8 @@ def _encode_ab_cached(
     """
     if dtype not in _INPUT_CODEC:
         raise ValueError(
-            f"unsupported A/B dtype {dtype!r}; add it to _NATIVE_NP or an encode branch"
+            f"unsupported A/B dtype {dtype!r} in kernel {kernel_name!r}; "
+            "add it to _NATIVE_IN_NP or _INPUT_CODEC"
         )
     resolved_ocp = _resolve_use_ocp(use_ocp) if dtype in ("fp8", "bf8") else False
     cacheable = (
@@ -1492,7 +1514,9 @@ class GpuGemmRunner:
         # and layout. Paired with the fp32 (A, B) shape cache in
         # tile_engine/ops/gemm/run_one_gemm_kernel.py so batch sweeps encode once
         # per (shape, dtype, layout) rather than once per kernel.
-        A_h, B_h = _encode_ab_cached(A, B, dtype, la, lb, self._use_ocp)
+        A_h, B_h = _encode_ab_cached(
+            A, B, dtype, la, lb, self._use_ocp, self._kernel_name
+        )
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
