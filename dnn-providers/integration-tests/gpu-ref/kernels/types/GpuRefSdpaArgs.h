@@ -66,6 +66,45 @@ struct SdpaFwdArgs
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
 
+// --- SDPA backward argument struct ---
+// Mirrors CpuFpReferenceSdpa::backward. lse == nullptr selects the softmax-recompute path. rowD,
+// rowM and rowL are fp32 [B, H, Sq] contiguous scratch written by the row-stats kernel: D =
+// sum(dO * O), and either the LSE (rowM) or the recomputed row max and exp-sum.
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
+struct SdpaBwdArgs
+{
+    const void* q;
+    const void* k;
+    const void* v;
+    const void* o;
+    const void* dO;
+    const void* mask;
+    const float* lse;
+    void* dQ;
+    void* dK;
+    void* dV;
+    void* dBias;
+    float* rowD;
+    float* rowM;
+    float* rowL;
+    SdpaStrides qStr, kStr, vStr, oStr, dOStr, dQStr, dKStr, dVStr, maskStr, dBiasStr, lseStr;
+    long long batch, numHeads, numHeadsK, numHeadsV;
+    long long seqQ, seqKv, headDim, headDimV;
+    int maskRank;
+    long long maskDims[4];
+    float scale;
+    long long leftBound, rightBound;
+    int topLeftAlignment;
+    const int* seqLenQ;
+    const int* seqLenKv;
+    long long seqLenQStride, seqLenKvStride;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)
+
 // --- Ragged SDPA forward args (RFC-0014: packed BSHD + ragged_offset) ---
 // Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
 // q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
