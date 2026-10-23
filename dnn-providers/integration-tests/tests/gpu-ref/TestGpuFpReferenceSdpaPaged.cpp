@@ -71,6 +71,12 @@ float tolerance()
     {
         return 1e-2f;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3>)
+    {
+        // fp8 inputs with a bf16 output. Host and device decode fp8 the same way, so this only
+        // covers bf16 output rounding and device-vs-host math.
+        return 2e-2f;
+    }
     else
     {
         static_assert(false, "Type not supported");
@@ -98,6 +104,50 @@ void expectClose(float actual, float expected, float tol, const std::string& wha
     {
         EXPECT_NEAR(actual, expected, tol) << what;
     }
+}
+
+// Optional fp8 descales, each scalar [1] or per KV head [B, H_kv, 1, 1]. Both references get the
+// same tensors; the dense oracle applies them to the inputs it gathers.
+struct PagedDescales
+{
+    Tensor<float>* q = nullptr;
+    Tensor<float>* k = nullptr;
+    Tensor<float>* v = nullptr;
+};
+
+// A descale as the references read it: 1 when absent, else the scalar or the (b, kvHead) entry.
+float descaleAt(const Tensor<float>* descale, int64_t b, int64_t kvHead)
+{
+    if(descale == nullptr)
+    {
+        return 1.0f;
+    }
+    if(descale->elementCount() == 1)
+    {
+        return descale->getHostValue(std::vector<int64_t>(descale->dims().size(), 0));
+    }
+    return descale->getHostValue(b, kvHead, int64_t{0}, int64_t{0});
+}
+
+Tensor<float> makeScalarDescale(float value)
+{
+    Tensor<float> t({1});
+    t.memory().hostData()[0] = value;
+    t.memory().markHostModified();
+    return t;
+}
+
+// Per-KV-head descale [B, heads, 1, 1] with a distinct value per (b, head).
+Tensor<float> makePerHeadDescale(int64_t batch, int64_t heads, float base)
+{
+    Tensor<float> t({batch, heads, 1, 1});
+    auto* p = t.memory().hostData();
+    for(int64_t i = 0; i < batch * heads; ++i)
+    {
+        p[i] = base + 0.1f * static_cast<float>(i);
+    }
+    t.memory().markHostModified();
+    return t;
 }
 
 // INT32 [B, 1, 1, 1] lengths.
@@ -182,8 +232,9 @@ struct PagedCase
     bool sinkInIoType = false;
 };
 
-template <typename T>
-void checkPaged(const PagedCase& c)
+// T is the Q/K/V type and OutT the O type (fp8 Q/K/V write bf16).
+template <typename T, typename OutT = T>
+void checkPaged(const PagedCase& c, const PagedDescales& descales = {})
 {
     const auto batch = static_cast<int64_t>(c.seqLenKv.size());
     const bool raggedQ = c.raggedQTokens.has_value();
@@ -242,10 +293,10 @@ void checkPaged(const PagedCase& c)
     const auto cumQ = cumTokens(qExtent);
     Tensor<T> q(qDims, qStrides);
     q.fillTensorWithRandomValues(-1.0f, 1.0f, SEED_Q);
-    Tensor<T> oGpu(qDims, qStrides);
-    Tensor<T> oCpu(qDims, qStrides);
-    oGpu.fillWithValue(static_cast<T>(O_SENTINEL));
-    oCpu.fillWithValue(static_cast<T>(O_SENTINEL));
+    Tensor<OutT> oGpu(qDims, qStrides);
+    Tensor<OutT> oCpu(qDims, qStrides);
+    oGpu.fillWithValue(static_cast<OutT>(O_SENTINEL));
+    oCpu.fillWithValue(static_cast<OutT>(O_SENTINEL));
     const std::vector<int64_t> lseDims{batch, h, c.seqQMax, 1};
     Tensor<float> lseGpu(lseDims);
     Tensor<float> lseCpu(lseDims);
@@ -289,50 +340,50 @@ void checkPaged(const PagedCase& c)
                                       qStrides,
                                       SDPA_SEQ_AXIS,
                                       makeRaggedOffsetAux(cumQ, h * d));
-            ShallowRaggedTensor<T> oR(oCpu.memory().hostData(),
-                                      qDims,
-                                      qStrides,
-                                      SDPA_SEQ_AXIS,
-                                      makeRaggedOffsetAux(cumQ, h * d));
-            CpuFpReferenceSdpaRagged::forwardPaged<T, T, T, T, float>(qR,
-                                                                      kHost,
-                                                                      vHost,
-                                                                      oR,
-                                                                      pageTableK,
-                                                                      pageTableVUsed,
-                                                                      seqLenKv,
-                                                                      seqLenQPtr,
-                                                                      maxSeqLenKv,
-                                                                      scale,
-                                                                      c.leftBound,
-                                                                      c.rightBound,
-                                                                      c.topLeftAlignment,
-                                                                      lsePtr,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      sinkPerHead);
+            ShallowRaggedTensor<OutT> oR(oCpu.memory().hostData(),
+                                         qDims,
+                                         qStrides,
+                                         SDPA_SEQ_AXIS,
+                                         makeRaggedOffsetAux(cumQ, h * d));
+            CpuFpReferenceSdpaRagged::forwardPaged<T, T, T, OutT, float>(qR,
+                                                                         kHost,
+                                                                         vHost,
+                                                                         oR,
+                                                                         pageTableK,
+                                                                         pageTableVUsed,
+                                                                         seqLenKv,
+                                                                         seqLenQPtr,
+                                                                         maxSeqLenKv,
+                                                                         scale,
+                                                                         c.leftBound,
+                                                                         c.rightBound,
+                                                                         c.topLeftAlignment,
+                                                                         lsePtr,
+                                                                         descales.q,
+                                                                         descales.k,
+                                                                         descales.v,
+                                                                         sinkPerHead);
         }
         else
         {
-            CpuFpReferenceSdpaRagged::forwardPaged<T, T, T, T, float>(q,
-                                                                      kHost,
-                                                                      vHost,
-                                                                      oCpu,
-                                                                      pageTableK,
-                                                                      pageTableVUsed,
-                                                                      seqLenKv,
-                                                                      seqLenQPtr,
-                                                                      maxSeqLenKv,
-                                                                      scale,
-                                                                      c.leftBound,
-                                                                      c.rightBound,
-                                                                      c.topLeftAlignment,
-                                                                      lsePtr,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      sinkPerHead);
+            CpuFpReferenceSdpaRagged::forwardPaged<T, T, T, OutT, float>(q,
+                                                                         kHost,
+                                                                         vHost,
+                                                                         oCpu,
+                                                                         pageTableK,
+                                                                         pageTableVUsed,
+                                                                         seqLenKv,
+                                                                         seqLenQPtr,
+                                                                         maxSeqLenKv,
+                                                                         scale,
+                                                                         c.leftBound,
+                                                                         c.rightBound,
+                                                                         c.topLeftAlignment,
+                                                                         lsePtr,
+                                                                         descales.q,
+                                                                         descales.k,
+                                                                         descales.v,
+                                                                         sinkPerHead);
         }
     }
 
@@ -345,7 +396,7 @@ void checkPaged(const PagedCase& c)
         auto offO = makeRaggedOffset(cumQ, h * d);
         const auto runGpu = [&](auto* sink, auto sinkTag) {
             using SinkT = typename decltype(sinkTag)::type;
-            GpuFpReferenceSdpaRagged::fpropPaged<T, T, T, T, float, SinkT>(
+            GpuFpReferenceSdpaRagged::fpropPaged<T, T, T, OutT, float, SinkT>(
                 q,
                 kDev,
                 vDev,
@@ -364,9 +415,9 @@ void checkPaged(const PagedCase& c)
                 c.withLse ? &lseGpu : nullptr,
                 nullptr,
                 SdpaSoftmaxProbabilityMode::FLOAT,
-                nullptr,
-                nullptr,
-                nullptr,
+                descales.q,
+                descales.k,
+                descales.v,
                 {},
                 sink);
         };
@@ -385,12 +436,12 @@ void checkPaged(const PagedCase& c)
     }
 
     const float tol = tolerance<T>();
-    const T* og = oGpu.memory().hostData();
+    const OutT* og = oGpu.memory().hostData();
     const float* lg = lseGpu.memory().hostData();
 
     // 1. GPU vs CPU over the whole element space.
     {
-        const T* oc = oCpu.memory().hostData();
+        const OutT* oc = oCpu.memory().hostData();
         for(size_t i = 0; i < oGpu.elementSpace(); ++i)
         {
             expectClose(static_cast<float>(og[i]),
@@ -463,6 +514,8 @@ void checkPaged(const PagedCase& c)
             continue;
         }
 
+        // Dense float oracle on dequantized inputs: Q head hh reads its KV head's Q and K
+        // descales, and V rows take the V head's descale.
         Tensor<float> qb({1, h, sQ, d});
         Tensor<float> kb({1, c.numHeadsK, sKv, d});
         Tensor<float> vb({1, c.numHeadsV, sKv, d});
@@ -473,10 +526,14 @@ void checkPaged(const PagedCase& c)
         {
             for(int64_t hh = 0; hh < h; ++hh)
             {
+                const float dq = descaleAt(descales.q, b, hh / (h / c.numHeadsK));
                 for(int64_t dd = 0; dd < d; ++dd)
                 {
-                    qb.setHostValue(
-                        static_cast<float>(qh[qRow(b, s) + hh * qStrides[1] + dd]), 0, hh, s, dd);
+                    qb.setHostValue(static_cast<float>(qh[qRow(b, s) + hh * qStrides[1] + dd]) * dq,
+                                    0,
+                                    hh,
+                                    s,
+                                    dd);
                 }
             }
         }
@@ -486,26 +543,28 @@ void checkPaged(const PagedCase& c)
             const int64_t blockV = pv[b * maxBlocks + skv / bs];
             for(int64_t hh = 0; hh < c.numHeadsK; ++hh)
             {
+                const float dk = descaleAt(descales.k, b, hh);
                 for(int64_t dd = 0; dd < d; ++dd)
                 {
-                    kb.setHostValue(
-                        static_cast<float>(kHost.getHostValue(blockK, hh, skv % bs, dd)),
-                        0,
-                        hh,
-                        skv,
-                        dd);
+                    kb.setHostValue(static_cast<float>(kHost.getHostValue(blockK, hh, skv % bs, dd))
+                                        * dk,
+                                    0,
+                                    hh,
+                                    skv,
+                                    dd);
                 }
             }
             for(int64_t hh = 0; hh < c.numHeadsV; ++hh)
             {
+                const float dv = descaleAt(descales.v, b, hh);
                 for(int64_t dd = 0; dd < d; ++dd)
                 {
-                    vb.setHostValue(
-                        static_cast<float>(vHost.getHostValue(blockV, hh, skv % bs, dd)),
-                        0,
-                        hh,
-                        skv,
-                        dd);
+                    vb.setHostValue(static_cast<float>(vHost.getHostValue(blockV, hh, skv % bs, dd))
+                                        * dv,
+                                    0,
+                                    hh,
+                                    skv,
+                                    dd);
                 }
             }
         }
@@ -823,4 +882,170 @@ TEST(TestGpuSdpaPagedFwdBf16, SinkShapeMismatchThrows)
                                                                  {},
                                                                  &sink)),
                  std::invalid_argument);
+}
+
+// --- fp8 E4M3 Q/K/V with a bf16 output, the fp8 tuple the GPU paged plan serves. Both
+// references and the dense oracle get the same descales; Q, K and V descales differ, so a
+// descale applied to the wrong operand changes the result. ---
+
+TEST(TestGpuSdpaPagedFwdFp8, ScalarDescalesDecode)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedCase c;
+    c.seqLenKv = {37, 0, 16, 5};
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.withLse = true;
+    auto descaleQ = makeScalarDescale(0.5f);
+    auto descaleK = makeScalarDescale(0.25f);
+    auto descaleV = makeScalarDescale(2.0f);
+    checkPaged<fp8_e4m3, bfloat16>(c, {&descaleQ, &descaleK, &descaleV});
+}
+
+// AITER's [B, H_kv] descales under GQA, with ragged Q. Distinct Q values per KV head catch a Q
+// descale indexed by query head.
+TEST(TestGpuSdpaPagedFwdFp8, PerKvHeadDescalesGqaRaggedQ)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedCase c;
+    c.seqLenKv = {10, 7, 33};
+    c.raggedQTokens = std::vector<int64_t>{3, 0, 5};
+    c.seqLenQ = std::vector<int64_t>{2, 0, 5};
+    c.seqQMax = 5;
+    c.numHeads = 8;
+    c.numHeadsK = 2;
+    c.numHeadsV = 2;
+    c.headDim = 128;
+    c.rightBound = 0;
+    c.topLeftAlignment = false;
+    c.withLse = true;
+    const auto batch = static_cast<int64_t>(c.seqLenKv.size());
+    auto descaleQ = makePerHeadDescale(batch, c.numHeadsK, 0.4f);
+    auto descaleK = makePerHeadDescale(batch, c.numHeadsK, 0.2f);
+    auto descaleV = makePerHeadDescale(batch, c.numHeadsV, 0.3f);
+    checkPaged<fp8_e4m3, bfloat16>(c, {&descaleQ, &descaleK, &descaleV});
+}
+
+namespace
+{
+
+constexpr int64_t CHECK_HEADS = 2;
+constexpr int64_t CHECK_HEAD_DIM = 64;
+constexpr int64_t CHECK_BLOCK_SIZE = 16;
+constexpr int64_t CHECK_NUM_BLOCKS = 4;
+constexpr int64_t CHECK_MAX_SEQ_LEN_KV = 32; // page tables two blocks wide
+constexpr int64_t CHECK_MAX_BLOCKS = 2;
+
+// A valid problem for the argument checks: B = 2, seq_len_kv {20, 5} on a pool of four blocks.
+// Dense Q holds 2 rows per batch; ragged Q packs {3, 1} tokens with seq_len_q {3, 1}.
+struct PagedArgs
+{
+    explicit PagedArgs(bool ragged)
+        : raggedQ(ragged)
+        , qDims(raggedDims(2, ragged ? 3 : 2, CHECK_HEADS, CHECK_HEAD_DIM))
+        , q(qDims, raggedStrides(qDims))
+        , o(qDims, raggedStrides(qDims))
+        , k({CHECK_NUM_BLOCKS, CHECK_HEADS, CHECK_BLOCK_SIZE, CHECK_HEAD_DIM})
+        , v({CHECK_NUM_BLOCKS, CHECK_HEADS, CHECK_BLOCK_SIZE, CHECK_HEAD_DIM})
+        , pageTableK(makePageTable(
+              {20, 5}, CHECK_BLOCK_SIZE, CHECK_MAX_BLOCKS, CHECK_NUM_BLOCKS, SEED_PAGES_K))
+        , pageTableV(makePageTable(
+              {20, 5}, CHECK_BLOCK_SIZE, CHECK_MAX_BLOCKS, CHECK_NUM_BLOCKS, SEED_PAGES_V))
+        , seqLenKv(makeSeqLens({20, 5}))
+        , offQ(makeRaggedOffset({0, 3, 4}, CHECK_HEADS * CHECK_HEAD_DIM))
+        , offO(makeRaggedOffset({0, 3, 4}, CHECK_HEADS * CHECK_HEAD_DIM))
+    {
+        if(ragged)
+        {
+            seqLenQ.emplace(makeSeqLens({3, 1}));
+        }
+    }
+
+    void run()
+    {
+        GpuFpReferenceSdpaRagged::fpropPaged<bfloat16>(q,
+                                                       k,
+                                                       v,
+                                                       o,
+                                                       raggedQ ? &offQ : nullptr,
+                                                       raggedQ ? &offO : nullptr,
+                                                       pageTableK,
+                                                       pageTableV,
+                                                       seqLenKv,
+                                                       seqLenQ.has_value() ? &seqLenQ.value()
+                                                                           : nullptr,
+                                                       CHECK_MAX_SEQ_LEN_KV);
+    }
+
+    bool raggedQ;
+    std::vector<int64_t> qDims;
+    Tensor<bfloat16> q;
+    Tensor<bfloat16> o;
+    Tensor<bfloat16> k;
+    Tensor<bfloat16> v;
+    Tensor<int32_t> pageTableK;
+    Tensor<int32_t> pageTableV;
+    Tensor<int32_t> seqLenKv;
+    Tensor<int32_t> offQ;
+    Tensor<int32_t> offO;
+    std::optional<Tensor<int32_t>> seqLenQ;
+};
+
+} // namespace
+
+// The unmodified argument-check problems run, so each rejection below comes from its one change.
+TEST(TestGpuSdpaPagedFwdBf16, ArgumentCheckBaselineRuns)
+{
+    SKIP_IF_NO_DEVICES();
+    for(const bool ragged : {false, true})
+    {
+        PagedArgs args(ragged);
+        EXPECT_NO_THROW(args.run()) << "raggedQ=" << ragged;
+    }
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, NegativeUsedBlockIdInVTableOnlyThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedArgs args(/*ragged=*/false);
+    // Batch 0 entry 1 is used: 20 keys need two blocks of 16.
+    args.pageTableV.memory().hostData()[1] = -1;
+    args.pageTableV.memory().markHostModified();
+    EXPECT_THROW(args.run(), std::invalid_argument);
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, SeqLenQAboveDenseExtentThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedArgs args(/*ragged=*/false);
+    args.seqLenQ.emplace(makeSeqLens({2, 3})); // dense Q holds 2 rows per batch
+    EXPECT_THROW(args.run(), std::invalid_argument);
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, SeqLenQAboveRaggedExtentThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedArgs args(/*ragged=*/true);
+    args.seqLenQ.emplace(makeSeqLens({3, 2})); // batch 1 holds 1 token
+    EXPECT_THROW(args.run(), std::invalid_argument);
+}
+
+TEST(TestGpuSdpaPagedFwdBf16, RaggedQWithoutSeqLenQThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedArgs args(/*ragged=*/true);
+    args.seqLenQ.reset();
+    EXPECT_THROW(args.run(), std::invalid_argument);
+}
+
+// max_seq_len_kv 32 with blocks of 16 needs page tables exactly two blocks wide.
+TEST(TestGpuSdpaPagedFwdBf16, PageTableOneBlockTooWideThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    PagedArgs args(/*ragged=*/false);
+    args.pageTableK = makePageTable(
+        {20, 5}, CHECK_BLOCK_SIZE, CHECK_MAX_BLOCKS + 1, CHECK_NUM_BLOCKS, SEED_PAGES_K);
+    args.pageTableV = makePageTable(
+        {20, 5}, CHECK_BLOCK_SIZE, CHECK_MAX_BLOCKS + 1, CHECK_NUM_BLOCKS, SEED_PAGES_V);
+    EXPECT_THROW(args.run(), std::invalid_argument);
 }

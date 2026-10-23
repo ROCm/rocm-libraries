@@ -113,6 +113,19 @@ TEST(TestGpuSdpaPagedFwdSignatureKey, RegistersBf16AndFp16Builders)
     }
 }
 
+// fp8 E4M3 Q/K/V are served with a bf16 output only; fpropPaged has no fp8 output.
+TEST(TestGpuSdpaPagedFwdSignatureKey, RegistersFp8InputBf16OutputBuilder)
+{
+    const auto builders = GpuSdpaPagedFwdSignatureKey::getPlanBuilders();
+    EXPECT_EQ(builders.count(GpuSdpaPagedFwdSignatureKey{
+                  DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::BFLOAT16}),
+              1U);
+    EXPECT_EQ(builders.count(GpuSdpaPagedFwdSignatureKey{
+                  DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::FP8_E4M3, DataType::FP8_E4M3}),
+              0U);
+    EXPECT_EQ(builders.size(), 3U);
+}
+
 // Paged nodes route to the paged plan before the ragged check, so ragged Q with paged K/V is
 // applicable too.
 TEST(TestGpuSdpaPagedFwdSignatureKey, ExecutorRoutesPagedNodesToPagedPlan)

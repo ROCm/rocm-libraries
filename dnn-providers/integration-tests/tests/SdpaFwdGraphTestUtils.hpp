@@ -448,6 +448,13 @@ struct PagedSdpaFwdGraphOptions
     std::optional<int64_t> sinkUid;
     hipdnn_flatbuffers_sdk::data_objects::DataType sinkDataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    // Output dtype. UNSET means the input dtype. fp8 graphs use bf16 here.
+    hipdnn_flatbuffers_sdk::data_objects::DataType oDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    // fp8 Q/K/V descales.
+    std::optional<FloatOperandSpec> descaleQ;
+    std::optional<FloatOperandSpec> descaleK;
+    std::optional<FloatOperandSpec> descaleV;
 };
 
 // Builds a one-node paged-KV SDPA forward graph (vLLM block tables). Q/O are [B, H, Sq, D] with
@@ -499,6 +506,20 @@ inline flatbuffers::FlatBufferBuilder
     {
         attrs.sink_token_tensor_uid = options.sinkUid;
     }
+    if(options.descaleQ.has_value())
+    {
+        attrs.descale_q_tensor_uid = options.descaleQ->uid;
+    }
+    if(options.descaleK.has_value())
+    {
+        attrs.descale_k_tensor_uid = options.descaleK->uid;
+    }
+    if(options.descaleV.has_value())
+    {
+        attrs.descale_v_tensor_uid = options.descaleV->uid;
+    }
+    const DataType outputDataType
+        = (options.oDataType == DataType::UNSET) ? dataType : options.oDataType;
 
     flatbuffers::FlatBufferBuilder builder;
 
@@ -526,7 +547,7 @@ inline flatbuffers::FlatBufferBuilder
     tensors.push_back(CreateTensorAttributesDirect(builder,
                                                    oUid,
                                                    "O",
-                                                   dataType,
+                                                   outputDataType,
                                                    &oStrides,
                                                    &oDims,
                                                    /*virtual_=*/false,
@@ -601,6 +622,16 @@ inline flatbuffers::FlatBufferBuilder
                                                        options.sinkDataType,
                                                        &sinkStrides,
                                                        &sinkDims));
+    }
+
+    for(const auto& [spec, name] : {std::pair{&options.descaleQ, "DescaleQ"},
+                                    std::pair{&options.descaleK, "DescaleK"},
+                                    std::pair{&options.descaleV, "DescaleV"}})
+    {
+        if(spec->has_value())
+        {
+            addFloatOperandTensor(builder, tensors, spec->value(), name);
+        }
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);

@@ -47,6 +47,9 @@ constexpr int64_t PAGE_TABLE_V_UID = 31;
 constexpr int64_t SEQ_LEN_KV_UID = 32;
 constexpr int64_t SEQ_LEN_Q_UID = 33;
 constexpr int64_t SINK_UID = 34;
+constexpr int64_t DESCALE_Q_UID = 35;
+constexpr int64_t DESCALE_K_UID = 36;
+constexpr int64_t DESCALE_V_UID = 37;
 
 // Not in the tensor map. Setting an unsupported-mode uid to it is enough to reject the node.
 constexpr int64_t UNUSED_UID = 99;
@@ -69,6 +72,10 @@ using Bf16Builder = GpuSdpaPagedFwdPlanBuilder<DataType::BFLOAT16,
                                                DataType::BFLOAT16>;
 using Fp16Builder
     = GpuSdpaPagedFwdPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF>;
+using Fp8Builder = GpuSdpaPagedFwdPlanBuilder<DataType::FP8_E4M3,
+                                              DataType::FP8_E4M3,
+                                              DataType::FP8_E4M3,
+                                              DataType::BFLOAT16>;
 
 flatbuffers::FlatBufferBuilder makePagedGraph(SdpaAttributesT attrs = {},
                                               DataType dataType = DataType::BFLOAT16,
@@ -564,4 +571,152 @@ TEST(TestGpuSdpaPagedFwdPlan, ExecuteWithSinkMatchesDirectFpropPaged)
         /*raggedQ=*/false, bottomRightCausal(), {-1, 0, false}, DataType::FLOAT);
     checkExecuteMatchesDirect(
         /*raggedQ=*/true, bottomRightCausal(), {-1, 0, false}, DataType::BFLOAT16);
+}
+
+namespace
+{
+
+// fp8 E4M3 Q/K/V with a bf16 output and device Q/K/V descales: Q scalar [1], K and V per KV
+// head [B, H_kv, 1, 1].
+PagedSdpaFwdGraphOptions fp8Options()
+{
+    PagedSdpaFwdGraphOptions options;
+    options.oDataType = DataType::BFLOAT16;
+    options.descaleQ = FloatOperandSpec{DESCALE_Q_UID};
+    FloatOperandSpec descaleK{DESCALE_K_UID};
+    descaleK.dims = {BATCH, HEADS, 1, 1};
+    FloatOperandSpec descaleV{DESCALE_V_UID};
+    descaleV.dims = {BATCH, HEADS, 1, 1};
+    options.descaleK = descaleK;
+    options.descaleV = descaleV;
+    return options;
+}
+
+Tensor<float> makeDescale(const std::vector<int64_t>& dims, const std::vector<float>& values)
+{
+    Tensor<float> t(dims);
+    auto* p = t.memory().hostData();
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        p[i] = values[i];
+    }
+    t.memory().markHostModified();
+    return t;
+}
+
+} // namespace
+
+TEST(TestGpuSdpaPagedFwdPlanBuilder, IsApplicableForFp8WithDescales)
+{
+    const auto graph = makePagedGraph(bottomRightCausal(), DataType::FP8_E4M3, fp8Options());
+    EXPECT_TRUE(isApplicable<Fp8Builder>(graph));
+    EXPECT_FALSE(isApplicable<Bf16Builder>(graph));
+
+    auto ragged = fp8Options();
+    ragged.seqLenQUid = SEQ_LEN_Q_UID;
+    ragged.raggedOffsetQUid = RAGGED_OFFSET_Q_UID;
+    ragged.raggedOffsetOUid = RAGGED_OFFSET_O_UID;
+    EXPECT_TRUE(isApplicable<Fp8Builder>(makePagedGraph({}, DataType::FP8_E4M3, ragged)));
+}
+
+// The plan must bind each descale to its own operand. K and V descales differ per (batch, head)
+// and from each other, so a swapped or dropped binding changes the output.
+TEST(TestGpuSdpaPagedFwdPlan, ExecuteFp8MatchesDirectFpropPaged)
+{
+    SKIP_IF_NO_DEVICES();
+
+    PagedSdpaFwdGraphOptions options = fp8Options();
+    options.statsUid = STATS_UID;
+    SdpaAttributesT attrs = bottomRightCausal();
+    attrs.attn_scale_value = 0.25f;
+    auto graphBuilder = makePagedGraph(attrs, DataType::FP8_E4M3, options);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const Fp8Builder builder;
+    ASSERT_TRUE(builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<fp8_e4m3> q(Q_DIMS, raggedStrides(Q_DIMS));
+    Tensor<fp8_e4m3> k(KV_DIMS, raggedStrides(KV_DIMS));
+    Tensor<fp8_e4m3> v(KV_DIMS, raggedStrides(KV_DIMS));
+    q.fillTensorWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
+    k.fillTensorWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
+    v.fillTensorWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+
+    auto pageTableK = makePageTable({4, 1, 0, 5, -1, -1});
+    auto pageTableV = makePageTable({2, 5, 3, 0, -1, -1});
+    auto seqLenKv = makeInt32({BATCH, 1, 1, 1}, {19, 3});
+    auto descaleQ = makeDescale({1}, {0.5f});
+    auto descaleK = makeDescale({BATCH, HEADS, 1, 1}, {0.25f, 0.75f, 1.5f, 0.5f});
+    auto descaleV = makeDescale({BATCH, HEADS, 1, 1}, {2.0f, 0.125f, 0.625f, 3.0f});
+
+    const auto makeO = [&]() {
+        Tensor<bfloat16> o(Q_DIMS, raggedStrides(Q_DIMS));
+        o.fillWithValue(static_cast<bfloat16>(7.0f));
+        return o;
+    };
+    const auto makeLse = [&]() {
+        Tensor<float> lse({BATCH, HEADS, SEQ_Q, 1});
+        lse.fillWithValue(-99.0f);
+        return lse;
+    };
+    auto oPlan = makeO();
+    auto oDirect = makeO();
+    auto lsePlan = makeLse();
+    auto lseDirect = makeLse();
+
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {STATS_UID, lsePlan.memory().deviceData()},
+        {PAGE_TABLE_K_UID, pageTableK.memory().deviceData()},
+        {PAGE_TABLE_V_UID, pageTableV.memory().deviceData()},
+        {SEQ_LEN_KV_UID, seqLenKv.memory().deviceData()},
+        {DESCALE_Q_UID, descaleQ.memory().deviceData()},
+        {DESCALE_K_UID, descaleK.memory().deviceData()},
+        {DESCALE_V_UID, descaleV.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+    lsePlan.markDeviceModified();
+
+    hipdnn_gpu_ref::GpuFpReferenceSdpaRagged::
+        fpropPaged<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
+            q,
+            k,
+            v,
+            oDirect,
+            nullptr,
+            nullptr,
+            pageTableK,
+            pageTableV,
+            seqLenKv,
+            nullptr,
+            MAX_SEQ_LEN_KV,
+            0.25f,
+            -1,
+            0,
+            false,
+            &lseDirect,
+            nullptr,
+            sdpaProbabilityMode<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16>(),
+            &descaleQ,
+            &descaleK,
+            &descaleV);
+
+    const auto* op = oPlan.memory().hostData();
+    const auto* od = oDirect.memory().hostData();
+    for(size_t i = 0; i < oPlan.elementSpace(); ++i)
+    {
+        EXPECT_EQ(static_cast<float>(op[i]), static_cast<float>(od[i]))
+            << "output mismatch at element " << i;
+    }
+    const auto* lp = lsePlan.memory().hostData();
+    const auto* ld = lseDirect.memory().hostData();
+    for(size_t i = 0; i < lsePlan.elementSpace(); ++i)
+    {
+        EXPECT_EQ(lp[i], ld[i]) << "LSE mismatch at element " << i;
+    }
 }
