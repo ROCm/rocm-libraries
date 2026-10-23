@@ -290,8 +290,9 @@ for each thread's coalesced output chunk:
 - The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
 - The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
 - Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
+- `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
 
-It is in the AOT kernel cache (`kernels/conv/aot_jobs.py`) and in `benchmark_implicit_gemm_conv --run-from-cache`; the dispatcher does not select it. `split_k = 1` emits exactly the plain kernel.
+Both forms are in the AOT kernel cache (`kernels/conv/aot_jobs.py`) and in `benchmark_implicit_gemm_conv --run-from-cache`; the dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
 
 ### Step-By-Step Trace (one workgroup)
 

@@ -132,6 +132,7 @@ def build_conv(
     vector_size_c=None,
     group_merge=1,
     split_k=1,
+    split_k_cluster=0,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -159,6 +160,7 @@ def build_conv(
             vector_size_c=vector_size_c,
             group_merge=group_merge,
             split_k=split_k,
+            split_k_cluster=split_k_cluster,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -2175,12 +2177,14 @@ def cases():
         )
 
     # gfx1250 split-K forward (WMMA): the two-stage binary (fp32 workspace
-    # slabs, degree as a kernarg) on mem/cshuffle and mem/default. Small M,
-    # deep K: 9*256 reduction.
+    # slabs, degree as a kernarg) on mem/cshuffle and mem/default, and the
+    # single-launch cluster form (S=4) that folds the slabs through a cluster
+    # barrier. Small M, deep K: 9*256 reduction.
     conv_small_m = (1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1)
-    for tag, epi, vec_c in (
-        ("splitk_cshuffle", "cshuffle", None),
-        ("splitk_default", "default", 1),
+    for tag, epi, vec_c, skc in (
+        ("splitk_cshuffle", "cshuffle", None, 0),
+        ("splitk_default", "default", 1, 0),
+        ("splitk_cluster4", "cshuffle", None, 4),
     ):
         add(
             "conv",
@@ -2200,6 +2204,7 @@ def cases():
                 epilogue=epi,
                 vector_size_c=vec_c,
                 split_k=2,
+                split_k_cluster=skc,
             ),
         )
     # Its Stage 2: the runtime slab loop and the degree-unrolled fold.

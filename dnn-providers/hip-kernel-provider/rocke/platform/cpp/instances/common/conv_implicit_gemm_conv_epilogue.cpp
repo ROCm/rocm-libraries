@@ -18,6 +18,7 @@
  */
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_pack_f32_to */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 
 /* ===================================================================== *
@@ -512,6 +513,96 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
 }
 
 /* ===================================================================== *
+ * rocke_conv_emit_cluster_fold   (Python _emit_cluster_fold)
+ *
+ * Fold the cluster's S slabs of this tile into D (spec.split_k_cluster).
+ * Slice s owns rows [s*R, (s+1)*R) of the tile, R = ceil(TM / S); each
+ * thread walks 4-channel quads of those rows (D and the slabs are packed
+ * [M][K]; the host checks K % 4 == 0 and kpg % 4 == 0). Every SSA value is
+ * bound in Python's left-to-right evaluation order.
+ * ===================================================================== */
+static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int S = spec->split_k_cluster;
+    const int block_m = ctx->block_m;
+    const int block_n = ctx->block_n;
+    const int rows = (block_m + S - 1) / S;
+    const int quads_per_row = block_n / 4;
+    const int n_quads = rows * quads_per_row;
+    const int threads = rocke_implicit_gemm_conv_spec_block_size(spec);
+    rocke_value_t* m0 = ctx->block_m_off_v;
+    rocke_value_t* n0 = ctx->block_n_off_v;
+    rocke_value_t* n_bound = ctx->merged ? ctx->c_gm : ctx->p_kpg;
+    rocke_value_t* k_base = ctx->k_out_group_base;
+
+    rocke_b_cluster_barrier(b);
+    rocke_value_t* c_rows = rocke_b_const_i32(b, rows);
+    rocke_value_t* row_step = rocke_b_mul(b, ctx->fwd_slice_id, c_rows);
+    rocke_value_t* row0 = rocke_b_add(b, m0, row_step);
+    rocke_value_t* slab = rocke_b_mul(b, ctx->p_M, ctx->p_K);
+    for(int t = 0; t < (n_quads + threads - 1) / threads; ++t)
+    {
+        rocke_value_t* c_t = rocke_b_const_i32(b, t * threads);
+        rocke_value_t* q = rocke_b_add(b, ctx->tid, c_t);
+        rocke_value_t* c_qpr = rocke_b_const_i32(b, quads_per_row);
+        rocke_value_t* r = rocke_b_div(b, q, c_qpr);
+        rocke_value_t* c_qpr2 = rocke_b_const_i32(b, quads_per_row);
+        rocke_value_t* r_q = rocke_b_mul(b, r, c_qpr2);
+        rocke_value_t* q_in_row = rocke_b_sub(b, q, r_q);
+        rocke_value_t* c_four = rocke_b_const_i32(b, 4);
+        rocke_value_t* c = rocke_b_mul(b, q_in_row, c_four);
+        rocke_value_t* m = rocke_b_add(b, row0, r);
+        rocke_value_t* n = rocke_b_add(b, n0, c);
+        rocke_value_t* c_nq = rocke_b_const_i32(b, n_quads);
+        rocke_value_t* q_ok = rocke_b_cmp_lt(b, q, c_nq);
+        rocke_value_t* m_ok = rocke_b_cmp_lt(b, m, ctx->p_M);
+        rocke_value_t* ok_a = rocke_b_land(b, q_ok, m_ok);
+        rocke_value_t* c_bm = rocke_b_const_i32(b, block_m);
+        rocke_value_t* m_end = rocke_b_add(b, m0, c_bm);
+        rocke_value_t* m_in_tile = rocke_b_cmp_lt(b, m, m_end);
+        rocke_value_t* n_ok = rocke_b_cmp_lt(b, n, n_bound);
+        rocke_value_t* ok_b = rocke_b_land(b, m_in_tile, n_ok);
+        rocke_value_t* ok = rocke_b_land(b, ok_a, ok_b);
+
+        rocke_if_t guard = rocke_b_scf_if(b, ok);
+        rocke_b_region_enter(b, guard.then_region);
+        {
+            rocke_value_t* k_out = (k_base == NULL) ? n : rocke_b_add(b, k_base, n);
+            rocke_value_t* m_row = rocke_b_mul(b, m, ctx->p_K);
+            rocke_value_t* off = rocke_b_add(b, m_row, k_out);
+            /* S <= 15 (rocke_conv_fwd_split_k_available). */
+            rocke_value_t* parts[15][4] = {};
+            for(int s_i = 0; s_i < S; ++s_i)
+            {
+                rocke_value_t* o = off;
+                if(s_i != 0)
+                {
+                    rocke_value_t* c_s = rocke_b_const_i32(b, s_i);
+                    rocke_value_t* s_off = rocke_b_mul(b, c_s, slab);
+                    o = rocke_b_add(b, s_off, off);
+                }
+                rocke_value_t* v = rocke_b_global_load_vN(b, ctx->fwd_p_ws, o, rocke_f32(), 4, 0);
+                for(int i = 0; i < 4; ++i)
+                    parts[s_i][i] = rocke_b_vec_extract(b, v, i);
+            }
+            rocke_value_t* tot[4];
+            for(int i = 0; i < 4; ++i)
+                tot[i] = parts[0][i];
+            for(int s_i = 1; s_i < S; ++s_i)
+            {
+                for(int i = 0; i < 4; ++i)
+                    tot[i] = rocke_b_fadd(b, tot[i], parts[s_i][i]);
+            }
+            rocke_value_t* packed = rocke_b_pack_f32_to(b, tot, 4, spec->dtype_d);
+            rocke_b_global_store_vN(b, ctx->D, off, packed, 4, 0);
+        }
+        rocke_b_region_leave(b);
+    }
+}
+
+/* ===================================================================== *
  * rocke_conv_emit_epilogue   (Python lines 1349-1377)
  *
  * The epilogue phase: apply the accumulator epilogue, then dispatch
@@ -610,5 +701,12 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                         ctx->d_k_out_group_base,
                                         ctx->p_M,
                                         ctx->merged ? ctx->c_gm : ctx->p_kpg);
+    }
+    /* Cluster split-K: after the slab store, fold the cluster's slabs into D
+     * (Python: only on the stock epilogue path, never under an override). */
+    if(!(ctx->ov != NULL && ctx->ov->epilogue_override != NULL) && ctx->fwd_split
+       && spec->split_k_cluster)
+    {
+        rocke_conv_emit_cluster_fold(ctx);
     }
 }

@@ -916,9 +916,10 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # Changes the emitted kernel and its launch grid; dropped, the engine
         # would build an unmerged kernel under a merged spec's name and grid.
         group_merge=getattr(spec, "group_merge", 1),
-        # The split-K forward binary (its own ABI and epilogue); dropped, the
-        # engine would build the plain kernel.
+        # The split-K forward binary (its own ABI and epilogue) and its cluster
+        # form; dropped, the engine would build the plain kernel.
         split_k=getattr(spec, "split_k", 1),
+        split_k_cluster=getattr(spec, "split_k_cluster", 0),
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=getattr(spec, "num_load_waves", 4),
     )

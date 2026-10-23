@@ -339,6 +339,14 @@ class ImplicitGemmConvSpec:
     # past the reduction stores zeros), so the workspace needs no clearing and
     # the result is deterministic. 1 (the default) emits none of this.
     split_k: int = 1
+    # Single-launch split-K through a gfx1250 workgroup cluster (0 = off).
+    # The ``split_k_cluster`` slices of one output tile form one (1, 1, S)
+    # cluster: each stores its fp32 partial tile into its workspace slab as
+    # above, then the cluster barrier (cluster-scope release / acquire, no L2
+    # writeback) makes the slabs visible and each slice folds 1/S of the
+    # tile's rows across the S slabs and stores them cast into D. No Stage 2
+    # launch. Bakes the degree: the launch passes ks_count == S.
+    split_k_cluster: int = 0
 
     @property
     def block_size(self) -> int:
@@ -439,6 +447,7 @@ class ImplicitGemmConvSpec:
                 # The split-K binary has its own ABI and epilogue; the degree is
                 # a kernarg, so only the variant reaches the name.
                 "splitk": self.split_k > 1,
+                f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
             },
         )
 
@@ -646,6 +655,15 @@ def fwd_split_k_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]
             return f"split-K forward does not support {label}"
     if spec.epilogue == "default" and (spec.vector_size_c or 1) > 1:
         return "split-K forward with the default epilogue stores scalars (vector_size_c must be 1)"
+    if spec.split_k_cluster:
+        if spec.split_k < 2:
+            return "split_k_cluster needs the split-K binary (split_k > 1)"
+        if not 2 <= spec.split_k_cluster <= 15:
+            return f"split_k_cluster must be 2..15 (got {spec.split_k_cluster})"
+        if spec.pipeline != "mem":
+            return "split_k_cluster is wired for the mem pipeline only"
+        if spec.tile_n % 4:
+            return "split_k_cluster folds 4-channel quads (tile_n % 4 == 0)"
     return None
 
 
@@ -898,7 +916,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
-    if spec.split_k > 1:
+    if spec.split_k > 1 or spec.split_k_cluster:
         _why = fwd_split_k_reason(spec, family)
         if _why is not None:
             return False, _why
@@ -1260,6 +1278,8 @@ def _build_implicit_gemm_conv_impl(
         p_ws_bytes = b.param("ws_bytes", I32)
         p_ks = b.param("ks", I32)
         p_ks_count = b.param("ks_count", I32)
+        if spec.split_k_cluster:
+            b.set_cluster_dims(1, 1, spec.split_k_cluster)
 
     def _magic(prefix: str, name: str):
         """The ``(mult, shift)`` SSA pair for one unmerge divisor."""
@@ -2361,7 +2381,81 @@ def _build_implicit_gemm_conv_impl(
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
     else:
         _emit_fwd_epilogue(final_accs)
+        if split and spec.split_k_cluster:
+            _emit_cluster_fold(
+                b,
+                spec,
+                tid=tid,
+                slice_id=slice_id,
+                m0=block_m_off_v,
+                n0=block_n_off_v,
+                block_m=block_m,
+                block_n=block_n,
+                p_M=p_M,
+                p_K=p_K,
+                n_bound=c_N_bound,
+                k_base=k_out_group_base,
+                ws=p_ws,
+                D=D,
+            )
     return b.kernel
+
+
+def _emit_cluster_fold(
+    b: IRBuilder,
+    spec: "ImplicitGemmConvSpec",
+    *,
+    tid,
+    slice_id,
+    m0,
+    n0,
+    block_m: int,
+    block_n: int,
+    p_M,
+    p_K,
+    n_bound,
+    k_base,
+    ws,
+    D,
+) -> None:
+    """Fold the cluster's S slabs of this tile into D (``split_k_cluster``).
+
+    Slice ``s`` owns rows ``[s*R, (s+1)*R)`` of the tile, R = ceil(TM / S);
+    each thread walks 4-channel quads of those rows (D and the slabs are
+    packed ``[M][K]``; the host checks K % 4 == 0 and kpg % 4 == 0).
+    """
+    from rocke.helpers.io import pack_f32_to
+
+    S = spec.split_k_cluster
+    rows = -(-block_m // S)
+    quads_per_row = block_n // 4
+    n_quads = rows * quads_per_row
+    threads = spec.block_size
+    b.cluster_barrier()
+    row0 = b.add(m0, b.mul(slice_id, b.const_i32(rows)))
+    slab = b.mul(p_M, p_K)
+    for t in range(-(-n_quads // threads)):
+        q = b.add(tid, b.const_i32(t * threads))
+        r = b.div(q, b.const_i32(quads_per_row))
+        c = b.mul(b.sub(q, b.mul(r, b.const_i32(quads_per_row))), b.const_i32(4))
+        m = b.add(row0, r)
+        n = b.add(n0, c)
+        ok = b.land(
+            b.land(b.cmp_lt(q, b.const_i32(n_quads)), b.cmp_lt(m, p_M)),
+            b.land(b.cmp_lt(m, b.add(m0, b.const_i32(block_m))), b.cmp_lt(n, n_bound)),
+        )
+        with b.scf_if(ok):
+            k_out = n if k_base is None else b.add(k_base, n)
+            off = b.add(b.mul(m, p_K), k_out)
+            parts = []
+            for s in range(S):
+                o = off if s == 0 else b.add(b.mul(b.const_i32(s), slab), off)
+                v = b.global_load_vN(ws, o, F32, 4)
+                parts.append([b.vec_extract(v, i) for i in range(4)])
+            tot = parts[0]
+            for pp in parts[1:]:
+                tot = [b.fadd(x, y) for x, y in zip(tot, pp)]
+            b.global_store_vN(D, off, pack_f32_to(b, tot, dtype=spec.data.dtype_d), 4)
 
 
 def async_tile_loaders(

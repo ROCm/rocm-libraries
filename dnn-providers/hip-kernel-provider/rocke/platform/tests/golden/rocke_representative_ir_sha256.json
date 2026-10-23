@@ -2228,6 +2228,10 @@
         }
       },
       "expected_failures": {
+        "conv/gfx1250/n1h7c256k64r3/splitk_cluster4": {
+          "message": "cluster_barrier requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
@@ -2264,7 +2268,7 @@
           "gfx942": 57,
           "gfx950": 180
         },
-        "expected_failures": 6,
+        "expected_failures": 7,
         "families": {
           "attention": 38,
           "attention_d128_swa": 1,
@@ -4521,6 +4525,10 @@
         }
       },
       "expected_failures": {
+        "conv/gfx1250/n1h7c256k64r3/splitk_cluster4": {
+          "message": "cluster_barrier requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "conv_direct_dgrad_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
@@ -4557,7 +4565,7 @@
           "gfx942": 57,
           "gfx950": 180
         },
-        "expected_failures": 6,
+        "expected_failures": 7,
         "families": {
           "attention": 38,
           "attention_d128_swa": 1,
@@ -5346,6 +5354,14 @@
           "family": "conv",
           "kernel_name": "irhash_conv_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_cshuffle",
           "sha256": "d94f658d1c5dc893acc5695ec58281b4d3d148ede0597402ede5c6a10e230e16",
+          "status": "ok"
+        },
+        "conv/gfx1250/n1h7c256k64r3/splitk_cluster4": {
+          "arch": "gfx1250",
+          "bytes": 46739,
+          "family": "conv",
+          "kernel_name": "irhash_conv_1250_splitk_cluster4_N1H7W7C256_K64Y3X3_t32x32x32_w2x1_a16x16x32_mem_cshuffle_splitk_skc4",
+          "sha256": "a8b939d52480eb423bfba2f749d82ae619c776765a543acee44dcf6b7a6ee0bc",
           "status": "ok"
         },
         "conv/gfx1250/n1h7c256k64r3/splitk_cshuffle": {
@@ -6868,7 +6884,7 @@
           "gfx1151": 10,
           "gfx12-generic": 1,
           "gfx1201": 8,
-          "gfx1250": 22,
+          "gfx1250": 23,
           "gfx90a": 5,
           "gfx942": 57,
           "gfx950": 180
@@ -6879,7 +6895,7 @@
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 51,
-          "conv": 22,
+          "conv": 23,
           "conv_dgrad": 13,
           "conv_direct": 26,
           "conv_direct_depthwise_tiled": 4,
@@ -6900,7 +6916,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 284
+        "ok_cases": 285
       }
     }
   },

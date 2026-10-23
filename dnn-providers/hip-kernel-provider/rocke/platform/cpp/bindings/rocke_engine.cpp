@@ -1625,9 +1625,10 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
     s.groups = dict_int(d, "groups", s.groups);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
-    /* Split-K forward: a different ABI and epilogue; dropped, the engine would
-     * build the plain kernel. */
+    /* Split-K forward: a different ABI and epilogue (and the cluster form a
+     * cluster launch shape); dropped, the engine would build the plain kernel. */
     s.split_k = dict_int(d, "split_k", s.split_k);
+    s.split_k_cluster = dict_int(d, "split_k_cluster", s.split_k_cluster);
     /* The wavelet load-wave count sizes the launch block and the load-wave
      * loaders; dropped, a non-default count builds a different kernel. */
     s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);
