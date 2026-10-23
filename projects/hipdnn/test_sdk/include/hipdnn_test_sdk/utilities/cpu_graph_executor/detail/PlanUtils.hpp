@@ -213,6 +213,28 @@ int64_t sdpaPagedMaxSeqKv(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttrib
     return maxSeqKv;
 }
 
+/// Whether an SDPA forward node's attention sink is one the references implement: absent, or a
+/// FLOAT tensor [1, H, 1, 1] with H the query head count (cuDNN's shape).
+template <typename TensorMap>
+bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                         const TensorMap& tensorMap)
+{
+    if(!attrs.sink_token_tensor_uid().has_value())
+    {
+        return true;
+    }
+    const auto sinkIt = tensorMap.find(attrs.sink_token_tensor_uid().value());
+    const auto qIt = tensorMap.find(attrs.q_tensor_uid());
+    if(sinkIt == tensorMap.end() || qIt == tensorMap.end() || sinkIt->second->dims() == nullptr
+       || qIt->second->dims() == nullptr || qIt->second->dims()->size() != 4
+       || sinkIt->second->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        return false;
+    }
+    const std::vector<int64_t> dims(sinkIt->second->dims()->begin(), sinkIt->second->dims()->end());
+    return dims == std::vector<int64_t>{1, qIt->second->dims()->Get(1), 1, 1};
+}
+
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
     do                                              \
     {                                               \
