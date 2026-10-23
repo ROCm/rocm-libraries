@@ -95,7 +95,9 @@
     "llvm.amdgcn.mfma.i32.32x32x16.i8": "llvm.amdgcn.mfma.i32.32x32x16.i8",
     "llvm.amdgcn.mfma.i32.32x32x32.i8": "llvm.amdgcn.mfma.i32.32x32x32.i8",
     "llvm.amdgcn.mfma.i32.32x32x8i8": "llvm.amdgcn.mfma.i32.32x32x8i8",
+    "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v16i16.v16i16": "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v16i16.v16i16",
     "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16": "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16",
+    "llvm.amdgcn.wmma.f16.16x16x16.f16.v16f16.v16f16": "llvm.amdgcn.wmma.f16.16x16x16.f16.v16f16.v16f16",
     "llvm.amdgcn.wmma.f16.16x16x16.f16.v8f16.v8f16": "llvm.amdgcn.wmma.f16.16x16x16.f16.v8f16.v8f16",
     "llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32": "llvm.amdgcn.wmma.f32.16x16x16.bf8.bf8.v8f32.v2i32",
     "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32": "llvm.amdgcn.wmma.f32.16x16x16.bf8.fp8.v8f32.v2i32",
@@ -7992,6 +7994,89 @@
         "verified_on": "llvm23"
       }
     },
+    "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v16i16.v16i16": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1200": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx908": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
     "llvm.amdgcn.wmma.bf16.16x16x16.bf16.v8i16.v8i16": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
@@ -8077,6 +8162,89 @@
       },
       "gfx950": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.bf16.16x16x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "llvm.amdgcn.wmma.f16.16x16x16.f16.v16f16.v16f16": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1200": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx908": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f16.16x16x16.f16",
         "status": "arch_absent",
         "verified_on": "llvm23"
       }
