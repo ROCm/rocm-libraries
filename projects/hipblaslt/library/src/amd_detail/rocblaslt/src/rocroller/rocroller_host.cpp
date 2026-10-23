@@ -17,6 +17,7 @@
 
 #include "Debug.hpp"
 #include "handle.h"
+#include "rocroller_selected.hpp"
 #include "utility.hpp"
 
 using namespace rocRoller;
@@ -358,34 +359,11 @@ rocblaslt_status
     int              index;
     *returnAlgoCount = 0;
 
-    if(prob.bias != nullptr)
-    {
-        std::cerr << "rocRoller does not support bias" << std::endl;
+    // useRocRoller() vetoes these before routing, so a declined problem reaches
+    // TensileLite rather than this error. Kept for callers that bypass the
+    // routing predicate, and because gemm.cpp relies on batch_count == 1 here.
+    if(!rocRollerSupportsProblem(prob))
         return rocblaslt_status_invalid_value;
-    }
-
-    if(prob.batch_count != 1)
-    {
-        std::cerr << "rocRoller only supports 1 batch_count not " << prob.batch_count << std::endl;
-        return rocblaslt_status_invalid_value;
-    }
-
-    auto scale_type = normalizeOperandType(prob.scale_type);
-    if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
-    {
-        // Print the hipDataType. hip2RocRollerType throws on a format rocRoller
-        // does not name, and that throw becomes an internal error.
-        std::cerr << "rocRoller only supports F32 as scale type not "
-                  << static_cast<int>(scale_type) << std::endl;
-        return rocblaslt_status_invalid_value;
-    }
-
-    if(kernelType.typeAcc != HIP_R_32F)
-    {
-        std::cerr << "rocRoller only supports F32 accumulation, not "
-                  << static_cast<int>(kernelType.typeAcc) << std::endl;
-        return rocblaslt_status_invalid_value;
-    }
 
     auto solutionIndexParameters
         = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);

@@ -3972,6 +3972,14 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     if(isFp8A && isFp8B && isShuffledScale)
         return false;
 
+    // Properties rocRoller declines outright. Vetoing them here, rather than
+    // letting the rocRoller entry points report an error, is what makes the
+    // problem fall through to TensileLite. Every rocRoller call site shares
+    // this predicate, so selection, support checks and the launch all agree on
+    // which backend owns the problem.
+    if(!rocRollerSupportsProblem(prob))
+        return false;
+
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
@@ -5540,6 +5548,16 @@ static bool gemmDataUsesRocRoller(rocblaslt_handle                        handle
 {
     return data && data->rocProblem && useRocRoller(handle, *data->rocProblem);
 }
+#ifdef HIPBLASLT_USE_ROCROLLER
+// parametersToIndex sets bit 31 on every rocRoller solution index; Tensile
+// indices are non-negative. getSolutionsFromIndex already routes on this.
+// Needed because getBestSolutions may hand back a Tensile algo for a problem
+// useRocRoller() accepts, when no rocRoller kernel fits it.
+static bool isRocRollerAlgo(const rocblaslt_matmul_algo* algo)
+{
+    return algo != nullptr && *reinterpret_cast<const int*>(algo->data) < 0;
+}
+#endif
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
@@ -5634,8 +5652,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     try
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(useRocRoller(handle, prob))
-            return runRocRollerContractionProblem(handle, algo, prob);
+        // getBestSolutions can fall back, so the algo decides the backend; only
+        // a call that picked no algo is still free to choose.
+        if(useRocRoller(handle, prob) && (algo == nullptr || isRocRollerAlgo(algo)))
+        {
+            const rocblaslt_status rrStatus
+                = runRocRollerContractionProblem(handle, algo, prob);
+            // not_implemented is rocRoller's "no kernel fits"; anything else,
+            // including a launch failure, belongs to the caller. An algo the
+            // caller chose is never replaced.
+            if(algo != nullptr || rrStatus != rocblaslt_status_not_implemented)
+                return rrStatus;
+        }
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
@@ -7481,23 +7509,31 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   size_t                             maxWorkSpaceBytes)
 {
     *returnAlgoCount = 0;
+    if(useRocRoller(handle, prob))
+    {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
-        return getRocRollerBestSolutions(handle,
-                                         prob,
-                                         requestedAlgoCount,
-                                         heuristicResultsArray,
-                                         maxWorkSpaceBytes,
-                                         returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerBestSolutions(
+            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes,
+            returnAlgoCount);
 #else
-    if(useRocRoller(handle, prob))
-        return getRocRollerSelectedSolutions(handle,
-                                   prob,
-                                   requestedAlgoCount,
-                                   heuristicResultsArray,
-                                   maxWorkSpaceBytes,
-                                   returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerSelectedSolutions(
+            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes,
+            returnAlgoCount);
 #endif
+        if(rrStatus == rocblaslt_status_success && *returnAlgoCount > 0)
+            return rrStatus;
+
+        // No rocRoller kernel fits this problem. Fall through to the Tensile
+        // heuristic rather than failing the call: the generated library covers
+        // shapes and types the rocRoller tile set does not. Both legs discard
+        // whatever the rocRoller call left in the array.
+        if(requestedAlgoCount > 0)
+            memset(heuristicResultsArray,
+                   0,
+                   sizeof(rocblaslt_matmul_heuristic_result) * requestedAlgoCount);
+        *returnAlgoCount = 0;
+    }
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7683,23 +7719,27 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes)
 {
-#ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
-        return getAllSolutionsRocRoller(prob, handle, heuristicResults, maxWorkSpaceBytes);
-#else
     if(useRocRoller(handle, prob))
     {
+#ifdef HIPBLASLT_USE_ROCROLLER
+        std::vector<rocblaslt_matmul_heuristic_result> ranked;
+        const rocblaslt_status                         rrStatus
+            = getAllSolutionsRocRoller(prob, handle, ranked, maxWorkSpaceBytes);
+#else
         std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
-        int                                            count = 0;
-        rocblaslt_status                               status = getRocRollerSelectedSolutions(
+        int                                            count    = 0;
+        const rocblaslt_status                         rrStatus = getRocRollerSelectedSolutions(
             handle, prob, -1, ranked.data(), maxWorkSpaceBytes, &count);
-        if(status != rocblaslt_status_success)
-            return status;
         ranked.resize(static_cast<size_t>(std::max(count, 0)));
-        heuristicResults = std::move(ranked);
-        return rocblaslt_status_success;
-    }
 #endif
+        // Same fallback as getBestSolutions: an empty rocRoller list means no
+        // rocRoller kernel fits, so answer from the generated library instead.
+        if(rrStatus == rocblaslt_status_success && !ranked.empty())
+        {
+            heuristicResults = std::move(ranked);
+            return rocblaslt_status_success;
+        }
+    }
     auto tensile_prob = ConstructTensileProblem(prob);
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
 }
@@ -8071,7 +8111,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      size_t*                      workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
@@ -8087,7 +8127,7 @@ rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                 
                                                size_t* workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
     {
         RocblasltContractionProblem probe = prob;
         return isRocRollerSolutionSupported(handle, probe, algo, workspaceSizeInBytes);
@@ -8119,7 +8159,7 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
                                             size_t*                            workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
         return isSolutionSupportedNoMutation(handle, prob, gemmData, algo, workspaceSizeInBytes);
 #endif
 
