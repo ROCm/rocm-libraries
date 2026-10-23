@@ -44,47 +44,6 @@
 using namespace group_conv;
 
 // ---------------------------------------------------------------------------
-// Host-only: the fix relies on TF32-ness being recoverable from the problem, i.e. a TF32 FP32
-// convolution must carry the _cxTF32 compute marker in its db key and an otherwise-identical
-// strict-FP32 problem must not. This is also what keeps TF32 and FP32 perf-db records distinct.
-// ---------------------------------------------------------------------------
-namespace {
-
-std::string ProblemKey(miopenMathType_t math_type)
-{
-    GroupConvTestConfig<2u> cfg{8, 256, 384, 384, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}};
-
-    const auto in_desc  = miopen::TensorDescriptor(miopenFloat, miopenTensorNHWC, cfg.GetInput());
-    const auto wei_desc = miopen::TensorDescriptor(miopenFloat, miopenTensorNHWC, cfg.GetWeights());
-
-    auto conv_desc = cfg.GetConv();
-    conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type);
-
-    const auto out_desc = conv_desc.GetForwardOutputTensor(in_desc, wei_desc, miopenFloat);
-
-    const miopen::conv::ProblemDescription problem{
-        in_desc, wei_desc, out_desc, conv_desc, miopen::conv::Direction::Forward};
-
-    std::ostringstream ss;
-    problem.Serialize(ss);
-    return ss.str();
-}
-
-} // namespace
-
-TEST(CPU_ConvCkGroupedFwdTF32Reuse_NONE, ProblemKeyCarriesComputeType)
-{
-    const auto key_tf32 = ProblemKey(miopenMathDefault);  // TF32 allowed
-    const auto key_fp32 = ProblemKey(miopenMathPedantic); // strict FP32
-
-    EXPECT_NE(key_tf32.find("cxTF32"), std::string::npos)
-        << "TF32 problem key is missing the compute marker: " << key_tf32;
-    EXPECT_EQ(key_fp32.find("cxTF32"), std::string::npos)
-        << "strict-FP32 problem key unexpectedly carries the TF32 marker: " << key_fp32;
-    EXPECT_NE(key_tf32, key_fp32);
-}
-
-// ---------------------------------------------------------------------------
 // GPU: run the forward grouped CK solver with a config that has been round-tripped through the
 // perf-db serialization (which drops use_tf32), on a TF32 problem, and require the result to
 // differ from the same kernel run as strict FP32. Before the fix the DB-restored config built
@@ -188,15 +147,80 @@ struct GPU_GroupConv2DFwd_TF32Reuse_FP32 : GroupConvTestFix<2u, float, Direction
         tensor<float> out_fp32 = output;
         run(problem_fp32, restored, out_fp32);
 
+        // Pristine TF32 config (use_tf32 preserved, no db round-trip): the reference for what a
+        // genuinely-TF32 run looks like on this build.
+        tensor<float> out_tf32_ref = output;
+        run(problem_tf32, cfg, out_tf32_ref);
+
         ASSERT_EQ(miopen::range_distance(out_tf32), miopen::range_distance(out_fp32));
-        const auto diff = miopen::rms_range(out_fp32, out_tf32);
-        EXPECT_GT(diff, 1e-5) << "perf-db-restored TF32 config produced an FP32-identical result "
-                                 "(rms "
-                              << diff << "): TF32 silently fell back to FP32 on reuse";
+
+        // Some CK builds do not carry a numerically distinct TF32 grouped-fwd kernel for this
+        // instance on this device -- there TF32 and FP32 compute identically and the perf-db reuse
+        // property is unobservable. Skip rather than false-fail; the fix is still exercised on
+        // builds that do run a distinct TF32 kernel (e.g. gfx942 / ROCm >= 10.1).
+        if(miopen::rms_range(out_fp32, out_tf32_ref) <= 1e-5)
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "CK runs TF32 grouped-fwd identically to FP32 on this device; cannot "
+                            "observe perf-db TF32 reuse";
+        }
+
+        // The fix: a db-restored config (use_tf32 dropped) must still run TF32 -- matching the
+        // pristine TF32 reference and diverging from FP32 -- not silently fall back to FP32.
+        EXPECT_GT(miopen::rms_range(out_fp32, out_tf32), 1e-5)
+            << "perf-db-restored TF32 config produced an FP32-identical result: TF32 silently fell "
+               "back to FP32 on reuse";
+        EXPECT_LE(miopen::rms_range(out_tf32_ref, out_tf32), 1e-6)
+            << "perf-db-restored TF32 result diverged from the pristine TF32 result";
+    }
+
+    // TF32 and strict-FP32 versions of the same problem must serialize to different perf-db keys
+    // (via the _cxTF32 compute marker) so their tuned records never collide in the DB. The marker
+    // is only emitted once SetupComputeType has run against a TF32-capable device, so this runs on
+    // the GPU and skips elsewhere.
+    void RunKeyDistinct()
+    {
+        auto& handle = get_handle();
+        auto ctx     = miopen::ExecutionContext{};
+        ctx.SetStream(&handle);
+
+        miopen::conv::ProblemDescription problem_tf32{
+            input.desc, weights.desc, output.desc, conv_desc, Direction::Forward, 0, alpha, beta};
+        problem_tf32.SetupComputeType(ctx);
+        if(!problem_tf32.UseTF32())
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "TF32 compute is not enabled on this device";
+        }
+
+        auto conv_desc_fp32 = conv_desc;
+        conv_desc_fp32.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
+        miopen::conv::ProblemDescription problem_fp32{input.desc,
+                                                      weights.desc,
+                                                      output.desc,
+                                                      conv_desc_fp32,
+                                                      Direction::Forward,
+                                                      0,
+                                                      alpha,
+                                                      beta};
+        problem_fp32.SetupComputeType(ctx);
+
+        std::ostringstream key_tf32;
+        std::ostringstream key_fp32;
+        problem_tf32.Serialize(key_tf32);
+        problem_fp32.Serialize(key_fp32);
+
+        EXPECT_NE(key_tf32.str().find("cxTF32"), std::string::npos)
+            << "TF32 problem key is missing the compute marker: " << key_tf32.str();
+        EXPECT_EQ(key_fp32.str().find("cxTF32"), std::string::npos)
+            << "strict-FP32 problem key unexpectedly carries the TF32 marker: " << key_fp32.str();
+        EXPECT_NE(key_tf32.str(), key_fp32.str())
+            << "TF32 and FP32 problems serialize to the same perf-db key; their records collide";
     }
 };
 
 TEST_P(GPU_GroupConv2DFwd_TF32Reuse_FP32, DbRestoredConfigStaysTF32) { RunDbReuse(); }
+TEST_P(GPU_GroupConv2DFwd_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
