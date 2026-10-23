@@ -319,6 +319,12 @@ typedef enum rocblaslt_compute_type_
     = 106, /**< 32-bit input can use fp8 for A and bf8 for B compute */
     rocblaslt_compute_f32_fast_bf8f8
     = 107, /**< 32-bit input can use bf8 for A and fp8 for B compute */
+    rocblaslt_compute_f64_emulated_fixedpoint
+    = 200, /**< FP64 GEMM emulated with INT8 fixed-point arithmetic (Ozaki Scheme II).
+                Must match HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT. */
+    rocblaslt_compute_f32_emulated_fixedpoint
+    = 201, /**< FP32 GEMM emulated with INT8 fixed-point arithmetic (Ozaki Scheme II).
+                Must match HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT. */
 } rocblaslt_compute_type;
 
 /*! \ingroup types_module

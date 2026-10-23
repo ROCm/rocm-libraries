@@ -44,6 +44,16 @@ namespace
         hipblasLtMatmulDescSetAttribute(
             matmul_desc, HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR, &ed, sizeof(ed));
     }
+    /* Map an emulated data type to the rocblaslt compute type passed to
+     * fixedPointEmulationDecision.  emulated=true selects the explicit
+     * *_EMULATED_FIXEDPOINT compute type (always enables emulation);
+     * emulated=false selects plain f64/f32 (emulates only via env var). */
+    inline rocblaslt_compute_type emulComputeType(hipDataType t, bool emulated)
+    {
+        if(t == HIP_R_32F)
+            return emulated ? rocblaslt_compute_f32_emulated_fixedpoint : rocblaslt_compute_f32;
+        return emulated ? rocblaslt_compute_f64_emulated_fixedpoint : rocblaslt_compute_f64;
+    }
     // Returns true only when a HIP device exists AND it is in the emulation
     // hardware support table.  Uses EAGER to bypass the cost model so the probe
     // GEMM size (16³) never influences the result — only the device table check
@@ -61,7 +71,7 @@ namespace
         /* Check device support using a temporary matmul desc with eager emulation. */
         hipblasLtMatmulDesc_t    _tmpDesc = nullptr;
         hipblasLtEmulationDesc_t _ed      = nullptr;
-        hipblasLtMatmulDescCreate(&_tmpDesc, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+        hipblasLtMatmulDescCreate(&_tmpDesc, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F);
         hipblasLtEmulationDescCreate(&_ed);
         emulSetStrategy(_ed, HIPBLAS_EMULATION_STRATEGY_EAGER);
         emulAttach(_tmpDesc, _ed);
@@ -69,7 +79,7 @@ namespace
         const _rocblaslt_matmul_desc* _dp
             = reinterpret_cast<const _rocblaslt_matmul_desc*>(_tmpDesc);
         const FixedPointEmulationSettings d = fixedPointEmulationDecision(
-            _h, _dp, HIP_R_64F, 16, 16, 16, 1, ~size_t{0});
+            _h, _dp, rocblaslt_compute_f64_emulated_fixedpoint, 16, 16, 16, 1, ~size_t{0});
         hipblasLtEmulationDescDestroy(_ed);
         hipblasLtMatmulDescDestroy(_tmpDesc);
         hipblasLtDestroy(h);
@@ -160,7 +170,10 @@ namespace
                 GTEST_SKIP() << "No HIP device or device not supported by emulation";
             ASSERT_EQ(hipblasLtCreate(&m_handle), HIPBLAS_STATUS_SUCCESS);
             m_roc = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
-            ASSERT_EQ(hipblasLtMatmulDescCreate(&m_emul_desc, HIPBLAS_COMPUTE_64F, HIP_R_64F),
+            /* Emulation is enabled by the compute type; the attached emulation
+             * descriptor only tunes strategy / special values / mantissa bits. */
+            ASSERT_EQ(hipblasLtMatmulDescCreate(
+                          &m_emul_desc, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F),
                       HIPBLAS_STATUS_SUCCESS);
             /* Create emulation sub-descriptor, configure defaults, attach to matmul desc. */
             ASSERT_EQ(hipblasLtEmulationDescCreate(&m_ed), HIPBLAS_STATUS_SUCCESS);
@@ -181,8 +194,12 @@ namespace
 
         void set_enabled(bool on)
         {
-            /* Attach or detach the emulation descriptor: attached = enabled, null = disabled. */
-            emulAttach(m_emul_desc, on ? m_ed : nullptr);
+            /* Emulation is requested via the compute type passed to the decision:
+             * on  -> *_EMULATED_FIXEDPOINT compute type (explicit request);
+             * off -> plain f64/f32 compute type (emulates only via env var).
+             * The emulation descriptor stays attached in both cases — it only
+             * tunes settings and must never enable emulation by itself.       */
+            m_enabled = on;
         }
 
         void set_strategy(hipblasEmulationStrategy_t s)
@@ -195,7 +212,7 @@ namespace
             const FixedPointEmulationSettings decision = fixedPointEmulationDecision(
                 m_roc,
                 reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
-                t,
+                emulComputeType(t, m_enabled),
                 m,
                 n,
                 k,
@@ -205,6 +222,7 @@ namespace
             return decision.apply;
         }
 
+        bool                     m_enabled   = true;
         hipblasLtHandle_t        m_handle    = nullptr;
         hipblasLtMatmulDesc_t    m_emul_desc = nullptr;
         hipblasLtEmulationDesc_t m_ed        = nullptr;
@@ -249,11 +267,32 @@ namespace
                   0u);
     }
 
-    // Explicit "off" must win regardless of the environment variable.
-    TEST_F(FixedPointEmulationTest, WouldApply_ForcedOffReturnsFalse)
+    // An attached emulation descriptor alone must NOT enable emulation: with a
+    // plain 64F/32F compute type, emulation is only enabled through
+    // HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1.
+    TEST_F(FixedPointEmulationTest, WouldApply_DescriptorAloneDoesNotEnable)
     {
-        set_enabled(false);
+        set_enabled(false); /* plain compute type, emulation descriptor still attached */
+        set_strategy(HIPBLAS_EMULATION_STRATEGY_EAGER);
+        if(fixedPointEmulationIsEnabled(HIP_R_64F))
+            GTEST_SKIP() << "HIPBLASLT_EMULATE_DOUBLE_PRECISION is set";
         EXPECT_FALSE(would_apply(HIP_R_64F, 4096, 4096, 4096, 1));
+        if(!fixedPointEmulationIsEnabled(HIP_R_32F))
+            EXPECT_FALSE(would_apply(HIP_R_32F, 4096, 4096, 4096, 1));
+    }
+
+    // The emulated compute type enables emulation even without any emulation
+    // descriptor attached (descriptor only tunes; defaults apply otherwise).
+    TEST_F(FixedPointEmulationTest, WouldApply_EmulatedComputeTypeWithoutDescriptor)
+    {
+        emulAttach(m_emul_desc, nullptr);
+        const auto* dp = reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc);
+        /* Default strategy may be PERFORMANT, so use a size the cost model accepts. */
+        const FixedPointEmulationSettings d = fixedPointEmulationDecision(
+            m_roc, dp, rocblaslt_compute_f64_emulated_fixedpoint, 4096, 4096, 4096, 1, ~size_t{0});
+        EXPECT_EQ(d.status, rocblaslt_status_success);
+        EXPECT_TRUE(d.apply);
+        emulAttach(m_emul_desc, m_ed);
     }
 
     // Verifies that EAGER strategy bypasses the cost model for both FP64 and FP32.
@@ -611,7 +650,7 @@ namespace
         /* ── Emulation handle ─────────────────────────────────────────────── */
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled by attaching the emulation descriptor */
+        /* emulation enabled by the *_EMULATED_FIXEDPOINT compute type; the descriptor only tunes */
         /* emulation strategy=HIPBLAS_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
 
         /* ── Native DGEMM reference handle + layouts ─────────────────────── */
@@ -663,7 +702,7 @@ namespace
         const size_t _emu_ws_sz = [&]() -> size_t {
             hipblasLtMatmulDesc_t    _wd  = nullptr;
             hipblasLtEmulationDesc_t _wed = nullptr;
-            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F);
             hipblasLtEmulationDescCreate(&_wed);
             emulSetStrategy(_wed, HIPBLAS_EMULATION_STRATEGY_EAGER);
             emulAttach(_wd, _wed);
@@ -1186,7 +1225,7 @@ namespace
 
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled by attaching the emulation descriptor */
+        /* emulation enabled by the *_EMULATED_FIXEDPOINT compute type; the descriptor only tunes */
         /* emulation strategy=HIPBLAS_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
 
         FixedPointEmulationSettings emu_settings{};
@@ -1198,7 +1237,7 @@ namespace
         const size_t _dem_ws_sz = [&]() -> size_t {
             hipblasLtMatmulDesc_t    _wd  = nullptr;
             hipblasLtEmulationDesc_t _wed = nullptr;
-            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F);
             hipblasLtEmulationDescCreate(&_wed);
             emulSetStrategy(_wed, HIPBLAS_EMULATION_STRATEGY_EAGER);
             emulAttach(_wd, _wed);
@@ -1570,7 +1609,7 @@ namespace
 
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled by attaching the emulation descriptor */
+        /* emulation enabled by the *_EMULATED_FIXEDPOINT compute type; the descriptor only tunes */
         /* emulation strategy=HIPBLAS_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
         /* ADP: let the algorithm choose the number of moduli from the data */
         /* emulation num_moduli=-1 now set on matmul desc; see emulSetNumModuli() */;
@@ -1618,7 +1657,7 @@ namespace
         const size_t _struct_ws_sz = [&]() -> size_t {
             hipblasLtMatmulDesc_t    _wd  = nullptr;
             hipblasLtEmulationDesc_t _wed = nullptr;
-            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+            hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F);
             hipblasLtEmulationDescCreate(&_wed);
             emulSetStrategy(_wed, HIPBLAS_EMULATION_STRATEGY_EAGER);
             emulAttach(_wd, _wed);
@@ -2786,7 +2825,7 @@ namespace
                 GTEST_SKIP() << "No HIP device or device not supported by emulation";
             if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
                 GTEST_SKIP() << "hipblasLtCreate failed";
-            hipblasLtMatmulDescCreate(&m_emul_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+            hipblasLtMatmulDescCreate(&m_emul_desc, HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT, HIP_R_32F);
             hipblasLtEmulationDescCreate(&m_ed);
             emulSetStrategy(m_ed, HIPBLAS_EMULATION_STRATEGY_EAGER);
             emulAttach(m_emul_desc, m_ed);
@@ -2924,7 +2963,7 @@ namespace
         const FixedPointEmulationSettings d = fixedPointEmulationDecision(
             h,
             reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
-            HIP_R_32F,
+            rocblaslt_compute_f32_emulated_fixedpoint,
             128,
             128,
             128,

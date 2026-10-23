@@ -157,7 +157,14 @@ struct FixedPointEmulationSettings
 /* Status-returning emulation gate.  Invalid env-var values return
  * rocblaslt_status_invalid_value so callers do not silently fall back to
  * native GEMM.  On success, apply=false means the native path should be
- * used without error.  Dispatches on type_a (HIP_R_64F or HIP_R_32F).
+ * used without error.  Dispatches on the matmul compute type:
+ *   - rocblaslt_compute_{f64,f32}_emulated_fixedpoint: emulation requested
+ *     explicitly (like CUBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT).
+ *   - rocblaslt_compute_{f64,f32}: emulation only when the env var
+ *     HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 is set.
+ *   - anything else: never emulated.
+ * An attached emulation descriptor only tunes the settings (strategy,
+ * special values, mantissa bits); it does not enable emulation by itself.
  *
  * Setting precedence (highest to lowest):
  *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit)
@@ -169,7 +176,7 @@ struct FixedPointEmulationSettings
  * Always selects ADP (dynamic) mode; num_moduli is always S_MAX.          */
 FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*      h,
                                                         const _rocblaslt_matmul_desc* desc,
-                                                        hipDataType                   type_a,
+                                                        rocblaslt_compute_type        compute_type,
                                                         int64_t                       m,
                                                         int64_t                       n,
                                                         int64_t                       k,
@@ -181,7 +188,7 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
  * the apply/reject outcome is needed.                                       */
 bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
                                    const _rocblaslt_matmul_desc* desc,
-                                   hipDataType                   type_a,
+                                   rocblaslt_compute_type        compute_type,
                                    int64_t                       m,
                                    int64_t                       n,
                                    int64_t                       k,

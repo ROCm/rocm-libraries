@@ -21,6 +21,7 @@
 #include "scale_kernels.hpp" /* scale_A/B_T/N kernels */
 #include "shift_refine_kernels.hpp" /* refine / col_max / adp kernels */
 #include "tables.hpp"
+#include "utility.hpp" /* isFixedPointEmulatedComputeType & friends */
 
 #include "hipblaslt/hipblaslt.h"
 #include <hip/hip_runtime.h>
@@ -1834,13 +1835,17 @@ FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* val
 
 FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*      h,
                                                         const _rocblaslt_matmul_desc* desc,
-                                                        hipDataType                   type_a,
+                                                        rocblaslt_compute_type        compute_type,
                                                         int64_t                       m,
                                                         int64_t                       n,
                                                         int64_t                       k,
                                                         int32_t                       batch_count,
                                                         size_t workspace_bytes)
 {
+    /* Data type being emulated: HIP_R_64F / HIP_R_32F for the fixed-point
+     * emulated compute types and for plain f64 / f32 (env-var path);
+     * HIPBLASLT_DATATYPE_INVALID for every other compute type.            */
+    const hipDataType type_a = fixedPointEmulatedComputeDataType(compute_type);
     /* Derive transpose flags from the descriptor (or default to OP_N when nullptr). */
     const hipblasOperation_t opA = desc ? desc->op_A : HIPBLAS_OP_N;
     const hipblasOperation_t opB = desc ? desc->op_B : HIPBLAS_OP_N;
@@ -1879,9 +1884,13 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     if(ed && ed->force_off)
         return result; /* apply=false */
 
-    /* Emulation enabled: attaching the descriptor is the enable signal.
-     * Without a descriptor, fall back to the env var (HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION). */
-    const bool emulEnabled = ed ? true : fixedPointEmulationIsEnabled(type_a);
+    /* Emulation enabled:
+     *   - compute type is {64F,32F}_EMULATED_FIXEDPOINT -> explicitly requested;
+     *   - plain 64F / 32F compute type -> only via the env var
+     *     HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 (transparent mode).
+     * The emulation descriptor only tunes settings; it never enables. */
+    const bool emulEnabled = isFixedPointEmulatedComputeType(compute_type)
+                             || fixedPointEmulationIsEnabled(type_a);
     if(!emulEnabled)
         return result;
 
@@ -2335,7 +2344,7 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
  * type and problem (enabled + device supported + strategy gate passes).      */
 bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
                                    const _rocblaslt_matmul_desc* desc,
-                                   hipDataType                   type_a,
+                                   rocblaslt_compute_type        compute_type,
                                    int64_t                       m,
                                    int64_t                       n,
                                    int64_t                       k,
@@ -2343,7 +2352,7 @@ bool fixedPointEmulationWouldApply(const _rocblaslt_handle*      h,
 {
     return fixedPointEmulationDecision(h,
                                        desc,
-                                       type_a,
+                                       compute_type,
                                        m,
                                        n,
                                        k,

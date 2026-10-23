@@ -32,6 +32,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "utility.hpp" /* fixedPointEmulatedComputeDataType */
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -1184,18 +1185,18 @@ try
         const int64_t     k           = (desc_ptr->op_A == HIPBLAS_OP_N)
                                         ? static_cast<int64_t>(A_layout->n)
                                         : static_cast<int64_t>(A_layout->m);
-        const int32_t     batch_count = A_layout->batch_count;
-        const hipDataType type_a      = A_layout->type;
+        const int32_t                batch_count  = A_layout->batch_count;
+        const rocblaslt_compute_type compute_type = desc_ptr->compute_type;
 
         const FixedPointEmulationSettings emulDecision =
-            fixedPointEmulationDecision(h, desc_ptr, type_a, m, n, k, batch_count,
+            fixedPointEmulationDecision(h, desc_ptr, compute_type, m, n, k, batch_count,
                                           reinterpret_cast<const _rocblaslt_matmul_preference*>(pref)->max_workspace_bytes);
         if(emulDecision.status != rocblaslt_status_success)
             return RocBlasLtStatusToHIPStatus(emulDecision.status);
         if(emulDecision.apply && *returnAlgoCount > 0)
         {
-            const size_t emul_ws =
-                fixedPointEmulationWorkspaceSize(h, type_a, desc_ptr->op_A, desc_ptr->op_B,
+            const size_t emul_ws = fixedPointEmulationWorkspaceSize(
+                h, fixedPointEmulatedComputeDataType(compute_type), desc_ptr->op_A, desc_ptr->op_B,
                                            m, n, k, emulDecision);
             for(int i = 0; i < *returnAlgoCount; ++i)
                 heuristicResultsArray[i].workspaceSize = emul_ws;
@@ -1574,8 +1575,16 @@ try
     const auto* desc = reinterpret_cast<const _rocblaslt_matmul_desc*>(matmulDesc);
     const hipblasOperation_t opA = desc ? desc->op_A : HIPBLAS_OP_N;
     const hipblasOperation_t opB = desc ? desc->op_B : HIPBLAS_OP_N;
+    /* Compute type: taken from matmulDesc when given (it must emulate the
+     * requested input type); without a descriptor the query is treated as a
+     * request for fixed-point emulation of computeInputType.                 */
+    const rocblaslt_compute_type ctype
+        = desc ? desc->compute_type
+               : (computeInputType == HIP_R_64F ? rocblaslt_compute_f64_emulated_fixedpoint
+                                                : rocblaslt_compute_f32_emulated_fixedpoint);
+    if(fixedPointEmulatedComputeDataType(ctype) != computeInputType) return 0;
     const FixedPointEmulationSettings d = fixedPointEmulationDecision(
-        h, desc, computeInputType, m, n, k, 1, ~size_t{0});
+        h, desc, ctype, m, n, k, 1, ~size_t{0});
     if(d.status != rocblaslt_status_success || !d.apply) return 0;
     return fixedPointEmulationWorkspaceSize(h, computeInputType, opA, opB, m, n, k, d);
 }

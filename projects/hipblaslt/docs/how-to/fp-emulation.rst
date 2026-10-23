@@ -50,6 +50,51 @@ results.  Similarly, if the dynamic range of the input is too large for the
 configured number of moduli, the call falls back to native GEMM automatically.
 
 
+Enabling emulation
+==================
+
+Emulation is selected through the **compute type** of the matmul descriptor,
+following the cuBLAS model:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Compute type
+     - Behaviour
+   * - ``HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT``
+     - FP64 GEMM explicitly requested to use fixed-point emulation.
+       Equivalent to ``CUBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT``.
+   * - ``HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT``
+     - FP32 GEMM explicitly requested to use fixed-point emulation.
+       This has **no cuBLAS equivalent** (cuBLAS emulates FP32 with BF16x9).
+   * - ``HIPBLAS_COMPUTE_64F`` / ``HIPBLAS_COMPUTE_32F``
+     - Native GEMM, unless ``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` /
+       ``HIPBLASLT_EMULATE_SINGLE_PRECISION=1`` is set, in which case the
+       GEMM is transparently emulated (no code changes needed).
+
+With an emulated compute type, the A, B, C and D matrices must all be
+``HIP_R_64F`` (for ``HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT``) or ``HIP_R_32F``
+(for ``HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT``); other type combinations
+are rejected and ``hipblasLtMatmul`` returns an error status
+(``rocblaslt_status_not_implemented`` internally, currently surfaced as
+``HIPBLAS_STATUS_INTERNAL_ERROR``).  The scale type is ``HIP_R_64F`` /
+``HIP_R_32F`` respectively.
+
+An emulated compute type *requests* emulation; whether a given call is
+actually emulated still depends on the strategy (``performant`` only emulates
+when predicted faster), device support, ``batch_count=1`` and the input data
+(Inf/NaN or excessive dynamic range fall back to native).  When emulation is
+not taken, the call runs as a native FP64/FP32 GEMM.
+
+.. note::
+
+   Attaching an emulation descriptor (see below) does **not** enable
+   emulation.  The emulation descriptor only tunes the strategy, the
+   special-value handling and the target precision of GEMMs that are already
+   emulated through the compute type or the environment variables.
+
+
 Emulation descriptor (per-matmul settings)
 ===========================================
 
@@ -107,7 +152,8 @@ and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
        HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
        &emul_desc, sizeof(emul_desc));
 
-Set the pointer to ``NULL`` to detach the emulation descriptor.
+Set the pointer to ``NULL`` to detach the emulation descriptor; emulated
+compute types then use the environment-variable / built-in defaults.
 
 Example: enable FP64 emulation eagerly with reduced precision:
 
@@ -116,7 +162,9 @@ Example: enable FP64 emulation eagerly with reduced precision:
    hipblasLtMatmulDesc_t    matmul_desc;
    hipblasLtEmulationDesc_t emul_desc;
 
-   hipblasLtMatmulDescCreate(&matmul_desc, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+   // The emulated compute type enables emulation
+   hipblasLtMatmulDescCreate(&matmul_desc,
+                             HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F);
    hipblasLtEmulationDescCreate(&emul_desc);
 
    // Use eager strategy (always emulate, skip performance gate)
@@ -159,7 +207,11 @@ Emulation requires a workspace buffer. Query the required size with
 ``hipblasLtEmulationWorkspaceSize``, which accepts the matmul descriptor so
 that per-call emulation settings (including the transpose modes ``TRANSA`` /
 ``TRANSB``) are accounted for.  The input precision is supplied explicitly via
-``computeInputType`` (``HIP_R_64F`` or ``HIP_R_32F``).  Pass ``batch_count=1``
+``computeInputType`` (``HIP_R_64F`` or ``HIP_R_32F``); when a matmul descriptor
+is given, its compute type must correspond to ``computeInputType``
+(``64F`` / ``64F_EMULATED_FIXEDPOINT`` for ``HIP_R_64F``, ``32F`` /
+``32F_EMULATED_FIXEDPOINT`` for ``HIP_R_32F``), otherwise 0 is returned.
+Pass ``batch_count=1``
 (the only currently supported value; the function returns 0 for any other value,
 which signals that emulation is not supported for that batch size):
 
@@ -207,7 +259,8 @@ A typical enable-and-tune sequence:
 
 .. code-block:: bash
 
-   # Enable FP64 emulation, and only take it when it is predicted to win.
+   # Transparently emulate all plain HIPBLAS_COMPUTE_64F GEMMs, and only take
+   # emulation when it is predicted to win.
    export HIPBLASLT_EMULATE_DOUBLE_PRECISION=1
    export HIPBLASLT_EMULATION_STRATEGY=performant
 
@@ -217,29 +270,89 @@ A typical enable-and-tune sequence:
 Setting precedence
 ==================
 
-For each emulation parameter, the precedence order (highest to lowest) is:
+Whether emulation is enabled is decided by the compute type
+(``*_EMULATED_FIXEDPOINT`` always requests it) or, for plain ``64F`` / ``32F``
+compute types, by ``HIPBLASLT_EMULATE_DOUBLE_PRECISION`` /
+``HIPBLASLT_EMULATE_SINGLE_PRECISION``.  The emulation descriptor never
+enables emulation.
+
+For each emulation tuning parameter (strategy, target precision,
+special-values handling), the precedence order (highest to lowest) is:
 
 1. **Emulation descriptor attribute** (``hipblasLtEmulationDescSetAttribute`` on an attached
    ``hipblasLtEmulationDesc_t``) — overrides env vars for that specific matmul call.
 2. **Environment variable** — read once at first use, process-wide default.
-3. **Built-in default** — ADP mode (52 mantissa bits for FP64, 23 for FP32), special-values mask 0x3.
+3. **Built-in default** — ``performant`` strategy, ADP mode (52 mantissa bits for FP64, 23 for FP32), special-values mask 0x3.
 
 
 Testing with hipblaslt-bench
 =============================
 
-hipblaslt-bench can be used to run and profile emulated GEMMs.  Emulation is
-activated by setting the appropriate environment variable before invoking the
-benchmark.  The benchmark must also be given a workspace buffer large enough
-for the emulation algorithm; 32 GiB is sufficient for large problem sizes on
-MI355X.
+hipblaslt-bench can be used to run and profile emulated GEMMs.  There are two
+ways to enable emulation, mirroring the library behaviour described in
+`Enabling emulation`_:
 
+* **Emulated compute type (recommended)** — pass
+  ``--compute_type f64_emulated_fixedpoint_r`` (with all of ``--a_type``,
+  ``--b_type``, ``--c_type``, ``--d_type`` and ``--scale_type`` set to
+  ``f64_r``) or ``--compute_type f32_emulated_fixedpoint_r`` (with all types set
+  to ``f32_r``).  No environment variable is needed, and only that problem is
+  emulated.
+* **Transparent mode (environment variable)** — keep the plain ``f64_r`` /
+  ``f32_r`` compute type and set ``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` /
+  ``HIPBLASLT_EMULATE_SINGLE_PRECISION=1``.  Every FP64 / FP32 GEMM in the
+  process is then emulated.
+
+In both cases the tuning environment variables (for example
+``HIPBLASLT_EMULATION_STRATEGY`` and
+``HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT``) apply, since hipblaslt-bench
+does not attach an emulation descriptor.  Note that with the default
+``performant`` strategy small problems run natively; set
+``HIPBLASLT_EMULATION_STRATEGY=eager`` to force emulation regardless of size.
+
+The benchmark must also be given a workspace buffer large enough for the
+emulation algorithm; 32 GiB is sufficient for large problem sizes on MI355X.
 The workspace size is supplied as a number of bytes either via the
 ``--workspace`` command-line option or via the ``user_allocated_workspace``
 key in a YAML problem file.
 
 Command-line example
 --------------------
+
+FP64 emulation through the compute type:
+
+.. code-block:: bash
+
+   ./hipblaslt-bench \
+       --function matmul \
+       --a_type f64_r --b_type f64_r --c_type f64_r --d_type f64_r \
+       --compute_type f64_emulated_fixedpoint_r --scale_type f64_r \
+       --transA T --transB N \
+       --alpha 1 --beta 0 \
+       --initialization trig_float \
+       -m 8192 -n 8192 -k 8192 \
+       --batch_count 1 \
+       --workspace 34359738368
+
+FP32 emulation through the compute type:
+
+.. code-block:: bash
+
+   ./hipblaslt-bench \
+       --function matmul \
+       --a_type f32_r --b_type f32_r --c_type f32_r --d_type f32_r \
+       --compute_type f32_emulated_fixedpoint_r --scale_type f32_r \
+       --transA T --transB N \
+       --alpha 1 --beta 0 \
+       --initialization trig_float \
+       -m 8192 -n 8192 -k 8192 \
+       --batch_count 1 \
+       --workspace 34359738368
+
+Running the same command with ``--compute_type f64_r`` (or ``f32_r``) and no
+emulation environment variable gives the native baseline for comparison.
+
+Transparent mode, emulating a plain FP64 GEMM via the environment variable:
 
 .. code-block:: bash
 
@@ -257,17 +370,22 @@ Command-line example
 YAML file example
 -----------------
 
-Create a YAML problem file (e.g. ``problems.yaml``):
+Create a YAML problem file (e.g. ``problems.yaml``).  In YAML files the
+emulated compute types are spelled ``c_f64_emulated_fixedpoint_r`` and
+``c_f32_emulated_fixedpoint_r``:
 
 .. code-block:: yaml
 
-   - {function: matmul, a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_r, scale_type: f64_r, transA: T, transB: N, alpha: 1, beta: 0, initialization: trig_float, M: 8192, N: 8192, K: 8192, batch_count: 1, user_allocated_workspace: 34359738368}
+   - {function: matmul, a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_emulated_fixedpoint_r, scale_type: f64_r, transA: T, transB: N, alpha: 1, beta: 0, initialization: trig_float, M: 8192, N: 8192, K: 8192, batch_count: 1, user_allocated_workspace: 34359738368}
 
 Then run:
 
 .. code-block:: bash
 
-   HIPBLASLT_EMULATE_DOUBLE_PRECISION=1 hipblaslt-bench --yaml problems.yaml
+   hipblaslt-bench --yaml problems.yaml
+
+Alternatively, use ``compute_type: c_f64_r`` in the YAML file and run with
+``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` (transparent mode).
 
 Limitations
 ===========

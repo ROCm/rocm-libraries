@@ -88,6 +88,8 @@ typedef enum
     HIPBLAS_COMPUTE_32F_FAST_8BF_FNUZ   = 101, /**< 32-bit compute using bf8 mfma instruction */
     HIPBLAS_COMPUTE_32F_FAST_8F8BF_FNUZ = 102, /**< 32-bit compute using f8bf8 mfma instruction */
     HIPBLAS_COMPUTE_32F_FAST_8BF8F_FNUZ = 103, /**< 32-bit compute using bf8f8 mfma instruction */
+    HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT = 200, /**< 64-bit GEMM computed with fixed-point emulation */
+    HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT = 201, /**< 32-bit GEMM computed with fixed-point emulation */
 } hipblasComputeType_t;
 
 /*! \brief Emulation strategy for reduced-precision GEMM emulation (e.g. FP64 GEMM via Ozaki

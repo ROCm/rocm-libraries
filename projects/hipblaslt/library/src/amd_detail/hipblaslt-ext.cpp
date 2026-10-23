@@ -1187,11 +1187,13 @@ namespace hipblaslt_ext
              * Used by algoGetHeuristic / isAlgoSupported to report the true
              * total workspace so callers can pre-allocate it.                */
             const auto* h = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
+            const auto  ctype
+                = static_cast<rocblaslt_compute_type>(problemtype.getTypeCompute());
             const FixedPointEmulationSettings emulDecision =
-                fixedPointEmulationDecision(h, nullptr, problemtype.getTypeA(),
+                fixedPointEmulationDecision(h, nullptr, ctype,
                                       m, n, k, batch_count, ~size_t{0});
             m_emul_workspace_bytes = emulDecision.apply
-                ? fixedPointEmulationWorkspaceSize(h, problemtype.getTypeA(),
+                ? fixedPointEmulationWorkspaceSize(h, fixedPointEmulatedComputeDataType(ctype),
                                              problemtype.getOpA(), problemtype.getOpB(),
                                              m, n, k, emulDecision)
                 : 0u;
@@ -1245,10 +1247,11 @@ namespace hipblaslt_ext
                                      : static_cast<int64_t>(A_layout->m);
             const int32_t batch = A_layout->batch_count;
             const FixedPointEmulationSettings emulDecision =
-                fixedPointEmulationDecision(h, desc_ptr, A_layout->type,
+                fixedPointEmulationDecision(h, desc_ptr, desc_ptr->compute_type,
                                       m_sz, n_sz, k_sz, batch, ~size_t{0});
             m_emul_workspace_bytes = emulDecision.apply
-                ? fixedPointEmulationWorkspaceSize(h, A_layout->type,
+                ? fixedPointEmulationWorkspaceSize(
+                      h, fixedPointEmulatedComputeDataType(desc_ptr->compute_type),
                                              desc_ptr->op_A, desc_ptr->op_B,
                                              m_sz, n_sz, k_sz, emulDecision)
                 : 0u;

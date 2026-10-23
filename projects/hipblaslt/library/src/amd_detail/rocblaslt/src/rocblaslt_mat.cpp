@@ -137,12 +137,14 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     // Emulation intercept via Ozaki Scheme II (fixed-point emulation)
     //
     // Conditions for emulation:
-    //   • Data type is FP64 (HIP_R_64F) or FP32 (HIP_R_32F)
+    //   • Compute type is HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT, or
+    //     plain 64F/32F with HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1
+    //     (A/B/C/D types are validated against the compute type)
     //   • Non-batched (batch_count == 1)
     //   • Plain GEMM epilogue (no activation, no bias, no auxiliary outputs)
     //   • alpha/beta are host (non-device-pointer) scalars
-    //   • Emulation is enabled: handle override (1=on, 0=off) or env var
-    //   • Arithmetic intensity exceeds the threshold (compute-bound region)
+    //   • Arithmetic intensity exceeds the threshold (compute-bound region),
+    //     unless the EAGER strategy is selected
     // Invalid emulation env-var values return invalid_value instead of
     // silently falling back to the native path.
     //
@@ -155,8 +157,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT)
     {
-        FixedPointEmulationSettings emulDecision =
-            fixedPointEmulationDecision(handle, matmul_descr, type_a, m, n, k, num_batches_a, workspaceSizeInBytes);
+        FixedPointEmulationSettings emulDecision = fixedPointEmulationDecision(
+            handle, matmul_descr, compute_type, m, n, k, num_batches_a, workspaceSizeInBytes);
         if(emulDecision.status != rocblaslt_status_success)
             return emulDecision.status;
         if(emulDecision.apply)
@@ -165,9 +167,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
              * already resolved by fixedPointEmulationDecision(). */
             emulDecision.workspace = workspace;
 
-            /* Dispatch to the type-appropriate emulation entry point. */
+            /* Dispatch on the emulated data type implied by the compute type. */
             rocblaslt_status emulSt;
-            if(type_a == HIP_R_32F)
+            if(fixedPointEmulatedComputeDataType(compute_type) == HIP_R_32F)
             {
                 emulSt = fp32EmulatedGemm(handle, opA, opB, m, n, k,
                                           static_cast<const float*>(alpha),
@@ -213,6 +215,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     }
 
 
+    // Native (Tensile) path from here on: a fixed-point emulated compute type
+    // that was not emulated (or fell back) runs as plain FP64 / FP32.
+    compute_type = fixedPointEmulationNativeComputeType(compute_type);
+
     // Others
     // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
     // The actual batch mode is tracked via problem.batchMode() for argument passing
@@ -224,12 +230,12 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
     {
-        if(matmul_descr->compute_type == rocblaslt_compute_f64)
+        if(compute_type == rocblaslt_compute_f64)
         {
             *((double*)alpha_1) = 1.f;
             alpha               = alpha_1;
         }
-        else if(matmul_descr->compute_type == rocblaslt_compute_i32)
+        else if(compute_type == rocblaslt_compute_i32)
         {
             *((int32_t*)alpha_1) = 1.f;
             alpha                = alpha_1;

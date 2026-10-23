@@ -106,7 +106,8 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type,
     else 
     {
      
-        if(compute_type == rocblaslt_compute_f64)
+        if(compute_type == rocblaslt_compute_f64
+           || compute_type == rocblaslt_compute_f64_emulated_fixedpoint)
         {
             _set_value(alpha, (double)1.0);
             _set_value(beta,  (double)1.0);
@@ -1435,6 +1436,8 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
             case rocblaslt_compute_f32_fast_bf8:
             case rocblaslt_compute_f32_fast_f8bf8:
             case rocblaslt_compute_f32_fast_bf8f8:
+            case rocblaslt_compute_f64_emulated_fixedpoint:
+            case rocblaslt_compute_f32_emulated_fixedpoint:
                 break;
             default:
                 log_error(__func__, "invalid compute type", computeType);
@@ -1452,9 +1455,13 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
             (*matmulDesc)->compute_type          = computeType;
             (*matmulDesc)->compute_type_original = computeType;
             (*matmulDesc)->scale_type            = scaleType;
-            auto computeTypeInit                 = computeType == rocblaslt_compute_f32_fast_xf32
-                                                       ? rocblaslt_compute_f32
-                                                       : computeType;
+            /* Fixed-point emulated compute types initialize the Tensile gemm data
+             * with their native compute type (used for the non-emulated fallback). */
+            const rocblaslt_compute_type computeTypeNative
+                = fixedPointEmulationNativeComputeType(computeType);
+            auto computeTypeInit = computeTypeNative == rocblaslt_compute_f32_fast_xf32
+                                       ? rocblaslt_compute_f32
+                                       : computeTypeNative;
             auto dataType                        = HIP_R_32F;
             if(computeTypeInit == rocblaslt_compute_f64)
                 dataType = HIP_R_64F;
