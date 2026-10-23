@@ -295,18 +295,15 @@ namespace
         ScalResources& operator=(const ScalResources&) = delete;
         ~ScalResources()
         {
-            rocsparse_clients_log_rocsparse_error(
-                "rocsparse_set_pointer_mode",
-                rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            EXPECT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+                      rocsparse_status_success);
             if(info != nullptr)
             {
-                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
-                                                      rocsparse_destroy_mat_info(info));
+                EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
             }
             if(descr != nullptr)
             {
-                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
-                                                      rocsparse_destroy_mat_descr(descr));
+                EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
             }
         }
     };
@@ -337,9 +334,12 @@ namespace
         device_vector<T>             d_beta(std::vector<T>{h_beta});
 
         ScalResources res(handle);
-        EXPECT_EQ(rocsparse_create_mat_descr(&res.descr), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_create_mat_info(&res.info), rocsparse_status_success);
-        EXPECT_EQ(rocsparse_set_pointer_mode(handle, mode), rocsparse_status_success);
+        unit_test_throw_rocsparse_error("rocsparse_create_mat_descr",
+                                        rocsparse_create_mat_descr(&res.descr));
+        unit_test_throw_rocsparse_error("rocsparse_create_mat_info",
+                                        rocsparse_create_mat_info(&res.info));
+        unit_test_throw_rocsparse_error("rocsparse_set_pointer_mode",
+                                        rocsparse_set_pointer_mode(handle, mode));
         const rocsparse_mat_descr descr = res.descr;
         const rocsparse_mat_info  info  = res.info;
         const T* beta = (mode == rocsparse_pointer_mode_host) ? &h_beta : d_beta.ptr;
