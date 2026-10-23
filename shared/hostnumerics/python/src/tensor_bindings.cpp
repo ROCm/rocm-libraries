@@ -47,7 +47,9 @@ void appendTensorValues(nb::list& result, Tensor tensor) {
     const auto storage = tensor.rawEncodedBackingStorage();
     const auto& layout = tensor.layout();
     detail::forEachIndex(tensor.shape(), [&](std::span<const size_t> indices, size_t) {
-        result.append(load(storage, layout.elementOffset(indices)));
+        const auto offset = layout.elementOffset(indices);
+        if (!offset) throw std::runtime_error(detail::message(offset.error()));
+        result.append(load(storage, *offset));
     });
 }
 

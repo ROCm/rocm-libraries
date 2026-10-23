@@ -44,6 +44,43 @@ TEST(PreparedIteration, ZeroStrideHugeCoordinatesDoNotOverflowSignedOffsets) {
               0);
 }
 
+TEST(PreparedIteration, PreconditionsAreDiagnosedInDebug) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "Prepared execution assertions are enabled in Debug builds.";
+#else
+    const detail::IndexIteration plan(Shape{2, 3});
+    std::array<size_t, 2> point{};
+    EXPECT_DEATH(plan.coordinates(0, std::span<size_t>(point).first(1)), "result.size()");
+    EXPECT_DEATH(plan.coordinates(plan.count(), point), "index < m_count");
+    const detail::IndexIteration empty(Shape{0});
+    EXPECT_DEATH(empty.coordinates(0, std::span<size_t>(point).first(1)), "index < m_count");
+    const std::array<size_t, 2> outside{2, 0};
+    EXPECT_DEATH((void)plan.linearIndex(outside), "validCoordinates");
+    point = {0, 3};
+    EXPECT_DEATH((void)plan.advance(point), "validCoordinates");
+    const Layout layout(Shape{2, 3}, {3, 1});
+    EXPECT_DEATH((void)detail::preparedElementOffset(layout, {}), "indices.size()");
+    EXPECT_DEATH((void)detail::preparedElementOffset(layout, outside), "indices\\[axis\\]");
+#endif
+}
+
+TEST(PreparedIteration, CheckedAndPreparedOffsetsAgreeForEveryPermutation) {
+    const Shape shape{2, 3, 4};
+    std::array<size_t, 3> order{0, 1, 2};
+    do {
+        const Layout layout = Layout::contiguous(shape, order);
+        const detail::IndexIteration plan(shape, order);
+        std::array<size_t, 3> point{};
+        for (size_t index = 0; index < plan.count(); ++index) {
+            plan.coordinates(index, point);
+            const auto checked = layout.elementOffset(point);
+            ASSERT_TRUE(checked);
+            EXPECT_EQ(*checked, static_cast<ptrdiff_t>(index));
+            EXPECT_EQ(detail::preparedElementOffset(layout, point), *checked);
+        }
+    } while (std::next_permutation(order.begin(), order.end()));
+}
+
 TEST(PreparedIteration, PermutationsAndScalarHaveCorrectLoopBounds) {
     const Shape shape{2, 3, 4};
     std::vector<size_t> order{0, 1, 2};

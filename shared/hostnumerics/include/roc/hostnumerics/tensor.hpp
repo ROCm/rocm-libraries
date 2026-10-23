@@ -49,7 +49,7 @@ inline constexpr std::string_view message(const StorageFailure& failure) noexcep
     return std::visit([](auto error) { return message(error); }, failure.cause);
 }
 
-Expected<size_t, StorageFailure> tryStorageBytesForLayout(ScalarType type,
+Expected<size_t, StorageFailure> getStorageBytesForLayout(ScalarType type,
                                                           const Layout& layout) noexcept;
 }  // namespace detail
 size_t storageBytesForLayout(ScalarType type, const Layout& layout);
@@ -191,7 +191,7 @@ class Tensor {
         if (shape().rank() != 0)
             throw std::runtime_error("Tensor item requires a rank-zero tensor.");
         return detail::decodeScalar<Target>(type(), rawEncodedBackingStorage(),
-                                            layout().elementOffset(std::span<const size_t>{}));
+                                            checkedElementOffset(std::span<const size_t>{}));
     }
 
     template <typename Target>
@@ -199,7 +199,7 @@ class Tensor {
         if (shape().rank() != 0)
             throw std::runtime_error("Tensor item requires a rank-zero tensor.");
         return detail::decodeScalar<Target>(type(), rawEncodedBackingStorage(),
-                                            layout().elementOffset(std::span<const size_t>{}),
+                                            checkedElementOffset(std::span<const size_t>{}),
                                             options);
     }
 
@@ -210,13 +210,13 @@ class Tensor {
     template <typename Target>
     Target loadAs(std::span<const size_t> indices) const {
         return detail::decodeScalar<Target>(m_type, rawEncodedBackingStorage(),
-                                            m_layout.elementOffset(indices));
+                                            checkedElementOffset(indices));
     }
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
         return detail::decodeScalar<Target>(m_type, rawEncodedBackingStorage(),
-                                            m_layout.elementOffset(indices), options);
+                                            checkedElementOffset(indices), options);
     }
 
     template <typename Target>
@@ -232,14 +232,14 @@ class Tensor {
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value) const {
-        detail::encodeScalar(m_type, rawEncodedBackingStorage(), m_layout.elementOffset(indices),
+        detail::encodeScalar(m_type, rawEncodedBackingStorage(), checkedElementOffset(indices),
                              value);
     }
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value,
                    const ScalarConversionOptions& options) const {
-        detail::encodeScalar(m_type, rawEncodedBackingStorage(), m_layout.elementOffset(indices),
+        detail::encodeScalar(m_type, rawEncodedBackingStorage(), checkedElementOffset(indices),
                              std::move(value), options);
     }
 
@@ -312,6 +312,12 @@ class Tensor {
                            const ScalarConversionOptions& options) const;
 
    private:
+    ptrdiff_t checkedElementOffset(std::span<const size_t> indices) const {
+        const auto result = m_layout.elementOffset(indices);
+        if (!result) throw std::runtime_error(detail::message(result.error()));
+        return *result;
+    }
+
     struct SharedStorage {
         SharedStorage() = default;
 

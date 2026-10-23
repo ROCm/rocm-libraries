@@ -85,6 +85,49 @@ class LayoutTests(unittest.TestCase):
                         )
                         self.assertEqual(layout.element_offset(point), expected)
 
+    def test_all_contiguous_permutations(self):
+        for dimensions in ([], [7], [2, 3], [2, 3, 5], [2, 1, 3, 2]):
+            shape = hn.Shape(dimensions)
+            self.assertEqual(
+                hn.Layout.contiguous(shape),
+                hn.Layout.contiguous_last_dimension_fastest(shape),
+            )
+            for order in itertools.permutations(range(len(dimensions))):
+                layout = hn.Layout.contiguous(shape, order)
+                storage = np.empty([dimensions[axis] for axis in order], dtype=np.int64)
+                expected_strides = [0] * len(dimensions)
+                for axis, stride in zip(order, storage.strides):
+                    expected_strides[axis] = stride // storage.itemsize
+                self.assertEqual(layout.strides, expected_strides)
+                for point in itertools.product(*(range(d) for d in dimensions)):
+                    expected = (
+                        0
+                        if not dimensions
+                        else int(
+                            np.ravel_multi_index(
+                                tuple(point[axis] for axis in order), storage.shape
+                            )
+                        )
+                    )
+                    self.assertEqual(layout.element_offset(point), expected)
+                    self.assertEqual(
+                        layout.element_offset(point), shape.linear_index(point, order)
+                    )
+
+    def test_invalid_contiguous_orders(self):
+        shape = hn.Shape([2, 3, 5])
+        for order in ([], [0, 1], [0, 1, 2, 3], [0, 0, 2], [0, 1, 3]):
+            with self.assertRaises(RuntimeError):
+                hn.Layout.contiguous(shape, order)
+        for order in ([0, 1, -1], [0, 1, 1.5], [0, 1, SIZE_MAX + 1]):
+            with self.assertRaises(TypeError):
+                hn.Layout.contiguous(shape, order)
+        with self.assertRaises(RuntimeError):
+            hn.Layout.contiguous(hn.Shape(), [0])
+        # Order validation precedes arithmetic, even when an extent is too large.
+        with self.assertRaisesRegex(RuntimeError, "each dimension once"):
+            hn.Layout.contiguous(hn.Shape([SIZE_MAX, 0]), [0, 0])
+
     def test_signed_zero_and_overlapping_strides(self):
         # Python integers provide an independent, exact oracle for each address.
         for dimensions in ([], [3], [2, 3], [2, 1, 2]):

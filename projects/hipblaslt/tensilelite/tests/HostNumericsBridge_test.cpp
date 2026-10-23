@@ -139,12 +139,12 @@ TEST(HostNumericsBridge, SamplingAndLayoutRejectUnrepresentableShapeAsAResult)
                                                        sizes.end(),
                                                        strides.begin(),
                                                        strides.end());
-        const auto selection = TensileLite::Client::tryReferenceOutputSelection(descriptor, 1);
+        const auto selection = TensileLite::Client::getReferenceOutputSelection(descriptor, 1);
         ASSERT_FALSE(selection.has_value());
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(selection.error()))
                       .find("element count exceeds size_t"),
                   std::string::npos);
-        const auto layout = TensileLite::Client::tryHostnumericsLayout(descriptor);
+        const auto layout = TensileLite::Client::getHostnumericsLayout(descriptor);
         ASSERT_FALSE(layout.has_value());
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(layout.error()))
                       .find("element count exceeds size_t"),
@@ -168,9 +168,9 @@ TEST(HostNumericsBridge, SamplingAndLayoutAcceptOversizedEmptyShapes)
                                                        sizes.end(),
                                                        strides.begin(),
                                                        strides.end());
-        const auto selection = TensileLite::Client::tryReferenceOutputSelection(descriptor, 1);
+        const auto selection = TensileLite::Client::getReferenceOutputSelection(descriptor, 1);
         ASSERT_TRUE(selection.has_value());
-        const auto layout = TensileLite::Client::tryHostnumericsLayout(descriptor);
+        const auto layout = TensileLite::Client::getHostnumericsLayout(descriptor);
         ASSERT_TRUE(layout.has_value());
         EXPECT_EQ(layout->shape().elementCount(), 0);
         EXPECT_NO_THROW(TensileLite::Client::referenceOutputSelection(descriptor, 1));

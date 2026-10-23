@@ -81,3 +81,27 @@ TEST(GemmResourceFailure, ValidationFailurePropagatesInsteadOfBecomingUnsupporte
                  std::bad_alloc);
 #endif
 }
+
+TEST(GemmResourceFailure, CheckedGeometryDoesNotAllocateButOwningFactoriesCan) {
+    using namespace roc::hostnumerics;
+    const Shape shape{2, 3};
+    const Layout layout(shape, {3, 1});
+    const std::array<size_t, 2> order{0, 1};
+    const std::array<size_t, 2> valid{1, 2}, invalid{2, 0};
+    withAllocationFailure([&] {
+        const auto offset = layout.elementOffset(valid);
+        const auto failure = layout.elementOffset(invalid);
+        const auto bytes = detail::getStorageBytesForLayout(ScalarType::Float32, layout);
+        const bool noAllocation = failNextAllocation;
+        failNextAllocation = false;
+        ASSERT_TRUE(offset);
+        EXPECT_EQ(*offset, 5);
+        ASSERT_FALSE(failure);
+        EXPECT_EQ(failure.error().error, detail::LayoutError::CoordinateOutOfRange);
+        ASSERT_TRUE(bytes);
+        EXPECT_EQ(*bytes, 24);
+        EXPECT_TRUE(noAllocation);
+    });
+    EXPECT_THROW(withAllocationFailure([&] { (void)Layout::getContiguousLayout(shape, order); }),
+                 std::bad_alloc);
+}
