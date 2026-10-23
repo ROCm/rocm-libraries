@@ -25,6 +25,7 @@ SOFTWARE.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -51,13 +52,32 @@ namespace {
 //   sr10000 -> plain gaussian_filter: the range weight is ~1 everywhere.
 //   sr25   -> the edge-preserving regime in between, where the range weight actually varies over
 //             the input pattern (adjacent values differ by multiples of 37 in [0,255] units).
+//   ss1en20 / sr1en20 -> a tiny but legal sigma, whose 1 / (2 sigma^2) overflows a float; the
+//             centre weight must stay exp(0) = 1, so the output is the input.
+
+// num_token prints through std::to_string, which renders 1e-20 as "0" -- the zero sigma the
+// negative test rejects. Tiny values keep their exponent instead: 1e-20 -> "1en20".
+std::string sigma_token(float v) {
+    if (v == 0.0f || v >= 1e-3f) return num_token(v);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%g", v);
+    std::string s = buf;
+    for (char& ch : s) {
+        if (ch == '.')
+            ch = 'p';
+        else if (ch == '-')
+            ch = 'n';
+    }
+    return s;
+}
+
 struct BilateralFilterParams {
     Rpp32u kernelSize;
     float stdDevSpace;
     float rawStdDevRange;
     std::string name() const {
-        return "k" + std::to_string(kernelSize) + "_ss" + num_token(stdDevSpace) + "_sr" +
-               num_token(rawStdDevRange);
+        return "k" + std::to_string(kernelSize) + "_ss" + sigma_token(stdDevSpace) + "_sr" +
+               sigma_token(rawStdDevRange);
     }
 };
 
@@ -72,6 +92,12 @@ float range_in_dtype(float raw, DType dt) {
 float per_image(float v, Rpp32u n) {
     return v * (1.0f + 0.5f * static_cast<float>(n));
 }
+
+// ROIs smaller than the KxK window, where one pixel's window overhangs both opposite edges: 1x1 and
+// 2x2, a single row and a single column, 8x8 (one short of K = 9), and 9x9 (exactly K = 9). Full
+// ROI only: a partial ROI of a 1-pixel image is empty.
+const std::vector<Size> kSmallRoiSizes{{2, 1, 1},  {2, 2, 2}, {2, 1, 20},
+                                       {2, 20, 1}, {1, 8, 8}, {1, 9, 9}};
 
 // Tolerances reflect legitimate numeric error only (weighted-mean rounding); U8/I8 allow one LSB
 // for round-to-nearest quantization, floats allow accumulation slack.
@@ -201,7 +227,8 @@ TEST_P(BilateralFilterTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_bilateral_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Same-layout cases plus both directions of the fused output-layout conversion.
+// Same-layout cases plus both directions of the fused output-layout conversion, then ROIs smaller
+// than the window.
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, BilateralFilterTest,
     ::testing::ValuesIn(with_params<BilateralFilterParams>(
@@ -210,11 +237,14 @@ INSTANTIATE_TEST_SUITE_P(
                          {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
             make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv, {Roi::Full},
+                         kSmallRoiSizes),
         }),
         {BilateralFilterParams{3, 1.0f, 25.0f}, BilateralFilterParams{5, 1.0f, 25.0f},
          BilateralFilterParams{7, 1.0f, 25.0f}, BilateralFilterParams{9, 1.0f, 25.0f},
          BilateralFilterParams{5, 0.25f, 25.0f}, BilateralFilterParams{5, 5.0f, 25.0f},
-         BilateralFilterParams{5, 1.0f, 0.1f}, BilateralFilterParams{5, 1.0f, 10000.0f}})),
+         BilateralFilterParams{5, 1.0f, 0.1f}, BilateralFilterParams{5, 1.0f, 10000.0f},
+         BilateralFilterParams{5, 1e-20f, 25.0f}, BilateralFilterParams{5, 1.0f, 1e-20f}})),
     op_config_name<BilateralFilterParams>);
 
 // Full name:
