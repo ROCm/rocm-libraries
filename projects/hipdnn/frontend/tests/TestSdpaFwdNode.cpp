@@ -56,6 +56,32 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsMinimal)
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
+TEST(TestSdpaFwdNode, PreValidateChecksDiagonalBandBounds)
+{
+    // cuDNN's left_bound counts the diagonal key: 0 keeps no keys; -1 is unbounded.
+    const auto validate = [](std::optional<int64_t> left, std::optional<int64_t> right) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        if(left.has_value())
+        {
+            attrs.set_diagonal_band_left_bound(*left);
+        }
+        if(right.has_value())
+        {
+            attrs.set_diagonal_band_right_bound(*right);
+        }
+        const GraphAttributes graphAttrs;
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    EXPECT_EQ(validate(1, 0), error_code_t::OK);
+    EXPECT_EQ(validate(-1, 0), error_code_t::OK);
+    EXPECT_EQ(validate(std::nullopt, -1), error_code_t::OK);
+    EXPECT_EQ(validate(0, 0), error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(-2, std::nullopt), error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(std::nullopt, -2), error_code_t::INVALID_VALUE);
+}
+
 TEST(TestSdpaFwdNode, PreValidateSucceedsGQA)
 {
     // num_heads=8, num_kv_heads=2 — 8 % 2 == 0, GQA valid

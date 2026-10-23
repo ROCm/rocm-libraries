@@ -968,6 +968,24 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
     EXPECT_TRUE(exactValidation.allClose(oT, oRef));
 }
 
+// cuDNN's left_bound counts the diagonal key: the shared band rule rejects 0 (no keys kept) and
+// values below -1, and passes positive bounds and -1 through unchanged.
+TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
+{
+    const auto extract = [](int64_t left) {
+        SdpaAttributesT attrs;
+        attrs.left_bound = left;
+        attrs.right_bound = 0;
+        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const auto* node = GetGraph(graphBuilder.GetBufferPointer())->nodes()->Get(0);
+        return extractDiagonalBandParams(*node->attributes_as_SdpaAttributes(), "test");
+    };
+    EXPECT_EQ(extract(1).leftBound, 1);
+    EXPECT_EQ(extract(-1).leftBound, -1);
+    EXPECT_THROW(extract(0), std::invalid_argument);
+    EXPECT_THROW(extract(-2), std::invalid_argument);
+}
+
 // Attention sink: FLOAT [1, H, 1, 1] (cuDNN). The raw graph has H = 2.
 TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
 {
