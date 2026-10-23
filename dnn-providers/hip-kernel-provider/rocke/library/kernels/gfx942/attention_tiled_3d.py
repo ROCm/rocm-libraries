@@ -1453,12 +1453,14 @@ def supports_unified_attention_reduce_tiled(
 
     Mirrors what ``build_unified_attention_reduce_tiled`` can actually emit:
     one wave64 splits ``head_size`` evenly over its 64 lanes, and the per-segment
-    rescale factors (fp32, ``num_segments`` of them) live in LDS.
+    rescale factors (fp32, ``num_segments`` of them) live in LDS
+    (``_tiled_3d_reduce_lds_bytes``, the one formula the strided runtime checks too).
     """
     from ..common.attention_arch import (
         attention_lds_capacity_bytes,
         validate_tiled_attention_arch,
     )
+    from ..common.attention_unified import _tiled_3d_reduce_lds_bytes
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
     if not arch_ok:
@@ -1470,7 +1472,7 @@ def supports_unified_attention_reduce_tiled(
             f"head_size={spec.head_size} must be a positive multiple of 64 "
             f"(the reduce splits head_size over 64 lanes)"
         )
-    lds_bytes = 4 * spec.num_segments
+    lds_bytes = _tiled_3d_reduce_lds_bytes(spec)
     cap = attention_lds_capacity_bytes(arch)
     if lds_bytes > cap:
         return False, (

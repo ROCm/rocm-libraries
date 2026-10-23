@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -34,6 +35,41 @@ inline constexpr int64_t GFX942_UNIFIED_3D_KV_ELEMENT_BYTES = 2;
 /// The segment kernel's argument count with strided K/V: 19 base + 8 strided.
 inline constexpr size_t GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT = 27;
 
+/// One K or V tensor's token stride and per-head span, in bytes.
+struct Gfx942KvHeadSpan
+{
+    int64_t tokenBytes = 0;
+    int64_t spanBytes = 0;
+};
+
+/**
+ * @brief `KvTensorLayout`'s token stride and `head_span_bytes` for one K or V tensor:
+ *
+ *     token_bytes     = 2 * stride_S
+ *     head_span_bytes = 2 * ((capacity - 1) * stride_S + D)
+ *
+ * The one formula both users share. Each applies its own limit: the graph match refuses
+ * either past the 0x7FFF0000-byte buffer-offset limit (stridedKvRefusal), and
+ * gfx942StridedKvArguments() refuses either outside int32 (the kernel argument type).
+ * nullopt when either overflows int64. Total: never throws.
+ */
+inline std::optional<Gfx942KvHeadSpan>
+    gfx942KvHeadSpan(int64_t capacity, int64_t tokenStride, int64_t headSize)
+{
+    constexpr int64_t E = GFX942_UNIFIED_3D_KV_ELEMENT_BYTES;
+    Gfx942KvHeadSpan span;
+    int64_t rows = 0;
+    int64_t elements = 0;
+    if(__builtin_mul_overflow(tokenStride, E, &span.tokenBytes)
+       || __builtin_mul_overflow(capacity - 1, tokenStride, &rows)
+       || __builtin_add_overflow(rows, headSize, &elements)
+       || __builtin_mul_overflow(elements, E, &span.spanBytes))
+    {
+        return std::nullopt;
+    }
+    return span;
+}
+
 /// One K or V tensor's stride arguments (`KvTensorLayout.arguments(prefix)`), in bytes.
 struct Gfx942StridedKvArguments
 {
@@ -52,8 +88,7 @@ struct Gfx942StridedKvArguments
  *
  *     stride_batch_bytes = 2 * strides[0]
  *     stride_head_bytes  = 2 * strides[1]
- *     stride_token_bytes = 2 * strides[2]
- *     span_bytes         = 2 * ((capacity - 1) * strides[2] + D)   (head_span_bytes)
+ *     stride_token_bytes, span_bytes: gfx942KvHeadSpan(capacity, strides[2], D)
  *
  * Precondition: the tensor passed KvTensorLayout's admission (stridedKvRefusal), which
  * keeps the token stride and the span inside the buffer-offset range. A token stride or
@@ -63,10 +98,10 @@ inline Gfx942StridedKvArguments gfx942StridedKvArguments(const std::array<int64_
                                                          const std::array<int64_t, 4>& strides)
 {
     constexpr int64_t E = GFX942_UNIFIED_3D_KV_ELEMENT_BYTES;
-    const int64_t tokenBytes = strides[2] * E;
-    const int64_t spanBytes = E * ((dims[2] - 1) * strides[2] + dims[3]);
-    if(tokenBytes < 0 || spanBytes <= 0 || tokenBytes > std::numeric_limits<int32_t>::max()
-       || spanBytes > std::numeric_limits<int32_t>::max())
+    const auto span = gfx942KvHeadSpan(dims[2], strides[2], dims[3]);
+    if(!span.has_value() || span->tokenBytes < 0 || span->spanBytes <= 0
+       || span->tokenBytes > std::numeric_limits<int32_t>::max()
+       || span->spanBytes > std::numeric_limits<int32_t>::max())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -75,8 +110,8 @@ inline Gfx942StridedKvArguments gfx942StridedKvArguments(const std::array<int64_
     Gfx942StridedKvArguments args;
     args.strideBatchBytes = strides[0] * E;
     args.strideHeadBytes = strides[1] * E;
-    args.strideTokenBytes = static_cast<int32_t>(tokenBytes);
-    args.spanBytes = static_cast<int32_t>(spanBytes);
+    args.strideTokenBytes = static_cast<int32_t>(span->tokenBytes);
+    args.spanBytes = static_cast<int32_t>(span->spanBytes);
     return args;
 }
 

@@ -117,9 +117,6 @@ constexpr uint32_t SEQ_AXIS = 2;
 constexpr uint32_t HEAD_SIZE_AXIS = 3;
 constexpr uint32_t SDPA_RANK = 4;
 
-/// fp16 and bf16 only (the candidate's `Capability.dtypes`).
-constexpr int64_t BYTES_PER_ELEMENT = 2;
-
 /// `kernels/common/attention_kv_cache.py::KvTensorLayout`: the per-head span and the token
 /// stride must stay within the buffer-resource offset range the kernel addresses K/V with
 /// (`_attention_strided_kv.py`: out-of-range lanes read 0x7FFFFFFF and get zero).
@@ -260,7 +257,7 @@ std::optional<std::string> stridedKvRefusal(const data_objects::TensorAttributes
     }
     for(uint32_t axis = 0; axis < HEAD_SIZE_AXIS; ++axis)
     {
-        const auto bytes = checkedProduct({stride[axis], BYTES_PER_ELEMENT});
+        const auto bytes = checkedProduct({stride[axis], GFX942_UNIFIED_3D_KV_ELEMENT_BYTES});
         if(!bytes.has_value())
         {
             return "a stride in bytes exceeds signed 64-bit";
@@ -295,16 +292,17 @@ std::optional<std::string> stridedKvRefusal(const data_objects::TensorAttributes
             return "the address span exceeds signed 64-bit bytes";
         }
     }
-    if(!checkedProduct({span, BYTES_PER_ELEMENT}).has_value())
+    if(!checkedProduct({span, GFX942_UNIFIED_3D_KV_ELEMENT_BYTES}).has_value())
     {
         return "the address span exceeds signed 64-bit bytes";
     }
 
-    const auto rows = checkedProduct({extent[SEQ_AXIS] - 1, stride[SEQ_AXIS]});
-    int64_t headSpanElements = 0;
-    if(!rows.has_value() || __builtin_add_overflow(*rows, extent[HEAD_SIZE_AXIS], &headSpanElements)
-       || headSpanElements > STRIDED_KV_SPAN_LIMIT_BYTES / BYTES_PER_ELEMENT
-       || stride[SEQ_AXIS] > STRIDED_KV_SPAN_LIMIT_BYTES / BYTES_PER_ELEMENT)
+    // The same token-stride and head-span bytes the launch passes (gfx942KvHeadSpan), held
+    // to the buffer-offset limit, which is tighter than the arguments' int32.
+    const auto headSpan
+        = gfx942KvHeadSpan(extent[SEQ_AXIS], stride[SEQ_AXIS], extent[HEAD_SIZE_AXIS]);
+    if(!headSpan.has_value() || headSpan->spanBytes > STRIDED_KV_SPAN_LIMIT_BYTES
+       || headSpan->tokenBytes > STRIDED_KV_SPAN_LIMIT_BYTES)
     {
         return "the per-head span or token stride exceeds the 0x7FFF0000-byte buffer-offset "
                "limit";
