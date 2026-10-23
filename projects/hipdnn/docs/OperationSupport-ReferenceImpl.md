@@ -131,7 +131,8 @@ dimension must be reduced.
 | Log-sum-exp `stats` output | Supported | Required input |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported (same rules) |
 | Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Supported |
-| Philox dropout (`dropout_probability`, seed, offset) and RNG_DUMP | Not supported | Not supported |
+| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Not supported (the backward node has no `rng_dump`) |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
