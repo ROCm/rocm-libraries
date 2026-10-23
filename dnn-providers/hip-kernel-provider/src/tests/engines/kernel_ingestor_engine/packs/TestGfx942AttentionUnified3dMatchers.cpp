@@ -467,6 +467,68 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesMalformedRecords)
     EXPECT_FALSE(matchesKernel(PACK, graph.context(), definition, *bound)) << "missing field";
 }
 
+// The base cell (Hq 32, D128) puts 32 * 16 * 128 = 2^16 segm_output elements in each batch
+// row of a 16-segment kernel, so batch 2^15 reaches 2^31 elements: the kernels' i32 offsets
+// would wrap. graph_match still accepts the graph, and a kernel with fewer segments still
+// serves it.
+constexpr int64_t I32_WRAP_BATCH = int64_t{1} << 15;
+
+TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesACandidateWhoseIndicesWrapInt32)
+{
+    auto spec = base();
+    spec.batch = I32_WRAP_BATCH;
+    EXPECT_TRUE(graphMatches(spec));
+    KernelSpec kernel;
+    kernel.numSegments = 8; // 2^30 elements
+    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "8 segments fit";
+    kernel.numSegments = 16; // exactly 2^31 elements
+    EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "16 segments reach 2^31";
+
+    spec.batch = I32_WRAP_BATCH - 1; // 2^31 - 2^16 elements
+    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "one batch row fewer fits";
+}
+
+/// The message prepare() throws for @p kernel against @p spec; empty if it returned.
+std::string prepareFailure(const GraphSpec& spec, const KernelSpec& kernel)
+{
+    const auto graph = fixture(spec);
+    const auto bound = matchesGraph(PACK, graph.context());
+    EXPECT_TRUE(bound.has_value());
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    try
+    {
+        static_cast<void>(
+            dispatchHandler(PACK).prepare(graph.context(), *bound, makeKernel(kernel)));
+    }
+    catch(const std::exception& error)
+    {
+        return error.what();
+    }
+    return {};
+}
+
+/// Defence in depth: prepare() refuses the same candidate kernelMatches declines, for a
+/// caller that reaches the handler without matching. The 8-segment control fails later
+/// (no archive), never on the index limit.
+TEST(TestGfx942AttentionUnified3dMatchers, PrepareRefusesACandidateWhoseIndicesWrapInt32)
+{
+    constexpr const char* MARKER = "past 2^31 elements";
+    auto spec = base();
+    spec.batch = I32_WRAP_BATCH;
+    KernelSpec kernel;
+    kernel.numSegments = 16;
+    const std::string refused = prepareFailure(spec, kernel);
+    EXPECT_NE(refused.find(MARKER), std::string::npos) << refused;
+
+    kernel.numSegments = 8;
+    const std::string control = prepareFailure(spec, kernel);
+    ASSERT_FALSE(control.empty()) << "prepare() cannot succeed without an archive";
+    EXPECT_EQ(control.find(MARKER), std::string::npos) << control;
+}
+
 // =============================================================================
 // Dispatch handler surface that needs no device
 // =============================================================================

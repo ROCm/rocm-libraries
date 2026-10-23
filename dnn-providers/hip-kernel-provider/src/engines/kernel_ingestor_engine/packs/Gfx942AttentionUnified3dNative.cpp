@@ -490,7 +490,9 @@ bool isSupportedGqaRatio(int64_t ratio)
  * stats/LSE outputs, an attention-mask tensor, dropout, sinks, page tables, seq_len tensors
  * (ragged), FP8 scales, ALiBi, padding masks, block masks and a device scale tensor.
  *
- * Batch and Skv are not limited: the kernel takes both at run time (grid and seq_lens).
+ * Batch and Skv are not limited here: the kernel takes both at run time (grid and
+ * seq_lens). kernelMatches declines each candidate whose num_segments would take an
+ * i32-indexed tensor to 2^31 elements at the graph's batch.
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog.
  */
@@ -873,16 +875,22 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
 }
 
 /**
- * @brief Kernel-scoped applicability: is THIS candidate built for the graph's cell?
+ * @brief Kernel-scoped applicability: is THIS candidate built for the graph's cell, and
+ *        can it index the graph's tensors?
  *
  * Compares the feature cell exactly -- dtype, head_size, num_query_heads, num_kv_heads --
- * and requires sliding_window 0 (graph_match refuses every window). Never batch or Skv:
- * both are runtime (grid x and seq_lens), and the spec's baked `num_seqs` is read only by
- * the binary search the decode grid does not emit (`attention_tiled_3d.py`,
+ * and requires sliding_window 0 (graph_match refuses every window). Never batch or Skv as
+ * cell fields: both are runtime (grid x and seq_lens), and the spec's baked `num_seqs` is
+ * read only by the binary search the decode grid does not emit (`attention_tiled_3d.py`,
  * `use_decode_grid`). block_size and num_segments are not taken from the graph: every
  * value serves any graph (a KV tile of any size covers any Skv; the reduce combines every
  * segment, and segments with no keys contribute nothing), so they are the scorer's to
  * rank.
+ *
+ * One limit does depend on batch: the kernels index segm_output, segm_max/expsum, Q and O
+ * with i32 element offsets, so a candidate whose num_segments takes any of them to 2^31
+ * elements at the graph's batch is declined (gfx942Unified3dIndicesFitInt32). A candidate
+ * with fewer segments may still match the same graph.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -899,10 +907,26 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     const auto dataTypeName = supportedDataTypeName(problem->dataType);
-    return dataTypeName.has_value() && traits->dtype == *dataTypeName
-           && traits->headSize == problem->headSize
-           && traits->numQueryHeads == problem->numQueryHeads
-           && traits->numKvHeads == problem->numKvHeads && traits->slidingWindow == 0;
+    if(!dataTypeName.has_value() || traits->dtype != *dataTypeName
+       || traits->headSize != problem->headSize || traits->numQueryHeads != problem->numQueryHeads
+       || traits->numKvHeads != problem->numKvHeads || traits->slidingWindow != 0)
+    {
+        return false;
+    }
+    if(!gfx942Unified3dIndicesFitInt32(
+           problem->batch, problem->numQueryHeads, traits->numSegments, problem->headSize))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
+                               << " declined "
+                               << describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                               << " [i32_index]: batch " << problem->batch << " x query heads "
+                               << problem->numQueryHeads << " x num_segments "
+                               << traits->numSegments << " x head size " << problem->headSize
+                               << " reaches 2^31 elements; the kernels index segm_output, "
+                                  "segm_max/expsum, Q and O with signed 32-bit offsets");
+        return false;
+    }
+    return true;
 }
 
 /// Scores. A block-16 candidate scores in (BLOCK_16_FLOOR, BLOCK_16_FLOOR + KEY_SPAN]; every
@@ -1198,6 +1222,18 @@ public:
                 "gfx942 unified 3d: the bound Q/K/V/O tensors are missing or not the layout "
                 "the kernels address");
         }
+        const auto problem = problemFor(*q, *k);
+        if(!gfx942Unified3dIndicesFitInt32(
+               problem.batch, problem.numQueryHeads, traits->numSegments, problem.headSize))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx942 unified 3d: kernel '" + toString(kernel.kernelId)
+                    + "' would index segm_output, segm_max/expsum, Q or O past 2^31 elements "
+                      "at batch "
+                    + std::to_string(problem.batch) + " with " + std::to_string(traits->numSegments)
+                    + " segments (i32 offsets)");
+        }
 
         // Both launches' recorded argument lists are compared before either is loaded:
         // buildIngestorKernelCode compares each one only on its own way to the load, so a
@@ -1221,7 +1257,7 @@ public:
 
         Unified3dLaunchState state;
         state.binding = binding;
-        state.problem = problemFor(*q, *k);
+        state.problem = problem;
         state.segmentArguments
             = gfx942Unified3dSegmentArguments(static_cast<int32_t>(state.problem.batch),
                                               binding.scale,

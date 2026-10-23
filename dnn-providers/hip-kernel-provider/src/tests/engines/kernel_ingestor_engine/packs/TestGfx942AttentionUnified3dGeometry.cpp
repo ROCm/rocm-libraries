@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include <gtest/gtest.h>
@@ -105,6 +106,36 @@ TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
         EXPECT_EQ(gfx942TileSizeOverride(r.d, r.block), r.override);
         EXPECT_EQ(gfx942ResolvedTileSize(r.d, r.block), r.tile);
     }
+}
+
+// The kernels index segm_output [B, Hq, nseg, D], segm_max/expsum [B, Hq, nseg] and Q/O
+// [B, Hq, D] with i32 element offsets: each must hold at most 2^31 - 1 elements.
+// segm_output is the largest of the three (nseg >= 1, D >= 1), so it is the one that binds.
+TEST(TestGfx942AttentionUnified3dGeometry, IndicesFitInt32AtTheExactBoundary)
+{
+    constexpr int64_t LAST_OK = (int64_t{1} << 31) - 1;
+    // Every extent is exactly 2^31 - 1 elements, then exactly 2^31.
+    EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(LAST_OK, 1, 1, 1));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(LAST_OK + 1, 1, 1, 1));
+
+    // segm_output: 16384 * 32 * 16 * 256 = 2^31; one batch row fewer is 2^31 - 2^17.
+    EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(16383, 32, 16, 256));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(16384, 32, 16, 256));
+
+    // The reachable default-path case: D256 Hq128 at B 4097 with 16 segments is
+    // 2,148,007,936 elements; 8 segments halve it.
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4097, 128, 16, 256));
+    EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(4097, 128, 8, 256));
+}
+
+TEST(TestGfx942AttentionUnified3dGeometry, IndicesFitInt32IsTotal)
+{
+    constexpr int64_t LARGEST = std::numeric_limits<int64_t>::max();
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(LARGEST, LARGEST, LARGEST, LARGEST));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(0, 32, 16, 128));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, -1, 16, 128));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 0, 128));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 16, 0));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

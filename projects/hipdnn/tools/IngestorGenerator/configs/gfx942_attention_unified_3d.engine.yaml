@@ -340,10 +340,13 @@ launch_surface:
       dropout, sinks, page tables, seq_len tensors, FP8 scales, ALiBi and
       padding masks. kernelMatches() compares dtype, head_size,
       num_query_heads and num_kv_heads exactly and requires sliding_window 0;
-      never batch or Skv. A record missing a field, with block_size outside
-      {16,32,64}, num_segments <= 0, or a tile_size_override other than
-      rocKE's gfx942 rule is declined. The admission table is generated from
-      rocKE and kept current by a quick pytest drift guard.
+      never batch or Skv as cell fields. It declines a candidate whose
+      num_segments would take segm_output, segm_max/expsum, Q or O to 2^31
+      elements at the graph's batch (i32 offsets). A record missing a field,
+      with block_size outside {16,32,64}, num_segments <= 0, or a
+      tile_size_override other than rocKE's gfx942 rule is declined. The
+      admission table is generated from rocKE and kept current by a quick
+      pytest drift guard.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dAdmission.cpp
 
   - name: kernargs

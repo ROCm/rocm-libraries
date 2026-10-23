@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -311,6 +312,49 @@ inline Gfx942AttentionUnified3dWorkspace gfx942AttentionUnified3dWorkspace(int64
     w.cuSeqlensQ = gfx942AlignWorkspace(w.sequsedK + batch * I32_BYTES);
     w.totalBytes = gfx942AlignWorkspace(w.cuSeqlensQ + (batch + 1) * I32_BYTES);
     return w;
+}
+
+/// One past the largest element offset a signed 32-bit index reaches (2^31).
+constexpr int64_t GFX942_UNIFIED_3D_I32_INDEX_LIMIT = int64_t{1} << 31;
+
+/**
+ * @brief Does every tensor the segment and reduce kernels index with signed 32-bit element
+ *        offsets hold fewer than 2^31 elements?
+ *
+ * The kernels compute these flat element offsets in i32 (`kernels/gfx942/attention_tiled_3d.py`,
+ * `TensorDescriptor.naive(...).offset` in `rocke/helpers/transforms.py`, lowered to an i32
+ * `getelementptr`, which sign-extends):
+ *
+ *  - `segm_output[token, head, seg, dim]`: `((token * Hq + head) * nseg + seg) * D + dim`,
+ *    B * Hq * nseg * D elements (segment store and reduce load);
+ *  - `segm_max` / `segm_expsum[token, head, seg]`: B * Hq * nseg elements;
+ *  - Q and O `[token, head, dim]`: `(token * Hq + head) * D + dim`, B * Hq * D elements.
+ *
+ * At 2^31 elements or more the last offsets wrap negative and the stores land before the
+ * buffer, silently. K and V are addressed through i64 bases and buffer resources instead
+ * (stridedKvRefusal bounds them). False for non-positive inputs. Total: never throws.
+ */
+inline bool
+    gfx942Unified3dIndicesFitInt32(int64_t batch, int64_t hq, int64_t numSegments, int64_t headSize)
+{
+    if(batch <= 0 || hq <= 0 || numSegments <= 0 || headSize <= 0)
+    {
+        return false;
+    }
+    const auto fits = [](std::initializer_list<int64_t> factors) {
+        int64_t elements = 1;
+        for(const int64_t factor : factors)
+        {
+            if(__builtin_mul_overflow(elements, factor, &elements))
+            {
+                return false;
+            }
+        }
+        return elements < GFX942_UNIFIED_3D_I32_INDEX_LIMIT;
+    };
+    return fits({batch, hq, numSegments, headSize}) // segm_output
+           && fits({batch, hq, numSegments}) // segm_max, segm_expsum
+           && fits({batch, hq, headSize}); // Q, O
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
