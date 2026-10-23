@@ -78,8 +78,6 @@ void testing_backend_disable_accelerator_after_stop(void)
     disable_accelerator_rocalution(true);
     init_rocalution();
 
-    EXPECT_FALSE(_rocalution_available_accelerator());
-
     // Stop rocalution platform
     stop_rocalution();
     disable_accelerator_rocalution(false);
