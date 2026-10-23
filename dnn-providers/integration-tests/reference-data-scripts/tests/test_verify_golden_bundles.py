@@ -723,6 +723,49 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stdout)
         self.assertIn("disables both references", completed.stderr)
 
+    # A virtual intermediate output has no blob, and the loader does not ask for one:
+    # golden data is declared once every non-virtual output has its blob.
+    def test_both_references_disabled_with_blob_for_real_output_only_passes(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle_dir = root / "quick/BatchnormFwdInference/nchw/fp32/Small"
+            bundle_dir.mkdir(parents=True)
+            tensors = [
+                {"uid": uid, "dims": [1], "strides": [1], "data_type": "float"}
+                | {"virtual": uid == 1}
+                for uid in (0, 1, 2)
+            ]
+            graph = {
+                "nodes": [
+                    {"outputs": {"y_tensor_uid": 1}},
+                    {"outputs": {"y_tensor_uid": 2}},
+                ],
+                "tensors": tensors,
+                "io_data_type": "float",
+                "compute_data_type": "float",
+                "intermediate_data_type": "float",
+                "name": "",
+            }
+            (bundle_dir / "Small.json").write_text(json.dumps(graph))
+            (bundle_dir / "Small.tensor2.bin").write_bytes(self.default_bytes("float"))
+            (bundle_dir / "Small.meta.json").write_text(
+                json.dumps(
+                    {
+                        "generator": "manual",
+                        "reference_source": "manual",
+                        "no_cpu_reference": True,
+                        "no_gpu_reference": True,
+                    }
+                )
+            )
+
+            completed = self.run_verifier(root)
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     # The reference flags are ignored on an expected rejection, so setting both
     # without golden data is not the both-off error.
     def test_expected_rejection_with_both_references_disabled_passes(self) -> None:

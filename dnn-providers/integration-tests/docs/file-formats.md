@@ -275,8 +275,8 @@ the file or case.
 **Rule R4: if both flags are `true`, the bundle must declare golden data.**
 Otherwise nothing could ever verify it. "Declared" means:
 
-- **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or golden
-  output blobs `{Name}.tensor<uid>.bin` exist.
+- **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or a golden
+  blob `{Name}.tensor<uid>.bin` exists for every non-virtual output.
 - **Sweep case:** the case has a `golden` object with a `path`.
 
 A violation throws `BundleMetadataError` at load, so the bundle's test is red.
@@ -316,8 +316,8 @@ Rules:
   error (`BundleMetadataError`), so its test is red.
   `reference-data-scripts/verify_golden_bundles.py` reports it as an error.
   "Next to" means:
-  - **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or golden
-    output blobs `{Name}.tensor<uid>.bin` exist.
+  - **Single graph:** `{Name}.tensors.dvc` exists next to `{Name}.json`, or a golden
+    blob `{Name}.tensor<uid>.bin` exists for every non-virtual output.
   - **Sweep case:** the case has a `golden` object.
 - **The invalidity must be engine-visible, not schema-level.** The engine can
   reject only a bundle that loads. A bundle whose JSON or graph cannot load is a
