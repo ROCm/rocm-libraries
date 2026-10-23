@@ -350,6 +350,20 @@ def test_emits_dequantize_per_local_write(toolchain):
     assert src.index("scaleA: low half") < src.index("buffer_load_d16_hi_b16")
 
 
+def test_wide_a_load_dequantizes_every_source_dword(toolchain):
+    """A 4-dword load expands to 16 dwords over several ds_writes. Its packed
+    source sits at the top of that block, so a forward expansion never
+    overwrites a dword it has yet to read."""
+    kernel, src = _emit(toolchain, glvwA=32)
+    numLoads = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
+    assert re.search(r"buffer_load_b128 v\[vgprG2LA\+\d+:.*sgprSrdA", src)
+
+    saved = re.findall(
+        r"v_mov_b32 v\d+, v\[vgprG2LA\+(\d+)\+(\d+)\]\s+// w4a16: save packed int4", src)
+    assert set(int(base) + int(d) for base, d in saved) == {
+        16 * load + 12 + d for load in range(numLoads) for d in range(4)}
+
+
 def test_dequantize_reads_source_before_overwriting_it(toolchain):
     """The bf16 output overlaps the packed int4 source inside each G2L block, so
     the source dword must be copied to a temp first."""

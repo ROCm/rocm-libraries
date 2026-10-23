@@ -193,3 +193,120 @@ BenchmarkProblems:
           - Exact: [256, 1, 1, 512]
           - Exact: [37, 3, 1, 768]
           - Exact: [512, 4, 1, 3584]
+  ########################################
+  # Wide A loads (2 and 4 dwords per load, split over several ds_writes) and
+  # DepthU up to 1024; fp16, UnsignedBias8, symmetric, G128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [128]
+      Int4EncodingA: UnsignedBias8
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [2, 1]
+          - [2, 4]
+        - WorkGroup:
+          - [4, 1, 16]
+          - [4, 1, 32]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [16, 32]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - Groups:
+          - - DepthU: [256]
+              AssertSummationElementMultiple: [256]
+            - DepthU: [512]
+              AssertSummationElementMultiple: [512]
+            - DepthU: [1024]
+              AssertSummationElementMultiple: [1024]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 1024]
+          - Exact: [37, 3, 1, 3072]
+          - Exact: [512, 4, 1, 2048]
+  ########################################
+  # Wide A loads, fp16, UnsignedBias8, zero point, G32
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [32]
+      ScaleZeroPointA: True
+      Int4EncodingA: UnsignedBias8
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [2, 1]
+          - [2, 4]
+        - WorkGroup:
+          - [4, 1, 16]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [16, 32]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - Groups:
+          - - DepthU: [256]
+              AssertSummationElementMultiple: [256]
+            - DepthU: [1024]
+              AssertSummationElementMultiple: [1024]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 1024]
+          - Exact: [37, 3, 1, 3072]
+          - Exact: [512, 4, 1, 2048]
