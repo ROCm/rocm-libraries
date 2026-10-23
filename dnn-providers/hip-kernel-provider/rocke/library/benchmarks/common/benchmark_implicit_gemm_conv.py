@@ -5442,6 +5442,31 @@ def _split_k_degrees(
     )
 
 
+# Cluster split-K forward gate (see _runtime_split_ks): fewer than this many
+# output tiles (groups included), and at least this deep a reduction.
+_FWD_SPLIT_K_CLUSTER_MAX_TILES = 256
+_FWD_SPLIT_K_CLUSTER_MIN_GEMM_K = 1500
+
+
+def _fwd_cluster_split_pays(problem, ident) -> bool:
+    """Is ``problem`` a small-output / deep-reduction layer the cluster
+    split-K forward binary ``ident`` is for?"""
+    from kernels.common.conv_args import ConvArgs
+
+    args_ = ConvArgs.from_problem(
+        problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+    )
+    tiles = args_.num_pid_m * args_.num_pid_n * max(1, problem.groups)
+    kpg = problem.K // max(1, problem.groups)
+    return (
+        # The fold walks 4-channel quads of the packed [M][K] output.
+        problem.K % 4 == 0
+        and kpg % 4 == 0
+        and tiles < _FWD_SPLIT_K_CLUSTER_MAX_TILES
+        and args_.gemm_k >= _FWD_SPLIT_K_CLUSTER_MIN_GEMM_K
+    )
+
+
 def _runtime_split_ks(
     problem, ident, requested: int = 0, degrees: tuple = _SPLIT_K_AUTO
 ) -> tuple:
@@ -5458,6 +5483,29 @@ def _runtime_split_ks(
     different binary, so ``--split-k 1`` yields no degree and the caller skips
     the entry rather than silently timing it at some other degree.
     """
+    if ident.direction == "fwd" and ident.split_k_cluster:
+        # The cluster binary bakes its degree. It is only offered where the
+        # single launch pays: few output tiles (the grid alone cannot fill
+        # the device) and a deep reduction; elsewhere -- e.g. many small
+        # grouped tiles -- the cluster barrier costs more than it saves.
+        if requested not in (0, -1, ident.split_k_cluster):
+            return ()
+        if not _fwd_cluster_split_pays(problem, ident):
+            return ()
+        return _split_k_degrees(
+            problem,
+            arch=ident.arch,
+            dtype=ident.dtype_d,
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
+            block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+            group_merge=1,
+            two_stage=True,
+            degrees=(ident.split_k_cluster,),
+            include_resolved=False,
+            direction="fwd",
+        )
     if ident.direction == "fwd":
         # No resolver for the forward split: -1 sweeps the forward ladder like
         # 0, a positive value pins the degree.
@@ -5615,6 +5663,20 @@ def _cached_bind(
         return None
     live_extras.append(extras)
     values = _launch_values_for(direction, problem, ident, ptrs, sizes, extras)
+    cluster = None
+    if direction == "fwd" and ident.split_k_cluster:
+        # One (1, 1, S) cluster per output tile: the K slices of a tile are
+        # consecutive in z, so z must hold whole clusters and the launch
+        # degree must be the baked one.
+        S = ident.split_k_cluster
+        if split_k != S or grid[2] % S or any(g < 1 for g in grid):
+            print(
+                f"  [skip] {ident.label()}: cluster split-K launched at degree "
+                f"{split_k} with grid {grid}",
+                flush=True,
+            )
+            return None
+        cluster = (1, 1, S)
     cfg = LaunchConfig(
         grid=grid,
         block=(
@@ -5623,6 +5685,7 @@ def _cached_bind(
             1,
         ),
         stream=0,
+        cluster=cluster,
     )
     run = launcher.bind(values, config=cfg)
     if (
@@ -5673,7 +5736,7 @@ def _cached_bind(
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
-    if direction == "fwd" and ident.two_stage:
+    if direction == "fwd" and ident.two_stage and not ident.split_k_cluster:
         # Split-K forward: Stage 1 stores every slab element (no clearing),
         # then Stage 2 folds the slabs and casts into D. Both are its cost.
         s2_launcher, s2_values, s2_cfg = _fwd_stage2(
