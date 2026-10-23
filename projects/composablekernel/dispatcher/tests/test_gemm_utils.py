@@ -331,6 +331,99 @@ class TestFp8EncodeMatchesMlDtypes(unittest.TestCase):
                 theirs = big.astype(getattr(ml_dtypes, ml_name)).astype(np.float64)
                 self.assertFalse(np.all(np.isfinite(theirs)))
 
+    @staticmethod
+    def _reference_float64_ladder(
+        x: np.ndarray, exp_bits: int, mant_bits: int, use_ocp: bool
+    ) -> np.ndarray:
+        """Oracle: original per-element float64 searchsorted nearest-even ladder."""
+        table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+        sign_byte = np.uint8(1 << (exp_bits + mant_bits))
+        pos_mag = table[: int(sign_byte)].astype(np.float64)
+        finite = np.flatnonzero(np.isfinite(pos_mag))
+        order = finite[np.argsort(pos_mag[finite])]
+        sorted_mag = pos_mag[order]
+        sorted_byte = order.astype(np.uint8)
+
+        xf = np.ascontiguousarray(x, dtype=np.float32)
+        with np.errstate(invalid="ignore"):
+            ax = np.abs(xf).astype(np.float64)
+        raw = np.searchsorted(sorted_mag, ax)
+        hi = np.clip(raw, 0, sorted_mag.size - 1)
+        lo = np.clip(raw - 1, 0, sorted_mag.size - 1)
+        d_lo = np.abs(sorted_mag[lo] - ax)
+        d_hi = np.abs(sorted_mag[hi] - ax)
+        lo_is_even = (sorted_byte[lo] & np.uint8(1)) == 0
+        pick_lo = np.where(d_lo == d_hi, lo_is_even, d_lo < d_hi)
+        chosen = np.where(pick_lo, lo, hi)
+        out = sorted_byte[chosen]
+        is_zero = sorted_mag[chosen] == 0
+        out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
+        nan_byte = (
+            np.uint8(((1 << exp_bits) - 1) << mant_bits | ((1 << mant_bits) - 1))
+            if use_ocp
+            else sign_byte
+        )
+        out = np.where(np.isnan(xf), nan_byte, out)
+        return out.astype(np.uint8).reshape(np.shape(x))
+
+    def test_bit_exact_against_float64_ladder_across_all_codecs(self):
+        # Asserts byte-identical output between the table-driven encoder and the
+        # reference float64 searchsorted ladder across normals, subnormals, +0.0,
+        # -0.0, NaN (quiet/signaling, positive/negative payloads), +/-Inf,
+        # values above max representable magnitude, and exact tie points (+/-16
+        # ULPs) for all four codecs: FNUZ fp8, OCP fp8, FNUZ bf8, and OCP bf8.
+        rng = np.random.default_rng(42)
+        u_rand = rng.integers(0, 2**32, size=100_000, dtype=np.uint32)
+        specials_u32 = np.array(
+            [
+                0x00000000,  # +0.0
+                0x80000000,  # -0.0
+                0x00000001,  # smallest positive float32 subnormal
+                0x80000001,  # smallest negative float32 subnormal
+                0x7F7FFFFF,  # max finite float32
+                0xFF7FFFFF,  # min finite float32
+                0x7F800000,  # +Inf
+                0xFF800000,  # -Inf
+                0x7F800001,  # signaling NaN (low16 != 0, hi16 == 0x7F80)
+                0xFF800001,  # negative signaling NaN (low16 != 0, hi16 == 0xFF80)
+                0x7FC00000,  # canonical quiet NaN
+                0xFFC00000,  # negative quiet NaN
+            ],
+            dtype=np.uint32,
+        )
+        offsets = np.arange(-16, 17, dtype=np.int64)
+        for exp_bits, mant_bits, use_ocp, _ in self._CASES:
+            with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                mags = self._finite_magnitudes(table)
+                mids = ((mags[:-1] + mags[1:]) / 2.0).astype(np.float32)
+                centers = np.unique(
+                    np.concatenate([mags.astype(np.float32), mids])
+                ).view(np.uint32)
+                u_grid = (
+                    np.clip(
+                        centers[:, None].astype(np.int64) + offsets[None, :],
+                        0,
+                        0x7FFFFFFF,
+                    )
+                    .astype(np.uint32)
+                    .ravel()
+                )
+                u_all = np.concatenate(
+                    [
+                        u_grid,
+                        u_grid | np.uint32(0x80000000),
+                        specials_u32,
+                        u_rand,
+                    ]
+                )
+                x = u_all.view(np.float32)
+                expected = self._reference_float64_ladder(
+                    x, exp_bits, mant_bits, use_ocp
+                )
+                got = _fp8_encode(x, exp_bits, mant_bits, use_ocp=use_ocp)
+                np.testing.assert_array_equal(got, expected)
+
 
 class TestOutputDtype(unittest.TestCase):
     """Output (C) element dtype must mirror the codegen's get_output_dtype."""

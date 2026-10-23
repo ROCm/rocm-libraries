@@ -54,9 +54,22 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
     try:
         problem = GemmProblem.from_dict(prob_dict)
 
-        np.random.seed(42)
-        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float32)
-        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float32)
+        # Cache host matrices per shape so batch mode doesn't regenerate huge
+        # inputs per kernel; paired with _encode_ab_cached in
+        # dispatcher/python/gemm_utils.py so encoded (A_h, B_h) buffers are
+        # also reused across kernels sharing (shape, dtype, layout).
+        cache = getattr(_run_one, "_ab_cache", {})
+        key = (problem.M, problem.N, problem.K)
+        if key not in cache:
+            rng = np.random.RandomState(42)
+            A_in = (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32)
+            B_in = (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32)
+            A_in.flags.writeable = False
+            B_in.flags.writeable = False
+            cache.clear()
+            cache[key] = (A_in, B_in)
+            _run_one._ab_cache = cache
+        A, B = cache[key]
 
         # CRITICAL: load the library ONLY inside this subprocess. The runner reads
         # dtype + layout off the kernel name and arranges/encodes A/B accordingly.
