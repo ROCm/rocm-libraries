@@ -106,7 +106,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_mfma` / `grouped_wgrad_mfma` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0`, any filter) and 4/8-channel grouped wgrad, stride 1, on `mfma_f32_4x4x4`; partial slots + `dw_wgrad_fold`; need `ds_read_b64_tr_b16`. AOT sweep only, not yet wired into dispatch |
-| `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA, wave64. Built from `library/kernels`; not yet wired into dispatch |
+| `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 
 ---
 
@@ -187,8 +187,10 @@ parity runs on the matching device and is not implied by the ✅ here.
   contract, so it stays MFMA-only.
 - **Merged groups (`group_merge`)** is available in the forward
   (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
-  **depthwise** problems only (`cpg == kpg == 1`), on `wave_size == 64` (MFMA)
-  only, and is inert at its default of `1`. The degree must be a power of two
+  **depthwise** problems only (`cpg == kpg == 1`), and is inert at its default
+  of `1`. Forward builds it on MFMA (wave64) and WMMA (wave32) targets alike
+  (GPU-numeric-verified on gfx1250; the gfx11 WMMA targets are covered by the
+  parity gate only); wgrad is `wave_size == 64` (MFMA) only. The degree must be a power of two
   in {2, 4, 8, 16, 32, 64} and divide `groups`. Beyond that the two directions
   restrict differently. Forward additionally rejects `async_dma`, an explicit
   `vector_size_b` other than 1, a `vector_size_a`/`vector_size_c` that does not
@@ -205,7 +207,10 @@ parity runs on the matching device and is not implied by the ✅ here.
   struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
   boundary, and the fwd parity emitters build eight depthwise configs
   (`conv_implicit_gemm_emit.{py,c}` indices 21–28: 22–27 merged, 21 and 28 the
-  unmerged default/cshuffle controls) spanning both epilogues, the 1-wide
+  unmerged default/cshuffle controls), plus four merged WMMA ones (29–32:
+  gfx1250 `mem` and `wavelet` with cshuffle, gfx1250 with the direct epilogue,
+  and gfx1151) and three unmerged grouped gfx1250 controls (33–35), spanning
+  both epilogues, the 1-wide
   cshuffle store, `unroll_k`, and degrees with `groups/Gm > 1` as well as
   `Gm == groups` (one merged group; the grouped decode stays engaged). Byte-identity is therefore a
   real gate on merged emission, not a vacuous one. **wgrad is Python-engine

@@ -151,6 +151,11 @@ NATIVE_PARITY_TESTS = (
         "rocke_arch_target_identity",
         "native target identity parity",
     ),
+    (
+        "ROCKE_BUFFER_RSRC_HIP_TEST",
+        "rocke_buffer_rsrc_hip",
+        "native buffer descriptor HIP parity",
+    ),
 )
 
 

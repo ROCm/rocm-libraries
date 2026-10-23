@@ -1,0 +1,6 @@
+outs:
+- path: rma10.tar.gz
+  remote: sparse-matrices
+  md5: a899a0c48b9a58d081c52ffd88a84955
+  size: 19466055
+  hash: md5

@@ -18,7 +18,8 @@
 # index 103 its grouped / group-merge mode, and from index 114 the direct
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
 # DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
-# and from index 163 the bf16 DirectConv4cSpec), builds the kernel
+# from index 163 the bf16 DirectConv4cSpec, and from index 166 the depthwise
+# forward kernels on the wave32 gfx1250), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -478,6 +479,81 @@ def _wgrad_direct_spec(idx: int):
     if sel is None:
         return None
     return (sel[0], sel[1], sel[2] if len(sel) > 2 else "gfx950")
+
+
+# ---------------------------------------------------------------------------
+# Depthwise forward on a wave32 target (gfx1250), indices 166..170: the
+# preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
+# the preloading kernel at wave_size 64: a logical wave of 64 threads, which
+# the wave32 target runs as two hardware waves.
+# ---------------------------------------------------------------------------
+_WAVE32_CFG_BASE = 166
+
+
+def _dwp_fwd(N, H, W, groups, KH, PAD, stride, dtype):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=1,
+        kpg=1,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _wave32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WAVE32_CFG_BASE + idx``, or None."""
+    if idx == 0:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 1:
+        p = _dwp_fwd(2, 14, 14, 3, 3, 1, 2, "bf16")
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 2:
+        p = _dwp_fwd(2, 16, 16, 96, 5, 2, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32
+            ),
+            "gfx1250",
+        )
+    if idx == 3:
+        p = _dwp_fwd(2, 12, 12, 96, 3, 1, 2, "fp16")
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p,
+                block_h=8,
+                block_w=2,
+                block_waves=1,
+                dtype="fp16",
+                wave_size=32,
+            ),
+            "gfx1250",
+        )
+    if idx == 4:
+        # wave64 (logical) spec on the wave32 target.
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx1250",
+        )
+    return None
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -1769,6 +1845,11 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _WAVE32_CFG_BASE:
+        sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _FOURC_BF16_CFG_BASE:
         sel = _fourc_bf16_spec(idx - _FOURC_BF16_CFG_BASE)
         if sel is not None:

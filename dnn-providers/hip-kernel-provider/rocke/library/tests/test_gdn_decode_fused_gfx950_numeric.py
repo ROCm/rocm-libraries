@@ -18,7 +18,9 @@ barrier's position is also pinned on CPU (``test_gdn_decode_fused.py``,
 ``TestFusedBarrier``), independent of scheduling.
 
 Specs are built directly from ``GdnDecodeSpec``: the fused modes are an emitter
-capability, independent of any tile selection policy.
+capability, independent of any tile selection policy. The dispatched path
+(request -> dispatch -> launch) is covered in
+``test_gdn_decode_gfx950_numeric.py`` (``test_request_fields_reach_the_launch``).
 
 Needs a real gfx950 and ROCm torch; marked ``gpu`` and skipped elsewhere. The
 spec rules, ABI, reference and IR are covered on CPU by

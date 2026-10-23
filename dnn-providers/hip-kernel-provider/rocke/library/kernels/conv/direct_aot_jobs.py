@@ -25,6 +25,7 @@ from kernels.conv.direct_variants import (
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_WAVE_PARAMETRIC,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_wgrad_fold_knobs,
@@ -1430,7 +1431,7 @@ def _caps_jobs(
             caps, knobs, arch, dtype
         ):
             continue
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
             continue
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
@@ -1510,11 +1511,17 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
-    spec = make_spec(variant, probe, job.spec_kwargs)
+    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
-    return _build_kernel(variant, spec, arch), {}
+    # The wave size the binary is built at, which the run side checks against
+    # the identity before it derives a launch geometry from it
+    # (direct_entry_wave_reason).
+    meta = (
+        {"spec_wave_size": spec.wave_size} if variant in DIRECT_WAVE_PARAMETRIC else {}
+    )
+    return _build_kernel(variant, spec, arch), meta
 
 
 def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
@@ -1579,7 +1586,7 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, identity.wave_size)
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")

@@ -92,15 +92,40 @@ _MFMA_PRELOAD_VGPR_BUDGET = 384
 _RTC_WIDE_Q_PRELOAD_VGPR_BUDGET = 216
 
 
-def make_direct_spec(variant: str, problem, knobs: dict):
+# Variants whose kernel is written for any wave size (scalar FMA, one lane per
+# channel or per channel and column): their spec takes the target's wave size,
+# so the binary matches the wave size the identity records (and the tiled and
+# column-streamed validators require it). Every other variant is a wave64 MFMA
+# kernel and keeps its spec default, which its validator checks against the
+# target.
+DIRECT_WAVE_PARAMETRIC = frozenset(
+    {
+        "direct_depthwise",
+        "direct_depthwise_spatial",
+        "direct_depthwise_tiled",
+        "direct_depthwise_col",
+    }
+)
+
+
+def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
     For the MFMA dgrad pipeline this is the spec of its compute pass (a
     forward kernel on the transposed problem); the weight transforms are
-    derived from the original problem separately.
+    derived from the original problem separately. ``wave_size`` is the
+    target's; only the :data:`DIRECT_WAVE_PARAMETRIC` variants take it.
     """
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
+
+    if variant in DIRECT_WAVE_PARAMETRIC:
+        if "wave_size" in knobs and knobs["wave_size"] != wave_size:
+            raise ValueError(
+                f"knob wave_size {knobs['wave_size']!r} conflicts with wave_size "
+                f"{wave_size!r}"
+            )
+        knobs = dict(knobs, wave_size=wave_size)
 
     if variant == "direct_grouped":
         return dc.DirectConvSpec(problem=problem, name="rocke_direct_conv", **knobs)
@@ -491,8 +516,31 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     return builders[variant](spec, arch=arch)
 
 
+def direct_entry_wave_reason(
+    variant: str, identity_wave_size: int, meta: dict
+) -> str | None:
+    """Why a cached binary of ``variant`` cannot launch at its identity's wave
+    size, or ``None`` when it can.
+
+    The launch geometry of a :data:`DIRECT_WAVE_PARAMETRIC` kernel follows the
+    spec's ``wave_size`` (block size, channels per block), so it has to be the
+    one the binary was built with. The build records it as ``spec_wave_size``;
+    an entry without it predates the record and was built at the wave64 spec
+    default, whatever wave size its identity says.
+    """
+    if variant not in DIRECT_WAVE_PARAMETRIC:
+        return None
+    built = meta.get("spec_wave_size", 64)
+    if built != identity_wave_size:
+        return (
+            f"cache entry was built at wave_size {built}, its identity says "
+            f"{identity_wave_size} (rebuild the cache with --compile-all)"
+        )
+    return None
+
+
 def direct_spec_for_problem(
-    variant: str, problem, knobs: dict, arch: str
+    variant: str, problem, knobs: dict, arch: str, wave_size: int = 64
 ) -> tuple[object | None, str]:
     """``(spec, "ok")`` when a binary of ``variant``/``knobs`` serves ``problem``.
 
@@ -503,7 +551,8 @@ def direct_spec_for_problem(
     ...). The spec is rebuilt on the real problem and run through the kernel's
     own validator, so a binary is only offered where a fresh build would accept
     the shape too. The returned spec is the one its launch geometry comes from.
-    Returns ``(None, why)`` otherwise.
+    ``wave_size`` is the binary's (its identity's). Returns ``(None, why)``
+    otherwise.
     """
     if variant in DIRECT_MFMA_DGRAD:
         why = direct_mfma_knobs_reason(problem, knobs)
@@ -513,7 +562,7 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
-    spec = make_direct_spec(variant, problem, knobs)
+    spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why

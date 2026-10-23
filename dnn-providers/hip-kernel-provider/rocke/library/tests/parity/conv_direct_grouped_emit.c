@@ -17,10 +17,10 @@
  * group-merge non-grouped spec; from index 114 the direct wgrad kernels:
  * rocke_direct_wgrad_tiled_spec_t, rocke_dw_wgrad_{fold,cols,lds}_spec_t,
  * rocke_direct_wgrad_gather_spec_t and, from index 148, the 4x4x4 MFMA
- * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t, and from
- * index 163 the bf16 rocke_direct_conv_4c_spec_t) identically
- * to the Python emitter
- * conv_direct_grouped_emit.py, builds the
+ * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t; from
+ * index 163 the bf16 rocke_direct_conv_4c_spec_t; from index 166 the
+ * depthwise forward kernels on the wave32 gfx1250) identically to the Python
+ * emitter conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
@@ -91,6 +91,9 @@ enum
 
 /* bf16 4c configs 163..165 follow the direct wgrad ones. */
 #define FOURC_BF16_CFG_BASE 163
+/* Depthwise forward on a wave32 target (gfx1250), configs 166..170, follows
+ * the bf16 4c ones: see _wave32_spec in the Python emitter. */
+#define WAVE32_CFG_BASE 166
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
  * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
@@ -789,6 +792,69 @@ static int make_reject_cfg(int idx,
         s16->problem = p;
         s16->block_groups = 4;
         *kind = KIND_16C;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Config WAVE32_CFG_BASE + idx (see _wave32_spec in the Python emitter): the
+ * preloading, spatial, tiled and column-streamed depthwise forward kernels at
+ * wave_size 32 on gfx1250, then the preloading kernel at wave_size 64 (a
+ * logical wave the wave32 target runs as two hardware waves). Returns 0 on
+ * success, -1 past the last one. */
+static int make_wave32_cfg(int idx,
+                           int* kind,
+                           rocke_direct_depthwise_spec_t* sdw,
+                           rocke_direct_depthwise_spatial_spec_t* ssp,
+                           rocke_direct_depthwise_tiled_spec_t* stiled,
+                           rocke_direct_depthwise_col_spec_t* sdwc,
+                           const char** arch)
+{
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 2;
+        sdw->wave_size = 32;
+        *kind = KIND_DW;
+        return 0;
+    case 1:
+        *ssp = rocke_direct_depthwise_spatial_spec_default();
+        ssp->problem = mk_dw_problem(2, 14, 14, 3, 3, 1, 2, "bf16");
+        ssp->block_waves = 2;
+        ssp->wave_size = 32;
+        *kind = KIND_SPATIAL;
+        return 0;
+    case 2:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 16, 16, 96, 5, 2, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        stiled->block_waves = 2;
+        stiled->wave_size = 32;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 3:
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = mk_dw_problem(2, 12, 12, 96, 3, 1, 2, "fp16");
+        sdwc->block_h = 8;
+        sdwc->block_w = 2;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        sdwc->wave_size = 32;
+        *kind = KIND_DWCOL;
+        return 0;
+    case 4:
+        /* wave64 (logical) spec on the wave32 target. */
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        *kind = KIND_DW;
         return 0;
     default:
         return -1;
@@ -2056,7 +2122,15 @@ int main(int argc, char** argv)
     wgrad_direct_specs_t swd;
     rocke_direct_conv_split_reduce_spec_t sred;
     const char* arch = "gfx950";
-    if(idx >= FOURC_BF16_CFG_BASE)
+    if(idx >= WAVE32_CFG_BASE)
+    {
+        if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= FOURC_BF16_CFG_BASE)
     {
         kind = KIND_4C;
         if(make_4c_bf16_cfg(idx - FOURC_BF16_CFG_BASE, &s4, &arch) != 0)
