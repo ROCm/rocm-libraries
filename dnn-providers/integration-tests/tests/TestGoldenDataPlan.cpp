@@ -308,4 +308,83 @@ TEST(TestGoldenDataPlanJudgeLane, EachBundleGetsTheVerdictItsLaneEarns)
     }
 }
 
+// A bundle that switches a reference off has said it does not want that lane to grade
+// it. The lane says so out loud under the bundle's own name, and the bundle still
+// counts as accounted for: a deliberate opt-out is not an `_Unvalidated` failure.
+TEST(TestGoldenDataPlanDisabledLane, ADisabledLaneIsAVisibleSkipNotAnUnvalidatedFailure)
+{
+    auto bundle = loaded("quick_BatchnormFwdInference_x", "Small", buildBatchnormGraph());
+    bundle.bundle->metadata.noCpuReference = true;
+
+    const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
+
+    // The GpuRef lane has no batchnorm plan, so nothing else could account for it.
+    ASSERT_EQ(plan.tests.size(), 1u);
+    EXPECT_EQ(plan.tests.front().kind, PlannedKind::SKIP);
+    EXPECT_EQ(plan.tests.front().suiteName, "quick_BatchnormFwdInference_x_CpuRef");
+    EXPECT_NE(plan.tests.front().message.find("no_cpu_reference"), std::string::npos)
+        << plan.tests.front().message;
+    EXPECT_EQ(plan.lanes.at(0).disabledByMetadata, 1u);
+    EXPECT_EQ(plan.lanes.at(0).validated, 0u);
+}
+
+// The flag stands in for the lane's run, so a gap entry for the same lane would never
+// be consulted again and could never go stale. That has to be loud.
+TEST(TestGoldenDataPlanDisabledLane, AFlagBesideAKnownGapEntryFailsNamingBoth)
+{
+    auto bundle
+        = loaded("quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small", "Small", buildSdpaGraph(256));
+    bundle.bundle->metadata.noGpuReference = true;
+
+    const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
+
+    const std::vector<Planned> expected{
+        {PlannedKind::EXPECT_DECLINE,
+         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small_CpuRef",
+         "Small"},
+        {PlannedKind::FAIL, "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small_GpuRef", "Small"},
+    };
+    EXPECT_EQ(kindsAndNames(plan), expected);
+    const auto& failure = plan.tests.back();
+    EXPECT_NE(failure.message.find("no_gpu_reference"), std::string::npos) << failure.message;
+    EXPECT_NE(failure.message.find("knownReferenceGaps()"), std::string::npos) << failure.message;
+}
+
+// The loader refuses golden data beside an expected rejection, so no such bundle
+// reaches this binary; what it would see is a bundle with nothing to validate.
+TEST(TestGoldenDataPlanDisabledLane, AnExpectedRejectionBundleIsNeverPlanned)
+{
+    auto bundle
+        = loaded("quick_Matmul_x", "Rejected", buildMatmulGraph(), /*hasGoldenOutputs=*/false);
+    bundle.bundle->metadata.expectedRejection = true;
+
+    const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
+
+    EXPECT_TRUE(plan.tests.empty());
+}
+
+TEST(TestGoldenDataPlanJudgeLane, ADisabledReferenceIsJudgedBeforeItsOpSetOrCost)
+{
+    auto costly = graphBundle(buildSdpaGraph(8192), true);
+    costly->metadata.noCpuReference = true;
+    EXPECT_EQ(judgeLane(*costly, "quick_SdpaFwd_x.Small", ReferenceExecutorType::CPU),
+              LaneVerdict::DISABLED_BY_METADATA);
+    // The other lane is untouched.
+    EXPECT_EQ(judgeLane(*costly, "quick_SdpaFwd_x.Small", ReferenceExecutorType::GPU),
+              LaneVerdict::VALIDATE);
+
+    auto outsideOpSet = graphBundle(buildBatchnormGraph(), true);
+    outsideOpSet->metadata.noGpuReference = true;
+    EXPECT_EQ(
+        judgeLane(*outsideOpSet, "quick_BatchnormFwdInference_x.Small", ReferenceExecutorType::GPU),
+        LaneVerdict::DISABLED_BY_METADATA);
+
+    auto gap = graphBundle(buildSdpaGraph(256), true);
+    gap->metadata.noGpuReference = true;
+    EXPECT_EQ(judgeLane(*gap,
+                        "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+                        ReferenceExecutorType::GPU),
+              LaneVerdict::DISABLED_WITH_GAP_ENTRY);
+}
+
 // NOLINTEND(readability-identifier-naming)

@@ -1,0 +1,8 @@
+{
+  "format_version": 1,
+  "generator": "hand-authored",
+  "reference_source": "none: expected_rejection bundle (never executed)",
+  "operation": "Matmul",
+  "expected_rejection": true,
+  "notes": "Twin of quick/Matmul/Default case 16_128_fp16_05e316 with the matmul node compute_data_type set to half. hipBLASLt requires float (HipblasltMatmulPlanBuilder::checkComputeTypes), so it drops the graph from its ranked list; the claimed valid twin is the positive control."
+}

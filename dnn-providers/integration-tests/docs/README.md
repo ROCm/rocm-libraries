@@ -52,6 +52,7 @@ other rows do not, so they are easy to miss.
 | `Error: zero tests ran.` | **yes** | A discovery or filter misconfiguration, or, with GTest sharding, an empty shard. | [Hard stops](running-tests.md#hard-stops) |
 | `FATAL: --enforce-support-claims is active and …` | **yes** | Enforcement verified nothing. | [Hard stops](running-tests.md#hard-stops) |
 | `unclaimed_support` in the `SUPPORT CLAIM SUMMARY` | no | The engine accepts graphs that no sidecar claims. Record them. | [Updating support claims](adding-tests.md#updating-support-claims) |
+| `[ VERIFIER ] rejected(<stage>): <bundle>` / `Verified by: … rejected R` | no | An expected-rejection bundle passed: the engine rejected a graph that is invalid on purpose. This is the intended pass, not a skip. | [Expected-rejection bundles](running-tests.md#expected-rejection-bundles) |
 | `Skipped:` equal to (or close to) the total | no | Green, but little or nothing was tested. Read the skip reasons. | [Test coverage summary](running-tests.md#test-coverage-summary) |
 | `WARNING: Bundle tests are enabled but …` / `WARNING: No bundles could be loaded from …` | no | No bundles registered. Only compiled-in C++ tests ran. | [Troubleshooting](running-tests.md#troubleshooting) |
 | `No tests were found!!!` from CTest | no (exit 0) | Wrong directory, wrong label, or only disabled suites. | [Runs that look green but are not](running-tests.md#runs-that-look-green-but-are-not) |

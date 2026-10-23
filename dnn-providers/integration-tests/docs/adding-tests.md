@@ -43,7 +43,9 @@ A bundle of any kind is complete only when it has all three required parts
 3. **A support-claim sidecar** — `{Name}.support.json`, or the sweep's
    `support.json` — even if it claims nothing yet.
 
-Golden data is the only optional part.
+Golden data is the only optional part. An expected-rejection bundle is the
+exception: it has no support claim and no golden data
+([details](#add-an-expected-rejection-bundle)).
 
 ## End to end: a bundle for a new op
 
@@ -189,6 +191,93 @@ one of these:
   claims only what the harness can check today, or
 - **quarantine the bundle** until one of the above lands: exclude it in the
   provider's `test_categories_integration.yaml` with a comment that says why.
+
+### Disable a reference for a bundle
+
+Set `no_cpu_reference` or `no_gpu_reference` to `true` in the metadata of the
+bundle (`{Name}.meta.json`, or `cases[].metadata` of a sweep case) when that
+reference executor is known to be wrong for the bundle, or too slow to run on
+it. The harness never uses a disabled reference as an oracle
+([format](file-formats.md#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)).
+
+```json
+{ "format_version": 1, "generator": "…", "reference_source": "…", "no_cpu_reference": true }
+```
+
+- **Disabling both requires golden data.** Add it first
+  ([Golden data with DVC](#golden-data-with-dvc)). A bundle with both flags and
+  no declared golden data fails to load. `verify_golden_bundles.py` reports it
+  as an error.
+- **A known gap is a different tool.** `knownReferenceGaps()`
+  (`ReferenceOpCoverage.cpp`) records an op that a reference executor cannot
+  handle. If a bundle has the flag for a lane and a gap entry for the same
+  lane, `hipdnn_golden_data_tests` fails that lane's test and names both. Delete
+  the gap entry.
+- **What a run prints.** In `auto` mode, a disabled reference appears in the
+  failure message as `(disabled by bundle metadata)`. With
+  `--verification-mode=cpu|gpu` for a disabled reference, the test skips. With
+  both references disabled and the golden data not pulled, the test skips with
+  `golden data not pulled; bundle disables both references`. In
+  `hipdnn_golden_data_tests`, the disabled lane registers a skip test that names
+  the flag. See [Bundle-disabled references](running-tests.md#bundle-disabled-references).
+
+### Add an expected-rejection bundle
+
+Use this to prove that an engine **rejects** a graph that is invalid on purpose.
+The test is never executed or compared
+([format](file-formats.md#expected-rejection-bundles)).
+
+1. **Choose one engine-visible invalid property.** The graph must load and
+   deserialize, and the engine must see the problem. Example: hipBLASLt requires
+   Matmul compute type `float`, so set the matmul node's `compute_data_type` to
+   `half`. A property that the JSON or the graph schema cannot even load is not
+   engine-visible: it is a red `Failed to load expected_rejection bundle …` test.
+2. **Derive it from a claimed valid case.** Copy the graph of a case that an
+   engine claims (here a hipBLASLt-claimed `quick/Matmul/Default` case) and
+   change only that property. The valid twin is the **positive control**: it
+   passes in the same lane, so the rejection comes from your change.
+3. **Place it** at
+   `integration-test-bundles/<tier>/<Op>/<Layout>/<DataType>/<Name>/<Name>.json`:
+   six path segments under the bundle root, as `verify_golden_bundles.py`
+   expects. Example:
+   `integration-test-bundles/quick/Matmul/nc/fp16/ExpectedRejectionMatmulComputeHalf/ExpectedRejectionMatmulComputeHalf.json`.
+4. **Write `<Name>.meta.json`** with `format_version`, `generator` and
+   `reference_source` (the verifier requires both as non-empty strings) and
+   `expected_rejection: true`:
+
+   ```json
+   { "format_version": 1, "generator": "hand-authored", "reference_source": "none: expected_rejection bundle (never executed)", "expected_rejection": true }
+   ```
+
+5. **Add no sidecar and no golden data.** Do not hand-add a claim for the
+   bundle. A claim that names it fails the C++ test and
+   `verify_support_claims.py`. A `--write-support-claims` run skips it and writes
+   no claim. Golden data next to it is a load error.
+6. **Re-run CMake, then run the lane pinned to the engine** (an unpinned run
+   skips with `expected_rejection requires --test-engine`):
+
+   ```bash
+   build/bin/hipdnn_integration_tests --test-article <plugin> --test-engine HIPBLASLT_ENGINE \
+       --test-config dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml \
+       --gtest_filter='quick_Matmul_nc_fp16_ExpectedRejectionMatmulComputeHalf.*'
+   ```
+
+   The test prints `[ VERIFIER ] rejected(<stage>): <path>`. For this example
+   hipBLASLt drops the graph from its ranked list (`ranked_list`). Lanes whose
+   engine has no Matmul support, such as MIOpen and hip-kernel, reject vacuously at
+   `ranked_list`.
+7. **Run the verifiers** on the bundle directory
+   ([Check the data itself](#check-the-data-itself)), and
+   `python dnn-providers/integration-tests/scripts/verify_support_claims.py`.
+
+What a failure means:
+
+| Failure | Meaning |
+|---|---|
+| `Engine X accepted expected-rejection bundle …` | X ranked the graph and built its plans. The chosen property is not one that X rejects, or X now accepts it. |
+| `expected-rejection bundle never reached an engine` | The graph failed `from_binary`. The invalidity is schema-level. Choose an engine-visible property. |
+| `Failed to load expected_rejection bundle …` | The JSON or graph does not load, or the metadata is malformed (a non-boolean `expected_rejection`, golden data declared next to it). |
+| A claim error | A sidecar claims the bundle. Remove the claim. |
 
 ### Finding existing cases
 
@@ -635,7 +724,8 @@ the harness (`hipdnn_integration_tests_unit_tests`).
 - [ ] New graph coverage is a bundle, not a C++ test.
 - [ ] Every new bundle has its graph, its metadata (with `generator` and
       `reference_source`) and a support sidecar, even an empty one. No tool
-      checks for a missing sidecar, so check by hand.
+      checks for a missing sidecar, so check by hand. An expected-rejection
+      bundle is the exception: it has no sidecar and no golden data.
 - [ ] `verify_golden_bundles.py` reports no errors for the bundle directories you
       added or changed ([Check the data itself](#check-the-data-itself)).
 - [ ] You re-ran CMake after you changed bundles or sidecars or pulled data.

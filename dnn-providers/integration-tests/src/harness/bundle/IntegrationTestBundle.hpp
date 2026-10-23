@@ -744,6 +744,39 @@ inline std::optional<std::filesystem::path>
     return goldenPath.parent_path();
 }
 
+// The rules that tie a bundle's metadata flags to the golden data it declares.
+// "Declared" is a fact about the checked-in files, not about the checkout: the
+// `.tensors.dvc` pointer (or a sweep case's `golden.path`) is in git, the blobs it
+// names are only there after `dvc pull`. Reading it from the pointer keeps these
+// rules the same on a machine that has not pulled.
+//
+//   * Both references disabled: nothing but golden data could ever verify the
+//     bundle, so it must declare some.
+//   * An expected-rejection bundle is never executed, so golden data beside it is
+//     meaningless, and would also pull the bundle into the golden-data binary.
+//
+// `where` names the bundle or sweep case in the thrown message.
+inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                                        bool goldenDeclared,
+                                        const std::string& where)
+{
+    if(metadata.expectedRejection && goldenDeclared)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where
+            + " is an expected_rejection bundle but declares golden data; it is never executed, so"
+              " there is nothing to compare against");
+    }
+    if(metadata.noCpuReference && metadata.noGpuReference && !goldenDeclared)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where
+            + " disables both references (no_cpu_reference and no_gpu_reference) but declares no"
+              " golden data; add golden data ({Name}.tensors.dvc or output blobs, or the sweep"
+              " case's golden.path) or enable a reference");
+    }
+}
+
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -758,6 +791,8 @@ inline std::optional<std::filesystem::path>
 //   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
 //   * metadata present but malformed       -> throws BundleMetadataError
+//   * metadata flags that contradict the golden data it declares (both references
+//     off with none, expected_rejection with some) -> throws BundleMetadataError
 //   * valid graph, input blobs absent      -> bundle with blobs == nullopt
 //   * inputs present, outputs absent       -> bundle verified against reference
 //   * inputs and outputs present           -> bundle verified against golden data
@@ -820,6 +855,13 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         metadata.emplace();
     }
     bundle.metadata = std::move(*metadata);
+
+    // The `.tensors.dvc` pointer counts as declaring golden data even when the blobs
+    // it names have not been pulled.
+    auto pointerPath = jsonPath;
+    pointerPath.replace_extension(".tensors.dvc");
+    const bool goldenDeclared = goldenOutputsPresent || std::filesystem::exists(pointerPath);
+    detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, jsonPath.string());
 
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
 
@@ -916,6 +958,10 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     }
     bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
+
+    detail::checkGoldenDeclarationRules(bundle.metadata,
+                                        goldenOutputsPresent || goldenDirectory.has_value(),
+                                        discovered.diagnosticPath().string());
 
     if(goldenDirectory.has_value())
     {

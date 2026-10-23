@@ -658,4 +658,74 @@ TEST(TestParseBundleMetadataJson, ThrowsOnNonNumericInputsKey)
     }
 }
 
+// The reference and rejection flags are strict booleans: absent is false, a bool is
+// read as written, and anything else is an authoring error. A string "false" quietly
+// reading as false (or "yes" as true) would flip how the bundle is verified.
+TEST(TestParseBundleMetadataJson, ReferenceAndRejectionFlagsDefaultToFalse)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1})"));
+    EXPECT_FALSE(meta.noCpuReference);
+    EXPECT_FALSE(meta.noGpuReference);
+    EXPECT_FALSE(meta.expectedRejection);
+}
+
+TEST(TestParseBundleMetadataJson, ReferenceAndRejectionFlagsAreReadIndependently)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 1, "no_cpu_reference": true, "no_gpu_reference": false,
+            "expected_rejection": true})"));
+    EXPECT_TRUE(meta.noCpuReference);
+    EXPECT_FALSE(meta.noGpuReference);
+    EXPECT_TRUE(meta.expectedRejection);
+
+    const auto other = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 1, "no_cpu_reference": false, "no_gpu_reference": true})"));
+    EXPECT_FALSE(other.noCpuReference);
+    EXPECT_TRUE(other.noGpuReference);
+    EXPECT_FALSE(other.expectedRejection);
+}
+
+TEST(TestParseBundleMetadataJson, NonBooleanFlagsThrowNamingTheFlag)
+{
+    for(const char* flag : {"no_cpu_reference", "no_gpu_reference", "expected_rejection"})
+    {
+        for(const char* value : {R"("true")", "1", "0", "null", "[]"})
+        {
+            SCOPED_TRACE(std::string(flag) + " = " + value);
+            const auto json = nlohmann::json::parse(std::string(R"({"format_version": 1, ")") + flag
+                                                    + R"(": )" + value + "}");
+            try
+            {
+                parseBundleMetadataJson(json, "bundle.meta.json");
+                ADD_FAILURE() << "expected BundleMetadataError";
+            }
+            catch(const BundleMetadataError& e)
+            {
+                EXPECT_NE(std::string(e.what()).find(flag), std::string::npos) << e.what();
+                EXPECT_NE(std::string(e.what()).find("bundle.meta.json"), std::string::npos)
+                    << e.what();
+            }
+        }
+    }
+}
+
+TEST(TestLoadBundleMetadata, NonBooleanFlagFromAFileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "no_gpu_reference": "yes"})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestExcludedFromSupportClaims, OnlyAnExpectedRejectionIsExcluded)
+{
+    BundleMetadata meta;
+    EXPECT_FALSE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
+
+    meta.noCpuReference = true;
+    meta.noGpuReference = true;
+    EXPECT_FALSE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
+
+    meta.expectedRejection = true;
+    EXPECT_TRUE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
+}
+
 // NOLINTEND(readability-identifier-naming)

@@ -68,6 +68,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestVerifierTally.cpp
+    TestExpectedRejection.cpp
     TestErrorPaths.cpp
     TestLoadedEngineTable.cpp
     TestReferenceOpCoverage.cpp
