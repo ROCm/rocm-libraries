@@ -86,8 +86,12 @@ production visible to it and wait before consuming outputs on another stream.
 
 Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
 reuse scratch owned by the resolved pipeline/launch geometry and effective
-device/stream and submitting host thread. The cache holds at most eight resident eager owners: this is a
-count bound, not a byte budget. Each owner requires
+device/stream and submitting host thread. The eight-entry limit is an untuned
+heuristic matching the existing direct graph-cache default. A small LRU retains
+recent geometry/device/stream owners while bounding resident entries. Correctness
+does not depend on the value eight. The current performance validation uses one
+resident owner and does not tune cache capacity; this is not a byte budget.
+Each owner requires
 `4 * total_q * num_query_heads * num_segments * (head_size + 2)` bytes.
 A changing maximum KV length reuses an owner when its resolved spec and
 geometry stay identical; a selector bucket or segment-count change uses a
