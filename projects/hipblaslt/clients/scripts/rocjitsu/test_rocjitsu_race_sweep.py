@@ -24,6 +24,16 @@ import rocjitsu_sweep_plan as plan
 from rocjitsu_known_failures import apply_known_failures, known_failures
 
 
+def run_single_queue(jobs, workers, execute, progress, **kwargs):
+    return sweep.run_queue(
+        [[j] for j in jobs],
+        workers,
+        lambda batch, slot: [execute(batch[0], slot)],
+        progress,
+        **kwargs,
+    )
+
+
 def solution(index, tile=(64, 96, 1), depth=32):
     return {
         "index": index,
@@ -92,7 +102,9 @@ def bench_log(j=None):
     lines = []
     for case in j["cases"]:
         m, n, batch, k = case["shape"]
-        lines += [sweep.target_dispatch_line(j)] * 2
+        lines += [sweep.target_dispatch_line(j)] * j.get(
+            "target_dispatches_per_case", 2
+        )
         lines += [
             "[0]:m,n,batch_count,k,norm_error,atol,rtol",
             f"    {m},{n},{batch},{k},0,0.00001,0.00001",
@@ -125,6 +137,133 @@ def failure_list():
 
 
 class SweepTests(unittest.TestCase):
+    def test_batches_preserve_selection_and_group_shards_in_index_range_order(self):
+        jobs = []
+        for i, (shard, index) in enumerate(
+            (("z", 101), ("a", 300), ("z", 100), ("m", 200), ("a", 301))
+        ):
+            j = job()
+            j.update(id=i, library=shard)
+            j["solutions"][0]["index"] = index
+            jobs.append(j)
+        before = copy.deepcopy(jobs)
+        batches = plan.make_batches(jobs, 2, group_by_shard=True)
+        self.assertEqual([[j["id"] for j in b] for b in batches], [[0, 2], [3, 1], [4]])
+        self.assertEqual(jobs, before)
+        self.assertEqual(plan.make_batches([], 8, group_by_shard=True), [])
+        with self.assertRaises(ValueError):
+            plan.make_batches(jobs, 0, group_by_shard=True)
+
+    def test_bench_batch_checks_aliases_and_all_diagnostics(self):
+        jobs = [job(), job(), job()]
+        for i, j in enumerate(jobs):
+            j["id"] = i
+            j["solutions"][0]["index"] += i
+            j["cases"] = j["cases"][:1]
+            j["target_dispatches_per_case"] = 1
+        # All three indices deliberately share the same shape, name and kernel.
+        logs = [bench_log(j) for j in jobs]
+        text = "".join(logs)
+        results = sweep.classify_bench_batch(jobs, text, 0)
+        self.assertTrue(all(not r["failed"] for r in results))
+        self.assertEqual([r["target_dispatches"] for r in results], [1, 1, 1])
+        for broken, rc in (
+            (text + "RACE after final record\n", 0),
+            ("[rj warn] before first record\n" + text, 0),
+            (text + "[rj warn] shutdown\n", 0),
+            (text + sweep.target_dispatch_line(jobs[0]) + "\n", 0),
+            (text + logs[-1], 0),
+            ("".join(logs[:1]), 124),
+            (text, -6),
+        ):
+            with self.subTest(output=broken, rc=rc):
+                results = sweep.classify_bench_batch(jobs, broken, rc)
+                self.assertTrue(all(r["failed"] for r in results))
+                self.assertEqual(results[0]["cases"][0]["status"], "PASSED")
+        for broken in (
+            text.replace("--Solution index: 8", "--Solution index: 7"),
+            text.replace("0.00001", "nan", 1),
+            text.replace(sweep.target_dispatch_line(jobs[0]), "wrong symbol", 1),
+            "".join(reversed(logs)),
+            "".join(logs[:1] + logs[2:]),
+        ):
+            with self.subTest(output=broken):
+                self.assertTrue(
+                    any(
+                        r["failed"] for r in sweep.classify_bench_batch(jobs, broken, 0)
+                    )
+                )
+
+    def test_batch_queue_is_asynchronous_and_accounts_for_claimed_indices(self):
+        slow = threading.Event()
+        snapshots = []
+        batches = [[{"id": i}, {"id": i + 1}] for i in (6, 2, 4, 0)]
+
+        def execute(batch, slot):
+            if batch[0]["id"] == 6:
+                self.assertTrue(slow.wait(2))
+            if batch[0]["id"] == 0:
+                slow.set()
+            return [{"id": j["id"], "failed": False, "cases": []} for j in batch]
+
+        result = sweep.run_queue(
+            batches, 2, execute, lambda value: snapshots.append(copy.deepcopy(value))
+        )
+        self.assertEqual(result["assigned_job_ids"], [6, 7, 2, 3, 4, 5, 0, 1])
+        self.assertEqual([r["id"] for r in result["results"]], list(range(8)))
+        self.assertEqual(result["unstarted"], [])
+        self.assertEqual(result["max_active"], 2)
+        self.assertIsNone(result["stop"])
+        self.assertEqual([r["id"] for r in snapshots[0]["completed"]], [2, 3])
+
+    def test_batched_run_filters_skips_and_preserves_partial_failure_accounting(self):
+        for failure, continuation in (
+            (None, False),
+            ("partial", False),
+            ("race", True),
+            ("exception", False),
+        ):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                reports, summary, invocations = self.exercise_skips(
+                    Path(tmp),
+                    "bench",
+                    ["tile", "mn_edge"],
+                    indices=(7, 8, 9, 10, 11),
+                    batch_size=3,
+                    failure=failure,
+                    continue_on_failure=continuation,
+                )
+                expected = (
+                    [7, 8, 9, 10, 11] if failure is None or continuation else [7, 8, 9]
+                )
+                if failure == "exception":
+                    expected = [7]
+                self.assertEqual(invocations, expected)
+                self.assertEqual(summary["accounted_cases"], 20)
+                self.assertEqual(summary["counts"]["SKIPPED"], 2)
+                self.assertEqual(
+                    len(summary["unstarted_cases"]),
+                    0 if failure is None or continuation else 8,
+                )
+                if failure == "partial":
+                    self.assertEqual(summary["counts"]["PASSED"], 2)
+                    self.assertEqual(len(summary["missing"]), 8)
+                self.assertEqual(summary["passed"], failure is None)
+                for result in summary["results"]:
+                    saved = json.loads(
+                        (
+                            reports / f"solution-{result['id']:03}.result.json"
+                        ).read_text()
+                    )
+                    self.assertEqual(saved, result)
+                if failure is None:
+                    inputs = sorted(reports.glob("batch-*.yaml"))
+                    self.assertEqual(len(inputs), 2)
+                    self.assertEqual(
+                        [len(yaml.safe_load(p.read_text())["Tests"]) for p in inputs],
+                        [10, 8],
+                    )
+
     def test_regular_policy_streams_both_formats_and_preserves_sample_prefix(self):
         from tensilelite.Utilities.LibraryIO import writeMessagePack
 
@@ -174,7 +313,7 @@ class SweepTests(unittest.TestCase):
             cases=[{"id": "regular", "shape": [64, 96, 1, 256]}],
             target_dispatches_per_case=1,
         )
-        text = bench_log(j).replace(sweep.target_dispatch_line(j) + "\n", "", 1)
+        text = bench_log(j)
         text = text.replace("k,norm_error", "k,alpha,beta,norm_error").replace(
             "64,96,1,256,0,", "64,96,1,256,(1,0),(0,0),0,"
         )
@@ -348,7 +487,15 @@ class SweepTests(unittest.TestCase):
                     apply_known_failures(manifest, yaml.safe_dump(data), revision)
 
     def exercise_skips(
-        self, root, backend, cases, indices=(7, 8), recheck=False, failure=None
+        self,
+        root,
+        backend,
+        cases,
+        indices=(7, 8),
+        recheck=False,
+        failure=None,
+        batch_size=1,
+        continue_on_failure=False,
     ):
         """Use the real planner/list/runner; only the native subprocess is simulated."""
         library = root / "library_gfx942.dat"
@@ -376,6 +523,8 @@ class SweepTests(unittest.TestCase):
             reports=root / "reports",
             backend=backend,
             workers=1,
+            batch_size=batch_size,
+            continue_on_failure=continue_on_failure,
             timeout=120,
             suite_timeout=1500,
             seed="test",
@@ -398,6 +547,7 @@ class SweepTests(unittest.TestCase):
                 if backend == "bench"
                 else Path(command[-1]).read_text()
             )
+            groups = {}
             if backend == "tensile":
                 options = [line.split("=", 1) for line in native_input.splitlines()]
                 index = int(next(v for k, v in options if k == "solution-start-idx"))
@@ -408,37 +558,47 @@ class SweepTests(unittest.TestCase):
                 ]
             else:
                 rows = yaml.safe_load(native_input)["Tests"]
-                self.assertEqual(len({r["solution_index"] for r in rows}), 1)
-                index = rows[0]["solution_index"]
-                shapes = [[r[k] for k in ("M", "N", "batch_count", "K")] for r in rows]
-            expected = [
-                c
-                for c in plan.derive_cases(solution(index))
-                if recheck or index != 7 or c["id"] not in cases
-            ]
-            self.assertEqual(
-                shapes,
-                [c["shape"] for c in expected],
-                "known failures reached native input",
-            )
-            invocations.append(index)
-            if failure == "exception":
-                raise ValueError("native adapter failed")
-            native_job = {
-                "solutions": [
-                    {
-                        "index": index,
-                        "name": f"solution-{index}",
-                        "kernel": f"kernel-{index}",
-                    }
-                ],
-                "cases": expected,
-            }
-            text = (
-                success_log(native_job)
-                if backend == "tensile"
-                else bench_log(native_job)
-            )
+                for row in rows:
+                    groups.setdefault(row["solution_index"], []).append(
+                        [row[k] for k in ("M", "N", "batch_count", "K")]
+                    )
+                self.assertLessEqual(len(groups), batch_size)
+            if backend == "tensile":
+                groups[index] = shapes
+            self.assertGreater(timeout, 120 * (len(groups) - 1))
+            self.assertLessEqual(timeout, 120 * len(groups))
+            outputs = []
+            for index, shapes in groups.items():
+                expected = [
+                    c
+                    for c in plan.derive_cases(solution(index))
+                    if recheck or index != 7 or c["id"] not in cases
+                ]
+                self.assertEqual(
+                    shapes,
+                    [c["shape"] for c in expected],
+                    "known failures reached native input",
+                )
+                invocations.append(index)
+                if failure == "exception":
+                    raise ValueError("native adapter failed")
+                native_job = {
+                    "solutions": [
+                        {
+                            "index": index,
+                            "name": f"solution-{index}",
+                            "kernel": f"kernel-{index}",
+                        }
+                    ],
+                    "cases": expected,
+                }
+                text = (
+                    success_log(native_job)
+                    if backend == "tensile"
+                    else bench_log(native_job)
+                )
+                outputs.append(text)
+            text = "".join(outputs[:1] if failure == "partial" else outputs)
             if failure == "race":
                 text += "RACE new finding\nEND_RACE\n"
             elif failure == "warning":
@@ -454,7 +614,7 @@ class SweepTests(unittest.TestCase):
                     else text.replace("0.00001", "nan", 1)
                 )
             log.write_text(text)
-            return 0
+            return 124 if failure == "partial" else 0
 
         with (
             patch.object(sweep, "physical_cpus", return_value=[0]),
@@ -717,6 +877,50 @@ class SweepTests(unittest.TestCase):
                     sweep.main()
                 run.assert_not_called()
 
+    def test_cli_batch_defaults_and_limits(self):
+        required = [
+            "sweep",
+            "--target",
+            "gfx942",
+            "--seed",
+            "0",
+            "--rocjitsu-revision",
+            "a" * 40,
+        ]
+        for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
+            required += ["--" + name, "."]
+        for backend, flags, size in (
+            ("bench", [], 8),
+            ("tensile", [], 1),
+            (
+                "bench",
+                ["--batch-size", "16", "--workers", "8", "--continue-on-failure"],
+                16,
+            ),
+        ):
+            with (
+                self.subTest(backend=backend, flags=flags),
+                patch.object(sys, "argv", required + ["--backend", backend] + flags),
+                patch.object(sweep, "run", return_value=0) as run,
+            ):
+                self.assertEqual(sweep.main(), 0)
+                self.assertEqual(run.call_args.args[0].batch_size, size)
+                self.assertEqual(run.call_args.args[0].continue_on_failure, bool(flags))
+        for flags in (
+            ["--backend", "tensile", "--batch-size", "2"],
+            ["--backend", "bench", "--batch-size", "0"],
+            ["--backend", "bench", "--workers", "9"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+            ):
+                with self.assertRaises(SystemExit):
+                    sweep.main()
+                run.assert_not_called()
+
     def test_shapes_follow_each_kernels_tile_and_depth(self):
         first, second = plan.derive_cases(solution(0)), plan.derive_cases(
             solution(1, (128, 32, 1), 64)
@@ -901,6 +1105,7 @@ class SweepTests(unittest.TestCase):
                     reports=Path(tmp) / "reports",
                     backend=backend,
                     workers=1,
+                    batch_size=1,
                     timeout=1,
                     suite_timeout=1500,
                     seed="test",
@@ -950,6 +1155,7 @@ class SweepTests(unittest.TestCase):
                         reports=Path(tmp) / "reports",
                         backend=backend,
                         workers=1,
+                        batch_size=1,
                         timeout=120,
                         suite_timeout=5,
                         seed="test",
@@ -1103,7 +1309,7 @@ class SweepTests(unittest.TestCase):
             time.sleep(0.01)
             return {"id": task["id"], "failed": False, "cases": []}
 
-        result = sweep.run_queue(
+        result = run_single_queue(
             [{"id": i} for i in range(10)], 4, execute, lambda _: None
         )
         self.assertEqual(result["max_active"], 4)
@@ -1118,7 +1324,7 @@ class SweepTests(unittest.TestCase):
                 time.sleep(0.05)
             return {"id": task["id"], "failed": task["id"] == 0, "cases": []}
 
-        result = sweep.run_queue(
+        result = run_single_queue(
             [{"id": i} for i in range(10)], 4, execute, lambda _: None
         )
         self.assertEqual(result["unstarted"], list(range(4, 10)))
@@ -1129,7 +1335,7 @@ class SweepTests(unittest.TestCase):
         def execute(task, slot):
             raise ValueError("malformed output")
 
-        result = sweep.run_queue(
+        result = run_single_queue(
             [{"id": i} for i in range(2)], 1, execute, lambda _: None
         )
         self.assertEqual(result["unstarted"], [1])
@@ -1144,7 +1350,7 @@ class SweepTests(unittest.TestCase):
             return {"id": task["id"], "failed": False, "cases": []}
 
         with patch.object(sweep.time, "monotonic", side_effect=lambda: clock[0]):
-            result = sweep.run_queue(
+            result = run_single_queue(
                 [{"id": i} for i in range(10)], 4, execute, lambda _: None, deadline=5
             )
         self.assertEqual(result["stop"]["reason"], "suite-timeout")
@@ -1185,7 +1391,7 @@ class SweepTests(unittest.TestCase):
         def progress(value):
             raise OSError("No space left")
 
-        result = sweep.run_queue(
+        result = run_single_queue(
             [{"id": i} for i in range(2)],
             1,
             lambda task, slot: {"id": task["id"], "failed": False, "cases": []},
