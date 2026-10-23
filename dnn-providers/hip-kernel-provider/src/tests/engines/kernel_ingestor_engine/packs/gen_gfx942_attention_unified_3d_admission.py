@@ -88,12 +88,16 @@ def main():
         BATCHES, HEADS, SEQLEN_Q, SEQLEN_K, HEAD_SIZES, DTYPES, MASKS
     ):
         flags = ", ".join(
-            "true"
-            if admitted(candidate, b, hq, hkv, sq, skv, d, dtype, mask, window, blk)
-            else "false"
+            (
+                "true"
+                if admitted(candidate, b, hq, hkv, sq, skv, d, dtype, mask, window, blk)
+                else "false"
+            )
             for blk in KV_BLOCK_SIZES
         )
-        print(f'{{{b}, {hq}, {hkv}, {sq}, {skv}, {d}, "{dtype}", AdmissionMask::{name}, {flags}}},')
+        print(
+            f'{{{b}, {hq}, {hkv}, {sq}, {skv}, {d}, "{dtype}", AdmissionMask::{name}, {flags}}},'
+        )
 
 
 if __name__ == "__main__":

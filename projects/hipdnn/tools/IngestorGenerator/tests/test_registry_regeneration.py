@@ -70,7 +70,9 @@ def _require(engine: Engine, path: Path, what: str) -> None:
         return
     started = [p.name for p in (engine.manifest, engine.selection) if p.is_file()]
     if not started:
-        pytest.skip(f"{engine.name}: engine not added yet (no manifest or selection in configs/)")
+        pytest.skip(
+            f"{engine.name}: engine not added yet (no manifest or selection in configs/)"
+        )
     pytest.fail(f"{engine.name}: {what} missing beside {started}: {path}")
 
 

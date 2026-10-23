@@ -70,17 +70,59 @@ def padded_capacity(b, h, s, d, cap):
 # (label, batch, scale, K layout, V layout). Scales are exact in f32.
 CASES = (
     ("bhsd_b1_h1_s1_d64", 1, 0.125, bhsd(1, 1, 1, 64), bhsd(1, 1, 1, 64)),
-    ("bhsd_b4_h8_s4096_d128", 4, 0.08838834764831845, bhsd(4, 8, 4096, 128), bhsd(4, 8, 4096, 128)),
+    (
+        "bhsd_b4_h8_s4096_d128",
+        4,
+        0.08838834764831845,
+        bhsd(4, 8, 4096, 128),
+        bhsd(4, 8, 4096, 128),
+    ),
     ("bhsd_b2_h8_s17_d256", 2, 0.0625, bhsd(2, 8, 17, 256), bhsd(2, 8, 17, 256)),
     ("bshd_b4_h8_s4096_d128", 4, 1.0, bshd(4, 8, 4096, 128), bshd(4, 8, 4096, 128)),
     ("bshd_b16_h1_s513_d64", 16, 0.125, bshd(16, 1, 513, 64), bshd(16, 1, 513, 64)),
     ("bshd_b1_h8_s8192_d256", 1, 0.0625, bshd(1, 8, 8192, 256), bshd(1, 8, 8192, 256)),
-    ("padrow_bhsd_b2_h8_s100_d128", 2, 0.5, bhsd(2, 8, 100, 128, row=136), bhsd(2, 8, 100, 128, row=136)),
-    ("padrow_bshd_b3_h4_s33_d64", 3, 0.125, bshd(3, 4, 33, 64, row=72), bshd(3, 4, 33, 64, row=72)),
-    ("padcap_bhsd_b2_h8_s1000_d128", 2, 0.25, padded_capacity(2, 8, 1000, 128, 1024), padded_capacity(2, 8, 1000, 128, 1024)),
-    ("mixed_kbhsd_vbshd_b4_h8_s2048_d128", 4, 0.08838834764831845, bhsd(4, 8, 2048, 128), bshd(4, 8, 2048, 128)),
-    ("mixed_kbshd_vpadrow_b2_h1_s300_d64", 2, 0.125, bshd(2, 1, 300, 64), bhsd(2, 1, 300, 64, row=80)),
-    ("mixed_kpadcap_vbshd_b1_h8_s7_d256", 1, 0.0625, padded_capacity(1, 8, 7, 256, 64), bshd(1, 8, 7, 256)),
+    (
+        "padrow_bhsd_b2_h8_s100_d128",
+        2,
+        0.5,
+        bhsd(2, 8, 100, 128, row=136),
+        bhsd(2, 8, 100, 128, row=136),
+    ),
+    (
+        "padrow_bshd_b3_h4_s33_d64",
+        3,
+        0.125,
+        bshd(3, 4, 33, 64, row=72),
+        bshd(3, 4, 33, 64, row=72),
+    ),
+    (
+        "padcap_bhsd_b2_h8_s1000_d128",
+        2,
+        0.25,
+        padded_capacity(2, 8, 1000, 128, 1024),
+        padded_capacity(2, 8, 1000, 128, 1024),
+    ),
+    (
+        "mixed_kbhsd_vbshd_b4_h8_s2048_d128",
+        4,
+        0.08838834764831845,
+        bhsd(4, 8, 2048, 128),
+        bshd(4, 8, 2048, 128),
+    ),
+    (
+        "mixed_kbshd_vpadrow_b2_h1_s300_d64",
+        2,
+        0.125,
+        bshd(2, 1, 300, 64),
+        bhsd(2, 1, 300, 64, row=80),
+    ),
+    (
+        "mixed_kpadcap_vbshd_b1_h8_s7_d256",
+        1,
+        0.0625,
+        padded_capacity(1, 8, 7, 256, 64),
+        bshd(1, 8, 7, 256),
+    ),
 )
 
 
@@ -97,7 +139,9 @@ def c_array(values):
 
 
 def arguments(batch, scale, k_layout, v_layout):
-    kv = StridedKvCacheLayout(KvTensorLayout(*k_layout), KvTensorLayout(*v_layout)).arguments()
+    kv = StridedKvCacheLayout(
+        KvTensorLayout(*k_layout), KvTensorLayout(*v_layout)
+    ).arguments()
     scalars = {
         "scale": f32(scale),
         "k_scale": 1.0,

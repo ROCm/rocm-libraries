@@ -2405,7 +2405,8 @@ TEST_F(TestGfx942AttentionUnified3dPacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
     EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx942_attention_unified3d.score");
-    EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx942_attention_unified3d.score"));
+    EXPECT_TRUE(
+        ingestor::ScoreRegistry::isRegistered("hipkernel.gfx942_attention_unified3d.score"));
 }
 
 /// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped

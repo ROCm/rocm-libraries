@@ -85,7 +85,9 @@ def claimed_cells(sweep_dir):
         # Every kernel is a decode kernel; the engine declines seqlen_q > 1 before any
         # cell is compared, so such a claim breaks whatever the catalog holds.
         assert q[2] == 1, f"{sweep_dir}: claimed case {case['id']} has seqlen_q {q[2]}"
-        dtype = KMD_DTYPE.get(case["values"]["io_data_type"], case["values"]["io_data_type"])
+        dtype = KMD_DTYPE.get(
+            case["values"]["io_data_type"], case["values"]["io_data_type"]
+        )
         cells[case["id"]] = (dtype, q[3], q[1], k[1])
     # A claim naming no sweep case would otherwise drop out of the comparison unseen.
     missing = claimed - cells.keys()
@@ -107,9 +109,7 @@ def test_every_claimed_case_has_a_shipped_kernel():
         cells = claimed_cells(sweep_dir)
         # A tier with no claim would pass as "nothing missing" too.
         assert cells, f"{sweep_dir}: no case claimed for {ENGINE} on gfx942"
-        unserved = {
-            case: cell for case, cell in cells.items() if cell not in catalog
-        }
+        unserved = {case: cell for case, cell in cells.items() if cell not in catalog}
         assert not unserved, (
             f"{sweep_dir}: claimed cases whose (dtype, head size, Hq, Hkv) no shipped "
             f"kernel carries: {unserved}"
