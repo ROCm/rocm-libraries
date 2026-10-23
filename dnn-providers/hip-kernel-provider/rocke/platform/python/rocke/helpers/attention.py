@@ -845,8 +845,8 @@ def pv32_v_load_paired(
     Reference inlined version at ``instances/attention_tiled_2d.py:
     2610-2666`` (TRANSPOSED_HALF_LOCAL_PV branch). Same lane-layout
     arithmetic, just lifted into a callable so the future P12 / P47
-    swap to ``ds_read_b128_tr_b16`` is a one-line edit at every call
-    site.
+    swap to a wide transpose read would be a one-line edit at every call
+    site (gfx950 has none; gfx1250 has ``ds_load_tr16_b128``).
 
     Inputs:
 

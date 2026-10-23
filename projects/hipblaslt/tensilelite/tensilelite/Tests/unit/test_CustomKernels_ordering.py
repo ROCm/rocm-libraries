@@ -4,7 +4,7 @@
 
 import pytest
 
-from Tensile.CustomKernels import getAllCustomKernelNames
+from tensilelite.CustomKernels import getAllCustomKernelNames
 
 pytestmark = pytest.mark.unit
 
@@ -19,7 +19,7 @@ def test_names_are_sorted_independently_of_listdir_order(tmp_path, monkeypatch):
 
     listdir_orders = [["b.s", "a.s", "c.s"], ["c.s", "b.s", "a.s"]]
     monkeypatch.setattr(
-        "Tensile.CustomKernels.os.listdir", lambda directory: listdir_orders.pop(0)
+        "tensilelite.CustomKernels.os.listdir", lambda directory: listdir_orders.pop(0)
     )
 
     assert getAllCustomKernelNames(directory=str(tmp_path)) == ["a", "b", "c"]

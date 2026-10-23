@@ -70,8 +70,9 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires six roots: production, plus five over the four authored test sets
-(`shared` packs twice, once into each test binary's discovery root).
+The provider wires seven roots: production, plus six over the four authored test sets.
+`shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
+twice, once for each test binary, so each binary reads its own archive.
 
 | Root | Source | Ships |
 |---|---|---|
