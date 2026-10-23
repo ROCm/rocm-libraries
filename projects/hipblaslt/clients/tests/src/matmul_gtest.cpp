@@ -327,12 +327,15 @@ namespace
         }
     };
 
-    TEST_P(rocroller_predicate_test, unrollXYK)
+    TEST_P(rocroller_predicate_test, fallsBackToTensile)
     {
-        // rocRoller has predicates that check the dimensions (M/N/K) must be
-        // multiples of the work group sizes. This test set the K dimension
-        // to not be a multiple, and thus we shall see failure.
-        EXPECT_FATAL_FAILURE(rocroller_predicate_testing{}(GetParam()), "NO solution found!");
+        // Problems rocRoller declines: a K no workgroup tile divides, and an
+        // operand too large for its 32-bit buffer descriptor. rocRoller still
+        // refuses both, but refusing is no longer the caller's answer -
+        // getBestSolutions falls back to the generated library, so a kernel is
+        // found and run. These reported "NO solution found!" before that
+        // fallback existed.
+        rocroller_predicate_testing{}(GetParam());
     }
     INSTANTIATE_TEST_CATEGORIES(rocroller_predicate_test);
 #endif
