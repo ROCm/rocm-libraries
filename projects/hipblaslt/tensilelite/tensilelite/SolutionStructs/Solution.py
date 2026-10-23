@@ -2429,6 +2429,8 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
+        if state["LocalSplitU"] > 1:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with LocalSplitU epilogue LDS overwrite")
       if state["DebugPersistentKernelLoopForever"] and not hasStaticAssignment(state):
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
@@ -6817,6 +6819,17 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
+    # PAP's prefetched compute banks survive the epilogue. Preserve the
+    # separate vector scratch layout above; reject only epilogues that still
+    # overlap those banks, including A/B gradient reductions.
+    if state["PrefetchAcrossPersistent"] and not state["_SeparateEpilogueLds"]:
+      if (state["ProblemType"]["UseBias"]
+          and (not state["ProblemType"]["Gradient"] or state["ProblemType"]["BiasSrc"] in ("A", "B"))):
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with bias epilogue LDS overwrite")
+      if state["ProblemType"]["UseScaleAlphaVec"]:
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with ScaleAlphaVec epilogue LDS overwrite")
+      if state["ProblemType"]["UseScaleAB"] == "Vector":
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with vector ScaleAB epilogue LDS overwrite")
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
 
     state["LdsBytesNoAmax"] = ldsNumBytes

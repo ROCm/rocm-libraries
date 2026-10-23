@@ -87,7 +87,10 @@ class DataParallel(TileProcessingStrategy):
         raise NotImplementedError
 
     def tileWork(self, kernel):
-        return TileWork("PersistentTileID")
+        # PAP materializes the next cluster block before this tile's store.
+        # Preserve whether the current peer is real along with its coordinates.
+        completion = ("PersistentPhantomTile",) if persistentSpatialCluster(kernel) else ()
+        return TileWork("PersistentTileID", completion_identity=completion)
 
     def persistentTileRegisters(self, kernel):
         return ["PersistentPhantomTile"] if persistentSpatialCluster(kernel) else []
