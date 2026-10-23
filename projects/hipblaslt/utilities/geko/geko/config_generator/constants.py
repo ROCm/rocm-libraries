@@ -534,6 +534,7 @@ ENV_UPDATABLE_KEYS = {
     "StreamK",
     "MI_FILTER",
     "DUCTILE_VALIDATION_PROFILE",
+    "BUILDABLE_MIS",
 }
 
 # Input-config keys that ``geko --tune --list`` carries into optim.configure.
@@ -552,6 +553,7 @@ LIST_FORWARDED_KEYS = (
     "EPILOGUES", 
     "CLUSTER",
     "DUCTILE_VALIDATION_PROFILE",
+    "BUILDABLE_MIS",
 )
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
