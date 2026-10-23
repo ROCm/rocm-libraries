@@ -26,6 +26,7 @@
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
+    "fabs.f64": "llvm.fabs.f64",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
     "fmuladd.f32": "llvm.fmuladd.f32",
@@ -71,6 +72,8 @@
     "mfma.f32.32x32x8bf16.1k": "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
     "mfma.f32.32x32x8f16": "llvm.amdgcn.mfma.f32.32x32x8f16",
     "mfma.f32.4x4x4f16": "llvm.amdgcn.mfma.f32.4x4x4f16",
+    "mfma.f64.16x16x4f64": "llvm.amdgcn.mfma.f64.16x16x4f64",
+    "mfma.f64.4x4x4f64": "llvm.amdgcn.mfma.f64.4x4x4f64",
     "mfma.scale.f32.16x16x128.f8f6f4": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
     "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
     "minnum.bf16": "llvm.minnum.bf16",
@@ -430,11 +433,13 @@
         "verified_on": "llvm20"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm20"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm20"
       },
       "gfx950": {
@@ -469,11 +474,13 @@
         "verified_on": "llvm20"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm20"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm20"
       },
       "gfx950": {
@@ -2120,6 +2127,41 @@
       }
     },
     "fabs.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "fabs.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm20"
@@ -4324,6 +4366,84 @@
       },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.4x4x4f16",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "mfma.f64.16x16x4f64": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.16x16x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.16x16x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.16x16x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.16x16x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "mfma.f64.4x4x4f64": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.4x4x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.4x4x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.4x4x4f64",
+        "status": "arch_absent",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f64.4x4x4f64",
         "status": "arch_absent",
         "verified_on": "llvm20"
       },
