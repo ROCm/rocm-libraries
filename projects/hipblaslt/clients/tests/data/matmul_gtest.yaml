@@ -104,6 +104,20 @@ Tests:
   matrix_size:
     - { M:  128,  N:  128,  K:  0  }
 
+# ROCM-31146: exercise cleanup after the unsupported general-batched vector-scaling return.
+- name: matmul_general_batch_vector_scale_cleanup
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: N
+  transB: N
+  M: 128
+  N: 64
+  K: 8
+  batch_mode: 1
+  batch_count: 2
+  scaleA: 2
+
 # Skinny GEMMs that library logic routes to the rocBLAS wvSpltK custom kernels on
 # gfx950: padded leading dimensions they must honor, and general-batched
 # (pointer-array) problems they cannot run, which must fall back to other kernels.
