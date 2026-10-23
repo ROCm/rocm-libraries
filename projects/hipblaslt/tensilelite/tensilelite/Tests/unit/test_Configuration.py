@@ -25,7 +25,7 @@
 import pytest
 import ast
 from copy import copy, deepcopy
-from Tensile.Configuration import ReadWriteTransformDict, Parameter, CallableParameter, ExpressionEvaluator, ProjectConfig
+from tensilelite.Configuration import ReadWriteTransformDict, Parameter, CallableParameter, ExpressionEvaluator, ProjectConfig
 
 
 class TestReadWriteTransformDict:
