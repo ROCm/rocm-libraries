@@ -3,7 +3,7 @@
 """f64 MFMA atom contracts and native parity, independent of GPU access."""
 
 import pytest
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -45,8 +45,12 @@ def test_catalog_isolation(m):
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
     )
     assert fp32.op_id == "mfma_f32_16x16x4_f32"
-    for gfx in ("gfx950", "gfx1151", "gfx1250"):
-        assert not any(op.a_dtype == "fp64" for op in ArchTarget.from_gfx(gfx).mma.ops)
+    # gfx90a and gfx950 list the 16x16x4 atom too; the four-block atom is
+    # gfx942's alone, and no other target lists either.
+    listed_on = {"gfx942"} if m == 4 else {"gfx90a", "gfx942", "gfx950"}
+    for gfx in known_arches():
+        lists = any(op.op_id == op_id for op in ArchTarget.from_gfx(gfx).mma.ops)
+        assert lists == (gfx in listed_on), gfx
 
 
 @pytest.mark.parametrize("m", [16, 4])

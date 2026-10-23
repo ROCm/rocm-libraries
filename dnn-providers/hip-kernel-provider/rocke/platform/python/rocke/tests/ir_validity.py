@@ -20,10 +20,13 @@ module docstring.
 
 ``assert_target_accepts`` turns ``"cannot_judge"`` into a named pytest skip, so a
 host whose toolchain predates a target reports the gap instead of passing.
+``target_mnemonics`` compiles the same way and returns the instruction mnemonics
+of the code object, for a test that pins the instruction LLVM selected.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -32,11 +35,12 @@ from typing import Literal
 
 import pytest
 
+from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.assets import platform_root
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
-__all__ = ["Verdict", "arbiter_verdict", "assert_target_accepts"]
+__all__ = ["Verdict", "arbiter_verdict", "assert_target_accepts", "target_mnemonics"]
 
 
 def _validity_tool() -> ModuleType | None:
@@ -57,18 +61,21 @@ def arbiter_verdict(ir_text: str, target: str) -> tuple[Verdict, str]:
 
     Returns ``(verdict, text)``; ``text`` is empty when the module is accepted.
     """
+    with tempfile.TemporaryDirectory() as work:
+        return _compile_in(ir_text, target, Path(work))
+
+
+def _compile_in(ir_text: str, target: str, work: Path) -> tuple[Verdict, str]:
+    """:func:`arbiter_verdict`, leaving the code object at ``work/module.hsaco``."""
     tool = _validity_tool()
     if tool is None:
         return "cannot_judge", "rocke platform tools not found"
     clang = tool._llvm_tool("clang")
     if clang is None:
         return "cannot_judge", "no host clang to compile lowered IR"
-    with tempfile.TemporaryDirectory() as work:
-        source = Path(work) / "module.ll"
-        source.write_text(ir_text)
-        accepted, diagnostic = tool._compile(
-            clang, source, target, Path(work) / "module.hsaco"
-        )
+    source = work / "module.ll"
+    source.write_text(ir_text)
+    accepted, diagnostic = tool._compile(clang, source, target, work / "module.hsaco")
     if accepted:
         return "accepted", ""
     if tool._target_unsupported(diagnostic):
@@ -89,7 +96,31 @@ def _toolchain_incomplete(diagnostic: str) -> bool:
 def assert_target_accepts(ir_text: str, target: str) -> None:
     """Fail unless ``ir_text`` compiles and links for ``target``; skip, naming
     the reason, when no verdict is possible on this host."""
-    verdict, text = arbiter_verdict(ir_text, target)
+    _require_accepted(*arbiter_verdict(ir_text, target), target)
+
+
+def _require_accepted(verdict: Verdict, text: str, target: str) -> None:
     if verdict == "cannot_judge":
         pytest.skip(text)
     assert verdict == "accepted", f"LLVM rejected the lowered IR for {target}: {text}"
+
+
+def target_mnemonics(ir_text: str, target: str) -> list[str]:
+    """The instruction mnemonics of ``ir_text`` compiled and linked for ``target``.
+
+    Fails when LLVM rejects the module, like :func:`assert_target_accepts`;
+    skips, naming the reason, when no verdict is possible or no
+    ``llvm-objdump`` is found next to the host clang.
+    """
+    with tempfile.TemporaryDirectory() as work:
+        _require_accepted(*_compile_in(ir_text, target, Path(work)), target)
+        objdump = _validity_tool()._llvm_tool("llvm-objdump")
+        if objdump is None:
+            pytest.skip("no llvm-objdump to disassemble the code object")
+        listing = subprocess.run(
+            [objdump, "-d", str(Path(work) / "module.hsaco")],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    return [_extract_mnemonic(line) for line in _instruction_lines(listing)]

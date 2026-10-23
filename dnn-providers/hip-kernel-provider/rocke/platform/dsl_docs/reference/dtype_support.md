@@ -28,7 +28,7 @@ logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
 **FP64 coverage update.** The f64 entries in §1, §2.5, §4B, §4C, and §5 reflect the
-IR type, arithmetic, memory, elementwise/reduce2d, gfx942 MFMA atom, and gfx942
+IR type, arithmetic, memory, elementwise/reduce2d, CDNA f64 MFMA atom, and gfx942
 universal GEMM support added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
@@ -306,9 +306,9 @@ mode. The missing selector and precision contract are described in §2.5.
   same `pack_quant_chunk_f32` path, whose `qdtype` distinguishes `fp8`/`bf8`/`i8`
   but not the dialect.
 - **`i8` C2=2** — full integer arithmetic and an `iu8` WMMA atom exists on
-  gfx1151, but no CDNA integer MFMA path is wired *in rocKE*. Note the ceiling is
-  software, not silicon: `V_MFMA_I32_*_I8` ships on every CDNA generation
-  including gfx942 and gfx950 (§4A), and gfx950 adds K64/K32 wide forms.
+  gfx1151; at the time of the snapshot no CDNA integer MFMA atom was declared.
+  The CDNA `V_MFMA_I32_*_I8` atoms, including gfx950's K64/K32 wide forms, are
+  now declared (section 4B).
   **C3=2** — both directions through f32 exist in
   [quant.py](../../python/rocke/helpers/quant.py): `quantize_scalar_f32` uses
   RNE with a symmetric ±127 clamp, and `dequantize_scalar_to_f32` handles
@@ -385,7 +385,7 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, elementwise/reduce2d, the gfx942 MFMA atoms, and gfx942
+- **`f64` — IR, memory, elementwise/reduce2d, the CDNA f64 MFMA atoms, and gfx942
   universal GEMM.** The IR type,
   `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
   `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
@@ -400,9 +400,10 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
   conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; universal
-  GEMM and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
-  accumulation (§5), and gfx90a/gfx950 declare no f64 atom (§4C.6).
+  The f64 MFMA atom `mfma_f64_16x16x4_f64` is declared on gfx90a/gfx942/gfx950,
+  and gfx942 also declares `mfma_f64_4x4x4_f64` (section 4B). Universal GEMM
+  and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
+  accumulation on gfx942 only (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -506,9 +507,10 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
-| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
-| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, **f64** |
-| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
+| `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
+| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
+| `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
+| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
@@ -517,15 +519,16 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
   and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
   omitted block-scaled formats.
-- **No integer MFMA atom is declared on any CDNA arch**, even though the silicon
-  has shipped `V_MFMA_I32_*_I8` since CDNA1. Integer matrix on CDNA is unwired
-  software, not absent hardware.
+- The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
+  only) and the mixed `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only
+  gfx942's `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
 
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
-The following gaps compare §4A with §4B. The first five concern atom declarations
-only, as does f64 (4C.6). The gfx942 XF32 declaration gap is now
-closed; §4D describes its logical dtype and remaining integration boundaries.
+The following gaps compare section 4A with section 4B and concern atom
+declarations only. The gfx942 XF32, CDNA integer MFMA (4C.3) and CDNA f64 MFMA
+(4C.6) declaration gaps are now closed; section 4D describes XF32's logical
+dtype and remaining integration boundaries.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
 The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
@@ -538,17 +541,18 @@ RDNA4 provides `V_WMMA_F32_16X16X16_{FP8,BF8}_{FP8,BF8}` and the matching SWMMAC
 sparse forms; the catalog declares f16/bf16 only, so fp8 on this arch is
 undeclared rather than unavailable.
 
-#### 4C.3 CDNA — integer MFMA is in silicon but undeclared everywhere
+#### 4C.3 CDNA -- integer MFMA (closed)
 `V_MFMA_I32_*_I8` ships on every CDNA generation in §4A, and gfx950 adds the wide
-`V_MFMA_I32_16X16X64_I8` / `V_MFMA_I32_32X32X32_I8` forms. rocKE declares none of
-them on any CDNA arch. This is why `i8` scores C2=2 and C5=1 (§2.5).
+`V_MFMA_I32_16X16X64_I8` / `V_MFMA_I32_32X32X32_I8` forms. All of them are now
+declared (section 4B); no family uses them yet, which keeps `i8` at C5=1
+(section 2.5).
 
 #### 4C.4 RDNA4 / CDNA5 — integer WMMA is in silicon but undeclared
 gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
 K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
 `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. rocKE declares no
-integer atom on either arch. Together with §4C.3, the declaration gaps are
-**CDNA integer MFMA and gfx1201/gfx1250 integer WMMA**. `gfx1151` and
+integer atom on either arch, so the remaining integer declaration gap is
+**gfx1201/gfx1250 integer WMMA**. `gfx1151` and
 `gfx11-generic` do declare both `wmma_i32_16x16x16_iu8` and
 `wmma_i32_16x16x16_iu4` (§4B). The existing integer WMMA GEMM builders (§5)
 and quant epilogues give `i8` some family coverage; its C5=1 score reflects
@@ -559,10 +563,10 @@ Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The
 catalog declares no sparse atom on any arch, and no family requests one. No dtype
 in §2.4 is blocked on it.
 
-#### 4C.6 f64 matrix is in silicon but mostly undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. gfx942 declares
-`mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; gfx90a and gfx950 declare no
-f64 MMA atom.
+#### 4C.6 f64 matrix (closed on CDNA)
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, and `mfma_f64_16x16x4_f64`
+is declared on all three; gfx942 also declares the four-block
+`mfma_f64_4x4x4_f64` (section 4B).
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set
