@@ -24,7 +24,8 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
-from ..arch.target import integer_mma_op_ids
+from ..arch.mfma_scale import MATRIX_FORMATS
+from ..arch.target import integer_mma_op_ids, narrow_f8f6f4_op_ids
 from ..dtypes import DTypeCategory, dtype_info, dtype_names
 from ..ir import (
     BF16,
@@ -48,6 +49,7 @@ from .matrix_operand_forms import (
     MatrixOperandForm,
     MatrixResultForm,
     RegisterType,
+    f8f6f4_operand_form,
 )
 
 # The integer types an immediate may have.
@@ -356,6 +358,42 @@ _GFX1250_BF16F32 = MatrixCall(
     result=AsIs(VectorType(BF16, 8)),
 )
 
+
+def _gfx1250_f8f6f4_wmma(a: str, b: str) -> MatrixCall:
+    """gfx1250 f8f6f4 16x16x128 reading format ``a`` x ``b``: (format A, A,
+    format B, B, C modifier, C), the format codes from ``MATRIX_FORMATS`` and
+    the C modifier 0. A and B each take the operand form of their own format
+    in ``<16 x i32>``; the accumulator and the result are ``<8 x float>``."""
+    register, accumulator = VectorType(I32, 16), VectorType(F32, 8)
+    return MatrixCall(
+        intrinsic="llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+        args=(
+            Imm(I32, MATRIX_FORMATS[a]),
+            MatrixOperand.A,
+            Imm(I32, MATRIX_FORMATS[b]),
+            MatrixOperand.B,
+            Imm(I16, 0),
+            MatrixOperand.C,
+        ),
+        a=f8f6f4_operand_form(a, register),
+        b=f8f6f4_operand_form(b, register),
+        c=AsIs(accumulator),
+        result=AsIs(accumulator),
+    )
+
+
+# gfx1250 f4 32x16x128: (A, B, C modifier, C), the C modifier 0. 128 fp4 values
+# of A per lane in sixteen words and 64 of B in eight, each zero-padded from
+# fewer packed words; sixteen fp32 results.
+_GFX1250_F4_32X16X128 = MatrixCall(
+    intrinsic="llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32",
+    args=(MatrixOperand.A, MatrixOperand.B, Imm(I16, 0), MatrixOperand.C),
+    a=f8f6f4_operand_form("fp4e2m1", VectorType(I32, 16)),
+    b=f8f6f4_operand_form("fp4e2m1", VectorType(I32, 8)),
+    c=AsIs(VectorType(F32, 16)),
+    result=AsIs(VectorType(F32, 16)),
+)
+
 # Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
 # same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use).
 _FP8_X8 = FlavorType(VectorType(I32, 2), ((LLVM_FLAVOR_LLVM22, I64),))
@@ -533,5 +571,14 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
                 _GFX1250_INTEGER_WMMA_ARGS,
             ),
         ),
+        # gfx1250 f8f6f4 -> f32, every format pair with a 6-bit or 4-bit
+        # operand: 64 values of A and of B per lane, eight results.
+        **{
+            op_id: _gfx1250_f8f6f4_wmma(a, b)
+            for op_id, (a, b) in narrow_f8f6f4_op_ids(
+                "wmma_gfx1250_f32_16x16x128_f8f6f4"
+            ).items()
+        },
+        "wmma_gfx1250_f32_32x16x128_f4": _GFX1250_F4_32X16X128,
     }
 )

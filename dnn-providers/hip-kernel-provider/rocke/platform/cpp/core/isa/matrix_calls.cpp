@@ -16,6 +16,7 @@
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/mfma_scale_internal.h"
 
 namespace ckc
 {
@@ -198,9 +199,32 @@ static constexpr rocke_matrix_call_t k_gfx1250_bf16f32
 static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
 static constexpr rocke_matrix_register_t k_fp8_x8 = {{"i32", 2}, k_i64_from_llvm22, 1};
 
+/* The form an f8f6f4 operand of the matrix format with code `format` takes in
+ * `reg` (Python f8f6f4_operand_form): an 8-bit format passes as is or with one
+ * bitcast; a 6-bit or 4-bit format arrives as packed words, zero-padded. */
+static constexpr rocke_matrix_form_t f8f6f4_operand_form(int format, rocke_matrix_register_t reg)
+{
+    return rocke_matrix_form_t{rocke_matrix_format_bits(format) == 8
+                                   ? ROCKE_MATRIX_FORM_AS_IS
+                                   : ROCKE_MATRIX_FORM_ZERO_PADDED,
+                               reg};
+}
+
+/* gfx1250 f4 32x16x128 (Python _GFX1250_F4_32X16X128): (A, B, C modifier, C),
+ * the C modifier 0. 128 fp4 values of A per lane in sixteen words and 64 of B
+ * in eight, each zero-padded from fewer packed words; sixteen fp32 results. */
+static const rocke_matrix_arg_t k_gfx1250_f4_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i16", 0, true},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+};
+static constexpr int k_fp4_format = 4;
+
 /* op_id -> call, for every MMA instruction lowered from data rather than by a
- * hand-written handler (Python MATRIX_CALLS, same order). */
-static const rocke_matrix_call_entry_t k_matrix_calls[] = {
+ * hand-written handler and not generated below (Python MATRIX_CALLS, same
+ * order). */
+static constexpr rocke_matrix_call_entry_t k_listed_calls[] = {
     /* CDNA i8 -> i32: four i8 per lane in one word (CDNA1-2), eight in an i64
      * (CDNA3), sixteen in four words (CDNA4). */
     {"mfma_i32_16x16x16_i8",
@@ -382,18 +406,91 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
 
 #undef ROCKE_INTEGER_WMMA
 
+namespace
+{
+/* gfx1250 f8f6f4 -> f32 at 16x16x128 for every format pair with a 6-bit or
+ * 4-bit operand (Python _gfx1250_f8f6f4_wmma): (format A, A, format B, B,
+ * C modifier, C), the format codes the pair's and the C modifier 0. A and B
+ * each take the operand form of their own format in <16 x i32>; the
+ * accumulator and the result are <8 x float>. The op_ids and argument lists
+ * live in constexpr variables of their own so the entries can point at them. */
+constexpr int k_f8f6f4_count = 21;
+constexpr auto k_f8f6f4_ids = rocke_make_narrow_f8f6f4_op_ids("wmma_gfx1250_f32_16x16x128_f8f6f4");
+struct f8f6f4_args
+{
+    rocke_matrix_arg_t args[k_f8f6f4_count][6];
+};
+consteval f8f6f4_args make_f8f6f4_args()
+{
+    f8f6f4_args result{};
+    for(int i = 0; i < k_f8f6f4_count; ++i)
+    {
+        const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+        result.args[i][0] = {ROCKE_MATRIX_ARG_IMM, "i32", pair.a, true};
+        result.args[i][1] = {ROCKE_MATRIX_ARG_A, NULL, 0, false};
+        result.args[i][2] = {ROCKE_MATRIX_ARG_IMM, "i32", pair.b, true};
+        result.args[i][3] = {ROCKE_MATRIX_ARG_B, NULL, 0, false};
+        result.args[i][4] = {ROCKE_MATRIX_ARG_IMM, "i16", 0, true};
+        result.args[i][5] = {ROCKE_MATRIX_ARG_C, NULL, 0, false};
+    }
+    return result;
+}
+constexpr auto k_f8f6f4_args = make_f8f6f4_args();
+
+constexpr int k_listed_count = (int)(sizeof(k_listed_calls) / sizeof(k_listed_calls[0]));
+constexpr int k_call_count = k_listed_count + k_f8f6f4_count + 1;
+struct matrix_call_table
+{
+    rocke_matrix_call_entry_t entries[k_call_count];
+};
+consteval matrix_call_table make_matrix_call_table()
+{
+    matrix_call_table result{};
+    for(int i = 0; i < k_listed_count; ++i)
+        result.entries[i] = k_listed_calls[i];
+    for(int i = 0; i < k_f8f6f4_count; ++i)
+    {
+        const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+        result.entries[k_listed_count + i]
+            = {k_f8f6f4_ids.ids[i],
+               {"llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+                k_f8f6f4_args.args[i],
+                6,
+                f8f6f4_operand_form(pair.a, reg("i32", 16)),
+                f8f6f4_operand_form(pair.b, reg("i32", 16)),
+                as_is(reg("f32", 8)),
+                as_is(reg("f32", 8)),
+                NULL}};
+    }
+    result.entries[k_listed_count + k_f8f6f4_count]
+        = {"wmma_gfx1250_f32_32x16x128_f4",
+           {"llvm.amdgcn.wmma.f32.32x16x128.f4.v16f32.v16i32.v8i32",
+            k_gfx1250_f4_args,
+            (int)(sizeof(k_gfx1250_f4_args) / sizeof(k_gfx1250_f4_args[0])),
+            f8f6f4_operand_form(k_fp4_format, reg("i32", 16)),
+            f8f6f4_operand_form(k_fp4_format, reg("i32", 8)),
+            as_is(reg("f32", 16)),
+            as_is(reg("f32", 16)),
+            NULL}};
+    return result;
+}
+/* op_id -> call, for every MMA instruction lowered from data (Python
+ * MATRIX_CALLS, same order): the listed entries, then the generated ones. */
+constexpr auto k_matrix_calls = make_matrix_call_table();
+} // namespace
+
 const rocke_matrix_call_entry_t* rocke_matrix_calls(int* out_count)
 {
     if(out_count)
-        *out_count = (int)(sizeof(k_matrix_calls) / sizeof(k_matrix_calls[0]));
-    return k_matrix_calls;
+        *out_count = k_call_count;
+    return k_matrix_calls.entries;
 }
 
 const rocke_matrix_call_t* rocke_matrix_call_for(const char* op_id)
 {
     if(!op_id)
         return NULL;
-    for(const rocke_matrix_call_entry_t& entry : k_matrix_calls)
+    for(const rocke_matrix_call_entry_t& entry : k_matrix_calls.entries)
     {
         if(strcmp(entry.op_id, op_id) == 0)
             return &entry.call;

@@ -24,8 +24,9 @@ names the register type and the one rule that turns the kernel's value into it:
       <16 x half> [d0 x d1 x .. d7 x]  -->  <8 x half> [d0 .. d7]   (result)
 
 A register type that changed spelling at a newer LLVM flavor is a
-:class:`FlavorType`. Forms are data; each renders itself through the lowerer it
-is handed. :mod:`rocke.core.isa.matrix_calls` composes them into one call.
+:class:`FlavorType`. :func:`f8f6f4_operand_form` picks :class:`AsIs` or
+:class:`ZeroPadded` for an f8f6f4 operand by its matrix format. Forms are data;
+each renders itself through the lowerer it is handed. :mod:`rocke.core.isa.matrix_calls` composes them into one call.
 
 The C++ engine's twin is ``cpp/core/lower_llvm/matrix_call.cpp``; both render
 the same text and raise the same errors.
@@ -35,6 +36,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..arch.mfma_scale import require_matrix_format
+from ..dtypes import dtype_info
 from ..ir import I32, Op, Type, VectorType, type_bits
 from ..mma_operand import MmaOperandRole, mma_operand_value
 
@@ -277,3 +280,21 @@ class EvenHalves(_Form):
 
 MatrixOperandForm = AsIs | ZeroPadded | EvenHalves
 MatrixResultForm = AsIs | EvenHalves
+
+
+def f8f6f4_operand_form(dtype: str, register_type: RegisterType) -> AsIs | ZeroPadded:
+    """The form an f8f6f4 operand of matrix format ``dtype`` takes in ``register_type``.
+
+    An 8-bit format (fp8e4m3, bf8e5m2) arrives as its logical values, or as
+    words of the register's width, and passes with at most one ``bitcast``
+    (:class:`AsIs`). A 6-bit or 4-bit format arrives as its packed words and is
+    widened with zero words (:class:`ZeroPadded`)::
+
+        fp8e4m3   vec<fp8e4m3x64>  --bitcast-->   <16 x i32>
+        fp4e2m1   vec<i32x8>       --zero words-> <16 x i32>
+
+    Raises ``ValueError`` when ``dtype`` is not one of the five matrix formats.
+    """
+    if dtype_info(require_matrix_format(dtype)).encoded_bits == 8:
+        return AsIs(register_type)
+    return ZeroPadded(register_type)
