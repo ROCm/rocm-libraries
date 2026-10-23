@@ -22,7 +22,7 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "GpuScalarOperand.hpp"
-#include "GpuSdpaFwdPlan.hpp" // reuse sdpaProbabilityMode<>()
+#include "GpuSdpaFwdPlan.hpp" // reuse REFERENCE_SDPA_PROBABILITY_MODE
 #include "IGpuGraphNodePlanBuilder.hpp"
 #include "IGpuGraphNodePlanExecutor.hpp"
 
@@ -231,7 +231,7 @@ public:
                 _params.topLeftAlignment,
                 lseTensor.has_value() ? &lseTensor.value() : nullptr,
                 raggedOffsetLseTensor.has_value() ? &raggedOffsetLseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>(),
+                REFERENCE_SDPA_PROBABILITY_MODE,
                 descaleQ,
                 descaleK,
                 descaleV,
