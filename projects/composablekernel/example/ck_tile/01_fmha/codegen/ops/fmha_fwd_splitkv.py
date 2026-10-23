@@ -903,10 +903,12 @@ class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
                 "128": [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
                         # bn0=32 serves page_block_size=16 (the vLLM KV block size): the
-                        # pipeline merges a tile straddling one page, so bn0 <= 2*page.
-                        # Listed last so non-paged dispatch keeps preferring bn0=64,
-                        # and restricted to gfx1100, the only target it is tuned and
-                        # validated on.
+                        # pipeline merges a tile straddling one page, which admits pages
+                        # with bn0 <= 2*page and page % (bn0/2) == 0. Generated for paged
+                        # KV only. Listed last so a page the bn0=64 tile can serve keeps
+                        # selecting it; bn0=32 is reached only when that tile's page
+                        # check fails. Restricted to gfx1100, the only target it is
+                        # tuned and validated on.
                         FmhaFwdTileSize( 64,  32,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint('device_name.compare(0, 7, "gfx1100") == 0'), True)],
                 "256": [FmhaFwdTileSize( 16,  64,  32, 256,  32,  256,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],

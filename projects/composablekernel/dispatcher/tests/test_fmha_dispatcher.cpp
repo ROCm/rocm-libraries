@@ -501,10 +501,9 @@ TEST(FmhaDispatcherTest, SplitKvAsymmetricHdimSelectsCombineAtHdimV)
     // hdim_v x hdim_v (128x128), so with_family must align the combine problem's
     // hdim_q to hdim_v or the combine (192 <= 128) fails to select -> "no plan".
     FmhaRegistry registry;
-    auto split_key                    = make_key(FmhaKernelFamily::FwdSplitKv, "split");
-    split_key.signature.hdim_q        = 192;
-    split_key.signature.hdim_v        = 128;
-    split_key.algorithm.tile_shape.n0 = 32; // page16-safe
+    auto split_key             = make_key(FmhaKernelFamily::FwdSplitKv, "split");
+    split_key.signature.hdim_q = 192;
+    split_key.signature.hdim_v = 128;
     registry.register_kernel(std::make_shared<MockFmhaKernel>(split_key, "split"));
     auto combine_key             = make_key(FmhaKernelFamily::FwdSplitKvCombine, "combine");
     combine_key.signature.hdim_q = 128;

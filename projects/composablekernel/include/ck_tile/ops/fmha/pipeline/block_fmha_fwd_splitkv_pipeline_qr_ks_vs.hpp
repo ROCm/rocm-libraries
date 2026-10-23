@@ -56,8 +56,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
-    // Only instances whose page block is shorter than kN0 pay for the
-    // cross-page merge; everything else compiles it out entirely.
+    // Set by codegen on the cross-page tile only. Such an instance checks at run
+    // time whether each K/V tile crosses into the next page block and, if so,
+    // loads both blocks and merges them; that also happens with a page longer
+    // than kN0 whose boundaries are not tile aligned. Every other instance
+    // compiles the merge out entirely.
     static constexpr bool kPageShorterThanTile = Problem::kPageShorterThanTile;
     static constexpr bool kHasUnevenSplits     = Problem::kHasUnevenSplits;
     static constexpr bool kHasSink             = Problem::kHasSink;
@@ -409,10 +412,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                 Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
                                                                         // load
 
-            // Paged KV with page_block_size < kN0: the seq tile overflows the
-            // current page block and the overflow rows read OOB-zero. Keep a
-            // mirror window on the next page so the two halves can be summed
-            // back into a whole tile.
+            // Paged KV whose seq tile crosses a page boundary: the rows past the
+            // current page block read OOB-zero. Keep a mirror window on the next
+            // page so the two halves can be summed back into a whole tile.
             auto k_dram_window_b = k_dram_window;
             bool k_is_cross      = false;
             if constexpr(kPageShorterThanTile)
