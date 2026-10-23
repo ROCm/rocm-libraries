@@ -342,7 +342,7 @@ void SkinnyGEMMEmitter::storeMasked(const EpilogueState &state,
                                       wValid.sub(2 * t, 2));
       builder.create<rocisa::SAndB64>(mask.container(), mask.container(),
                                       state.leader.container());
-      builder.select(state.off, mask.ref(), state.off, outOfRange);
+      builder.selectb32(state.off, mask.ref(), state.off, outOfRange);
       if (target.bf16)
         builder.create<rocisa::BufferStoreB16>(
             value.container(), state.off.container(), target.rsrc.container(),
@@ -392,7 +392,7 @@ void SkinnyGEMMEmitter::storeChunk(const EpilogueState &state,
   int rc = skinnyContiguous ? r + first : r;
   int tc = skinnyContiguous ? t : t + first;
   computeOffset(state, target, scalars, rc, tc);
-  builder.select(state.off, state.leader, state.off, outOfRange);
+  builder.selectb32(state.off, state.leader, state.off, outOfRange);
   int start = redIndex(state.layout, rc, tc);
   int dwords = elements;
   if (target.bf16) {

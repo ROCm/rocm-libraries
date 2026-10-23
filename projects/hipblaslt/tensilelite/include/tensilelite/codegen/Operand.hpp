@@ -6,44 +6,59 @@
 
 #include <tensilelite/codegen/Registers.hpp>
 
+#include "instruction/instruction.hpp"
+
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <variant>
 
 namespace rocm::tensilelite::codegen {
 
-/// An instruction source: a register reference or an integer immediate.
-/// Converts implicitly from a RegisterRange, a RegisterRef or an integer, so
-/// builder calls read like builder.addi32(dst, a, 4). Immediates are 64-bit so
-/// one type serves 32- and 64-bit ops; each op checks that the value fits its
-/// width.
-class Operand {
+/// An instruction source: a register or a 32-bit immediate, held as the rocisa
+/// InstructionInput that instruction constructors take, so an Operand is passed
+/// to them as is. A register is its RegisterContainer, of any width, so a pair
+/// is one Operand; an immediate is the input's int. Converts implicitly from a
+/// RegisterRange, a RegisterRef or an int32_t, so builder calls read like
+/// builder.addi32(dst, a, 4); the 64-bit ops sign-extend an immediate. 64-bit
+/// and unsigned integers do not convert, so a wide constant is a compile error
+/// rather than a silent truncation: write a 32-bit pattern as its int32_t
+/// value, such as -1 for 0xFFFFFFFF, and build a wider constant in a register
+/// pair with two movb32.
+class Operand : public InstructionInput {
 public:
-  Operand(const RegisterRange &range) : value(range.ref()) {}
-  Operand(RegisterRef ref) : value(ref) {}
-  Operand(int64_t immediate) : value(immediate) {}
+  Operand(const RegisterRange &range) : Operand(range.ref()) {}
+  Operand(RegisterRef ref)
+      : InstructionInput(std::shared_ptr<rocisa::Container>(ref.container())) {}
+  Operand(int32_t immediate) : InstructionInput(immediate) {}
+  Operand(int64_t) = delete;
+  Operand(uint32_t) = delete;
+  Operand(uint64_t) = delete;
 
-  bool isRegister() const { return std::holds_alternative<RegisterRef>(value); }
+  bool isRegister() const {
+    return std::holds_alternative<std::shared_ptr<rocisa::Container>>(
+        static_cast<const InstructionInput &>(*this));
+  }
   /// True if this is a register of the given kind.
   bool isRegister(RegisterKind kind) const {
     return isRegister() && reg().kind == kind;
   }
-  bool isImmediate() const { return std::holds_alternative<int64_t>(value); }
-
-  /// The register; asserts isRegister().
-  RegisterRef reg() const {
-    assert(isRegister() && "operand is not a register");
-    return std::get<RegisterRef>(value);
+  bool isImmediate() const {
+    return std::holds_alternative<int>(
+        static_cast<const InstructionInput &>(*this));
   }
+
+  /// The register, read back from its container; asserts isRegister().
+  RegisterRef reg() const;
   /// The immediate; asserts isImmediate().
-  int64_t immediate() const {
+  int32_t immediate() const {
     assert(isImmediate() && "operand is not an immediate");
-    return std::get<int64_t>(value);
+    return std::get<int>(static_cast<const InstructionInput &>(*this));
   }
-
-private:
-  std::variant<RegisterRef, int64_t> value;
 };
+
+static_assert(sizeof(Operand) == sizeof(InstructionInput),
+              "operand adds no state to the instruction input");
 
 } // namespace rocm::tensilelite::codegen
 

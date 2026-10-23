@@ -134,18 +134,17 @@ public:
   // src. An AGPR dst takes a VGPR, an SGPR or an inline constant, but no
   // literal (copy it to a VGPR first) and no AGPR (rocisa has no
   // v_accvgpr_mov_b32). Throws std::invalid_argument, before emitting
-  // anything, if the combination is not supported, if dst or a register src
-  // has the wrong number of registers, or if an immediate does not fit.
+  // anything, if the combination is not supported or if dst or a register src
+  // has the wrong number of registers.
 
-  /// Emits dst = src for one register. An immediate must lie in
-  /// [INT32_MIN, UINT32_MAX] and is used as a 32-bit pattern.
+  /// Emits dst = src for one register; an immediate is its 32-bit pattern.
   void movb32(RegisterRef dst, Operand src);
-  /// Emits dst = src for a register pair; an immediate is the full 64-bit
-  /// value. One 64-bit mov is used when both pairs are even-aligned and the
-  /// kinds allow it, and an immediate is an inline constant or in
-  /// [0, UINT32_MAX]; otherwise two movb32 on the halves, which covers
-  /// misaligned pairs, AGPRs and other immediates. Overlapping pairs are
-  /// copied correctly.
+  /// Emits dst = src for a register pair; an immediate is an int32_t
+  /// sign-extended to 64 bits. One 64-bit mov is used when both pairs are
+  /// even-aligned, the kinds allow it and an immediate is an inline constant or
+  /// non-negative (a 64-bit mov zero-extends a literal); otherwise two movb32
+  /// on the halves, which covers misaligned pairs, AGPRs and other immediates.
+  /// Overlapping pairs are copied correctly.
   void movb64(RegisterRef dst, Operand src);
 
   // The 32-bit integer ops below share these rules. Results wrap modulo 2^32,
@@ -159,13 +158,11 @@ public:
   // commutative operands or copying an operand into a temporary register,
   // which is released after the op.
   //
-  // Immediates must lie in [INT32_MIN, UINT32_MAX] and are used as 32-bit
-  // patterns. dst may alias an operand.
+  // Immediates are 32-bit patterns. dst may alias an operand.
   //
   // Throws std::invalid_argument, before emitting anything, if dst or a
-  // register operand is not exactly one register or is an AGPR, if an
-  // immediate does not fit 32 bits, or if dst is an SGPR and an operand is a
-  // VGPR.
+  // register operand is not exactly one register or is an AGPR, or if dst is
+  // an SGPR and an operand is a VGPR.
 
   /// Emits dst = a + b.
   void addi32(RegisterRef dst, Operand a, Operand b);
@@ -177,8 +174,9 @@ public:
   // The 64-bit integer ops below share these rules. Results wrap modulo 2^64,
   // so the ops are sign-agnostic.
   //
-  // dst and the register operands are register pairs, and an immediate is any
-  // int64 value, its full 64-bit pattern. The op is a SALU sequence iff dst and
+  // dst and the register operands are register pairs, and an immediate is an
+  // int32_t sign-extended to 64 bits, as in C; build a wider constant in a
+  // register pair with two movb32. The op is a SALU sequence iff dst and
   // every register operand are SGPRs: add is s_add_u32 + s_addc_u32, sub is
   // s_sub_u32 + s_subb_u32 and mul is s_mul_i32, s_mul_hi_u32 and s_add_u32;
   // they write SCC. A VGPR dst gives a VALU sequence: add is v_add_co_u32 +
@@ -227,15 +225,12 @@ public:
   /// select, with masks in temporary SGPR pairs. Temporary VGPRs, SGPRs and an
   /// SGPR pair are allocated and released inside the op.
   ///
-  /// Immediates must lie in [INT32_MIN, UINT32_MAX] and are used as int32 bit
-  /// patterns, so 0xFFFFFFFF is -1. a and b are read only at the start of the
-  /// expansion and dst is written only by its last instruction, so dst may
-  /// alias a or b.
+  /// a and b are read only at the start of the expansion and dst is written
+  /// only by its last instruction, so dst may alias a or b.
   ///
   /// Throws std::invalid_argument, before emitting anything, if dst or a
-  /// register operand is not exactly one register or is an AGPR, if an
-  /// immediate does not fit 32 bits, or if dst is an SGPR and an operand is a
-  /// VGPR.
+  /// register operand is not exactly one register or is an AGPR, or if dst is
+  /// an SGPR and an operand is a VGPR.
   void divsi32(RegisterRef dst, Operand a, Operand b, bool useIEEE);
 
   // The comparisons below share these rules.
@@ -252,32 +247,37 @@ public:
   //
   // dst may alias an operand. Throws std::invalid_argument, before emitting
   // anything, if dst is not one of the destinations above, if an operand is an
-  // AGPR or has the wrong number of registers, if an immediate does not fit,
-  // or if a uniform bool destination has a VGPR operand.
+  // AGPR or has the wrong number of registers, or if a uniform bool
+  // destination has a VGPR operand.
 
-  /// Emits dst = a pred b for one-register operands. Immediates must lie in
-  /// [INT32_MIN, UINT32_MAX] and are used as 32-bit patterns.
+  /// Emits dst = a pred b for one-register operands; immediates are 32-bit
+  /// patterns.
   void cmpi32(Predicate pred, RegisterRef dst, Operand a, Operand b);
-  /// Emits dst = a pred b for register-pair operands; immediates are full
-  /// 64-bit values. The scalar ordered predicates use a SALU borrow chain, so
-  /// they do not depend on exec.
+  /// Emits dst = a pred b for register-pair operands; an immediate is an
+  /// int32_t sign-extended to 64 bits. The scalar ordered predicates use a SALU
+  /// borrow chain, so they do not depend on exec.
   void cmpi64(Predicate pred, RegisterRef dst, Operand a, Operand b);
 
-  /// Emits dst = cond ? a : b. The width comes from dst, 1 or 2 registers, and
-  /// register operands must match it; immediates are 32-bit patterns (as for
-  /// cmpi32) for one register and full 64-bit values for a pair. cond is an
-  /// SGPR holding a uniform bool, where nonzero is true, or an SGPR pair at an
-  /// even index holding a lane mask. An SGPR dst needs a uniform bool cond and
-  /// scalar operands. A VGPR dst takes either cond, widening a uniform bool to
-  /// a temporary mask, and any SGPR, VGPR or immediate operands. A mask
-  /// written by a VALU instruction outside the builder must already satisfy
-  /// the two wait states; masks from cmpi32 and cmpi64 do. Throws
-  /// std::invalid_argument, before emitting anything, if dst is not 1 or 2
-  /// registers, if dst, cond or an operand is an AGPR, if cond has the wrong
-  /// kind or shape, if an operand has the wrong number of registers, if an
-  /// immediate does not fit, or if an SGPR dst has a mask cond or a VGPR
-  /// operand.
-  void select(RegisterRef dst, RegisterRef cond, Operand a, Operand b);
+  // The selects below compute dst = cond ? a : b. cond is an SGPR holding a
+  // uniform bool, where nonzero is true, or an SGPR pair at an even index
+  // holding a lane mask. An SGPR dst needs a uniform bool cond and scalar
+  // operands. A VGPR dst takes either cond, widening a uniform bool to a
+  // temporary mask, and any SGPR, VGPR or immediate operands. A mask written
+  // by a VALU instruction outside the builder must already satisfy the two
+  // wait states; masks from cmpi32 and cmpi64 do.
+  //
+  // Throws std::invalid_argument, before emitting anything, if dst is not the
+  // right number of registers (1 for selectb32, 2 for selectb64) or is an
+  // AGPR, if cond or an operand is an AGPR, if cond has the wrong kind or
+  // shape, if an operand has the wrong number of registers, or if an SGPR dst
+  // has a mask cond or a VGPR operand.
+
+  /// Emits dst = cond ? a : b for one register; immediates are 32-bit
+  /// patterns.
+  void selectb32(RegisterRef dst, RegisterRef cond, Operand a, Operand b);
+  /// Emits dst = cond ? a : b for a register pair; an immediate is
+  /// sign-extended to 64 bits.
+  void selectb64(RegisterRef dst, RegisterRef cond, Operand a, Operand b);
 
   // Buffer resource descriptors.
 
@@ -293,13 +293,13 @@ public:
   ///
   /// pointer must be an SGPR pair. An immediate pointer is rejected because a
   /// descriptor base is a runtime address; use sizeBytes 0 for a descriptor
-  /// that never touches memory. sizeBytes is one SGPR or an immediate in
-  /// [0, UINT32_MAX]. A descriptor must be uniform, so VGPRs and AGPRs are
-  /// rejected. dst may overlap pointer or sizeBytes; each word is read before
-  /// it is overwritten, and a word whose source already is its destination is
-  /// not copied. Throws std::invalid_argument, before emitting anything, if an
-  /// operand has the wrong kind, width or alignment, or sizeBytes is out of
-  /// range.
+  /// that never touches memory. sizeBytes is one SGPR or an immediate, the
+  /// 32-bit pattern of the unsigned size (-1 is 0xFFFFFFFF). A descriptor must
+  /// be uniform, so VGPRs and AGPRs are rejected. dst may overlap pointer or
+  /// sizeBytes; each word is read before it is overwritten, and a word whose
+  /// source already is its destination is not copied. Throws
+  /// std::invalid_argument, before emitting anything, if an operand has the
+  /// wrong kind, width or alignment.
   void makeRsrc(RegisterRef dst, Operand pointer, Operand sizeBytes);
 
 private:

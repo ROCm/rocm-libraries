@@ -19,7 +19,6 @@ using detail::registerText;
 namespace {
 
 constexpr std::string_view makeRsrcName = "makeRsrc";
-constexpr int64_t maxSize = UINT32_MAX;
 
 void requireDestination(RegisterRef dst) {
   if (dst.kind != RegisterKind::sgpr || dst.count != 4)
@@ -43,14 +42,9 @@ void requirePointer(Operand pointer) {
 }
 
 void requireSize(Operand sizeBytes) {
-  if (sizeBytes.isImmediate()) {
-    int64_t value = sizeBytes.immediate();
-    if (value >= 0 && value <= maxSize)
-      return;
-    throw std::invalid_argument(std::string(makeRsrcName) + " size " +
-                                std::to_string(value) + " is not in [0, " +
-                                std::to_string(maxSize) + "]");
-  }
+  // Any int32 is the 32-bit pattern of an unsigned size.
+  if (sizeBytes.isImmediate())
+    return;
   RegisterRef reg = sizeBytes.reg();
   if (reg.kind != RegisterKind::sgpr || reg.count != 1)
     throw std::invalid_argument(
@@ -99,5 +93,5 @@ void IRBuilder::makeRsrc(RegisterRef dst, Operand pointer, Operand sizeBytes) {
   if (!isSelfCopy(sizeDst, sizeBytes))
     movb32(sizeDst, sizeBytes);
   int32_t upper = rocisa::SrdUpperValue(target().isaVersion())->getValue();
-  movb32(upperDst, int64_t{static_cast<uint32_t>(upper)});
+  movb32(upperDst, upper);
 }

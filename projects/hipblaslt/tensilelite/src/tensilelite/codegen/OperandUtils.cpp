@@ -9,10 +9,31 @@
 
 #include <cassert>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <utility>
+
+using namespace rocm::tensilelite::codegen;
+
+// Maps the register prefix rocisa prints back to a kind.
+static RegisterKind kindOf(const std::string &prefix) {
+  if (prefix == "s")
+    return RegisterKind::sgpr;
+  if (prefix == "v")
+    return RegisterKind::vgpr;
+  assert(prefix == "acc" && "unknown register prefix");
+  return RegisterKind::agpr;
+}
+
+RegisterRef Operand::reg() const {
+  assert(isRegister() && "operand is not a register");
+  const rocisa::Container &container =
+      *std::get<std::shared_ptr<rocisa::Container>>(
+          static_cast<const InstructionInput &>(*this));
+  const rocisa::RegisterContainer &c =
+      static_cast<const rocisa::RegisterContainer &>(container);
+  return RegisterRef{kindOf(c.regType), c.regIdx, c.regNum};
+}
 
 namespace rocm::tensilelite::codegen::detail {
 
@@ -28,49 +49,37 @@ void requireRegisterCount(std::string_view opName, RegisterRef ref, int count) {
                               ", got " + registerText(ref));
 }
 
-void requireNotAgpr(std::string_view opName, RegisterRef ref) {
-  if (ref.kind != RegisterKind::agpr)
+void requireRegister(std::string_view opName, RegisterRef ref, int32_t count) {
+  if (ref.kind == RegisterKind::agpr)
+    throw std::invalid_argument(std::string(opName) +
+                                " does not accept agpr register " +
+                                registerText(ref));
+  requireRegisterCount(opName, ref, count);
+}
+
+void requireOperand(std::string_view opName, Operand operand, int32_t count) {
+  if (operand.isRegister())
+    requireRegister(opName, operand.reg(), count);
+}
+
+void requireScalarSources(std::string_view opName, RegisterRef dst, Operand a,
+                          Operand b) {
+  if (dst.kind != RegisterKind::sgpr)
     return;
-  throw std::invalid_argument(std::string(opName) +
-                              " does not accept agpr register " +
-                              registerText(ref));
+  for (Operand source : {a, b}) {
+    if (!source.isRegister(RegisterKind::vgpr))
+      continue;
+    throw std::invalid_argument(
+        std::string(opName) + " cannot write sgpr destination " +
+        registerText(dst) + " from vgpr operand " + registerText(source.reg()));
+  }
 }
 
-Operand canonicalizeImmediate32(std::string_view opName, Operand operand) {
-  if (operand.isRegister())
-    return operand;
-  int64_t value = operand.immediate();
-  if (value < INT32_MIN || value > UINT32_MAX)
-    throw std::invalid_argument(std::string(opName) + " immediate " +
-                                std::to_string(value) +
-                                " does not fit in 32 bits");
-  return Operand(int64_t{static_cast<int32_t>(static_cast<uint32_t>(value))});
-}
-
-InstructionInput toInput(Operand operand) {
-  if (operand.isRegister())
-    return std::shared_ptr<rocisa::Container>(operand.reg().container());
-  return static_cast<int>(operand.immediate());
-}
-
-InstructionInput toInput64(Operand operand) {
-  if (operand.isRegister() || gfx9::isInlineConstant(operand.immediate()))
-    return toInput(operand);
-  assert(gfx9::isEncodableImmediate64(operand.immediate()) &&
-         "immediate is not encodable in a 64-bit instruction");
-  char text[16];
-  std::snprintf(text, sizeof(text), "0x%x",
-                static_cast<unsigned>(operand.immediate()));
-  return std::string(text);
-}
-
-Operand operandHalf(Operand src, int index) {
+Operand operandHalf(Operand src, int32_t index) {
   if (src.isRegister())
     return Operand(src.reg().slice(index));
-  int64_t value = src.immediate();
-  int32_t word = index == 0 ? static_cast<int32_t>(static_cast<uint32_t>(value))
-                            : static_cast<int32_t>(value >> 32);
-  return Operand(int64_t{word});
+  int32_t value = src.immediate();
+  return Operand(index == 0 ? value : (value < 0 ? -1 : 0));
 }
 
 Operand copyToTemporary(IRBuilder &builder, RegisterKind kind, int width,

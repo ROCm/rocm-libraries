@@ -24,12 +24,8 @@ using detail::copyToTemporary;
 using detail::operandHalf;
 using detail::registerText;
 using detail::Temporaries;
-using detail::toInput;
-using detail::toInput64;
 
 namespace {
-
-constexpr std::string_view selectName = "select";
 
 // The sources of one 32-bit word of the result: a is chosen when the condition
 // holds, b otherwise.
@@ -41,50 +37,25 @@ struct WordSources {
 // The low word, then the high word of a pair; one word for a single register.
 using Words = std::vector<WordSources>;
 
-void requireDestination(RegisterRef dst) {
-  detail::requireNotAgpr(selectName, dst);
-  if (dst.count == 1 || dst.count == 2)
-    return;
-  throw std::invalid_argument(std::string(selectName) +
-                              " needs a destination of 1 or 2 registers, got " +
-                              registerText(dst));
-}
-
-Operand validateOperand(int width, Operand operand) {
-  if (operand.isRegister()) {
-    detail::requireNotAgpr(selectName, operand.reg());
-    detail::requireRegisterCount(selectName, operand.reg(), width);
-    return operand;
-  }
-  return width == 1 ? detail::canonicalizeImmediate32(selectName, operand)
-                    : operand;
-}
-
-void requireCondition(RegisterRef cond) {
+void requireCondition(std::string_view opName, RegisterRef cond) {
   if (cond.kind == RegisterKind::sgpr &&
       (cond.count == 1 || gfx9::isLaneMask(cond)))
     return;
   throw std::invalid_argument(
-      std::string(selectName) +
+      std::string(opName) +
       " condition must be an sgpr or an sgpr pair at an even index, got " +
       registerText(cond));
 }
 
-void requireScalarSelect(RegisterRef dst, RegisterRef cond, Operand a,
-                         Operand b) {
+void requireScalarSelect(std::string_view opName, RegisterRef dst,
+                         RegisterRef cond, Operand a, Operand b) {
   if (dst.kind != RegisterKind::sgpr)
     return;
   if (cond.count != 1)
     throw std::invalid_argument(
-        std::string(selectName) + " sgpr destination " + registerText(dst) +
+        std::string(opName) + " sgpr destination " + registerText(dst) +
         " needs a uniform bool condition, got " + registerText(cond));
-  for (Operand source : {a, b}) {
-    if (!source.isRegister(RegisterKind::vgpr))
-      continue;
-    throw std::invalid_argument(
-        std::string(selectName) + " cannot write sgpr destination " +
-        registerText(dst) + " from vgpr operand " + registerText(source.reg()));
-  }
+  detail::requireScalarSources(opName, dst, a, b);
 }
 
 Words wordSources(int width, Operand a, Operand b) {
@@ -138,7 +109,7 @@ void emitWords(RegisterRef dst, const Words &words, bool highFirst, Emit emit) {
 
 // Sets SCC to whether the uniform bool is nonzero.
 void testCondition(IRBuilder &builder, RegisterRef cond) {
-  builder.create<rocisa::SCmpLgU32>(toInput(Operand(cond)), 0);
+  builder.create<rocisa::SCmpLgU32>(cond.container(), 0);
 }
 
 // The aligned pair is written by one instruction, so every operand is read
@@ -153,8 +124,7 @@ void emitScalarSelect64(IRBuilder &builder, RegisterRef dst, RegisterRef cond,
   if (!gfx9::isLegalSop2(a, b))
     b = copyToTemporary(builder, RegisterKind::sgpr, 2, b, temps);
   testCondition(builder, cond);
-  builder.create<rocisa::SCSelectB64>(dst.container(), toInput64(a),
-                                      toInput64(b));
+  builder.create<rocisa::SCSelectB64>(dst.container(), a, b);
 }
 
 // One select per 32-bit word, for a single register or a misaligned pair. The
@@ -170,8 +140,7 @@ void emitScalarSelectWords(IRBuilder &builder, RegisterRef dst,
   bool highFirst = orderHalves(builder, dst, words, temps);
   testCondition(builder, cond);
   emitWords(dst, words, highFirst, [&](RegisterRef part, WordSources word) {
-    builder.create<rocisa::SCSelectB32>(part.container(), toInput(word.a),
-                                        toInput(word.b));
+    builder.create<rocisa::SCSelectB32>(part.container(), word.a, word.b);
   });
 }
 
@@ -202,7 +171,7 @@ void legalizeCndmaskWords(IRBuilder &builder, Words &words,
                           Temporaries &temps) {
   for (WordSources &word : words)
     for (Operand *source : {&word.a, &word.b})
-      if (!gfx9::isLegalCndmaskSource(*source))
+      if (!gfx9::isVgprOrInlineConstant(*source))
         *source =
             copyToTemporary(builder, RegisterKind::vgpr, 1, *source, temps);
 }
@@ -217,22 +186,34 @@ void emitVectorSelect(IRBuilder &builder, RegisterRef dst, RegisterRef cond,
   bool highFirst = orderHalves(builder, dst, words, temps);
   emitWords(dst, words, highFirst, [&](RegisterRef part, WordSources word) {
     // Operand order is src0 = b, src1 = a: a mask bit set selects src1.
-    builder.create<rocisa::VCndMaskB32>(part.container(), toInput(word.b),
-                                        toInput(word.a), mask.container());
+    builder.create<rocisa::VCndMaskB32>(part.container(), word.b, word.a,
+                                        mask.container());
   });
+}
+
+// Emits dst = cond ? a : b for width 1 (selectb32) or 2 (selectb64) registers.
+void emitSelect(IRBuilder &builder, int32_t width, RegisterRef dst,
+                RegisterRef cond, Operand a, Operand b) {
+  std::string_view opName = width == 1 ? "selectb32" : "selectb64";
+  detail::requireRegister(opName, dst, width);
+  detail::requireOperand(opName, a, width);
+  detail::requireOperand(opName, b, width);
+  requireCondition(opName, cond);
+  requireScalarSelect(opName, dst, cond, a, b);
+  if (dst.kind == RegisterKind::sgpr)
+    emitScalarSelect(builder, dst, cond, a, b);
+  else
+    emitVectorSelect(builder, dst, cond, a, b);
 }
 
 } // namespace
 
-void IRBuilder::select(RegisterRef dst, RegisterRef cond, Operand a,
-                       Operand b) {
-  requireDestination(dst);
-  a = validateOperand(dst.count, a);
-  b = validateOperand(dst.count, b);
-  requireCondition(cond);
-  requireScalarSelect(dst, cond, a, b);
-  if (dst.kind == RegisterKind::sgpr)
-    emitScalarSelect(*this, dst, cond, a, b);
-  else
-    emitVectorSelect(*this, dst, cond, a, b);
+void IRBuilder::selectb32(RegisterRef dst, RegisterRef cond, Operand a,
+                          Operand b) {
+  emitSelect(*this, 1, dst, cond, a, b);
+}
+
+void IRBuilder::selectb64(RegisterRef dst, RegisterRef cond, Operand a,
+                          Operand b) {
+  emitSelect(*this, 2, dst, cond, a, b);
 }

@@ -93,8 +93,8 @@ void buildDescriptorsInPlace(Kernel &kernel, const CopyOffsets &offsets,
   builder.create<rocisa::SLoadB64>(outRsrc.sub(0, 2), kernarg.container(),
                                    offsets.out);
   builder.createWaitCnt({.scalarMemory = 0});
-  builder.makeRsrc(inRsrc.ref(), inRsrc.ref(0, 2), int64_t{inWords * 4});
-  builder.makeRsrc(outRsrc.ref(), outRsrc.ref(0, 2), int64_t{outWords * 4});
+  builder.makeRsrc(inRsrc.ref(), inRsrc.ref(0, 2), inWords * 4);
+  builder.makeRsrc(outRsrc.ref(), outRsrc.ref(0, 2), outWords * 4);
 }
 
 RegisterRange computeByteOffset(Kernel &kernel) {

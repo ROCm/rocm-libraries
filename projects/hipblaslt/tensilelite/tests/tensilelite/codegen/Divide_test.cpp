@@ -23,8 +23,8 @@ namespace {
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
-constexpr int64_t literalA = 0x12345;
-constexpr int64_t literalB = 0x54321;
+constexpr int32_t literalA = 0x12345;
+constexpr int32_t literalB = 0x54321;
 constexpr const char *literalAText = "74565";
 constexpr const char *literalBText = "344865";
 
@@ -340,7 +340,7 @@ TEST_F(DivTest, ImmediateOperandsInVectorForm) {
     std::string dividend = emitDiv(dst.ref(), literalB, value, useIEEE);
     EXPECT_EQ(countLinesContaining(dividend, "v_mov_b32"), 1);
     expectLiteralOnlyInMoves(dividend, literalBText);
-    for (int64_t inlineValue : {7, -5})
+    for (int32_t inlineValue : {7, -5})
       EXPECT_EQ(countLinesContaining(
                     emitDiv(dst.ref(), value, inlineValue, useIEEE), "v_mov"),
                 0)
@@ -425,11 +425,6 @@ TEST_F(DivTest, InvalidOperandsThrowWithoutEmitting) {
     expectRejected([&] { builder.divsi32(vdst.ref(), va, pair, useIEEE); });
     expectRejected([&] { builder.divsi32(sdst.ref(), va, sa, useIEEE); });
     expectRejected([&] { builder.divsi32(sdst.ref(), sa, vb, useIEEE); });
-    expectRejected(
-        [&] { builder.divsi32(vdst.ref(), sa, int64_t{1} << 32, useIEEE); });
-    expectRejected([&] {
-      builder.divsi32(vdst.ref(), int64_t{INT32_MIN} - 1, va, useIEEE);
-    });
   }
 }
 

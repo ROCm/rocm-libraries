@@ -10,7 +10,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -23,8 +22,8 @@ using namespace rocm::tensilelite::codegen::test;
 
 using BuilderOp = void (IRBuilder::*)(RegisterRef, Operand, Operand);
 
-constexpr int64_t wideLiteral = 0x123456789ABCDEF0;
-constexpr int64_t otherWideLiteral = 0x0FEDCBA987654321;
+constexpr int32_t literal = 0x12345678;
+constexpr int32_t otherLiteral = 0x0FEDCBA9;
 
 struct OpCase {
   const char *name;
@@ -100,15 +99,9 @@ protected:
   RegisterRange vgprPair() { return builder.allocateVgpr(2, 2); }
 };
 
-// The 64-bit instructions and literals that the ops must never emit.
-void expectNoWideForms(const std::string &out, int64_t value) {
+// The ops are built from 32-bit instructions, so no 64-bit form is emitted.
+void expectNoWideForms(const std::string &out) {
   EXPECT_EQ(countLinesContaining(out, "_b64"), 0) << out;
-  if (value >= INT32_MIN && value <= INT32_MAX)
-    return;
-  EXPECT_EQ(countLinesContaining(out, std::to_string(value)), 0) << out;
-  std::ostringstream hex;
-  hex << std::hex << value;
-  EXPECT_EQ(countLinesContaining(out, hex.str()), 0) << out;
 }
 
 TEST_F(Arith64Test, SaluCarryChainsAreAdjacent) {
@@ -240,27 +233,21 @@ TEST_F(Arith64Test, ImmediatesAreSplitIntoHalves) {
       out,
       {inst("v_add_co_u32", {half(d, 0), carry, half(a, 0), "-5"}), "s_nop 1",
        inst("v_addc_co_u32", {half(d, 1), carry, half(a, 1), "-1", carry})});
-  expectNoWideForms(out, -5);
+  expectNoWideForms(out);
 
   // The low word of -100 is a literal, which VOP3 cannot take.
   out = emitAdd(d, a, -100);
   EXPECT_EQ(countLinesContaining(out, "v_mov_b32"), 1) << out;
   EXPECT_EQ(countLinesContaining(out, "v_mov_b32 v4, -100"), 1) << out;
   EXPECT_EQ(countLinesContaining(out, ", -1, "), 1) << out;
-  expectNoWideForms(out, -100);
+  expectNoWideForms(out);
 
-  // The high word is 1, so no 64-bit encoding is needed.
-  int64_t high = int64_t{1} << 32;
-  out = emitAdd(d, a, high);
-  expectInstructions(
-      out,
-      {inst("v_add_co_u32", {half(d, 0), carry, half(a, 0), "0"}), "s_nop 1",
-       inst("v_addc_co_u32", {half(d, 1), carry, half(a, 1), "1", carry})});
-  expectNoWideForms(out, high);
-
-  out = emitAdd(d, a, wideLiteral);
-  EXPECT_EQ(countLinesContaining(out, "v_mov_b32"), 2) << out;
-  expectNoWideForms(out, wideLiteral);
+  // A positive literal has a high word of 0, which is inline.
+  out = emitAdd(d, a, literal);
+  EXPECT_EQ(countLinesContaining(out, "v_mov_b32 v4, 305419896"), 1) << out;
+  EXPECT_EQ(countLinesContaining(out, "v_mov_b32"), 1) << out;
+  EXPECT_EQ(countLinesContaining(out, ", 0, "), 1) << out;
+  expectNoWideForms(out);
 }
 
 TEST_F(Arith64Test, SaluLiteralsUseOneLiteralPerInstruction) {
@@ -269,19 +256,19 @@ TEST_F(Arith64Test, SaluLiteralsUseOneLiteralPerInstruction) {
   RegisterRef d = dstOwner.ref();
   RegisterRef a = aOwner.ref();
 
-  std::string out = emitAdd(d, a, wideLiteral);
+  std::string out = emitAdd(d, a, literal);
   EXPECT_EQ(instructionCount(out), 2) << out;
   EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 0) << out;
-  expectNoWideForms(out, wideLiteral);
+  expectNoWideForms(out);
 
-  // Distinct literals cannot share an instruction, so b's halves are copied.
-  out = emitAdd(d, wideLiteral, otherWideLiteral);
-  EXPECT_EQ(instructionCount(out), 4) << out;
-  EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 2) << out;
-  expectNoWideForms(out, wideLiteral);
-  expectNoWideForms(out, otherWideLiteral);
+  // Distinct literals cannot share an instruction, so b's low half is copied;
+  // the high halves are both the inline constant 0.
+  out = emitAdd(d, literal, otherLiteral);
+  EXPECT_EQ(instructionCount(out), 3) << out;
+  EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 1) << out;
+  expectNoWideForms(out);
 
-  out = emitAdd(d, wideLiteral, wideLiteral);
+  out = emitAdd(d, literal, literal);
   EXPECT_EQ(instructionCount(out), 2) << out;
   EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 0) << out;
 }
@@ -289,9 +276,10 @@ TEST_F(Arith64Test, SaluLiteralsUseOneLiteralPerInstruction) {
 TEST_F(Arith64Test, ValuMulLiteralsAreCopied) {
   RegisterRange dstOwner = vgprPair();
   RegisterRange aOwner = vgprPair();
-  std::string out = emitMul(dstOwner.ref(), aOwner, wideLiteral);
-  EXPECT_EQ(countLinesContaining(out, "v_mov_b32"), 2) << out;
-  expectNoWideForms(out, wideLiteral);
+  std::string out = emitMul(dstOwner.ref(), aOwner, literal);
+  // Only the low half is a literal; the high half is the inline constant 0.
+  EXPECT_EQ(countLinesContaining(out, "v_mov_b32"), 1) << out;
+  expectNoWideForms(out);
 }
 
 TEST_F(Arith64Test, DestinationAliasingNeedsNoCopies) {

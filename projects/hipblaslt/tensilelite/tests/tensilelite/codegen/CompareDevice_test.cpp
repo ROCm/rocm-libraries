@@ -29,10 +29,11 @@ constexpr int randomPairs = 1024;
 constexpr int edgeStride32 = 17;
 constexpr int edgeStride64 = 18;
 
-constexpr int64_t literal32 = 0x12345678;
-constexpr int64_t literal64 = INT64_C(0x1234567890abcdef);
-constexpr int64_t inlineImmediate = -16;
-constexpr int64_t nearMin64 = INT64_MIN + 5;
+// Immediates are int32 values; a 64-bit comparison sign-extends them.
+constexpr int32_t literal32 = 0x12345678;
+constexpr int32_t negativeLiteral = -0x12345678;
+constexpr int32_t inlineImmediate = -16;
+constexpr int32_t nearMin32 = INT32_MIN + 5;
 
 using CompareFn = void (IRBuilder::*)(Predicate, RegisterRef, Operand, Operand);
 using Words = std::vector<uint32_t>;
@@ -143,7 +144,7 @@ OperandMaker words32() {
 }
 
 // Input 0 against an immediate, which comes first if immediateFirst.
-OperandMaker word32WithImmediate(int64_t immediate, bool immediateFirst) {
+OperandMaker word32WithImmediate(int32_t immediate, bool immediateFirst) {
   return [=](IRBuilder &, const std::vector<RegisterRef> &in) {
     if (immediateFirst)
       return Operands{{}, immediate, in[0]};
@@ -164,7 +165,7 @@ OperandMaker pairs64(bool misalignedA = false, bool misalignedB = false) {
 }
 
 // The pair from inputs (0, 1) against an immediate.
-OperandMaker pair64WithImmediate(int64_t immediate, bool immediateFirst,
+OperandMaker pair64WithImmediate(int32_t immediate, bool immediateFirst,
                                  bool misaligned) {
   return [=](IRBuilder &builder, const std::vector<RegisterRef> &in) {
     PairRegisters pair = makePair(builder, in[0], in[1], misaligned);
@@ -187,7 +188,7 @@ void expectMaskResults(CompareFn compare, Predicate pred,
                          RegisterRange mask = builder.allocateSgpr(2, 2);
                          (builder.*compare)(pred, mask.ref(), operands.a,
                                             operands.b);
-                         builder.select(dst, mask.ref(), 1, 0);
+                         builder.selectb32(dst, mask.ref(), 1, 0);
                        }};
   expectArithResults(spec, groups, inputs, expected);
 }
@@ -269,7 +270,7 @@ TEST_F(CmpDevice, MixedUniformAndLaneI32) {
 TEST_F(CmpDevice, LaneAgainstImmediateI32) {
   WordPairs pairs = makeArithPairs(randomPairs);
   for (const PredicateCase &current : predicates) {
-    for (int64_t immediate : {literal32, inlineImmediate}) {
+    for (int32_t immediate : {literal32, inlineImmediate}) {
       for (bool immediateFirst : {false, true}) {
         SCOPED_TRACE(std::string(current.name) + " immediate " +
                      std::to_string(immediate) +
@@ -391,14 +392,16 @@ TEST_F(CmpDevice, LaneAgainstImmediateI64) {
   WordQuads quads = makeArithPairs64(randomPairs);
   Values lanes = join(quads.aLo, quads.aHi);
   for (const PredicateCase &current : predicates) {
-    for (int64_t immediate : {literal64, inlineImmediate, nearMin64}) {
+    for (int32_t immediate :
+         {literal32, negativeLiteral, inlineImmediate, nearMin32}) {
       for (bool immediateFirst : {false, true}) {
         for (bool misaligned : {false, true}) {
           SCOPED_TRACE(std::string(current.name) + " immediate " +
                        std::to_string(immediate) +
                        (immediateFirst ? " first" : " second") +
                        (misaligned ? " misaligned" : " aligned"));
-          Values constant(lanes.size(), static_cast<uint64_t>(immediate));
+          Values constant(lanes.size(),
+                          static_cast<uint64_t>(int64_t{immediate}));
           expectMaskResults(
               &IRBuilder::cmpi64, current.pred, {lane, lane},
               pair64WithImmediate(immediate, immediateFirst, misaligned),
@@ -415,12 +418,14 @@ TEST_F(CmpDevice, UniformAgainstImmediateI64) {
   WordQuads quads = makeArithPairs64(randomPairs);
   Values values = join(quads.aLo, quads.aHi);
   for (const PredicateCase &current : predicates) {
-    for (int64_t immediate : {nearMin64, literal64, inlineImmediate}) {
+    for (int32_t immediate :
+         {nearMin32, literal32, negativeLiteral, inlineImmediate}) {
       for (bool immediateFirst : {false, true}) {
         SCOPED_TRACE(std::string(current.name) + " immediate " +
                      std::to_string(immediate) +
                      (immediateFirst ? " first" : " second"));
-        Values constant(values.size(), static_cast<uint64_t>(immediate));
+        Values constant(values.size(),
+                        static_cast<uint64_t>(int64_t{immediate}));
         expectBoolResults(
             &IRBuilder::cmpi64, current.pred, {uniform, uniform},
             pair64WithImmediate(immediate, immediateFirst, false),
@@ -446,7 +451,7 @@ TEST_F(CmpDevice, DestinationMayAliasAnOperandI64) {
                            PairRegisters x = makePair(builder, in[0], in[1]);
                            PairRegisters y = makePair(builder, in[2], in[3]);
                            builder.cmpi64(pred, x.pair, x.pair, y.pair);
-                           builder.select(dst, x.pair, 1, 0);
+                           builder.selectb32(dst, x.pair, 1, 0);
                          }};
     expectArithResults(spec, static_cast<int>(a.size()), laneInputs(quads),
                        perLane(expectedBits(64, pred, a, b)));
@@ -470,7 +475,7 @@ TEST_F(CmpDevice, VectorDestinationMayAliasAnSgprOperandI64) {
                            PairRegisters x = makePair(builder, in[0], in[1]);
                            PairRegisters y = makePair(builder, in[2], in[3]);
                            builder.cmpi64(pred, x.pair, x.pair, y.pair);
-                           builder.select(dst, x.pair, 1, 0);
+                           builder.selectb32(dst, x.pair, 1, 0);
                          }};
     expectArithResults(spec, groups,
                        {uniformLo, uniformHi, quads.bLo, quads.bHi},

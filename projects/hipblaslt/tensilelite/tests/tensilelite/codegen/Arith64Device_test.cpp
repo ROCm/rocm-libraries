@@ -48,19 +48,11 @@ const OpCase opCases[] = {
      [](uint64_t a, uint64_t b) { return a * b; }},
 };
 
-// Immediates that are inline constants, 32-bit literals, sign-extended values
-// and values with a high word.
-const int64_t immediates[] = {0,
-                              1,
-                              -1,
-                              65,
-                              -100,
-                              INT64_MIN,
-                              INT64_MAX,
-                              0xFFFFFFFF,
-                              int64_t{1} << 32,
-                              static_cast<int64_t>(0xFFFFFFFF00000000),
-                              0x123456789ABCDEF0};
+// Immediates are int32 values sign-extended to 64 bits: inline constants,
+// positive and negative literals, and the extremes.
+const int32_t immediates[] = {0,         1,         -1,         64,
+                              65,        -16,       -17,        -100,
+                              INT32_MIN, INT32_MAX, 0x12345678, -0x12345678};
 
 // How the destination sits relative to the operand registers.
 enum class Placement {
@@ -86,8 +78,8 @@ struct Case64 {
   bool dstMisaligned = false;
   bool operandsMisaligned = false;
   // An operand with no immediate is a register pair built from two inputs.
-  std::optional<int64_t> a;
-  std::optional<int64_t> b;
+  std::optional<int32_t> a;
+  std::optional<int32_t> b;
 };
 
 struct Data64 {
@@ -129,7 +121,7 @@ struct Emitted {
 
 // Reads an operand: an immediate, or a pair built from two inputs.
 Operand makeSource(IRBuilder &builder, const Case64 &spec,
-                   const std::optional<int64_t> &immediate,
+                   const std::optional<int32_t> &immediate,
                    const std::vector<RegisterRef> &in, size_t &next,
                    std::vector<RegisterRange> &owners) {
   if (immediate)
@@ -217,10 +209,10 @@ size_t inputIndex(const Case64 &spec, InputKind kind, size_t result) {
   return perResult ? result : result / arithWorkgroupSize;
 }
 
-uint64_t operandValue(const Case64 &spec, const std::optional<int64_t> &imm,
+uint64_t operandValue(const Case64 &spec, const std::optional<int32_t> &imm,
                       InputKind kind, const Values &values, size_t result) {
   if (imm)
-    return static_cast<uint64_t>(*imm);
+    return static_cast<uint64_t>(int64_t{*imm});
   return values[inputIndex(spec, kind, result)];
 }
 
@@ -342,7 +334,7 @@ TEST_F(Arith64Device, MisalignedPairs) {
 TEST_F(Arith64Device, ImmediateOperands) {
   Data64 data = makeData(0);
   for (const OpCase &op : opCases) {
-    for (int64_t immediate : immediates) {
+    for (int32_t immediate : immediates) {
       SCOPED_TRACE(std::string(op.name) + " immediate " +
                    std::to_string(immediate));
       for (Case64 spec : {makeCase(op, vgpr, lane, lane),
@@ -404,8 +396,8 @@ std::vector<NamedOperand> placementsOf(const PlacementRegisters &regs) {
           {"odd sgpr pair", regs.oddScalar.ref(1, 2)},
           {"inline -5", -5},
           {"literal -100", -100},
-          {"literal 0x123456789ABCDEF0", 0x123456789ABCDEF0},
-          {"1 << 32", int64_t{1} << 32}};
+          {"literal 0x12345678", 0x12345678},
+          {"INT32_MIN", INT32_MIN}};
 }
 
 // Emits every placement combination of one op into a single kernel.

@@ -333,8 +333,8 @@ TEST_F(DivDevice, MixedScalarAndVector) {
   }
 }
 
-std::vector<int64_t> immediatesFor(bool useIEEE) {
-  std::vector<int64_t> immediates = {1,   -1, 2,  -2,  3,       7,
+std::vector<int32_t> immediatesFor(bool useIEEE) {
+  std::vector<int32_t> immediates = {1,   -1, 2,  -2,  3,       7,
                                      -16, 64, 65, -17, 0x12345, -100000};
   if (useIEEE) {
     immediates.push_back(INT32_MIN);
@@ -348,7 +348,7 @@ std::vector<int64_t> immediatesFor(bool useIEEE) {
 
 // Computes dst = input / immediate, or immediate / input.
 ArithKernelSpec immediateSpec(InputKind kind, RegisterKind result,
-                              int64_t immediate, bool immediateIsDividend,
+                              int32_t immediate, bool immediateIsDividend,
                               bool useIEEE) {
   return {{kind},
           result,
@@ -362,7 +362,7 @@ ArithKernelSpec immediateSpec(InputKind kind, RegisterKind result,
 }
 
 std::vector<uint32_t> divideByImmediate(const std::vector<uint32_t> &words,
-                                        int64_t immediate,
+                                        int32_t immediate,
                                         bool immediateIsDividend) {
   uint32_t value = static_cast<uint32_t>(immediate);
   std::vector<uint32_t> out;
@@ -373,7 +373,7 @@ std::vector<uint32_t> divideByImmediate(const std::vector<uint32_t> &words,
 }
 
 // Runs the lane, uniform-into-sgpr and uniform-into-vgpr forms.
-void expectImmediateForms(const std::vector<uint32_t> &words, int64_t immediate,
+void expectImmediateForms(const std::vector<uint32_t> &words, int32_t immediate,
                           bool immediateIsDividend, bool useIEEE) {
   std::vector<uint32_t> expected =
       divideByImmediate(words, immediate, immediateIsDividend);
@@ -391,7 +391,7 @@ void expectImmediateForms(const std::vector<uint32_t> &words, int64_t immediate,
 TEST_F(DivDevice, ImmediateOperands) {
   for (bool useIEEE : {true, false}) {
     Pairs pairs = sample(pairsFor(useIEEE), 1024);
-    for (int64_t immediate : immediatesFor(useIEEE)) {
+    for (int32_t immediate : immediatesFor(useIEEE)) {
       SCOPED_TRACE(std::string(pathName(useIEEE)) + " immediate " +
                    std::to_string(immediate));
       // The other operand comes from the set, so it is never zero.
@@ -494,11 +494,11 @@ enum class BPlacement {
   minInt32,
 };
 
-constexpr int64_t inlineA = 7;
-constexpr int64_t inlineB = -5;
-constexpr int64_t literalA = 0x12345;
-constexpr int64_t literalB = 0x54321;
-constexpr int64_t negativeLiteralB = -100;
+constexpr int32_t inlineA = 7;
+constexpr int32_t inlineB = -5;
+constexpr int32_t literalA = 0x12345;
+constexpr int32_t literalB = 0x54321;
+constexpr int32_t negativeLiteralB = -100;
 
 const char *placementName(APlacement placement) {
   switch (placement) {

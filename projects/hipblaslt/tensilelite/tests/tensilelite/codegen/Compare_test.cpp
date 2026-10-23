@@ -20,7 +20,7 @@ namespace {
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
-constexpr int64_t literal32 = 0x12345678;
+constexpr int32_t literal32 = 0x12345678;
 constexpr const char *literal32Text = "305419896";
 constexpr const char *signBitText = "-2147483648";
 
@@ -170,13 +170,12 @@ TEST_F(CmpTest, VectorI64SgprPairAndInlineNeedNoCopy) {
 TEST_F(CmpTest, VectorI64LiteralIsCopiedToEvenPair) {
   RegisterRange mask = builder.allocateSgpr(2, 2);
   RegisterRange v = builder.allocateVgpr(2, 2);
-  // 0x1234567890abcdef has no 64-bit encoding, so it moves as two words.
-  std::string out =
-      emit64(Predicate::ult, mask.ref(), v, INT64_C(0x1234567890abcdef));
-  expectLinesInOrder(out, {line("v_mov_b32", "v2", "-1867788817"),
-                           line("v_mov_b32", "v3", "305419896"),
-                           line("v_cmp_lt_u64", text(mask), text(v), "v[2:3]"),
-                           "s_nop 1"});
+  // -100 sign-extends to a high word of -1, which a 64-bit mov cannot encode,
+  // so it moves as two words.
+  std::string out = emit64(Predicate::ult, mask.ref(), v, -100);
+  expectLinesInOrder(
+      out, {line("v_mov_b32", "v2", "-100"), line("v_mov_b32", "v3", "-1"),
+            line("v_cmp_lt_u64", text(mask), text(v), "v[2:3]"), "s_nop 1"});
 }
 
 TEST_F(CmpTest, VectorI64MisalignedPairsAreCopied) {
@@ -220,10 +219,10 @@ TEST_F(CmpTest, ScalarI64EqualityIsDirectForLegalOperands) {
                            line("s_cselect_b32", text(dst), "1", "0")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 0);
   out = emit64(Predicate::ne, dst.ref(), a, 0x12345);
-  expectLinesInOrder(out, {line("s_cmp_lg_u64", text(a), "0x12345")});
+  expectLinesInOrder(out, {line("s_cmp_lg_u64", text(a), "74565")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 0);
-  out = emit64(Predicate::ne, dst.ref(), a, 0xffffffffLL);
-  expectLinesInOrder(out, {line("s_cmp_lg_u64", text(a), "0xffffffff")});
+  out = emit64(Predicate::ne, dst.ref(), a, INT32_MAX);
+  expectLinesInOrder(out, {line("s_cmp_lg_u64", text(a), "2147483647")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 0);
 }
 
@@ -241,17 +240,17 @@ TEST_F(CmpTest, ScalarI64EqualityCopiesUnencodableOperands) {
   expectLinesInOrder(out, {line("s_mov_b32", "s8", "-17"),
                            line("s_mov_b32", "s9", "-1"),
                            line("s_cmp_lg_u64", text(a), "s[8:9]")});
-  out = emit64(Predicate::ne, dst.ref(), a, INT64_C(0x100000000));
-  expectLinesInOrder(out, {line("s_mov_b32", "s8", "0"),
-                           line("s_mov_b32", "s9", "1"),
+  out = emit64(Predicate::ne, dst.ref(), a, INT32_MIN);
+  expectLinesInOrder(out, {line("s_mov_b32", "s8", "-2147483648"),
+                           line("s_mov_b32", "s9", "-1"),
                            line("s_cmp_lg_u64", text(a), "s[8:9]")});
 }
 
 TEST_F(CmpTest, ScalarI64EqualityTwoDistinctLiteralsCopyOne) {
   RegisterRange dst = builder.allocateSgpr(1);
   std::string out = emit64(Predicate::eq, dst.ref(), 0x12345, 0x54321);
-  expectLinesInOrder(out, {line("s_mov_b64", "s[2:3]", "0x54321"),
-                           line("s_cmp_eq_u64", "0x12345", "s[2:3]")});
+  expectLinesInOrder(out, {line("s_mov_b64", "s[2:3]", "344865"),
+                           line("s_cmp_eq_u64", "74565", "s[2:3]")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 1);
 }
 
@@ -303,11 +302,11 @@ TEST_F(CmpOrderedTest, GreaterOrEqualInvertsTheResult) {
 }
 
 TEST_F(CmpOrderedTest, SignedImmediateIsBiasedOnTheHost) {
-  // 0x123456789 has the high word 1, which biases to 0x80000001.
-  std::string out = emit64(Predicate::sle, dst.ref(), a, INT64_C(0x123456789));
+  // -0x12345 has the high word -1, which biases to 0x7fffffff.
+  std::string out = emit64(Predicate::sle, dst.ref(), a, -0x12345);
   expectLinesInOrder(out, {line("s_xor_b32", "s6", "s3", signBitText),
-                           line("s_sub_u32", "s7", "591751049", "s2"),
-                           line("s_subb_u32", "s7", "-2147483647", "s6"),
+                           line("s_sub_u32", "s7", "-74565", "s2"),
+                           line("s_subb_u32", "s7", "2147483647", "s6"),
                            line("s_cselect_b32", "s0", "0", "1")});
   EXPECT_EQ(countLinesContaining(out, "s_xor_b32"), 1);
 }
@@ -323,9 +322,9 @@ TEST_F(CmpOrderedTest, LaneMaskDestination) {
 }
 
 TEST_F(CmpOrderedTest, TwoImmediatesCopyTheSecondFirst) {
-  std::string out = emit64(Predicate::ult, dst.ref(), 5, INT64_C(0x123456789));
-  expectLinesInOrder(out, {line("s_mov_b32", "s6", "591751049"),
-                           line("s_mov_b32", "s7", "1"),
+  std::string out = emit64(Predicate::ult, dst.ref(), 5, -100);
+  expectLinesInOrder(out, {line("s_mov_b32", "s6", "-100"),
+                           line("s_mov_b32", "s7", "-1"),
                            line("s_sub_u32", "s8", "5", "s6"),
                            line("s_subb_u32", "s8", "0", "s7"),
                            line("s_cselect_b32", "s0", "1", "0")});
@@ -390,23 +389,16 @@ TEST_F(CmpTest, InvalidOperandsThrowWithoutEmitting) {
   expectRejected([&] { builder.cmpi64(Predicate::eq, s.ref(), vpair, mask); });
   expectRejected([&] { builder.cmpi32(Predicate::eq, mask.ref(), mask, s); });
   expectRejected([&] { builder.cmpi64(Predicate::eq, mask.ref(), s, vpair); });
-  expectRejected(
-      [&] { builder.cmpi32(Predicate::eq, mask.ref(), v, int64_t{1} << 32); });
-  expectRejected([&] {
-    builder.cmpi32(Predicate::eq, mask.ref(), v, int64_t{INT32_MIN} - 1);
-  });
 }
 
 TEST_F(CmpTest, BoundaryImmediatesAreAccepted) {
   RegisterRange mask = builder.allocateSgpr(2, 2);
   RegisterRange v = builder.allocateVgpr(1);
-  EXPECT_NO_THROW(
-      builder.cmpi32(Predicate::eq, mask.ref(), v, int64_t{UINT32_MAX}));
-  EXPECT_NO_THROW(
-      builder.cmpi32(Predicate::eq, mask.ref(), v, int64_t{INT32_MIN}));
+  EXPECT_NO_THROW(builder.cmpi32(Predicate::eq, mask.ref(), v, INT32_MIN));
+  EXPECT_NO_THROW(builder.cmpi32(Predicate::eq, mask.ref(), v, INT32_MAX));
   RegisterRange pair = builder.allocateVgpr(2, 2);
-  EXPECT_NO_THROW(builder.cmpi64(Predicate::eq, mask.ref(), pair, INT64_MIN));
-  EXPECT_NO_THROW(builder.cmpi64(Predicate::eq, mask.ref(), pair, INT64_MAX));
+  EXPECT_NO_THROW(builder.cmpi64(Predicate::eq, mask.ref(), pair, INT32_MIN));
+  EXPECT_NO_THROW(builder.cmpi64(Predicate::eq, mask.ref(), pair, INT32_MAX));
 }
 
 } // namespace

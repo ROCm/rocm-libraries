@@ -7,6 +7,13 @@
 
 namespace rocm::tensilelite::codegen::gfx9 {
 
+// A 64-bit instruction sign-extends an inline constant and zero-extends a
+// literal, so a sign-extended value is encoded exactly iff it is inline or
+// non-negative.
+static bool isEncodableImmediate64(int32_t value) {
+  return isInlineConstant(value) || value >= 0;
+}
+
 namespace {
 
 bool isVector(Operand operand) {
@@ -25,15 +32,9 @@ bool usesConstantBus(Operand operand) {
   return operand.isRegister(RegisterKind::sgpr) || isLiteral(operand);
 }
 
-bool isVgprOrInlineConstant(Operand src) {
-  if (src.isImmediate())
-    return isInlineConstant(src.immediate());
-  return src.isRegister(RegisterKind::vgpr);
-}
-
 } // namespace
 
-bool isInlineConstant(int64_t value) {
+bool isInlineConstant(int32_t value) {
   return value >= minInlineInteger && value <= maxInlineInteger;
 }
 
@@ -87,10 +88,6 @@ bool isLegalMov64(RegisterRef dst, Operand src) {
   return kindIsLegal && reg.start % 2 == 0;
 }
 
-bool isEncodableImmediate64(int64_t value) {
-  return isInlineConstant(value) || (value >= 0 && value <= UINT32_MAX);
-}
-
 bool isLegalSalu64Source(Operand src) {
   if (src.isImmediate())
     return isEncodableImmediate64(src.immediate());
@@ -104,9 +101,11 @@ bool isLegalVop3Source64(Operand src) {
   return reg.kind != RegisterKind::agpr && reg.start % 2 == 0;
 }
 
-bool isLegalCndmaskSource(Operand src) { return isVgprOrInlineConstant(src); }
-
-bool isLegalCarryInSource(Operand src) { return isVgprOrInlineConstant(src); }
+bool isVgprOrInlineConstant(Operand src) {
+  if (src.isImmediate())
+    return isInlineConstant(src.immediate());
+  return src.isRegister(RegisterKind::vgpr);
+}
 
 bool isLaneMask(RegisterRef ref) {
   return ref.kind == RegisterKind::sgpr && ref.count == 2 && ref.start % 2 == 0;

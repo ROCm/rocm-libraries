@@ -832,8 +832,8 @@ void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
                    skinnyCols.ref());
     builder.muli32(col.ref(), col.ref(), scalars.ldS.ref());
     builder.addi32(dBase.ref(r), col.ref(), lane.laneBytes.ref());
-    builder.select(dBase.ref(r), sValid.ref(2 * r, 2), dBase.ref(r),
-                   outOfRange);
+    builder.selectb32(dBase.ref(r), sValid.ref(2 * r, 2), dBase.ref(r),
+                      outOfRange);
   }
   for (int t = 0; t < dims.tn; ++t) {
     RegisterRef base = dBase.ref(dims.bm + t);
@@ -851,7 +851,7 @@ void SkinnyGEMMEmitter::fillDataBases(const SetupScalars &scalars,
       builder.muli32(col.ref(), col.ref(), scalars.ldW.ref());
       builder.addi32(base, col.ref(), lane.laneBytes.ref());
     }
-    builder.select(base, valid, base, outOfRange);
+    builder.selectb32(base, valid, base, outOfRange);
   }
   // The persistent launch reuses the lane's bytes every tile.
   if (dims.grid3d)
@@ -872,8 +872,8 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
     builder.addi32(col.ref(), s0.ref(), r);
     scaleRowOffset(builder, row.ref(), col.ref(), scalars.rowGroup.ref());
     builder.addi32(sBase.ref(r), row.ref(), lane.sclOff.ref());
-    builder.select(sBase.ref(r), sValid.ref(2 * r, 2), sBase.ref(r),
-                   outOfRange);
+    builder.selectb32(sBase.ref(r), sValid.ref(2 * r, 2), sBase.ref(r),
+                      outOfRange);
   }
   for (int t = 0; t < dims.tn; ++t) {
     RegisterRef base = sBase.ref(dims.bm + t);
@@ -884,7 +884,7 @@ void SkinnyGEMMEmitter::fillScaleBases(const SetupScalars &scalars,
     builder.cmpi32(Predicate::ult, valid.ref(), col.ref(), wideCols.ref());
     scaleRowOffset(builder, row.ref(), col.ref(), scalars.rowGroup.ref());
     builder.addi32(base, row.ref(), lane.sclOff.ref());
-    builder.select(base, valid.ref(), base, outOfRange);
+    builder.selectb32(base, valid.ref(), base, outOfRange);
   }
 }
 

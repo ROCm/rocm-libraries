@@ -56,7 +56,7 @@ TEST_F(MoveTest, Movb32VectorDestination) {
                      {line("v_mov_b32", text(dst), text(vsrc))});
   expectLinesInOrder(emitMov32(dst.ref(), ssrc),
                      {line("v_mov_b32", text(dst), text(ssrc))});
-  expectLinesInOrder(emitMov32(dst.ref(), 0xFFFFFFFFu),
+  expectLinesInOrder(emitMov32(dst.ref(), -1),
                      {line("v_mov_b32", text(dst), "-1")});
   expectLinesInOrder(emitMov32(dst.ref(), asrc),
                      {line("v_accvgpr_read_b32", text(dst), text(asrc))});
@@ -87,10 +87,6 @@ TEST_F(MoveTest, Movb32InvalidOperandsThrowWithoutEmitting) {
   EXPECT_THROW(builder.movb32(adst.ref(), asrc), std::invalid_argument);
   EXPECT_THROW(builder.movb32(vpair.ref(), vsrc), std::invalid_argument);
   EXPECT_THROW(builder.movb32(sdst.ref(), spair), std::invalid_argument);
-  EXPECT_THROW(builder.movb32(vsrc.ref(), int64_t{1} << 32),
-               std::invalid_argument);
-  EXPECT_THROW(builder.movb32(vsrc.ref(), int64_t{INT32_MIN} - 1),
-               std::invalid_argument);
   EXPECT_EQ(body.toString(), "");
 }
 
@@ -111,12 +107,14 @@ TEST_F(MoveTest, Movb64SingleInstructionImmediates) {
   RegisterRange sdst = builder.allocateSgpr(2, 2);
   RegisterRange vdst = builder.allocateVgpr(2, 2);
   struct Case {
-    int64_t value;
+    int32_t value;
     std::string printed;
   };
+  // A non-inline literal is one 64-bit mov only when it is non-negative, since
+  // the hardware zero-extends it.
   for (const Case &current :
-       {Case{-1, "-1"}, Case{64, "64"}, Case{-16, "-16"},
-        Case{0x80000000LL, "0x80000000"}, Case{0xffffffffLL, "0xffffffff"}}) {
+       {Case{-1, "-1"}, Case{64, "64"}, Case{-16, "-16"}, Case{100, "100"},
+        Case{0x12345, "74565"}, Case{INT32_MAX, "2147483647"}}) {
     SCOPED_TRACE(current.printed);
     std::string scalar = emitMov64(sdst.ref(), current.value);
     expectLinesInOrder(scalar,
@@ -133,18 +131,18 @@ TEST_F(MoveTest, Movb64SplitImmediates) {
   RegisterRange sdst = builder.allocateSgpr(2, 2);
   RegisterRange vdst = builder.allocateVgpr(2, 2);
   RegisterRange adst = builder.allocateAgpr(2, 2);
-  std::string wide = emitMov64(sdst.ref(), INT64_C(0x1234567890abcdef));
-  expectLinesInOrder(wide,
-                     {line("s_mov_b32", text(sdst.ref(0, 1)), "-1867788817"),
-                      line("s_mov_b32", text(sdst.ref(1, 1)), "305419896")});
-  EXPECT_EQ(instructionCount(wide), 2);
+  // A negative literal sign-extends to a high half of -1 and splits.
+  std::string negative = emitMov64(sdst.ref(), -100);
+  expectLinesInOrder(negative, {line("s_mov_b32", text(sdst.ref(0, 1)), "-100"),
+                                line("s_mov_b32", text(sdst.ref(1, 1)), "-1")});
+  EXPECT_EQ(instructionCount(negative), 2);
 
   expectLinesInOrder(emitMov64(vdst.ref(), -17),
                      {line("v_mov_b32", text(vdst.ref(0, 1)), "-17"),
                       line("v_mov_b32", text(vdst.ref(1, 1)), "-1")});
-  expectLinesInOrder(emitMov64(vdst.ref(), INT64_MIN),
-                     {line("v_mov_b32", text(vdst.ref(0, 1)), "0"),
-                      line("v_mov_b32", text(vdst.ref(1, 1)), "-2147483648")});
+  expectLinesInOrder(emitMov64(vdst.ref(), INT32_MIN),
+                     {line("v_mov_b32", text(vdst.ref(0, 1)), "-2147483648"),
+                      line("v_mov_b32", text(vdst.ref(1, 1)), "-1")});
   expectLinesInOrder(emitMov64(adst.ref(), -5),
                      {line("v_accvgpr_write_b32", text(adst.ref(0, 1)), "-5"),
                       line("v_accvgpr_write_b32", text(adst.ref(1, 1)), "-1")});
@@ -203,8 +201,7 @@ TEST_F(MoveTest, Movb64InvalidOperandsThrowWithoutEmitting) {
   EXPECT_THROW(builder.movb64(spair.ref(), vpair), std::invalid_argument);
   EXPECT_THROW(builder.movb64(spair.ref(), apair), std::invalid_argument);
   EXPECT_THROW(builder.movb64(apair.ref(), apair), std::invalid_argument);
-  EXPECT_THROW(builder.movb64(apair.ref(), INT64_C(0x1234567890abcdef)),
-               std::invalid_argument);
+  EXPECT_THROW(builder.movb64(apair.ref(), 0x12345), std::invalid_argument);
   EXPECT_EQ(body.toString(), "");
 }
 

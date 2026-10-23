@@ -39,8 +39,8 @@ const OpCase opCases[] = {
 };
 
 // Immediates that cover inline constants, their edges, literals and wrapping.
-const int64_t immediates[] = {
-    0, 1, -1, 64, 65, -16, -17, INT32_MIN, INT32_MAX, 0x12345678, 0xFFFFFFFFu};
+const int32_t immediates[] = {0,   1,   -1,        64,        65,
+                              -16, -17, INT32_MIN, INT32_MAX, 0x12345678};
 
 class ArithDevice : public testing::Test {
 protected:
@@ -74,7 +74,7 @@ ArithKernelSpec binarySpec(BuilderOp op, InputKind aKind, InputKind bKind,
 
 // Computes dst = input (kind) op immediate, or immediate op input.
 ArithKernelSpec immediateSpec(BuilderOp op, InputKind kind, RegisterKind result,
-                              int64_t immediate, bool immediateFirst) {
+                              int32_t immediate, bool immediateFirst) {
   return {
       {kind},
       result,
@@ -89,7 +89,7 @@ ArithKernelSpec immediateSpec(BuilderOp op, InputKind kind, RegisterKind result,
 
 std::vector<uint32_t> applyImmediate(const OpCase &op,
                                      const std::vector<uint32_t> &words,
-                                     int64_t immediate, bool immediateFirst) {
+                                     int32_t immediate, bool immediateFirst) {
   uint32_t value = static_cast<uint32_t>(immediate);
   std::vector<uint32_t> out;
   for (uint32_t word : words)
@@ -168,7 +168,7 @@ TEST_F(ArithDevice, ImmediateOperands) {
   int groups = groupCount(pairs.a);
   int scalarGroups = static_cast<int>(pairs.a.size());
   for (const OpCase &op : opCases) {
-    for (int64_t immediate : immediates) {
+    for (int32_t immediate : immediates) {
       SCOPED_TRACE(std::string(op.name) + " immediate " +
                    std::to_string(immediate));
       expectArithResults(immediateSpec(op.op, InputKind::lane,
@@ -265,11 +265,11 @@ enum class BPlacement {
   minInt32,
 };
 
-constexpr int64_t inlineA = 7;
-constexpr int64_t inlineB = -5;
-constexpr int64_t literalA = 0x12345;
-constexpr int64_t literalB = 0x54321;
-constexpr int64_t negativeLiteralB = -100;
+constexpr int32_t inlineA = 7;
+constexpr int32_t inlineB = -5;
+constexpr int32_t literalA = 0x12345;
+constexpr int32_t literalB = 0x54321;
+constexpr int32_t negativeLiteralB = -100;
 
 const char *placementName(APlacement placement) {
   switch (placement) {

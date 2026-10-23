@@ -70,11 +70,10 @@ TEST_F(RsrcTest, SgprSize) {
 
 TEST_F(RsrcTest, ImmediateSize) {
   struct Case {
-    int64_t value;
+    int32_t value;
     std::string printed;
   };
-  for (const Case &current :
-       {Case{0, "0"}, Case{308, "308"}, Case{UINT32_MAX, "-1"}}) {
+  for (const Case &current : {Case{0, "0"}, Case{308, "308"}, Case{-1, "-1"}}) {
     SCOPED_TRACE(current.printed);
     std::string out = emitRsrc(dstRef, pointerRef, current.value);
     EXPECT_EQ(movCount(out), 3);
@@ -202,9 +201,6 @@ TEST_F(RsrcTest, InvalidOperandsThrowWithoutEmitting) {
                std::invalid_argument);
   EXPECT_THROW(builder.makeRsrc(dstRef, pointerRef, RegisterRef{sgpr, 30, 2}),
                std::invalid_argument);
-  EXPECT_THROW(builder.makeRsrc(dstRef, pointerRef, -1), std::invalid_argument);
-  EXPECT_THROW(builder.makeRsrc(dstRef, pointerRef, int64_t{1} << 32),
-               std::invalid_argument);
   EXPECT_EQ(body.toString(), "");
 }
 
@@ -225,7 +221,8 @@ TEST_F(RsrcTest, ErrorMessagesNameTheOperation) {
   EXPECT_NE(errorOf(dstRef, RegisterRef{vgpr, 2, 2}, sizeRef).find("sgpr pair"),
             std::string::npos);
   EXPECT_NE(errorOf(dstRef, 0, sizeRef).find("immediate 0"), std::string::npos);
-  EXPECT_NE(errorOf(dstRef, pointerRef, -1).find("makeRsrc size -1"),
+  EXPECT_NE(errorOf(dstRef, pointerRef, RegisterRef{vgpr, 3, 1})
+                .find("makeRsrc size must be a single sgpr"),
             std::string::npos);
 }
 

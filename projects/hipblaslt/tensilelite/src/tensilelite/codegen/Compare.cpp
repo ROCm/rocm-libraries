@@ -22,8 +22,6 @@ using namespace rocm::tensilelite::codegen;
 using detail::copyToTemporary;
 using detail::registerText;
 using detail::Temporaries;
-using detail::toInput;
-using detail::toInput64;
 
 namespace {
 
@@ -43,15 +41,6 @@ void requireDestination(std::string_view op, RegisterRef dst) {
       std::string(op) +
       " needs a destination of 1 sgpr or an sgpr pair at an even index, got " +
       registerText(dst));
-}
-
-Operand validateOperand(std::string_view op, int width, Operand operand) {
-  if (operand.isRegister()) {
-    detail::requireNotAgpr(op, operand.reg());
-    detail::requireRegisterCount(op, operand.reg(), width);
-    return operand;
-  }
-  return width == 1 ? detail::canonicalizeImmediate32(op, operand) : operand;
 }
 
 bool isScalar(Operand a, Operand b) {
@@ -84,38 +73,36 @@ void materialize(IRBuilder &builder, RegisterRef dst, bool invert) {
 
 void createScalarCmp32(IRBuilder &builder, Predicate pred, Operand a,
                        Operand b) {
-  InstructionInput x = toInput(a);
-  InstructionInput y = toInput(b);
   switch (pred) {
   case Predicate::eq:
-    builder.create<rocisa::SCmpEQU32>(x, y);
+    builder.create<rocisa::SCmpEQU32>(a, b);
     return;
   case Predicate::ne:
-    builder.create<rocisa::SCmpLgU32>(x, y);
+    builder.create<rocisa::SCmpLgU32>(a, b);
     return;
   case Predicate::slt:
-    builder.create<rocisa::SCmpLtI32>(x, y);
+    builder.create<rocisa::SCmpLtI32>(a, b);
     return;
   case Predicate::sle:
-    builder.create<rocisa::SCmpLeI32>(x, y);
+    builder.create<rocisa::SCmpLeI32>(a, b);
     return;
   case Predicate::sgt:
-    builder.create<rocisa::SCmpGtI32>(x, y);
+    builder.create<rocisa::SCmpGtI32>(a, b);
     return;
   case Predicate::sge:
-    builder.create<rocisa::SCmpGeI32>(x, y);
+    builder.create<rocisa::SCmpGeI32>(a, b);
     return;
   case Predicate::ult:
-    builder.create<rocisa::SCmpLtU32>(x, y);
+    builder.create<rocisa::SCmpLtU32>(a, b);
     return;
   case Predicate::ule:
-    builder.create<rocisa::SCmpLeU32>(x, y);
+    builder.create<rocisa::SCmpLeU32>(a, b);
     return;
   case Predicate::ugt:
-    builder.create<rocisa::SCmpGtU32>(x, y);
+    builder.create<rocisa::SCmpGtU32>(a, b);
     return;
   case Predicate::uge:
-    builder.create<rocisa::SCmpGeU32>(x, y);
+    builder.create<rocisa::SCmpGeU32>(a, b);
     return;
   }
 }
@@ -123,38 +110,36 @@ void createScalarCmp32(IRBuilder &builder, Predicate pred, Operand a,
 void createVectorCmp32(IRBuilder &builder, Predicate pred, RegisterRef dst,
                        Operand a, Operand b) {
   std::shared_ptr<rocisa::RegisterContainer> mask = dst.container();
-  InstructionInput x = toInput(a);
-  InstructionInput y = toInput(b);
   switch (pred) {
   case Predicate::eq:
-    builder.create<rocisa::VCmpEQU32>(mask, x, y);
+    builder.create<rocisa::VCmpEQU32>(mask, a, b);
     return;
   case Predicate::ne:
-    builder.create<rocisa::VCmpNeU32>(mask, x, y);
+    builder.create<rocisa::VCmpNeU32>(mask, a, b);
     return;
   case Predicate::slt:
-    builder.create<rocisa::VCmpLtI32>(mask, x, y);
+    builder.create<rocisa::VCmpLtI32>(mask, a, b);
     return;
   case Predicate::sle:
-    builder.create<rocisa::VCmpLeI32>(mask, x, y);
+    builder.create<rocisa::VCmpLeI32>(mask, a, b);
     return;
   case Predicate::sgt:
-    builder.create<rocisa::VCmpGTI32>(mask, x, y);
+    builder.create<rocisa::VCmpGTI32>(mask, a, b);
     return;
   case Predicate::sge:
-    builder.create<rocisa::VCmpGEI32>(mask, x, y);
+    builder.create<rocisa::VCmpGEI32>(mask, a, b);
     return;
   case Predicate::ult:
-    builder.create<rocisa::VCmpLtU32>(mask, x, y);
+    builder.create<rocisa::VCmpLtU32>(mask, a, b);
     return;
   case Predicate::ule:
-    builder.create<rocisa::VCmpLeU32>(mask, x, y);
+    builder.create<rocisa::VCmpLeU32>(mask, a, b);
     return;
   case Predicate::ugt:
-    builder.create<rocisa::VCmpGtU32>(mask, x, y);
+    builder.create<rocisa::VCmpGtU32>(mask, a, b);
     return;
   case Predicate::uge:
-    builder.create<rocisa::VCmpGEU32>(mask, x, y);
+    builder.create<rocisa::VCmpGEU32>(mask, a, b);
     return;
   }
 }
@@ -162,38 +147,36 @@ void createVectorCmp32(IRBuilder &builder, Predicate pred, RegisterRef dst,
 void createVectorCmp64(IRBuilder &builder, Predicate pred, RegisterRef dst,
                        Operand a, Operand b) {
   std::shared_ptr<rocisa::RegisterContainer> mask = dst.container();
-  InstructionInput x = toInput(a);
-  InstructionInput y = toInput(b);
   switch (pred) {
   case Predicate::eq:
-    builder.create<rocisa::VCmpEQU64>(mask, x, y);
+    builder.create<rocisa::VCmpEQU64>(mask, a, b);
     return;
   case Predicate::ne:
-    builder.create<rocisa::VCmpNeU64>(mask, x, y);
+    builder.create<rocisa::VCmpNeU64>(mask, a, b);
     return;
   case Predicate::slt:
-    builder.create<rocisa::VCmpLtI64>(mask, x, y);
+    builder.create<rocisa::VCmpLtI64>(mask, a, b);
     return;
   case Predicate::sle:
-    builder.create<rocisa::VCmpLeI64>(mask, x, y);
+    builder.create<rocisa::VCmpLeI64>(mask, a, b);
     return;
   case Predicate::sgt:
-    builder.create<rocisa::VCmpGTI64>(mask, x, y);
+    builder.create<rocisa::VCmpGTI64>(mask, a, b);
     return;
   case Predicate::sge:
-    builder.create<rocisa::VCmpGEI64>(mask, x, y);
+    builder.create<rocisa::VCmpGEI64>(mask, a, b);
     return;
   case Predicate::ult:
-    builder.create<rocisa::VCmpLtU64>(mask, x, y);
+    builder.create<rocisa::VCmpLtU64>(mask, a, b);
     return;
   case Predicate::ule:
-    builder.create<rocisa::VCmpLeU64>(mask, x, y);
+    builder.create<rocisa::VCmpLeU64>(mask, a, b);
     return;
   case Predicate::ugt:
-    builder.create<rocisa::VCmpGtU64>(mask, x, y);
+    builder.create<rocisa::VCmpGtU64>(mask, a, b);
     return;
   case Predicate::uge:
-    builder.create<rocisa::VCmpGEU64>(mask, x, y);
+    builder.create<rocisa::VCmpGEU64>(mask, a, b);
     return;
   }
 }
@@ -248,9 +231,9 @@ void emitScalarEquality64(IRBuilder &builder, Predicate pred, RegisterRef dst,
   if (!gfx9::isLegalSop2(a, b))
     b = copyToTemporary(builder, RegisterKind::sgpr, 2, b, temps);
   if (pred == Predicate::eq)
-    builder.create<rocisa::SCmpEQU64>(toInput64(a), toInput64(b));
+    builder.create<rocisa::SCmpEQU64>(a, b);
   else
-    builder.create<rocisa::SCmpLgU64>(toInput64(a), toInput64(b));
+    builder.create<rocisa::SCmpLgU64>(a, b);
   materialize(builder, dst, /*invert=*/false);
 }
 
@@ -290,12 +273,11 @@ OrderedForm orderedForm(Predicate pred) {
 // s_xor_b32 writes SCC, so it must precede the borrow chain.
 Operand biasHigh(IRBuilder &builder, Operand high, Temporaries &temps) {
   if (high.isImmediate()) {
-    uint32_t flipped = static_cast<uint32_t>(high.immediate()) ^ 0x80000000u;
-    return Operand(int64_t{static_cast<int32_t>(flipped)});
+    return Operand(static_cast<int32_t>(
+        static_cast<uint32_t>(high.immediate()) ^ 0x80000000u));
   }
   RegisterRange biased = builder.allocateSgpr(1);
-  builder.create<rocisa::SXorB32>(biased.container(), toInput(high),
-                                  toInput(Operand(int64_t{signBit})));
+  builder.create<rocisa::SXorB32>(biased.container(), high, Operand(signBit));
   temps.push_back(std::move(biased));
   return Operand(temps.back());
 }
@@ -310,11 +292,9 @@ void emitBorrowChain(IRBuilder &builder, Operand x, Operand y, bool isSigned,
     yHigh = biasHigh(builder, yHigh, temps);
   }
   RegisterRange diff = builder.allocateSgpr(1);
-  builder.create<rocisa::SSubU32>(diff.container(),
-                                  toInput(detail::operandHalf(x, 0)),
-                                  toInput(detail::operandHalf(y, 0)));
-  builder.create<rocisa::SSubBU32>(diff.container(), toInput(xHigh),
-                                   toInput(yHigh));
+  builder.create<rocisa::SSubU32>(diff.container(), detail::operandHalf(x, 0),
+                                  detail::operandHalf(y, 0));
+  builder.create<rocisa::SSubBU32>(diff.container(), xHigh, yHigh);
 }
 
 // dst is written only by the final s_cselect, after every operand was read, so
@@ -344,8 +324,8 @@ void emitCompare(IRBuilder &builder, int width, Predicate pred, RegisterRef dst,
                  Operand a, Operand b) {
   std::string_view op = opName(width);
   requireDestination(op, dst);
-  a = validateOperand(op, width, a);
-  b = validateOperand(op, width, b);
+  detail::requireOperand(op, a, width);
+  detail::requireOperand(op, b, width);
   requireScalarForUniformBool(op, dst, a, b);
   if (isScalar(a, b)) {
     if (width == 1)

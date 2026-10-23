@@ -27,17 +27,10 @@ constexpr RegisterKind sgpr = RegisterKind::sgpr;
 constexpr RegisterKind vgpr = RegisterKind::vgpr;
 constexpr RegisterKind agpr = RegisterKind::agpr;
 
-const int64_t immediates32[] = {0, -1, 64, 65, INT32_MIN, 0x12345678};
-const int64_t immediates64[] = {INT64_C(0x1234567890abcdef),
-                                -1,
-                                0x80000000LL,
-                                0xffffffffLL,
-                                -17,
-                                -16,
-                                64,
-                                65,
-                                INT64_MIN,
-                                INT64_MAX};
+const int32_t immediates32[] = {0, -1, 64, 65, INT32_MIN, 0x12345678};
+// A pair immediate is sign-extended to 64 bits.
+const int32_t immediates64[] = {
+    0, 1, -1, 64, 65, -16, -17, INT32_MIN, INT32_MAX, 0x12345678, -0x12345678};
 
 class MoveDevice : public testing::Test {
 protected:
@@ -90,7 +83,7 @@ TEST_F(MoveDevice, Movb32UniformToVgprAndSgpr) {
 }
 
 TEST_F(MoveDevice, Movb32Immediates) {
-  for (int64_t immediate : immediates32) {
+  for (int32_t immediate : immediates32) {
     SCOPED_TRACE(immediate);
     ArithEmitter emit = [immediate](IRBuilder &builder, RegisterRef dst,
                                     const std::vector<RegisterRef> &) {
@@ -162,7 +155,7 @@ RegisterRange allocatePair(IRBuilder &builder, RegisterKind kind) {
 }
 
 TEST_F(MoveDevice, Movb64Immediates) {
-  for (int64_t immediate : immediates64) {
+  for (int32_t immediate : immediates64) {
     for (RegisterKind kind : {sgpr, vgpr}) {
       SCOPED_TRACE("immediate " + std::to_string(immediate) +
                    (kind == sgpr ? " to sgpr pair" : " to vgpr pair"));
@@ -173,10 +166,11 @@ TEST_F(MoveDevice, Movb64Immediates) {
         builder.movb64(ref, immediate);
         return PairResult{std::move(pair), ref};
       };
-      // The expected halves come from the host value, which proves that
-      // literals are zero-extended and inline constants sign-extended.
-      uint32_t low = static_cast<uint32_t>(immediate);
-      uint32_t high = static_cast<uint32_t>(immediate >> 32);
+      // The expected halves come from the sign-extended host value, which
+      // proves that a negative literal is split and not zero-extended.
+      int64_t extended = immediate;
+      uint32_t low = static_cast<uint32_t>(extended);
+      uint32_t high = static_cast<uint32_t>(extended >> 32);
       size_t words = kind == sgpr ? 3 : 2 * arithWorkgroupSize;
       expectPairResults({}, kind, emit, kind == sgpr ? 3 : 2, {},
                         std::vector<uint32_t>(words, low),
@@ -353,11 +347,10 @@ TEST(MoveAssembly, AllPlacementsAssemble) {
                   return registerSource(srcKind, s, v, a, width, srcOffset);
                 },
                 counts);
-        std::vector<int64_t> values{7, -5, 0x12345, 0xffffffffLL};
+        std::vector<int32_t> values{7, -5, 0x12345, -1};
         if (width == 2)
-          values.insert(values.end(), {INT64_C(0x1234567890abcdef), -17,
-                                       0x80000000LL, INT64_MIN});
-        for (int64_t value : values)
+          values.insert(values.end(), {-17, INT32_MIN, INT32_MAX});
+        for (int32_t value : values)
           assemblePlacement(
               dstKind, width, offset,
               [=](RegisterRange &, RegisterRange &, RegisterRange &) {

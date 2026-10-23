@@ -22,7 +22,6 @@ using namespace rocm::tensilelite::codegen;
 using detail::copyToTemporary;
 using detail::legalizeVop3Sources;
 using detail::Temporaries;
-using detail::toInput;
 
 namespace {
 
@@ -41,45 +40,17 @@ std::string_view opName(BinaryOp op, int width) {
   throw std::invalid_argument("invalid binary op");
 }
 
-void requireRegister(BinaryOp op, int width, RegisterRef ref) {
-  detail::requireNotAgpr(opName(op, width), ref);
-  detail::requireRegisterCount(opName(op, width), ref, width);
-}
-
-// A 64-bit immediate is any int64 value, so only registers need checking.
-Operand validateOperand(BinaryOp op, int width, Operand operand) {
-  if (operand.isRegister())
-    requireRegister(op, width, operand.reg());
-  if (width == 2)
-    return operand;
-  return detail::canonicalizeImmediate32(opName(op, width), operand);
-}
-
-void requireScalarSources(BinaryOp op, int width, RegisterRef dst, Operand a,
-                          Operand b) {
-  if (dst.kind != RegisterKind::sgpr)
-    return;
-  for (Operand source : {a, b}) {
-    if (!source.isRegister(RegisterKind::vgpr))
-      continue;
-    throw std::invalid_argument(
-        std::string(opName(op, width)) + " cannot write sgpr destination " +
-        detail::registerText(dst) + " from vgpr operand " +
-        detail::registerText(source.reg()));
-  }
-}
-
 void createSalu(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                 Operand b) {
   switch (op) {
   case BinaryOp::add:
-    builder.create<rocisa::SAddU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::SAddU32>(dst.container(), a, b);
     return;
   case BinaryOp::sub:
-    builder.create<rocisa::SSubU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::SSubU32>(dst.container(), a, b);
     return;
   case BinaryOp::mul:
-    builder.create<rocisa::SMulI32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::SMulI32>(dst.container(), a, b);
     return;
   }
 }
@@ -88,13 +59,13 @@ void createValu(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                 Operand b) {
   switch (op) {
   case BinaryOp::add:
-    builder.create<rocisa::VAddU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::VAddU32>(dst.container(), a, b);
     return;
   case BinaryOp::sub:
-    builder.create<rocisa::VSubU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::VSubU32>(dst.container(), a, b);
     return;
   case BinaryOp::mul:
-    builder.create<rocisa::VMulLOU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::VMulLOU32>(dst.container(), a, b);
     return;
   }
 }
@@ -124,8 +95,7 @@ void rewriteSubImmediate(BinaryOp &op, Operand &b) {
   if (op != BinaryOp::sub || !b.isImmediate())
     return;
   op = BinaryOp::add;
-  uint32_t negated = 0u - static_cast<uint32_t>(b.immediate());
-  b = Operand(int64_t{static_cast<int32_t>(negated)});
+  b = Operand(static_cast<int32_t>(0u - static_cast<uint32_t>(b.immediate())));
 }
 
 void emitVop2(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
@@ -147,10 +117,10 @@ void emitVop2(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
 
 void emitBinaryI32(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                    Operand b) {
-  requireRegister(op, 1, dst);
-  a = validateOperand(op, 1, a);
-  b = validateOperand(op, 1, b);
-  requireScalarSources(op, 1, dst, a, b);
+  detail::requireRegister(opName(op, 1), dst, 1);
+  detail::requireOperand(opName(op, 1), a, 1);
+  detail::requireOperand(opName(op, 1), b, 1);
+  detail::requireScalarSources(opName(op, 1), dst, a, b);
   // Copies go into fresh temporaries before the single op, which reads all its
   // sources before writing dst, so dst may alias a or b.
   if (dst.kind == RegisterKind::sgpr)
@@ -201,12 +171,12 @@ void emitSaluCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
   std::shared_ptr<rocisa::RegisterContainer> lo = dst.slice(0).container();
   std::shared_ptr<rocisa::RegisterContainer> hi = dst.slice(1).container();
   if (op == BinaryOp::add) {
-    builder.create<rocisa::SAddU32>(lo, toInput(a.lo), toInput(b.lo));
-    builder.create<rocisa::SAddCU32>(hi, toInput(a.hi), toInput(b.hi));
+    builder.create<rocisa::SAddU32>(lo, a.lo, b.lo);
+    builder.create<rocisa::SAddCU32>(hi, a.hi, b.hi);
     return;
   }
-  builder.create<rocisa::SSubU32>(lo, toInput(a.lo), toInput(b.lo));
-  builder.create<rocisa::SSubBU32>(hi, toInput(a.hi), toInput(b.hi));
+  builder.create<rocisa::SSubU32>(lo, a.lo, b.lo);
+  builder.create<rocisa::SSubBU32>(hi, a.hi, b.hi);
 }
 
 void emitValuCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
@@ -215,12 +185,12 @@ void emitValuCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
   // The low half is VOP3 because its carry-out is an SGPR pair.
   legalizeVop3Sources(builder, a.lo, b.lo, temps);
   for (Operand *half : {&a.hi, &b.hi})
-    if (!gfx9::isLegalCarryInSource(*half))
+    if (!gfx9::isVgprOrInlineConstant(*half))
       *half = copyToTemporary(builder, RegisterKind::vgpr, 1, *half, temps);
   protectHighHalves(builder, dst, a, b, temps);
   assert(gfx9::isLegalVop3(a.lo, b.lo) && "illegal vop3 operands");
-  assert(gfx9::isLegalCarryInSource(a.hi) && gfx9::isLegalCarryInSource(b.hi) &&
-         "illegal carry-in operands");
+  assert(gfx9::isVgprOrInlineConstant(a.hi) &&
+         gfx9::isVgprOrInlineConstant(b.hi) && "illegal carry-in operands");
   // A temporary pair rather than VCC, because the allocator does not track VCC
   // and using it would clobber a caller's value invisibly.
   RegisterRange carry = builder.allocateSgpr(2, 2);
@@ -228,19 +198,16 @@ void emitValuCarryChain(IRBuilder &builder, BinaryOp op, RegisterRef dst,
   std::shared_ptr<rocisa::RegisterContainer> hi = dst.slice(1).container();
   bool isAdd = op == BinaryOp::add;
   if (isAdd)
-    builder.create<rocisa::VAddCOU32>(lo, carry.container(), toInput(a.lo),
-                                      toInput(b.lo));
+    builder.create<rocisa::VAddCOU32>(lo, carry.container(), a.lo, b.lo);
   else
-    builder.create<rocisa::VSubCoU32>(lo, carry.container(), toInput(a.lo),
-                                      toInput(b.lo));
+    builder.create<rocisa::VSubCoU32>(lo, carry.container(), a.lo, b.lo);
   builder.create<rocisa::SNop>(gfx9::valuWriteSgprReadWaitStates - 1);
-  InstructionInput carryIn = toInput(Operand(carry));
   if (isAdd)
-    builder.create<rocisa::VAddCCOU32>(hi, carry.container(), toInput(a.hi),
-                                       toInput(b.hi), carryIn);
+    builder.create<rocisa::VAddCCOU32>(hi, carry.container(), a.hi, b.hi,
+                                       carry.container());
   else
-    builder.create<rocisa::VSubBCoU32>(hi, carry.container(), toInput(a.hi),
-                                       toInput(b.hi), carryIn);
+    builder.create<rocisa::VSubBCoU32>(hi, carry.container(), a.hi, b.hi,
+                                       carry.container());
 }
 
 bool isLegalProductPair(RegisterKind kind, HalfPair pair) {
@@ -267,16 +234,12 @@ void emitSaluMul64(IRBuilder &builder, RegisterRef dst, Halves a, Halves b) {
   legalizeProductHalves(builder, a, b, RegisterKind::sgpr, temps);
   RegisterRange high = builder.allocateSgpr(1);
   RegisterRange cross = builder.allocateSgpr(1);
-  builder.create<rocisa::SMulHIU32>(high.container(), toInput(a.lo),
-                                    toInput(b.lo));
-  builder.create<rocisa::SMulI32>(cross.container(), toInput(a.lo),
-                                  toInput(b.hi));
+  builder.create<rocisa::SMulHIU32>(high.container(), a.lo, b.lo);
+  builder.create<rocisa::SMulI32>(cross.container(), a.lo, b.hi);
   builder.create<rocisa::SAddU32>(high.container(), high.container(),
                                   cross.container());
-  builder.create<rocisa::SMulI32>(cross.container(), toInput(a.hi),
-                                  toInput(b.lo));
-  builder.create<rocisa::SMulI32>(dst.slice(0).container(), toInput(a.lo),
-                                  toInput(b.lo));
+  builder.create<rocisa::SMulI32>(cross.container(), a.hi, b.lo);
+  builder.create<rocisa::SMulI32>(dst.slice(0).container(), a.lo, b.lo);
   builder.create<rocisa::SAddU32>(dst.slice(1).container(), high.container(),
                                   cross.container());
 }
@@ -290,24 +253,20 @@ void emitValuMul64(IRBuilder &builder, RegisterRef dst, Halves a, Halves b) {
   RegisterRange high = builder.allocateVgpr(1);
   RegisterRange crossA = builder.allocateVgpr(1);
   RegisterRange crossB = builder.allocateVgpr(1);
-  builder.create<rocisa::VMulHIU32>(high.container(), toInput(a.lo),
-                                    toInput(b.lo));
-  builder.create<rocisa::VMulLOU32>(crossA.container(), toInput(a.lo),
-                                    toInput(b.hi));
-  builder.create<rocisa::VMulLOU32>(crossB.container(), toInput(a.hi),
-                                    toInput(b.lo));
-  builder.create<rocisa::VMulLOU32>(dst.slice(0).container(), toInput(a.lo),
-                                    toInput(b.lo));
+  builder.create<rocisa::VMulHIU32>(high.container(), a.lo, b.lo);
+  builder.create<rocisa::VMulLOU32>(crossA.container(), a.lo, b.hi);
+  builder.create<rocisa::VMulLOU32>(crossB.container(), a.hi, b.lo);
+  builder.create<rocisa::VMulLOU32>(dst.slice(0).container(), a.lo, b.lo);
   builder.create<rocisa::VAdd3U32>(dst.slice(1).container(), high.container(),
                                    crossA.container(), crossB.container());
 }
 
 void emitBinaryI64(IRBuilder &builder, BinaryOp op, RegisterRef dst, Operand a,
                    Operand b) {
-  requireRegister(op, 2, dst);
-  a = validateOperand(op, 2, a);
-  b = validateOperand(op, 2, b);
-  requireScalarSources(op, 2, dst, a, b);
+  detail::requireRegister(opName(op, 2), dst, 2);
+  detail::requireOperand(opName(op, 2), a, 2);
+  detail::requireOperand(opName(op, 2), b, 2);
+  detail::requireScalarSources(opName(op, 2), dst, a, b);
   bool scalar = dst.kind == RegisterKind::sgpr;
   if (op == BinaryOp::mul && scalar)
     return emitSaluMul64(builder, dst, halvesOf(a), halvesOf(b));

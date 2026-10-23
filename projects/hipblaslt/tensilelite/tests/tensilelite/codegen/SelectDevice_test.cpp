@@ -32,12 +32,11 @@ using Words = std::vector<uint32_t>;
 using Values = std::vector<uint64_t>;
 using Inputs = std::vector<Words>;
 
-// Immediates that cover inline constants, literals, values that need
-// sign-extension and values with a high word.
-const int64_t immediates32[] = {5, -16, 0x12345678, 0x9abcdef0LL, 64};
-const int64_t immediates64[] = {
-    0xffffffffLL, 64, -17, INT64_MIN, INT64_C(0x1234567890abcdef),
-    0x80000000LL, -1};
+// Immediates that cover inline constants, literals and negative values.
+const int32_t immediates32[] = {5, -16, 0x12345678, -0x65432110, 64};
+// A pair immediate is sign-extended to 64 bits.
+const int32_t immediates64[] = {
+    0, 1, -1, 64, 65, -16, -17, INT32_MIN, INT32_MAX, 0x12345678, -0x12345678};
 
 // How the destination sits relative to the operand registers.
 enum class Placement {
@@ -58,8 +57,8 @@ struct SelectCase {
   bool dstMisaligned = false;
   bool operandsMisaligned = false;
   // An operand with no immediate is a register or a pair from the inputs.
-  std::optional<int64_t> a;
-  std::optional<int64_t> b;
+  std::optional<int32_t> a;
+  std::optional<int32_t> b;
 };
 
 struct SelectData {
@@ -138,7 +137,7 @@ Condition makeCondition(IRBuilder &builder, InputKind kind, RegisterRef input) {
 // Reads an operand: an immediate, one input register, or a pair built from two
 // inputs.
 Operand makeOperand(IRBuilder &builder, const SelectCase &spec,
-                    const std::optional<int64_t> &immediate,
+                    const std::optional<int32_t> &immediate,
                     const std::vector<RegisterRef> &in, size_t &next,
                     std::vector<RegisterRange> &owners) {
   if (immediate)
@@ -152,6 +151,14 @@ Operand makeOperand(IRBuilder &builder, const SelectCase &spec,
   return pair.pair;
 }
 
+void emitSelect(IRBuilder &builder, int width, RegisterRef dst,
+                RegisterRef cond, Operand a, Operand b) {
+  if (width == 1)
+    builder.selectb32(dst, cond, a, b);
+  else
+    builder.selectb64(dst, cond, a, b);
+}
+
 PairRegisters emitSeparate(IRBuilder &builder, const SelectCase &spec,
                            RegisterRef cond,
                            const std::vector<RegisterRef> &in) {
@@ -162,7 +169,7 @@ PairRegisters emitSeparate(IRBuilder &builder, const SelectCase &spec,
   int count = spec.width == 1 ? 1 : spec.dstMisaligned ? 3 : 2;
   RegisterRange range = allocateKind(builder, spec.dstKind, count);
   RegisterRef dst = range.ref(count - spec.width, spec.width);
-  builder.select(dst, cond, a, b);
+  emitSelect(builder, spec.width, dst, cond, a, b);
   return {std::move(range), dst};
 }
 
@@ -192,7 +199,7 @@ PairRegisters emitOverlapping(IRBuilder &builder, const SelectCase &spec,
     builder.movb32(b.slice(0), in[3]);
     builder.movb32(b.slice(1), in[4]);
   }
-  builder.select(dst, cond, a, b);
+  builder.selectb64(dst, cond, a, b);
   return {std::move(range), dst};
 }
 
@@ -211,10 +218,10 @@ size_t inputIndex(const SelectCase &spec, InputKind kind, size_t result) {
 }
 
 uint64_t operandValue(const SelectCase &spec,
-                      const std::optional<int64_t> &immediate,
+                      const std::optional<int32_t> &immediate,
                       const Values &values, size_t result) {
   uint64_t value = immediate
-                       ? static_cast<uint64_t>(*immediate)
+                       ? static_cast<uint64_t>(int64_t{*immediate})
                        : values[inputIndex(spec, spec.operandKind, result)];
   return spec.width == 1 ? static_cast<uint32_t>(value) : value;
 }
@@ -244,7 +251,7 @@ void addInput(KernelInputs &inputs, InputKind kind, const Words &source,
 }
 
 void addOperandInputs(KernelInputs &inputs, const SelectCase &spec,
-                      const std::optional<int64_t> &immediate,
+                      const std::optional<int32_t> &immediate,
                       const Values &values, size_t laneCount,
                       size_t groupCount) {
   if (immediate)
@@ -324,8 +331,8 @@ TEST_F(SelectDevice, VectorWordsWithMaskCondition) {
 
 TEST_F(SelectDevice, WordImmediates) {
   SelectData data = makeData32();
-  for (int64_t a : immediates32) {
-    for (int64_t b : immediates32) {
+  for (int32_t a : immediates32) {
+    for (int32_t b : immediates32) {
       SCOPED_TRACE("a " + std::to_string(a) + ", b " + std::to_string(b));
       for (SelectCase spec :
            {case32(sgpr, uniform, uniform), case32(vgpr, uniform, uniform),
@@ -340,7 +347,7 @@ TEST_F(SelectDevice, WordImmediates) {
 
 TEST_F(SelectDevice, WordImmediateAgainstRegister) {
   SelectData data = makeData32();
-  for (int64_t immediate : immediates32) {
+  for (int32_t immediate : immediates32) {
     SCOPED_TRACE(immediate);
     for (SelectCase spec :
          {case32(sgpr, uniform, uniform), case32(vgpr, lane, lane),
@@ -374,7 +381,7 @@ TEST_F(SelectDevice, ScalarPairImmediates) {
   const int count = static_cast<int>(std::size(immediates64));
   for (bool dstMisaligned : {false, true}) {
     for (int i = 0; i < count; ++i) {
-      int64_t immediate = immediates64[i];
+      int32_t immediate = immediates64[i];
       SCOPED_TRACE("immediate " + std::to_string(immediate) +
                    (dstMisaligned ? " to misaligned dst" : " to aligned dst"));
       SelectCase spec = case64(sgpr, uniform, uniform);
@@ -417,7 +424,7 @@ TEST_F(SelectDevice, VectorPairImmediates) {
   for (InputKind condKind : {lane, uniform}) {
     for (bool dstMisaligned : {false, true}) {
       for (int i = 0; i < count; ++i) {
-        int64_t immediate = immediates64[i];
+        int32_t immediate = immediates64[i];
         SCOPED_TRACE(
             "immediate " + std::to_string(immediate) +
             (condKind == lane ? ", mask cond" : ", uniform bool cond") +

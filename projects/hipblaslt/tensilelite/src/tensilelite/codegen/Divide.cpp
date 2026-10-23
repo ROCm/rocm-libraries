@@ -30,7 +30,6 @@ using namespace rocm::tensilelite::codegen;
 using detail::copyToTemporary;
 using detail::legalizeVop3Sources;
 using detail::Temporaries;
-using detail::toInput;
 
 namespace {
 
@@ -41,30 +40,6 @@ constexpr std::string_view divName = "divsi32";
 // on.
 const InstructionInput reciprocalScale = std::string("0x4f7ffffe");
 
-void requireRegister(RegisterRef ref) {
-  detail::requireNotAgpr(divName, ref);
-  detail::requireRegisterCount(divName, ref, 1);
-}
-
-Operand validateOperand(Operand operand) {
-  if (operand.isRegister())
-    requireRegister(operand.reg());
-  return detail::canonicalizeImmediate32(divName, operand);
-}
-
-void requireScalarSources(RegisterRef dst, Operand a, Operand b) {
-  if (dst.kind != RegisterKind::sgpr)
-    return;
-  for (Operand source : {a, b}) {
-    if (!source.isRegister(RegisterKind::vgpr))
-      continue;
-    throw std::invalid_argument(
-        std::string(divName) + " cannot write sgpr destination " +
-        detail::registerText(dst) + " from vgpr operand " +
-        detail::registerText(source.reg()));
-  }
-}
-
 // The helpers below pick the SALU or VALU instruction from the kind of dst.
 
 RegisterRange allocate(IRBuilder &builder, RegisterKind kind) {
@@ -74,33 +49,31 @@ RegisterRange allocate(IRBuilder &builder, RegisterKind kind) {
 
 void createXor(IRBuilder &builder, RegisterRef dst, Operand a, Operand b) {
   if (dst.kind == RegisterKind::sgpr)
-    builder.create<rocisa::SXorB32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::SXorB32>(dst.container(), a, b);
   else
-    builder.create<rocisa::VXorB32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::VXorB32>(dst.container(), a, b);
 }
 
 void createAShr(IRBuilder &builder, RegisterRef dst, Operand src, int shift) {
   if (dst.kind == RegisterKind::sgpr)
-    builder.create<rocisa::SAShiftRightI32>(dst.container(), shift,
-                                            toInput(src));
+    builder.create<rocisa::SAShiftRightI32>(dst.container(), shift, src);
   else
-    builder.create<rocisa::VAShiftRightI32>(dst.container(), shift,
-                                            toInput(src), "");
+    builder.create<rocisa::VAShiftRightI32>(dst.container(), shift, src, "");
 }
 
 // The inline constant in src0 keeps the VOP2 form legal.
 void createOrOne(IRBuilder &builder, RegisterRef dst, Operand src) {
   if (dst.kind == RegisterKind::sgpr)
-    builder.create<rocisa::SOrB32>(dst.container(), toInput(src), 1);
+    builder.create<rocisa::SOrB32>(dst.container(), src, 1);
   else
-    builder.create<rocisa::VOrB32>(dst.container(), 1, toInput(src));
+    builder.create<rocisa::VOrB32>(dst.container(), 1, src);
 }
 
 void createMulHi(IRBuilder &builder, RegisterRef dst, Operand a, Operand b) {
   if (dst.kind == RegisterKind::sgpr)
-    builder.create<rocisa::SMulHIU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::SMulHIU32>(dst.container(), a, b);
   else
-    builder.create<rocisa::VMulHIU32>(dst.container(), toInput(a), toInput(b));
+    builder.create<rocisa::VMulHIU32>(dst.container(), a, b);
 }
 
 // Readfirstlane is undefined with exec == 0, hence the documented precondition
@@ -130,7 +103,7 @@ RegisterRange absoluteValue(IRBuilder &builder, RegisterKind kind, Operand x) {
   }
   builder.subi32(magnitude.ref(), 0, x);
   // x in src0 keeps the VGPR in src1.
-  builder.create<rocisa::VMaxI32>(magnitude.container(), toInput(x),
+  builder.create<rocisa::VMaxI32>(magnitude.container(), x,
                                   magnitude.container());
   return magnitude;
 }
@@ -157,7 +130,7 @@ Magnitudes splitSigns(IRBuilder &builder, RegisterKind kind, Operand a,
 RegisterRange scaledReciprocal(IRBuilder &builder, RegisterRef divisor,
                                RegisterRef negDivisor) {
   RegisterRange value = builder.allocateVgpr(1);
-  builder.create<rocisa::VCvtU32toF32>(value.container(), toInput(divisor));
+  builder.create<rocisa::VCvtU32toF32>(value.container(), divisor.container());
   builder.create<rocisa::VRcpIFlagF32>(value.container(), value.container());
   // The one independent instruction between the reciprocal and its reader
   // covers the transcendental result hazard.
@@ -207,7 +180,7 @@ Correction prepareCorrection(IRBuilder &builder, RegisterRef q, RegisterRef r,
 void correctQuotientScalar(IRBuilder &builder, RegisterRef q, RegisterRef r,
                            RegisterRef divisor, bool updateRemainder) {
   Correction c = prepareCorrection(builder, q, r, divisor, updateRemainder);
-  builder.create<rocisa::SCmpGeU32>(toInput(r), toInput(divisor));
+  builder.create<rocisa::SCmpGeU32>(r.container(), divisor.container());
   builder.create<rocisa::SCSelectB32>(q.container(), c.next.container(),
                                       q.container());
   if (updateRemainder)
@@ -220,9 +193,9 @@ void correctQuotientVector(IRBuilder &builder, RegisterRef q, RegisterRef r,
   Correction c = prepareCorrection(builder, q, r, divisor, updateRemainder);
   RegisterRange mask = builder.allocateSgpr(2, 2);
   builder.cmpi32(Predicate::uge, mask.ref(), r, divisor);
-  builder.select(q, mask.ref(), c.next, q);
+  builder.selectb32(q, mask.ref(), c.next, q);
   if (updateRemainder)
-    builder.select(r, mask.ref(), *c.reduced, r);
+    builder.selectb32(r, mask.ref(), *c.reduced, r);
 }
 
 // One LLVM correction step: if r >= divisor then q += 1 and r -= divisor.
@@ -286,10 +259,10 @@ FastEstimate estimateQuotient(IRBuilder &builder, Operand a, Operand b) {
   RegisterRange fa = builder.allocateVgpr(1);
   RegisterRange quotient = builder.allocateVgpr(1);
   RegisterRange mask = builder.allocateSgpr(2, 2);
-  builder.create<rocisa::VCvtI32toF32>(fb.container(), toInput(b));
+  builder.create<rocisa::VCvtI32toF32>(fb.container(), b);
   builder.create<rocisa::VRcpIFlagF32>(fq.container(), fb.container());
   // Independent of the reciprocal, so it gives the result its wait state.
-  builder.create<rocisa::VCvtI32toF32>(fa.container(), toInput(a));
+  builder.create<rocisa::VCvtI32toF32>(fa.container(), a);
   builder.create<rocisa::VMulF32>(fq.container(), fa.container(),
                                   fq.container());
   // Truncates toward zero.
@@ -314,7 +287,7 @@ void finishFastVector(IRBuilder &builder, RegisterRef dst,
                       const FastEstimate &estimate, const RegisterRange &sign) {
   builder.create<rocisa::SNop>(gfx9::valuWriteSgprReadWaitStates - 1);
   RegisterRange correction = builder.allocateVgpr(1);
-  builder.select(correction.ref(), estimate.needsCorrection.ref(), sign, 0);
+  builder.selectb32(correction.ref(), estimate.needsCorrection.ref(), sign, 0);
   builder.addi32(dst, estimate.quotient, correction);
 }
 
@@ -328,8 +301,8 @@ void finishFastScalar(IRBuilder &builder, RegisterRef dst,
   builder.create<rocisa::SAndB64>(mask.container(), mask.container(),
                                   std::make_shared<rocisa::EXEC>());
   RegisterRange correction = builder.allocateSgpr(1);
-  builder.create<rocisa::SCSelectB32>(correction.container(),
-                                      toInput(Operand(sign)), 0);
+  builder.create<rocisa::SCSelectB32>(correction.container(), sign.container(),
+                                      0);
   builder.addi32(dst, q, correction);
 }
 
@@ -352,10 +325,10 @@ void emitFast(IRBuilder &builder, RegisterRef dst, Operand a, Operand b) {
 } // namespace
 
 void IRBuilder::divsi32(RegisterRef dst, Operand a, Operand b, bool useIEEE) {
-  requireRegister(dst);
-  a = validateOperand(a);
-  b = validateOperand(b);
-  requireScalarSources(dst, a, b);
+  detail::requireRegister(divName, dst, 1);
+  detail::requireOperand(divName, a, 1);
+  detail::requireOperand(divName, b, 1);
+  detail::requireScalarSources(divName, dst, a, b);
   if (useIEEE)
     return emitExact(*this, dst, a, b);
   emitFast(*this, dst, a, b);

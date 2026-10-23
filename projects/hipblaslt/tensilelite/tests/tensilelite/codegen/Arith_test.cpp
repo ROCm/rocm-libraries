@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace {
 
@@ -21,8 +22,8 @@ using namespace rocm::tensilelite::codegen::test;
 
 using BuilderOp = void (IRBuilder::*)(RegisterRef, Operand, Operand);
 
-constexpr int64_t literalA = 0x12345;
-constexpr int64_t literalB = 0x54321;
+constexpr int32_t literalA = 0x12345;
+constexpr int32_t literalB = 0x54321;
 constexpr const char *literalAText = "74565";
 
 class ArithTest : public BuilderTest {
@@ -136,12 +137,12 @@ TEST_F(ArithTest, InlineConstantsNeedNoCopy) {
   RegisterRange dst = builder.allocateVgpr(1);
   RegisterRange v1 = builder.allocateVgpr(1);
   struct Case {
-    int64_t value;
+    int32_t value;
     std::string printed;
     int copies;
   };
   for (const Case &current :
-       {Case{64, "64", 0}, Case{-16, "-16", 0}, Case{0xFFFFFFFFu, "-1", 0},
+       {Case{64, "64", 0}, Case{-16, "-16", 0}, Case{-1, "-1", 0},
         Case{65, "65", 1}, Case{-17, "-17", 1}}) {
     SCOPED_TRACE(current.printed);
     std::string out = emitMul(dst.ref(), v1, current.value);
@@ -245,10 +246,6 @@ TEST_F(ArithTest, InvalidOperandsThrowWithoutEmitting) {
   EXPECT_THROW(builder.addi32(vdst.ref(), s1, acc), std::invalid_argument);
   EXPECT_THROW(builder.addi32(pair.ref(), v1, s1), std::invalid_argument);
   EXPECT_THROW(builder.addi32(vdst.ref(), pair, s1), std::invalid_argument);
-  EXPECT_THROW(builder.addi32(vdst.ref(), v1, int64_t{1} << 32),
-               std::invalid_argument);
-  EXPECT_THROW(builder.addi32(vdst.ref(), v1, int64_t{INT32_MIN} - 1),
-               std::invalid_argument);
   EXPECT_EQ(body.toString(), "");
   EXPECT_EQ(allocator.highWaterMark(RegisterKind::vgpr), 4);
 }
@@ -256,14 +253,16 @@ TEST_F(ArithTest, InvalidOperandsThrowWithoutEmitting) {
 TEST_F(ArithTest, BoundaryImmediatesAreAccepted) {
   RegisterRange vdst = builder.allocateVgpr(1);
   RegisterRange v1 = builder.allocateVgpr(1);
-  EXPECT_NO_THROW(builder.addi32(vdst.ref(), v1, int64_t{UINT32_MAX}));
-  EXPECT_NO_THROW(builder.addi32(vdst.ref(), v1, int64_t{INT32_MIN}));
+  EXPECT_NO_THROW(builder.addi32(vdst.ref(), v1, INT32_MIN));
+  EXPECT_NO_THROW(builder.addi32(vdst.ref(), v1, INT32_MAX));
 }
 
 TEST(OperandTest, ConstructsFromRegisters) {
   Target target = Target::get("gfx950");
   RegisterAllocator allocator(target);
+  RegisterRange scalar = allocator.allocate(RegisterKind::sgpr, 1);
   RegisterRange range = allocator.allocate(RegisterKind::vgpr, 2);
+  RegisterRange accumulators = allocator.allocate(RegisterKind::agpr, 4);
   Operand fromRange(range);
   EXPECT_TRUE(fromRange.isRegister());
   EXPECT_TRUE(fromRange.isRegister(RegisterKind::vgpr));
@@ -273,6 +272,16 @@ TEST(OperandTest, ConstructsFromRegisters) {
 
   Operand fromRef(range.ref(1));
   EXPECT_EQ(fromRef.reg(), (RegisterRef{RegisterKind::vgpr, 1, 1}));
+
+  // The register is read back from its container for every kind and width.
+  Operand fromScalar(scalar);
+  EXPECT_TRUE(fromScalar.isRegister(RegisterKind::sgpr));
+  EXPECT_FALSE(fromScalar.isRegister(RegisterKind::agpr));
+  EXPECT_EQ(fromScalar.reg(), scalar.ref());
+  Operand fromAccumulators(accumulators);
+  EXPECT_TRUE(fromAccumulators.isRegister(RegisterKind::agpr));
+  EXPECT_FALSE(fromAccumulators.isRegister(RegisterKind::vgpr));
+  EXPECT_EQ(fromAccumulators.reg(), accumulators.ref());
 }
 
 TEST(OperandTest, ConstructsFromIntegers) {
@@ -281,9 +290,17 @@ TEST(OperandTest, ConstructsFromIntegers) {
   EXPECT_FALSE(fromInt.isRegister());
   EXPECT_FALSE(fromInt.isRegister(RegisterKind::vgpr));
   EXPECT_EQ(fromInt.immediate(), 5);
-  EXPECT_EQ(Operand(0xFFFFFFFFu).immediate(), 4294967295);
-  EXPECT_EQ(Operand(INT32_MIN).immediate(), -2147483648LL);
-  EXPECT_EQ(Operand(int64_t{1} << 40).immediate(), int64_t{1} << 40);
+  EXPECT_EQ(Operand(-1).immediate(), -1);
+  EXPECT_EQ(Operand(INT32_MIN).immediate(), INT32_MIN);
+  EXPECT_EQ(Operand(INT32_MAX).immediate(), INT32_MAX);
 }
+
+// Wide and unsigned integers are rejected at compile time, so a constant never
+// truncates silently.
+static_assert(!std::is_constructible_v<Operand, int64_t>);
+static_assert(!std::is_constructible_v<Operand, uint32_t>);
+static_assert(!std::is_constructible_v<Operand, uint64_t>);
+static_assert(std::is_constructible_v<Operand, int32_t>);
+static_assert(sizeof(Operand) == sizeof(InstructionInput));
 
 } // namespace

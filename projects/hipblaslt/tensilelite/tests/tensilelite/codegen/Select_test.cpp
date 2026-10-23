@@ -19,7 +19,7 @@ namespace {
 using namespace rocm::tensilelite::codegen;
 using namespace rocm::tensilelite::codegen::test;
 
-constexpr int64_t literal32 = 0x12345678;
+constexpr int32_t literal32 = 0x12345678;
 constexpr const char *literal32Text = "305419896";
 
 // Builds "v_cndmask_b32 dst, src0, src1, mask" as rocisa prints it.
@@ -30,9 +30,15 @@ std::string cndmask(const std::string &dst, const std::string &src0,
 
 class SelectTest : public BuilderTest {
 protected:
+  // Selects the width from dst.
   std::string emitSelect(RegisterRef dst, RegisterRef cond, Operand a,
                          Operand b) {
-    return emitted([&](IRBuilder &local) { local.select(dst, cond, a, b); });
+    return emitted([&](IRBuilder &local) {
+      if (dst.count == 1)
+        local.selectb32(dst, cond, a, b);
+      else
+        local.selectb64(dst, cond, a, b);
+    });
   }
 
   // Asserts that op throws std::invalid_argument and that nothing was emitted
@@ -84,9 +90,9 @@ TEST_F(SelectScalar64Test, AlignedPairs) {
 }
 
 TEST_F(SelectScalar64Test, EncodableImmediatesAreDirect) {
-  std::string out = emitSelect(dst.ref(), cond.ref(), 0xffffffffLL, 64);
+  std::string out = emitSelect(dst.ref(), cond.ref(), INT32_MAX, 64);
   expectLinesInOrder(out,
-                     {line("s_cselect_b64", text(dst), "0xffffffff", "64")});
+                     {line("s_cselect_b64", text(dst), "2147483647", "64")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 0);
   out = emitSelect(dst.ref(), cond.ref(), -16, a);
   expectLinesInOrder(out, {line("s_cselect_b64", text(dst), "-16", text(a))});
@@ -99,18 +105,17 @@ TEST_F(SelectScalar64Test, UnencodableImmediatesAreCopiedBeforeTheTest) {
       out, {line("s_mov_b32", "s8", "-17"), line("s_mov_b32", "s9", "-1"),
             line("s_cmp_lg_u32", text(cond), "0"),
             line("s_cselect_b64", text(dst), "s[8:9]", text(b))});
-  out = emitSelect(dst.ref(), cond.ref(), a, INT64_MIN);
+  out = emitSelect(dst.ref(), cond.ref(), a, INT32_MIN);
   expectLinesInOrder(out,
-                     {line("s_mov_b32", "s8", "0"),
-                      line("s_mov_b32", "s9", "-2147483648"),
+                     {line("s_mov_b32", "s8", "-2147483648"),
+                      line("s_mov_b32", "s9", "-1"),
                       line("s_cmp_lg_u32", text(cond), "0"),
                       line("s_cselect_b64", text(dst), text(a), "s[8:9]")});
-  out = emitSelect(dst.ref(), cond.ref(), INT64_C(0x1234567890abcdef), b);
-  expectLinesInOrder(out,
-                     {line("s_mov_b32", "s8", "-1867788817"),
-                      line("s_mov_b32", "s9", "305419896"),
-                      line("s_cmp_lg_u32", text(cond), "0"),
-                      line("s_cselect_b64", text(dst), "s[8:9]", text(b))});
+  out = emitSelect(dst.ref(), cond.ref(), -100, b);
+  expectLinesInOrder(
+      out, {line("s_mov_b32", "s8", "-100"), line("s_mov_b32", "s9", "-1"),
+            line("s_cmp_lg_u32", text(cond), "0"),
+            line("s_cselect_b64", text(dst), "s[8:9]", text(b))});
 }
 
 TEST_F(SelectScalar64Test, MisalignedOperandPairIsCopied) {
@@ -125,9 +130,9 @@ TEST_F(SelectScalar64Test, MisalignedOperandPairIsCopied) {
 TEST_F(SelectScalar64Test, TwoDistinctLiteralsCopyOne) {
   std::string out = emitSelect(dst.ref(), cond.ref(), 0x12345, 0x54321);
   expectLinesInOrder(out,
-                     {line("s_mov_b64", "s[8:9]", "0x54321"),
+                     {line("s_mov_b64", "s[8:9]", "344865"),
                       line("s_cmp_lg_u32", text(cond), "0"),
-                      line("s_cselect_b64", text(dst), "0x12345", "s[8:9]")});
+                      line("s_cselect_b64", text(dst), "74565", "s[8:9]")});
   EXPECT_EQ(countLinesContaining(out, "s_mov"), 1);
 }
 
@@ -171,9 +176,8 @@ TEST_F(SelectSplitTest, OverlapInBothDirectionsCopiesOneWord) {
 
 TEST_F(SelectSplitTest, ImmediateHalvesWithTwoLiteralsCopyOne) {
   RegisterRange b = builder.allocateSgpr(2, 2);
-  // The high words are two distinct literals.
-  std::string out = emitSelect(dst, cond.ref(), INT64_C(0x1234567800000001),
-                               INT64_C(0x7654321000000002));
+  // The low words are two distinct literals; the high words are the inline 0.
+  std::string out = emitSelect(dst, cond.ref(), 0x12345678, 0x76543210);
   EXPECT_EQ(countLinesContaining(out, "s_mov_b32"), 1);
   EXPECT_EQ(countLinesContaining(out, "s_cselect_b32"), 2);
 }
@@ -233,11 +237,11 @@ TEST_F(SelectVectorTest, Width2TakesHalvesInOrder) {
 TEST_F(SelectVectorTest, Width2SplitsAnImmediate) {
   RegisterRange pairDst = builder.allocateVgpr(2, 2);
   RegisterRange pairB = builder.allocateVgpr(2, 2);
-  // INT64_MIN is the inline 0 and the literal 0x80000000.
-  std::string out = emitSelect(pairDst.ref(), mask.ref(), INT64_MIN, pairB);
+  // INT32_MIN is the literal 0x80000000 and the inline -1.
+  std::string out = emitSelect(pairDst.ref(), mask.ref(), INT32_MIN, pairB);
   expectLinesInOrder(out, {line("v_mov_b32", "v3", "-2147483648"),
-                           cndmask("v4", "v6", "0", text(mask)),
-                           cndmask("v5", "v7", "v3", text(mask))});
+                           cndmask("v4", "v6", "v3", text(mask)),
+                           cndmask("v5", "v7", "-1", text(mask))});
   EXPECT_EQ(countLinesContaining(out, "v_mov"), 1);
 }
 
@@ -290,36 +294,36 @@ TEST_F(SelectVectorTest, InvalidOperandsThrowWithoutEmitting) {
 
   std::string message;
   try {
-    builder.select(dst.ref(), a.ref(), s, s);
+    builder.selectb32(dst.ref(), a.ref(), s, s);
   } catch (const std::invalid_argument &error) {
     message = error.what();
   }
-  EXPECT_EQ(message, "select condition must be an sgpr or an sgpr pair at an "
-                     "even index, got v1");
-  expectRejected([&] { builder.select(dst.ref(), acc.ref(0, 1), s, s); });
-  expectRejected([&] { builder.select(acc.ref(0, 1), s.ref(), s, s); });
-  expectRejected([&] { builder.select(dst.ref(), s.ref(), acc.ref(0, 1), s); });
-  expectRejected([&] { builder.select(sdst.ref(), mask.ref(), s, s); });
-  expectRejected([&] { builder.select(sdst.ref(), s.ref(), a, s); });
-  expectRejected([&] { builder.select(sdst2.ref(), s.ref(), pair, sdst2); });
-  expectRejected([&] { builder.select(dst.ref(), oddMask.ref(1, 2), a, b); });
-  expectRejected([&] { builder.select(dst.ref(), three.ref(), a, b); });
+  EXPECT_EQ(message,
+            "selectb32 condition must be an sgpr or an sgpr pair at an "
+            "even index, got v1");
+  expectRejected([&] { builder.selectb32(dst.ref(), acc.ref(0, 1), s, s); });
+  expectRejected([&] { builder.selectb32(acc.ref(0, 1), s.ref(), s, s); });
+  expectRejected(
+      [&] { builder.selectb32(dst.ref(), s.ref(), acc.ref(0, 1), s); });
+  expectRejected([&] { builder.selectb32(sdst.ref(), mask.ref(), s, s); });
+  expectRejected([&] { builder.selectb32(sdst.ref(), s.ref(), a, s); });
+  expectRejected([&] { builder.selectb64(sdst2.ref(), s.ref(), pair, sdst2); });
+  expectRejected(
+      [&] { builder.selectb32(dst.ref(), oddMask.ref(1, 2), a, b); });
+  expectRejected([&] { builder.selectb32(dst.ref(), three.ref(), a, b); });
   expectRejected([&] {
-    builder.select(RegisterRef{RegisterKind::vgpr, 20, 3}, s.ref(), 5, 6);
+    builder.selectb32(RegisterRef{RegisterKind::vgpr, 20, 3}, s.ref(), 5, 6);
   });
-  expectRejected([&] { builder.select(dst.ref(), s.ref(), pair, b); });
-  expectRejected([&] { builder.select(pair.ref(), s.ref(), a, b); });
-  expectRejected(
-      [&] { builder.select(dst.ref(), s.ref(), a, int64_t{1} << 32); });
-  expectRejected(
-      [&] { builder.select(dst.ref(), s.ref(), a, int64_t{INT32_MIN} - 1); });
+  expectRejected([&] { builder.selectb32(dst.ref(), s.ref(), pair, b); });
+  expectRejected([&] { builder.selectb64(pair.ref(), s.ref(), a, b); });
+  expectRejected([&] { builder.selectb64(dst.ref(), s.ref(), a, b); });
 }
 
 TEST_F(SelectVectorTest, BoundaryImmediatesAreAccepted) {
   RegisterRange pair = builder.allocateVgpr(2, 2);
+  EXPECT_NO_THROW(builder.selectb32(dst.ref(), mask.ref(), -1, INT32_MIN));
   EXPECT_NO_THROW(
-      builder.select(dst.ref(), mask.ref(), int64_t{UINT32_MAX}, INT32_MIN));
-  EXPECT_NO_THROW(builder.select(pair.ref(), mask.ref(), INT64_MIN, INT64_MAX));
+      builder.selectb64(pair.ref(), mask.ref(), INT32_MIN, INT32_MAX));
 }
 
 } // namespace

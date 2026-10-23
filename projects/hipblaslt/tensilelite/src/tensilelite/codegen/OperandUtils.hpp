@@ -11,6 +11,7 @@
 
 #include "instruction/instruction.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,28 +25,21 @@ std::string registerText(RegisterRef ref);
 /// registers.
 void requireRegisterCount(std::string_view opName, RegisterRef ref, int count);
 
-/// Throws std::invalid_argument naming opName if ref is an AGPR.
-void requireNotAgpr(std::string_view opName, RegisterRef ref);
+/// Throws std::invalid_argument naming opName if ref is an AGPR or does not
+/// have exactly count registers.
+void requireRegister(std::string_view opName, RegisterRef ref, int32_t count);
 
-/// Maps an immediate in [INT32_MIN, UINT32_MAX] to its int32 bit pattern, and
-/// returns a register unchanged. Throws std::invalid_argument naming opName if
-/// an immediate does not fit 32 bits.
-Operand canonicalizeImmediate32(std::string_view opName, Operand operand);
+/// requireRegister for a register operand; every immediate is accepted.
+void requireOperand(std::string_view opName, Operand operand, int32_t count);
 
-/// Converts operand to a rocisa instruction input. A register becomes its
-/// container; an immediate must be a canonical 32-bit value.
-InstructionInput toInput(Operand operand);
+/// Throws std::invalid_argument naming opName if dst is an SGPR and a or b is a
+/// VGPR, since there is no implicit readfirstlane.
+void requireScalarSources(std::string_view opName, RegisterRef dst, Operand a,
+                          Operand b);
 
-/// Converts operand to an input of a 64-bit instruction. An
-/// inline constant prints as an int; any other immediate is a 32-bit literal
-/// that the hardware zero-extends, so it prints unsigned, because a negative
-/// spelling would encode the same literal and lose the high word. A non-inline
-/// immediate must lie in [0, UINT32_MAX].
-InstructionInput toInput64(Operand operand);
-
-/// Returns the low (index 0) or high (index 1) 32 bits of a register pair or a
-/// 64-bit immediate. An immediate half is a canonical 32-bit value.
-Operand operandHalf(Operand src, int index);
+/// Returns the low (index 0) or high (index 1) 32 bits of a register pair or of
+/// an immediate sign-extended to 64 bits.
+Operand operandHalf(Operand src, int32_t index);
 
 /// Temporary registers that stay allocated until the instructions reading them
 /// have been emitted.
