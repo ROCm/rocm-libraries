@@ -89,10 +89,13 @@ def test_key_no_internal_args_split_gsu_boundaries(make_state):
     assert keys[-2] != keys[-1]
 
 
-def test_kernel_name_split_gsu_boundary_two_preserves_pinned_typeerror(make_state):
+def test_kernel_name_split_gsu_boundary_two_uses_multi_variant(make_state):
     # GSU=4 alone cannot distinguish `> 1` from a `> 2` boundary mutant.
-    with pytest.raises(TypeError):
-        N.getKernelNameMin(make_state(GlobalSplitU=2), splitGSU=True)
+    split_name = N.getKernelNameMin(make_state(GlobalSplitU=2), splitGSU=True)
+    unit_name = N.getKernelNameMin(make_state(GlobalSplitU=1), splitGSU=True)
+
+    assert "GSUM" in split_name.split("_")
+    assert split_name != unit_name
 
 
 def test_kernel_name_unsplit_gsu_auto_is_masked(make_state):

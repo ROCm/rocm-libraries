@@ -196,7 +196,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
 
 
     if ignoreInternalArgs:
-      if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
+      # In split mode, GSU>1 and auto GSU use the distinct GSUM kernel name.
+      # Decide from the numeric value saved before GlobalSplitU was masked to "M".
+      if gsuBackup == 1 or (not splitGSU and (gsuBackup > 0 or gsuBackup == -1)):
         requiredParametersTemp.discard("GlobalSplitU")
     else:
       requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",

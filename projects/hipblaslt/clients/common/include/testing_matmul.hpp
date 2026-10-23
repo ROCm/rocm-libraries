@@ -7003,8 +7003,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     // Before ROCm 7.1, destroying a stream with unsynchronized work leaks its last command,
     // which keeps that command's buffers alive. A leaked placed buffer leaves a stale VA
-    // reservation that breaks a later hipMemAddressFree at the same address.
-    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+    // reservation that breaks a later hipMemAddressFree at the same address. Only tests that
+    // place a buffer (PlacedRegion) are affected, so only they pay for the synchronization.
+    if(arg.placement[0])
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
