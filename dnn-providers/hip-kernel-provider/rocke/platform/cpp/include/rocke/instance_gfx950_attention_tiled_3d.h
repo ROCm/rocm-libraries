@@ -205,6 +205,11 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
      * can be extended. */
     bool use_wave_page_id_load; /* False */
+    /* Top-left causal (gfx942 tiled 3D only; the gfx950 C++ twin rejects it):
+     * context_len = 0, so the causal limit, the KV-loop prefix bound, the sliding
+     * window and the ALiBi / qq_bias offsets all use the unshifted diagonal.
+     * Name tag "tl", after "wpid". */
+    int causal_top_left; /* 0 (False) */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

@@ -139,6 +139,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
+    s.causal_top_left = 0;
     return s;
 }
 
@@ -274,7 +275,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
      *   "kvswz" if use_kv_lds_swizzle else "",
-     *   "wpid" if use_wave_page_id_load else "")
+     *   "wpid" if use_wave_page_id_load else "",
+     *   "tl" if causal_top_left else "")
      *
      * The whole thing is a positional parts list (NOT flags=...): empty parts
      * are skipped by kernel_name_join. We materialise each part string and feed
@@ -356,6 +358,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_wave_page_id_load)
     {
         parts[np++] = "wpid";
+    }
+    if(s->causal_top_left)
+    {
+        parts[np++] = "tl";
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a

@@ -55,8 +55,8 @@ _UNIFIED_CAPABILITY = Capability(
     ),
     # Unified kernels shift the causal diagonal by the runtime difference
     # between each sequence's KV and query lengths (bottom-right); top-left
-    # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
-    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
+    # cross-length selects the ``causal_top_left`` kernel variant on gfx950 /
+    # gfx942 and the scalar kernel elsewhere (the other tiled gates reject it).
     supports_features=ATTENTION_FEATURES,
 )
 

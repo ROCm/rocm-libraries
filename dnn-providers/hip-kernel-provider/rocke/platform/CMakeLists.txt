@@ -674,6 +674,7 @@ if(ROCKE_INSTALL_TESTS)
     # install tree.
     set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_gfx950_numeric.py"
+        "tests/library/tests/test_attention_unified_mask_gfx950_numeric.py"
         "tests/library/tests/test_extended_parity_attention.py")
     set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
     foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})
@@ -713,6 +714,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
+        "tests/library/tests/test_attention_unified_mask_gfx942_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"

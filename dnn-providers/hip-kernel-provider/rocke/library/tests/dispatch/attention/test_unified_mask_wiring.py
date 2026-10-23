@@ -6,7 +6,7 @@ CPU-only. The unified kernels hard-wired the bottom-right causal diagonal. The m
 now the cuDNN / hipDNN band ``(left = sliding_window, right = right_bound,
 diagonal_alignment)``: top-left alignment, full attention (NO_MASK, the SDPA default in
 cuDNN / FlashAttention / PyTorch) and non-causal windows / lookahead are distinct kernel
-bodies on gfx950 and must never share a kernel name / compile-cache key with the
+bodies on gfx950 and gfx942 and must never share a kernel name / compile-cache key with the
 bottom-right causal one. Covers every unified candidate: ``unified_2d``, ``unified_3d``,
 ``gfx950_d256`` (2D D256 prefill) and ``d256_decode`` (3D D256 decode).
 """
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
-from unittest import mock
 
 import kernels.common.attention_unified as au
 from dispatch.attention import (
@@ -183,20 +182,36 @@ class TestAttentionBand(unittest.TestCase):
             False,
             AttentionBand(128, 0, TL),
         ),
-        # Arches without the band kernels: legacy causal body for NO_MASK, and the
-        # equal-length fold even on the paged family (documented known gap).
-        "gfx942_no_mask_is_legacy_causal": (
+        # gfx942 implements the band as gfx950 does.
+        "gfx942_no_mask_is_full_attention": (
             dict(mask_type=NO_MASK, arch="gfx942"),
+            False,
+            AttentionBand(None, None, BR),
+        ),
+        "gfx942_no_mask_window_is_a_left_only_band": (
+            dict(mask_type=NO_MASK, arch="gfx942", sliding_window=256),
+            False,
+            AttentionBand(256, None, TL),
+        ),
+        "gfx942_top_left_equal_lengths_not_folded": (
+            dict(mask_type=TOP_LEFT, arch="gfx942", seqlen_q=1024, seqlen_k=1024),
+            False,
+            AttentionBand(None, 0, TL),
+        ),
+        # gfx1250 has no band kernels: legacy causal body for NO_MASK, and the
+        # equal-length fold even on the paged family (documented known gap).
+        "gfx1250_no_mask_is_legacy_causal": (
+            dict(mask_type=NO_MASK, arch="gfx1250"),
             False,
             AttentionBand(None, 0, BR),
         ),
-        "gfx942_no_mask_window_is_legacy_causal_window": (
-            dict(mask_type=NO_MASK, arch="gfx942", sliding_window=256),
+        "gfx1250_no_mask_window_is_legacy_causal_window": (
+            dict(mask_type=NO_MASK, arch="gfx1250", sliding_window=256),
             False,
             AttentionBand(256, 0, BR),
         ),
-        "gfx942_top_left_equal_lengths_folds": (
-            dict(mask_type=TOP_LEFT, arch="gfx942", seqlen_q=1024, seqlen_k=1024),
+        "gfx1250_top_left_equal_lengths_folds": (
+            dict(mask_type=TOP_LEFT, arch="gfx1250", seqlen_q=1024, seqlen_k=1024),
             False,
             AttentionBand(None, 0, BR),
         ),
@@ -392,14 +407,15 @@ class TestBandNormalization(unittest.TestCase):
         self.assertEqual(self._band(mask_type=TOP_LEFT, **eq), (True, 0))
         self.assertEqual(self._band(mask_type=BOTTOM_RIGHT, **eq), (False, 0))
 
-    def test_equal_length_top_left_keeps_the_legacy_body_off_gfx950(self):
-        # No top-left kernel on gfx942 / gfx1250: the legacy equal-length shortcut
-        # remains there (right only for uniform lengths; documented limitation).
+    def test_equal_length_top_left_keeps_the_legacy_body_on_gfx1250(self):
+        # No top-left kernel on gfx1250: the legacy equal-length shortcut remains
+        # there (right only for uniform lengths; documented limitation). gfx942 has
+        # the top-left body, so it keeps top-left as gfx950 does.
         eq = dict(seqlen_q=1024, seqlen_k=1024)
-        for arch in ("gfx942", "gfx1250"):
-            self.assertEqual(
-                self._band(mask_type=TOP_LEFT, arch=arch, **eq), (False, 0), arch
-            )
+        self.assertEqual(
+            self._band(mask_type=TOP_LEFT, arch="gfx1250", **eq), (False, 0)
+        )
+        self.assertEqual(self._band(mask_type=TOP_LEFT, arch="gfx942", **eq), (True, 0))
 
     def test_no_mask_is_full_attention(self):
         self.assertEqual(self._band(mask_type=NO_MASK), (False, -1))
@@ -821,72 +837,224 @@ class TestMaskGates(unittest.TestCase):
                 )
 
 
-class TestBandOffGfx950(unittest.TestCase):
-    """The gfx942 / gfx1250 tiled kernels are causal-only. NO_MASK is the request
-    default, so (KNOWN GAP, pinned here) it keeps being served by the existing causal
-    body there; every other band is rejected explicitly."""
+class TestBandOnGfx942(unittest.TestCase):
+    """gfx942's tiled 2D/3D kernels implement the band as gfx950's do: NO_MASK is full
+    attention, top-left / lookahead / non-causal windows are distinct bodies. The
+    4-warp GQA cohorts keep top-left but decline a right bound other than 0, so such
+    a problem builds the generic tiled 2D spec instead."""
 
-    def test_no_mask_requests_keep_the_legacy_body(self):
-        for arch in ("gfx942", "gfx1250"):
-            with self.subTest(arch=arch):
-                self.assertTrue(
-                    _problem(_req(mask_type=NO_MASK, arch=arch)).default_mask
-                )
-                # Legacy convention: a window on the default mask is a causal window.
-                p = _problem(_req(mask_type=NO_MASK, sliding_window=256, arch=arch))
-                self.assertTrue(p.default_mask)
-                self.assertEqual(p.sliding_window, 256)
+    def _gfx942(self, **kw):
+        return _req(**{"arch": "gfx942", "dtype": "fp16", **kw})
 
-    def test_non_causal_bands_are_rejected_with_a_reason(self):
-        for arch in ("gfx942", "gfx1250"):
+    def test_no_mask_is_full_attention(self):
+        p = _problem(self._gfx942(mask_type=NO_MASK))
+        self.assertFalse(p.default_mask)
+        self.assertEqual((p.causal_top_left, p.right_bound), (False, -1))
+        # cuDNN: a window on NO_MASK is a left-only (non-causal) band.
+        p = _problem(self._gfx942(mask_type=NO_MASK, sliding_window=256))
+        self.assertEqual((p.causal_top_left, p.right_bound), (True, -1))
+        self.assertEqual(p.sliding_window, 256)
+        r = dispatch_attention(self._gfx942(mask_type=NO_MASK))
+        self.assertIn("rbu", r.spec.kernel_name().split("_"))
+
+    def test_top_left_cross_length_routes_to_tiled(self):
+        with _GfxArch("gfx942"):
+            for kw in (dict(), dict(seqlen_q=1, seqlen_k=4096)):
+                with self.subTest(**kw):
+                    req = self._gfx942(mask_type=TOP_LEFT, **kw)
+                    r = dispatch_attention(req)
+                    self.assertIn(
+                        r.candidate.spec_id,
+                        ("unified_2d", "unified_3d", "gfx942_dense_pipe"),
+                    )
+                    self.assertTrue(r.spec.causal_top_left)
+                    self.assertIn("tl", r.spec.kernel_name().split("_"))
+                    p = _problem(req)
+                    gate = (
+                        au.supports_native_unified_attention_tiled
+                        if r.spec.path == "2d"
+                        else au.supports_native_unified_attention_3d_tiled
+                    )
+                    ok, why = gate(p, "gfx942")
+                    self.assertTrue(ok, why)
+
+    def test_bands_dispatch_with_their_own_kernel_names(self):
+        bands = {
+            "rbu_window": (dict(mask_type=NO_MASK, sliding_window=256), "rbu"),
+            "rb8": (dict(mask_type=NO_MASK, right_bound=8), "rb8"),
+            "rb8_window": (
+                dict(mask_type=SLIDING_WINDOW, sliding_window=256, right_bound=8),
+                "rb8",
+            ),
+        }
+        names = set()
+        with _GfxArch("gfx942"):
+            for label, (kw, token) in bands.items():
+                with self.subTest(band=label):
+                    r = dispatch_attention(self._gfx942(**kw))
+                    self.assertIn(token, r.spec.kernel_name().split("_"))
+                    names.add(r.spec.kernel_name())
+        self.assertEqual(len(names), len(bands))
+
+    def test_tiled_gates_accept_bands_on_gfx942(self):
+        with _GfxArch("gfx942"):
             for kw in (
-                dict(mask_type=NO_MASK, right_bound=16),
-                dict(mask_type=NO_MASK, sliding_window=256, right_bound=64),
-                dict(mask_type=SLIDING_WINDOW, sliding_window=256),
+                dict(mask_type=NO_MASK),
+                dict(mask_type=NO_MASK, sliding_window=256, right_bound=32),
+                dict(mask_type=NO_MASK, right_bound=8),
+                dict(mask_type=TOP_LEFT, sliding_window=256),
             ):
-                with self.subTest(arch=arch, **kw):
-                    with self.assertRaisesRegex(ValueError, "gfx950 only"):
-                        dispatch_attention(_req(arch=arch, dtype="fp16", **kw))
+                with self.subTest(**kw):
+                    ok, why = au.supports_native_unified_attention_tiled(
+                        _problem(self._gfx942(**kw)), "gfx942"
+                    )
+                    self.assertTrue(ok, why)
+                    ok, why = au.supports_native_unified_attention_3d_tiled(
+                        _problem(self._gfx942(seqlen_q=2, **kw)), "gfx942"
+                    )
+                    self.assertTrue(ok, why)
 
-    def test_a_causal_window_via_the_trio_is_accepted_off_gfx950(self):
-        req = _req(
-            arch="gfx942",
-            dtype="fp16",
-            mask_type=SLIDING_WINDOW,
-            sliding_window=256,
-            right_bound=0,
+    def test_spec_builders_carry_the_band(self):
+        from builders.common import attention_spec_builder as bld
+
+        with _GfxArch("gfx942"):
+            for kw, band in (
+                (dict(mask_type=TOP_LEFT), (True, 0)),
+                (dict(mask_type=NO_MASK), (False, -1)),
+                (dict(mask_type=NO_MASK, sliding_window=256, right_bound=8), (True, 8)),
+            ):
+                for dtype in ("fp16", "bf16"):
+                    with self.subTest(dtype=dtype, **kw):
+                        req = _req(arch="gfx942", dtype=dtype, **kw)
+                        s2 = bld._tiled_spec_from_problem(_problem(req), "gfx942")
+                        self.assertEqual((s2.causal_top_left, s2.right_bound), band)
+                        # seqlen_q=2: one query row would fold full attention
+                        # into bottom-right causal (normalize_band).
+                        s3 = bld._tiled_3d_spec_from_problem(
+                            _problem(replace(req, seqlen_q=2)), "gfx942"
+                        )
+                        self.assertEqual((s3.causal_top_left, s3.right_bound), band)
+            # The default mask builds the exact pre-band spec (fields at default).
+            s = bld._tiled_spec_from_problem(
+                _problem(self._gfx942(mask_type=BOTTOM_RIGHT)), "gfx942"
+            )
+            self.assertEqual((s.causal_top_left, s.right_bound), (False, 0))
+
+    def test_4warp_cohorts_keep_top_left_and_decline_a_right_bound(self):
+        d256 = dict(
+            dtype="bf16",
+            nhead_q=16,
+            nhead_k=2,
+            hdim_q=256,
+            hdim_v=256,
+            seqlen_q=4096,
+            seqlen_k=8192,
         )
-        self.assertEqual(dispatch_attention(req).spec.right_bound, 0)
+        d128_swa = dict(dtype="fp16", sliding_window=256)
+        with _GfxArch("gfx942"):
+            for label, shape in (("d256", d256), ("d128_swa", d128_swa)):
+                with self.subTest(cohort=label):
+                    base = _req(arch="gfx942")
+                    tl = _problem(replace(base, mask_type=TOP_LEFT, **shape))
+                    br = _problem(replace(base, mask_type=BOTTOM_RIGHT, **shape))
+                    self.assertTrue(au._gfx942_4warp_fast(br, "gfx942"))
+                    self.assertTrue(au._gfx942_4warp_fast(tl, "gfx942"))
+                    for right in (-1, 8):
+                        rb = _problem(
+                            replace(base, mask_type=NO_MASK, right_bound=right, **shape)
+                        )
+                        self.assertFalse(au._gfx942_4warp_fast(rb, "gfx942"))
+                        self.assertNotEqual(
+                            au._tiled_cache_key(rb, "gfx942"),
+                            au._tiled_cache_key(br, "gfx942"),
+                        )
 
-    def test_direct_non_default_problems_are_rejected_by_tiled_gates(self):
-        for arch in ("gfx942", "gfx1250"):
-            for over in (
-                dict(causal_top_left=True),
-                dict(right_bound=-1),
-                dict(right_bound=8, sliding_window=64),
-            ):
-                with self.subTest(arch=arch, **over), _GfxArch(arch):
-                    problem = au.UnifiedAttentionProblem(**_problem_kw(**over))
-                    for gate in (
-                        au.supports_native_unified_attention_tiled,
-                        au.supports_native_unified_attention_3d_tiled,
-                    ):
-                        ok, why = gate(problem, arch)
-                        self.assertFalse(ok)
-                        self.assertIn("does not implement", why)
+    def test_fp8_band_routes_to_the_unified_kernels(self):
+        with _GfxArch("gfx942"):
+            req = self._gfx942(
+                dtype="bf16",
+                use_fp8=True,
+                fp8_fnuz=True,
+                mask_type=NO_MASK,
+                sliding_window=256,
+                right_bound=8,
+            )
+            r = dispatch_attention(req)
+            self.assertEqual(r.candidate.spec_id, "unified_2d")
+            name = r.spec.kernel_name().split("_")
+            self.assertIn("fp8fnuz", name)
+            self.assertIn("rb8", name)
 
-    def test_gfx942_dense_pipe_rejects_non_default_masks(self):
+    def test_dense_pipe_serves_the_band(self):
         from dispatch.attention import attention_candidates
 
         cand = next(
             c for c in attention_candidates() if c.name == "attention_gfx942_dense_pipe"
         )
-        req = _req(
-            arch="gfx942", dtype="fp16", mask_type=TOP_LEFT, algorithm="dense_pipe"
-        )
-        self.assertFalse(cand.admits(req)[0])
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
-            self.assertIn("bottom-right", cand._supports(req)[1])
+        shape = dict(batch=2, nhead_q=16, nhead_k=16, seqlen_q=512, seqlen_k=1024)
+        with _GfxArch("gfx942"):
+            for kw, token in (
+                (dict(mask_type=TOP_LEFT), "tl"),
+                (dict(mask_type=NO_MASK), "rbu"),
+                (dict(mask_type=NO_MASK, sliding_window=256, right_bound=16), "rb16"),
+            ):
+                with self.subTest(**kw):
+                    req = self._gfx942(**shape, **kw)
+                    ok, why = cand.admits(req)
+                    self.assertTrue(ok, why)
+                    r = dispatch_attention(req)
+                    self.assertEqual(r.candidate.spec_id, "gfx942_dense_pipe")
+                    self.assertIn(token, r.spec.kernel_name().split("_"))
+            # The default mask keeps its pre-band kernel name, window included.
+            for kw in (dict(), dict(sliding_window=256)):
+                with self.subTest(default_mask=True, **kw):
+                    req = self._gfx942(**shape, mask_type=BOTTOM_RIGHT, **kw)
+                    name = dispatch_attention(req).spec.kernel_name().split("_")
+                    for token in ("tl", "rbu", "sw256"):
+                        self.assertNotIn(token, name)
+
+    def test_a_causal_window_via_the_trio_is_accepted(self):
+        req = self._gfx942(mask_type=SLIDING_WINDOW, sliding_window=256, right_bound=0)
+        self.assertEqual(dispatch_attention(req).spec.right_bound, 0)
+
+
+class TestBandOnGfx1250(unittest.TestCase):
+    """The gfx1250 tiled kernels are causal-only. NO_MASK is the request default, so
+    (KNOWN GAP, pinned here) it keeps being served by the existing causal body there;
+    every other band is rejected explicitly."""
+
+    def test_no_mask_requests_keep_the_legacy_body(self):
+        self.assertTrue(_problem(_req(mask_type=NO_MASK, arch="gfx1250")).default_mask)
+        # Legacy convention: a window on the default mask is a causal window.
+        p = _problem(_req(mask_type=NO_MASK, sliding_window=256, arch="gfx1250"))
+        self.assertTrue(p.default_mask)
+        self.assertEqual(p.sliding_window, 256)
+
+    def test_non_causal_bands_are_rejected_with_a_reason(self):
+        for kw in (
+            dict(mask_type=NO_MASK, right_bound=16),
+            dict(mask_type=NO_MASK, sliding_window=256, right_bound=64),
+            dict(mask_type=SLIDING_WINDOW, sliding_window=256),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "gfx950 and gfx942 only"):
+                    dispatch_attention(_req(arch="gfx1250", dtype="fp16", **kw))
+
+    def test_direct_non_default_problems_are_rejected_by_tiled_gates(self):
+        for over in (
+            dict(causal_top_left=True),
+            dict(right_bound=-1),
+            dict(right_bound=8, sliding_window=64),
+        ):
+            with self.subTest(**over), _GfxArch("gfx1250"):
+                problem = au.UnifiedAttentionProblem(**_problem_kw(**over))
+                for gate in (
+                    au.supports_native_unified_attention_tiled,
+                    au.supports_native_unified_attention_3d_tiled,
+                ):
+                    ok, why = gate(problem, "gfx1250")
+                    self.assertFalse(ok)
+                    self.assertIn("does not implement", why)
 
 
 if __name__ == "__main__":

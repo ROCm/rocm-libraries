@@ -361,20 +361,18 @@ ATTENTION_DIM_VOCABULARY = (
 # ``AttentionBand``; every dispatcher reads that instead of re-deriving the aliases.
 # A candidate that cannot compute the band is excluded by its declared features, so
 # the request fails with a reason instead of being served a different mask.
-# gfx950 implements the whole band in the unified kernels. KNOWN GAP: on the other
-# arches the tiled kernels are bottom-right causal only, so ``normalize_band`` keeps
+# gfx950 and gfx942 implement the whole band in the unified kernels. KNOWN GAP: on
+# gfx1250 the tiled kernels are bottom-right causal only, so ``normalize_band`` keeps
 # serving ``NO_MASK`` (the request default) by that causal body and rejects every
-# other non-causal band. That is the only place the logical mask depends on the arch;
-# the gfx942 tiled / dense kernels implement the full band in the stacked follow-up
-# (#13211), which removes it.
+# other non-causal band. That is the only place the logical mask depends on the arch.
 _BAND_NEEDS_BOUND_ERROR = (
     "mask_type SLIDING_WINDOW names a band: set sliding_window > 0 and/or "
     "right_bound > 0 (use TOP_LEFT_CAUSAL / BOTTOM_RIGHT_CAUSAL for a causal mask "
     "and NO_MASK for full attention)"
 )
-_BAND_GFX950_ONLY_ERROR = (
+_BAND_ARCH_ERROR = (
     "a non-causal attention band (right_bound != 0 with NO_MASK / SLIDING_WINDOW) "
-    "is implemented on gfx950 only"
+    "is implemented on gfx950 and gfx942 only"
 )
 
 # ``full_attention``: no left and no right bound (NO_MASK without a window, more than
@@ -614,7 +612,7 @@ def _has_no_mask_kernel(arch: str) -> bool:
     """Arches whose unified kernels have a top-left body. Elsewhere the tiled kernels
     are bottom-right causal only, so an equal-length top-left request is served by the
     bottom-right body (see ``normalize_band``)."""
-    return arch.strip().lower() == "gfx950"
+    return arch.strip().lower() in ("gfx950", "gfx942")
 
 
 # Arches served by the unified / dense candidates, i.e. the ones ``normalize_band``
@@ -747,7 +745,7 @@ def normalize_band(
                 # KNOWN GAP (see above): the legacy causal body, window included.
                 return AttentionBand(left_bound, 0, Alignment.BOTTOM_RIGHT)
             if right != 0:
-                raise ValueError(_BAND_GFX950_ONLY_ERROR)
+                raise ValueError(_BAND_ARCH_ERROR)
         right_bound = None if right < 0 else right
         align = Alignment.TOP_LEFT if alignment is None else Alignment(int(alignment))
     if left_bound is None and right_bound is None:

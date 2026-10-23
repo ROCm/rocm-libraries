@@ -477,8 +477,35 @@ class UnifiedAttention2DTiledSpec:
     # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
     # path); no-op-guarded to sliding_window==0.
     use_causal_mask_phase_split: bool = False
+    # Top-left causal: the unshifted ``key_pos <= query_pos`` diagonal, with the
+    # query position local to each sequence. Default (False) keeps the paged
+    # bottom-right diagonal ``context_len = seq_len - q_len``; True pins
+    # ``context_len = 0`` so every bound derived from it (per-element mask, tile
+    # skip, phase split, sliding window, ALiBi/qq-bias offsets) follows.
+    # Mirrored in the C++ twin.
+    causal_top_left: bool = False
+    # Right bound of the attention band: key ``k`` is visible to the query at
+    # diagonal position ``d`` iff ``k <= d + right_bound``. 0 (default) is causal,
+    # R > 0 lets a query see R keys ahead of its diagonal, -1 is unbounded (no
+    # upper bound: with ``sliding_window == 0`` that is full attention). ``d`` is
+    # ``context_len + query_pos`` and ``sliding_window`` still bounds ``d - k``, so
+    # ``(sliding_window, right_bound)`` is the cuDNN ``(left, right)`` band relative
+    # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
+    # QQ-bias, whose offsets are defined on the causal diagonal. Python-only (the
+    # C++ twin has no field; its binding rejects a non-zero value), and not
+    # supported by the 4-warp GQA bodies.
+    right_bound: int = 0
 
     def __post_init__(self):
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
+            raise ValueError(
+                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                "(their offsets are defined on the causal diagonal)"
+            )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -989,6 +1016,12 @@ class UnifiedAttention2DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "tl" if self.causal_top_left else "",
+            (
+                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+                if self.right_bound != 0
+                else ""
+            ),
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"wpe{self.waves_per_eu}" if self.waves_per_eu is not None else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
@@ -1603,7 +1636,29 @@ def build_unified_attention_2d_tiled(
     q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    if spec.causal_top_left:
+        context_len = b.const_i32(0)
+    else:
+        context_len = b.sub(seq_len, cur_batch_q_len)
+
+    # Right bound of the band (see the spec field). ``_upper_ok`` is the per-score
+    # compare ``col <= d + right_bound`` (``None`` when unbounded); every site that
+    # derived a causal limit from ``context_len`` adds ``RIGHT`` the same way. All
+    # of them are identical to the pre-existing causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+
+    def _upper_lim(causal_lim):
+        return causal_lim if RIGHT <= 0 else b.add(causal_lim, b.const_i32(RIGHT))
+
+    def _upper_ok(col_abs, causal_lim):
+        if RIGHT < 0:
+            return None
+        return b.cmp_le(col_abs, _upper_lim(causal_lim))
+
+    def _band_row_mask(row_ok, upper_ok, in_prefix):
+        if upper_ok is None:
+            return b.land(row_ok, in_prefix)
+        return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -2221,8 +2276,13 @@ def build_unified_attention_2d_tiled(
 
     # ---------------- KV tile loop bounds ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    if RIGHT < 0:
+        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
+    else:
+        msp_raw = b.add(
+            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
+        )
+        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     if SLIDING_WINDOW > 0:
@@ -2234,7 +2294,10 @@ def build_unified_attention_2d_tiled(
         first_allowed_key = b.add(
             b.sub(b.add(context_len, qb_start_pos), sw_const), b.const_i32(1)
         )
-        last_allowed_key = b.add(context_len, qpos_hi)
+        if RIGHT < 0:
+            last_allowed_key = b.sub(seq_len, b.const_i32(1))
+        else:
+            last_allowed_key = _upper_lim(b.add(context_len, qpos_hi))
         tile_start_raw = b.div(first_allowed_key, b.const_i32(T))
         tile_start = b.select(
             b.cmp_lt(tile_start_raw, b.const_i32(0)), b.const_i32(0), tile_start_raw
@@ -4310,9 +4373,13 @@ def build_unified_attention_2d_tiled(
                         else st_causal_lim_iter
                     )
                     prefix_tail = b.sub(max_seq_prefix_len, b.const_i32(1))
-                    valid_tail = b.select(
-                        b.cmp_lt(causal_lim, prefix_tail), causal_lim, prefix_tail
-                    )
+                    if RIGHT < 0:
+                        valid_tail = prefix_tail
+                    else:
+                        upper_lim = _upper_lim(causal_lim)
+                        valid_tail = b.select(
+                            b.cmp_lt(upper_lim, prefix_tail), upper_lim, prefix_tail
+                        )
                     st_row_half_base = b.mul(lane_half32, b.const_i32(4))
                     # VALU reduction for the per-element mask (algebraically
                     # identical to ``land(row_ok, col_abs <= valid_tail)``):
@@ -4432,9 +4499,9 @@ def build_unified_attention_2d_tiled(
                                     TRANSPOSED_INVARIANT_HOIST or TRANSPOSED_MASK_ONCE
                                 ):
                                     causal_lim = b.add(context_len, qp_r)
-                                causal_ok = b.cmp_le(col_abs, causal_lim)
+                                causal_ok = _upper_ok(col_abs, causal_lim)
                                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                                 if SLIDING_WINDOW > 0:
                                     dist = b.sub(causal_lim, col_abs)
                                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -4649,9 +4716,9 @@ def build_unified_attention_2d_tiled(
                 causal_lim = hoist_causal_lim[reg]
                 for n in range(QK_N_TILES):
                     col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
-                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -4724,9 +4791,9 @@ def build_unified_attention_2d_tiled(
                         b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))),
                         lane_col,
                     )
-                    causal_ok = b.cmp_le(col_abs, causal_lim)
+                    causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                    m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                    m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -5412,8 +5479,26 @@ def build_unified_attention_2d_tiled(
         # (every key <= the block's MIN causal limit = context_len +
         # qb_start_pos), so skip_mask=True is a bit-exact no-op there; only
         # [split, tile_end) needs the per-element causal mask VALU.
-        _min_causal_lim = b.add(context_len, qb_start_pos)
-        _split_raw = b.div(_min_causal_lim, b.const_i32(T))
+        if spec.causal_top_left or RIGHT != 0:
+            # Off the default diagonal the band's upper limit can pass the last
+            # KV tile (top-left with seq_len < q_len, or a positive right bound),
+            # so a full tile must also lie inside the prefix. Unbounded: only the
+            # prefix ends a full tile.
+            _full_by_prefix = b.div(max_seq_prefix_len, b.const_i32(T))
+            if RIGHT < 0:
+                _split_raw = _full_by_prefix
+            else:
+                _full_by_band = b.div(
+                    _upper_lim(b.add(context_len, qb_start_pos)), b.const_i32(T)
+                )
+                _split_raw = b.select(
+                    b.cmp_lt(_full_by_band, _full_by_prefix),
+                    _full_by_band,
+                    _full_by_prefix,
+                )
+        else:
+            _min_causal_lim = b.add(context_len, qb_start_pos)
+            _split_raw = b.div(_min_causal_lim, b.const_i32(T))
         _split = b.select(b.cmp_lt(_split_raw, tile_start), tile_start, _split_raw)
         _split = b.select(b.cmp_lt(tile_end, _split), tile_end, _split)
         # Phase-1 iter-args need UNIQUE names: both loops lower into one flat
@@ -5757,6 +5842,11 @@ def _build_gfx942_4warp_gqa_lean(
     arch: str = "gfx942",
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA lean natural-QK paged-attention ``KernelDef``."""
+    if spec.right_bound != 0:
+        raise ValueError(
+            "the gfx942 4-warp GQA body is causal-only: right_bound != 0 "
+            f"(got {spec.right_bound}) is not supported"
+        )
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -5854,11 +5944,18 @@ def _build_gfx942_4warp_gqa_lean(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can extend past klen (BN > klen % BN), so its tail keys map
+    # to logical blocks at or past cdiv(klen, BS) -- outside this sequence's
+    # block-table row. Clamp to the row's last valid entry: those keys are masked
+    # (key_g >= klen), so only the address must stay in bounds.
+    bt_last = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(bt_last, blk), bt_last, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
@@ -5873,12 +5970,18 @@ def _build_gfx942_4warp_gqa_lean(
     iters = [("m", ninf), ("l", zf)] + [
         (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
     ]
-    context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
+    context_off = (  # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
+        b.const_i32(0) if spec.causal_top_left else b.sub(klen, qlen)
+    )
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(128 + BN - 1)), b.const_i32(BN)
     )
     klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
+    # The last q-block of a sequence is partial when qlen % 128 != 0; its rows
+    # past qlen are never stored, but their Q loads must stay inside the sequence
+    # (the last sequence's tail would read past the end of the query tensor).
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
     loop = b.scf_for_iter(b.const_i32(0), kvend, b.const_i32(1), iters, iv_name="kv")
     with loop as (kv, carry):
         m_old = carry[0]
@@ -5907,6 +6010,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -5990,6 +6094,16 @@ def _build_gfx942_4warp_gqa_lean(
     l_f = loop.results[1]
     accs_f = loop.results[2:]
     recip = b.rcp_fast(l_f)
+    # A row whose causal band [0, min(d, klen - 1)] holds no key (bottom-right
+    # d = klen - qlen + row < 0 at Sq > Sk) must output exactly 0. Such a row either
+    # ran no KV tile (l == 0, so acc * rcp(0) is NaN) or saw only finite-ninf masked
+    # scores (p == 1, a uniform average of masked V). Zero its reciprocal instead.
+    # Each lane's output column (the query row) is the same for every slot.
+    _, _c0 = at.lane_to_output(b, lane, 0)
+    _d = b.add(context_off, b.add(qbase, b.add(wq, _c0)))
+    _klast = b.sub(klen, b.const_i32(1))
+    _hi = b.select(b.cmp_lt(_d, _klast), _d, _klast)
+    recip = b.select(b.cmp_lt(_hi, b.const_i32(0)), zf, recip)
     for nt in range(NDdim):
         for i in range(CPL):
             r, c = at.lane_to_output(b, lane, i)
@@ -6009,6 +6123,11 @@ def build_gfx942_4warp_gqa(
     arch: str = "gfx942",
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    if spec.right_bound != 0:
+        raise ValueError(
+            "the gfx942 4-warp GQA body is causal-only: right_bound != 0 "
+            f"(got {spec.right_bound}) is not supported"
+        )
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -6181,11 +6300,18 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can extend past klen (BN > klen % BN), so its tail keys map
+    # to logical blocks at or past cdiv(klen, BS) -- outside this sequence's
+    # block-table row. Clamp to the row's last valid entry: those keys are masked
+    # (key_g >= klen), so only the address must stay in bounds.
+    bt_last = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(bt_last, blk), bt_last, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
@@ -6200,7 +6326,9 @@ def build_gfx942_4warp_gqa(
     iters = [("m", ninf), ("l", zf)] + [
         (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
     ]
-    context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
+    context_off = (  # prefix in KV cache (qlen!=klen: chunked/decode); 0 = top-left
+        b.const_i32(0) if spec.causal_top_left else b.sub(klen, qlen)
+    )
     window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)
@@ -6243,6 +6371,10 @@ def build_gfx942_4warp_gqa(
         return b.select(b.cmp_lt(hi, x), hi, x)
 
     _a = _clamp(int_start, kvstart, kvend)
+    # Partial last q-block: rows past qlen are never stored, but their Q loads
+    # must stay inside the sequence (else the last sequence reads past the end of
+    # the query tensor). Clamp the load token to the sequence's last row.
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
     _bnd = _clamp(int_end, _a, kvend)
 
     def swz(
@@ -6374,12 +6506,14 @@ def build_gfx942_4warp_gqa(
                 # geometry); head BASE strides by GQAG (the GQA group).
                 _m = b.add(wq, ld.n_in_atom)
                 _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _tok = b.select(b.cmp_lt(_tok, q_last), _tok, q_last)
                 _hd = b.add(
                     b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
                 )
                 q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
             else:
                 q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
                 q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6533,6 +6667,24 @@ def build_gfx942_4warp_gqa(
     l_f = l3.results[1]
     accs_f = l3.results[2:]
     recip = b.rcp_fast(l_f)
+    if window > 0:
+        # A row whose band [max(0, d - window + 1), min(d, klen - 1)] holds no key
+        # (bottom-right d < 0 at Sq > Sk; top-left d >= klen + window - 1) must
+        # output exactly 0. Such a row either ran no KV tile (l == 0, so acc *
+        # rcp(0) is NaN) or saw only finite-ninf masked scores (p == 1, so a
+        # uniform average of masked V). Zero its reciprocal instead. Each lane's
+        # output column (the query row) is the same for every accumulator slot.
+        _, _c0 = at.lane_to_output(b, lane, 0)
+        if _FOLD:
+            _row = b.add(qbase, b.div(b.add(wq, _c0), b.const_i32(FOLD_HEADS)))
+        else:
+            _row = b.add(qbase, b.add(wq, _c0))
+        _d = b.add(context_off, _row)
+        _lo = b.sub(_d, b.const_i32(window - 1))
+        _lo = b.select(b.cmp_gt(_lo, b.const_i32(0)), _lo, b.const_i32(0))
+        _klast = b.sub(klen, b.const_i32(1))
+        _hi = b.select(b.cmp_lt(_d, _klast), _d, _klast)
+        recip = b.select(b.cmp_lt(_hi, _lo), zf, recip)
     for nt in range(NDdim):
         for i in range(CPL):
             r, c = at.lane_to_output(b, lane, i)

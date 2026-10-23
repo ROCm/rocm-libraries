@@ -199,6 +199,16 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         action="store_true",
         help="enable attention sinks (one [Hq] logit per query head)",
     )
+    # The band, also a request property.
+    ap.add_argument(
+        "--right-bound",
+        dest="right_bound",
+        type=int,
+        default=None,
+        help="attention-band right bound (-1 = unbounded, 0 = causal, R > 0 = R keys "
+        "of lookahead); when set the request is NO_MASK + this band (the cuDNN "
+        "vocabulary) and overrides the causal flag; default = the causal flag",
+    )
 
 
 def dense_request(
@@ -221,6 +231,11 @@ def dense_request(
     full causal) and ``use_sinks`` (``--use-sinks``, read from ``args``) are
     request properties, so dispatch ships the SWA-pruned, sink-seeded spec.
     """
+    mask_type = 1 if causal else 0
+    right_bound = getattr(args, "right_bound", None)
+    if right_bound is not None:
+        # The band comes from (sliding_window, right_bound) under NO_MASK.
+        mask_type = 0
     return AttentionRequest(
         batch=int(batch),
         nhead_q=int(num_query_heads),
@@ -230,13 +245,14 @@ def dense_request(
         hdim_q=int(head_size),
         hdim_v=int(head_size),
         arch=_ARCH,
-        mask_type=1 if causal else 0,
+        mask_type=mask_type,
         dtype=str(dtype).lower(),
         sliding_window=int(sliding_window),
         use_sinks=bool(getattr(args, "use_sinks", False)),
         # Opt-in selector: this is the candidate whose spec we are measuring.
         algorithm="attention_dense",
         spec_id=_SPEC_ID,
+        **({} if right_bound is None else {"right_bound": int(right_bound)}),
     )
 
 

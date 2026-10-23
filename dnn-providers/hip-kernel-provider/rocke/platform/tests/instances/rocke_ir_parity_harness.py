@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import hashlib
 import json
 import traceback
@@ -513,6 +514,54 @@ def build_attention_dense(arch, *, geometry=None, **over):
     return _build
 
 
+def build_attention_dense_gfx942(**over):
+    """gfx942 dense flash-attn prefill (library ``kernels/gfx942/attention_dense``).
+
+    Same base problem as :func:`build_attention_dense`; ``over`` patches it.
+    """
+
+    def _build():
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec,
+            build_attention_dense as _build_dense,
+        )
+
+        spec = dict(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        spec.update(over)
+        return _build_dense(Gfx942AttentionDenseSpec(**spec), arch="gfx942")
+
+    return _build
+
+
+def _expect_name_tags(build, *tags):
+    """Wrap ``build`` so the case fails unless every tag is in the kernel name.
+
+    Pins which body a band case lowers: a routing change that silently fell back
+    to another body would otherwise just re-bless a different kernel.
+    """
+
+    def _build():
+        kernel = build()
+        missing = [t for t in tags if t not in kernel.name]
+        if missing:
+            raise RuntimeError(
+                f"kernel {kernel.name!r} lacks expected tag(s) {missing}; "
+                "the case no longer routes to the body it pins"
+            )
+        return kernel
+
+    return _build
+
+
 def build_kda_chunkwise_gfx950(kind, arch, **over):
     """gfx950 chunkwise KDA kernel from a representative spec.
 
@@ -714,13 +763,14 @@ def build_attention_d256_gfx950(arch):
     return _build
 
 
-def build_attention_d256_gfx942(arch):
+def build_attention_d256_gfx942(arch, **problem_over):
     """D256 gfx942 4-warp GQA fast path.
 
     Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
     if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
     then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
     byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    ``problem_over`` patches the cohort problem (e.g. ``causal_top_left=True``).
     """
 
     def _build():
@@ -730,7 +780,7 @@ def build_attention_d256_gfx942(arch):
         )
         from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-        problem = _d256_problem()
+        problem = dataclasses.replace(_d256_problem(), **problem_over)
         with _pinned_attention_arch(arch):
             if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
@@ -743,7 +793,7 @@ def build_attention_d256_gfx942(arch):
     return _build
 
 
-def build_attention_d128_swa_fold_gfx942(arch):
+def build_attention_d128_swa_fold_gfx942(arch, **problem_over):
     """gfx942 GQA head-fold (D128 sliding-window bf16), the DEFAULT for its cohort.
 
     Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
@@ -760,7 +810,8 @@ def build_attention_d128_swa_fold_gfx942(arch):
     no GPU.
 
     Raises if the cohort is not fold-eligible, so a future predicate narrowing can
-    never silently re-bless the UNFOLDED kernel under this case id.
+    never silently re-bless the UNFOLDED kernel under this case id. ``problem_over``
+    patches the cohort problem (e.g. ``causal_top_left=True``).
     """
 
     def _build():
@@ -770,7 +821,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
         )
         from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-        problem = _d128_swa_fold_problem()
+        problem = dataclasses.replace(_d128_swa_fold_problem(), **problem_over)
         with _pinned_attention_arch(arch):
             if not gfx942_gqa_fold_eligible(
                 problem.head_size,
@@ -3502,6 +3553,144 @@ def cases():
                 num_query_heads=40,
                 num_kv_heads=8,
             ),
+        )
+
+    # Attention band on gfx942: the same band variants on the gfx942 tiled 2D / 3D,
+    # 4-warp GQA and dense bodies. Each case asserts the kernel-name tags of the body
+    # it pins, so a routing change cannot silently re-bless a different kernel.
+    for _case, _kw, _tags in (
+        ("top_left", dict(causal_top_left=True), ("_tl",)),
+        ("top_left_sw64", dict(causal_top_left=True, sliding_window=64), ("_sw64_tl",)),
+        ("rb16", dict(right_bound=16), ("_rb16",)),
+        ("rbu", dict(right_bound=-1), ("_rbu",)),
+        (
+            "left_only_sw64",
+            dict(causal_top_left=True, right_bound=-1, sliding_window=64),
+            ("_sw64_tl_rbu",),
+        ),
+        (
+            "two_sided_sw64_rb16",
+            dict(causal_top_left=True, right_bound=16, sliding_window=64),
+            ("_sw64_tl_rb16",),
+        ),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/2d_fp16_d128_b64_{_case}",
+            "gfx942",
+            _expect_name_tags(
+                build_attention_2d(
+                    f"irhash_attn_942_2d_fp16_{_case}",
+                    "gfx942",
+                    head_size=128,
+                    block_size=64,
+                    num_query_heads=4,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    **_kw,
+                ),
+                *_tags,
+            ),
+        )
+    for _case, _kw, _tags in (
+        ("top_left", dict(causal_top_left=True), ("_tl",)),
+        ("rb16", dict(right_bound=16), ("_rb16",)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/3d_bf16_d128_b64_{_case}",
+            "gfx942",
+            _expect_name_tags(
+                build_attention_3d(
+                    f"irhash_attn_942_3d_bf16_{_case}",
+                    "gfx942",
+                    head_size=128,
+                    block_size=64,
+                    num_query_heads=4,
+                    num_kv_heads=2,
+                    dtype="bf16",
+                    num_segments=4,
+                    **_kw,
+                ),
+                "rocke_uattn3d_tiled_gfx942_",
+                *_tags,
+            ),
+        )
+    # 4-warp GQA bodies are causal-only (right_bound != 0 is rejected); top-left is
+    # their only band variant. The lean D256 and the D128 SWA fold are separate bodies.
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa_top_left",
+        "gfx942",
+        _expect_name_tags(
+            build_attention_d256_gfx942("gfx942", causal_top_left=True),
+            "_tl_",
+            "_4wgqa",
+        ),
+    )
+    add(
+        "attention_d128_swa",
+        "attention_d128_swa/gfx942/4warp_gqa_fold_top_left",
+        "gfx942",
+        _expect_name_tags(
+            build_attention_d128_swa_fold_gfx942("gfx942", causal_top_left=True),
+            "_tl_",
+            "_4wgqa_fold",
+        ),
+    )
+    # Dense band: mirrors the gfx950 dense band cases above (num_persistent = the
+    # gfx942 CU count). causal=False is the unbounded right side.
+    _p942 = {"persistent": True, "num_persistent": 304}
+    for _variant, _over, _tags in (
+        ("full_sq512", {"causal": False}, ("_full_",)),
+        (
+            "noncausal_window_sq512",
+            {"causal": False, "sliding_window": 128},
+            ("_full_swa128_",),
+        ),
+        (
+            "persist_noncausal_window_sq512",
+            {"causal": False, "sliding_window": 128, **_p942},
+            ("_full_swa128_", "_persist304_"),
+        ),
+        (
+            "two_sided_window_sq512",
+            {"sliding_window": 128, "right_bound": 64},
+            ("_causal_rb64_swa128_",),
+        ),
+        ("lookahead_sq512", {"right_bound": 64}, ("_causal_rb64_",)),
+        (
+            "persist_lookahead_sq512",
+            {"right_bound": 64, **_p942},
+            ("_causal_rb64_", "_persist304_"),
+        ),
+        (
+            "full_ragged_cross_197x400",
+            {"seqlen_q": 197, "seqlen_kv": 400, "ragged": True, "causal": False},
+            ("_sq197_sk400_full_ragged_",),
+        ),
+        (
+            "top_left_ragged_cross_400x197",
+            {"seqlen_q": 400, "seqlen_kv": 197, "ragged": True},
+            ("_sq400_sk197_causal_ragged_",),
+        ),
+        # Rows with no visible key (window past the keys): the zero-output guard.
+        (
+            "window_empty_rows_1024x512",
+            {"seqlen_q": 1024, "seqlen_kv": 512, "sliding_window": 128},
+            ("_sq1024_sk512_causal_swa128_",),
+        ),
+        (
+            "persist_window_empty_rows_1024x512",
+            {"seqlen_q": 1024, "seqlen_kv": 512, "sliding_window": 128, **_p942},
+            ("_sq1024_sk512_causal_swa128_", "_persist304_"),
+        ),
+    ):
+        add(
+            "attention_dense",
+            f"attention_dense/gfx942/{_variant}",
+            "gfx942",
+            _expect_name_tags(build_attention_dense_gfx942(**_over), "_gfx942", *_tags),
         )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and

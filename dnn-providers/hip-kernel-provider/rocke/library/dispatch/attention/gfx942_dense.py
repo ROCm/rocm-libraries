@@ -22,11 +22,8 @@ from __future__ import annotations
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
-from .common import (
-    AttentionMaskType,
-    AttentionRequest,
-    _parse_attention_mask_type,
-)
+from .common import AttentionRequest
+from .gfx950_dense import _dense_band, _is_ragged
 
 CANDIDATE_NAME = "attention_gfx942_dense"
 SPEC_ID = "gfx942_dense"
@@ -45,7 +42,8 @@ def _base_spec(req: AttentionRequest):
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     once there is enough work to fill it (``nqb*Hq*B >= num_persistent``), and
-    non-tile-multiple self-attention lengths take the on-chip ragged path.
+    non-tile-multiple lengths (cross-attention included) take the on-chip ragged
+    path. The mask is the gfx950 dense band reading (``_dense_band``).
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -66,14 +64,19 @@ def _base_spec(req: AttentionRequest):
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    mask_type = _parse_attention_mask_type(req.mask_type)
+    # The gfx950 dense band reading: full attention, left-only / two-sided windows
+    # and lookahead on the top-left diagonal; at bottom-right alignment with
+    # seqlen_q != seqlen_k only the plain causal mask (moving_bottom_right, which
+    # ``supports_attention_dense`` rejects on gfx942; a window or lookahead there
+    # raises, so ``admits`` rejects it with the reason).
+    causal, right_bound, moving_bottom_right = _dense_band(req)
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
     bn = _DENSE_BLOCK_N
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    # on-chip ragged padding for lengths that are not tile multiples (any mask,
+    # including cross-attention seqlen_q != seqlen_kv), as on gfx950.
+    ragged = _is_ragged(sq, sk, bm, bn)
     nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     return Gfx942AttentionDenseSpec(
@@ -83,7 +86,8 @@ def _base_spec(req: AttentionRequest):
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=head_size,
-        causal=mask_type != AttentionMaskType.NO_MASK,
+        causal=causal,
+        causal_bottom_right=moving_bottom_right,
         dtype=dtype,
         block_m=bm,
         block_n=bn,
@@ -95,6 +99,8 @@ def _base_spec(req: AttentionRequest):
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        # Set only for a lookahead, so every pre-existing spec is unchanged.
+        **({"right_bound": right_bound} if right_bound else {}),
     )
 
 
@@ -105,7 +111,7 @@ def _supports(spec, *, arch):
 
 
 def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
-    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full).
+    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full/band).
 
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
@@ -130,10 +136,13 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         variant_id=_VARIANT_ID,
         base_spec=_base_spec,
         supports=_supports,
-        # Dense: causal, sliding-window and sinks (alone or combined), optional
-        # LSE output; no moving bottom-right diagonal. Head size stays out:
-        # D64/D128 coverage is ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        # Dense: the band (full, causal, windows, lookahead on the top-left
+        # diagonal) and sinks (alone or combined), optional LSE output, as the
+        # gfx950 persistent candidates; no moving bottom-right diagonal. Head size
+        # stays out: D64/D128 coverage is ``supports_attention_dense``'s call.
+        features=frozenset(
+            {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+        ),
         # _base_spec picks these from the work size and dtype/head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )
