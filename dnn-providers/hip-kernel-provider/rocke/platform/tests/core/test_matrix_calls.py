@@ -515,7 +515,8 @@ def _value_of(b: IRBuilder, t: Type):
     """A zero of type ``t``, the type a form takes its operand in."""
     if isinstance(t, VectorType):
         return b.zero_vec(t.elem, t.count)
-    return {F32: b.const_f32, F64: b.const_f64, I32: b.const_i32}[t](0)
+    constant = {F32: b.const_f32, F64: b.const_f64, I32: b.const_i32, I64: b.const_i64}
+    return constant[t](0)
 
 
 def _operand_type(form, flavor: str) -> Type:
