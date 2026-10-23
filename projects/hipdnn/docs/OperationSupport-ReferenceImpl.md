@@ -134,7 +134,8 @@ dimension must be reduced.
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
-| Paged KV cache, block-sparse attention | Not supported | - |
+| Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | - |
+| Block-sparse attention | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Ragged tensors | - | Rejected |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |

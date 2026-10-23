@@ -628,6 +628,310 @@ TEST(TestSdpaFwdPlanPadding, ExecuteMatchesDirectReference)
     EXPECT_EQ(o.getHostValue(0, 1, 3, 0), 0.0F);
 }
 
+// Paged KV cache (cuDNN layout). The frontend cannot build these graphs (its node validation
+// requires K/V batch == Q batch, but a paged container's first dim is the block count), so they
+// are built raw. Q is FLOAT [2, 2, 3, 8]; paged K/V containers are [5, 2, 2, 8] (block size 2);
+// page tables are INT32 [2, 1, 3, 1] (capacity 6). UIDs: Q=1 K=2 V=3 O=4 SeqLenQ=6 SeqLenKv=7
+// PageTableK=8 PageTableV=9.
+namespace
+{
+
+struct RawPagedGraphSpec
+{
+    bool pageK = true;
+    bool pageV = true;
+    bool seqLens = true;
+    DataType pageTableType = DataType::INT32;
+    std::optional<int32_t> maxSeqLenKv;
+};
+
+flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec& spec)
+{
+    const std::vector<int64_t> qDims = {2, 2, 3, 8};
+    const std::vector<int64_t> cDims = {5, 2, 2, 8};
+    const std::vector<int64_t> denseKvDims = {2, 2, 6, 8};
+    const std::vector<int64_t> lenDims = {2, 1, 1, 1};
+    const std::vector<int64_t> tableDims = {2, 1, 3, 1};
+    const auto qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
+    const auto cStrides = hipdnn_data_sdk::utilities::generateStrides(cDims);
+    const auto denseKvStrides = hipdnn_data_sdk::utilities::generateStrides(denseKvDims);
+    const auto lenStrides = hipdnn_data_sdk::utilities::generateStrides(lenDims);
+    const auto tableStrides = hipdnn_data_sdk::utilities::generateStrides(tableDims);
+
+    SdpaAttributesT attrs;
+    attrs.q_tensor_uid = 1;
+    attrs.k_tensor_uid = 2;
+    attrs.v_tensor_uid = 3;
+    attrs.o_tensor_uid = 4;
+    attrs.padding_mask = spec.seqLens;
+    attrs.max_seq_len_kv = spec.maxSeqLenKv;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    const auto add = [&](int64_t uid,
+                         const char* name,
+                         DataType type,
+                         const std::vector<int64_t>& strides,
+                         const std::vector<int64_t>& dims) {
+        tensors.push_back(CreateTensorAttributesDirect(builder, uid, name, type, &strides, &dims));
+    };
+    add(1, "Q", DataType::FLOAT, qStrides, qDims);
+    add(2,
+        "K",
+        DataType::FLOAT,
+        spec.pageK ? cStrides : denseKvStrides,
+        spec.pageK ? cDims : denseKvDims);
+    add(3,
+        "V",
+        DataType::FLOAT,
+        spec.pageV ? cStrides : denseKvStrides,
+        spec.pageV ? cDims : denseKvDims);
+    add(4, "O", DataType::FLOAT, qStrides, qDims);
+    if(spec.seqLens)
+    {
+        attrs.seq_len_q_tensor_uid = 6;
+        attrs.seq_len_kv_tensor_uid = 7;
+        add(6, "SeqLenQ", DataType::INT32, lenStrides, lenDims);
+        add(7, "SeqLenKv", DataType::INT32, lenStrides, lenDims);
+    }
+    if(spec.pageK)
+    {
+        attrs.page_table_k_tensor_uid = 8;
+        add(8, "PageTableK", spec.pageTableType, tableStrides, tableDims);
+    }
+    if(spec.pageV)
+    {
+        attrs.page_table_v_tensor_uid = 9;
+        add(9, "PageTableV", spec.pageTableType, tableStrides, tableDims);
+    }
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+    auto graph = CreateGraphDirect(builder,
+                                   "SdpaFwdPagedGraph",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+    return builder;
+}
+
+} // namespace
+
+struct PagedApplicabilityCase
+{
+    const char* name;
+    RawPagedGraphSpec spec;
+    bool applicable;
+};
+
+class TestSdpaFwdPlanPagedApplicability : public TestWithParam<PagedApplicabilityCase>
+{
+};
+
+TEST_P(TestSdpaFwdPlanPagedApplicability, MatchesContract)
+{
+    auto graphBuilder = makeRawPagedSdpaFwdGraph(GetParam().spec);
+    CpuReferenceGraphExecutor executor;
+    EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
+              GetParam().applicable);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaFwdPlanPagedApplicability,
+    Values(PagedApplicabilityCase{"PagedKv", {}, true},
+           PagedApplicabilityCase{
+               "PagedKOnly", {true, false, true, DataType::INT32, std::nullopt}, true},
+           PagedApplicabilityCase{
+               "MaxSeqLenWithinCapacity", {true, true, true, DataType::INT32, 5}, true},
+           // cuDNN: paging needs padding.
+           PagedApplicabilityCase{
+               "WithoutSeqLens", {true, true, false, DataType::INT32, std::nullopt}, false},
+           PagedApplicabilityCase{
+               "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7}, false},
+           PagedApplicabilityCase{
+               "FloatPageTable", {true, true, true, DataType::FLOAT, std::nullopt}, false},
+           // cuDNN: max_seq_len_kv without paging is rejected.
+           PagedApplicabilityCase{
+               "MaxSeqLenWithoutPaging", {false, false, true, DataType::INT32, 6}, false}),
+    [](const TestParamInfo<PagedApplicabilityCase>& info) { return std::string(info.param.name); });
+
+// A paged graph runs through the executor and equals gathering the cache and running the dense
+// padded reference directly.
+TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
+{
+    auto graphBuilder = makeRawPagedSdpaFwdGraph({});
+
+    hipdnn_data_sdk::utilities::Tensor<float> q({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> kCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> vCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> o({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenQ({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenKv({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> pageTable({2, 1, 3, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 41);
+    kCache.fillWithRandomValues(-1.0F, 1.0F, 42);
+    vCache.fillWithRandomValues(-1.0F, 1.0F, 43);
+    seqLenQ.setHostValue(3, 0, 0, 0, 0);
+    seqLenQ.setHostValue(2, 1, 0, 0, 0);
+    seqLenKv.setHostValue(5, 0, 0, 0, 0);
+    seqLenKv.setHostValue(2, 1, 0, 0, 0);
+    // Batch 0 uses blocks 4, 1, 3; batch 1 uses block 2, then the null block 0.
+    const std::vector<int32_t> blocks = {4, 1, 3, 2, 0, 0};
+    for(int64_t i = 0; i < 6; ++i)
+    {
+        pageTable.setHostValue(blocks[static_cast<size_t>(i)], i / 3, 0, i % 3, 0);
+    }
+    o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, kCache.memory().hostData()},
+                                                            {3, vCache.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {6, seqLenQ.memory().hostData()},
+                                                            {7, seqLenKv.memory().hostData()},
+                                                            {8, pageTable.memory().hostData()},
+                                                            {9, pageTable.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                kDense,
+                                vDense,
+                                oRef,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(o, oRef));
+}
+
+// End to end: a paged graph built through the frontend (num_blocks != batch) validates,
+// serializes, and runs on the CPU reference with the same result as gather-then-dense.
+TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
+{
+    using hipdnn_frontend::graph::TensorAttributes;
+    const auto tensorAttr = [](int64_t uid,
+                               const char* name,
+                               hipdnn_frontend::DataType type,
+                               const std::vector<int64_t>& dims) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid).set_name(name).set_data_type(type).set_dim(dims).set_stride(
+            hipdnn_data_sdk::utilities::generateStrides(dims));
+        return t;
+    };
+    constexpr auto F32 = hipdnn_frontend::DataType::FLOAT;
+    constexpr auto I32 = hipdnn_frontend::DataType::INT32;
+
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("SdpaFwdPagedFrontend")
+        .set_io_data_type(F32)
+        .set_compute_data_type(F32)
+        .set_intermediate_data_type(F32);
+    auto q = tensorAttr(1, "Q", F32, {2, 2, 3, 8});
+    auto k = tensorAttr(2, "K", F32, {5, 2, 2, 8});
+    auto v = tensorAttr(3, "V", F32, {5, 2, 2, 8});
+    auto seqQ = tensorAttr(6, "SeqLenQ", I32, {2, 1, 1, 1});
+    auto seqKv = tensorAttr(7, "SeqLenKv", I32, {2, 1, 1, 1});
+    auto tableK = tensorAttr(8, "PageTableK", I32, {2, 1, 3, 1});
+    auto tableV = tensorAttr(9, "PageTableV", I32, {2, 1, 3, 1});
+
+    hipdnn_frontend::graph::SdpaAttributes attrs;
+    attrs.set_name("SdpaFwdPaged")
+        .set_padding_mask(true)
+        .set_seq_len_q(seqQ)
+        .set_seq_len_kv(seqKv)
+        .set_paged_attention_k_table(tableK)
+        .set_paged_attention_v_table(tableV)
+        .set_paged_attention_max_seq_len_kv(6);
+    auto [o, stats] = graph->sdpa(q, k, v, attrs);
+    o->set_uid(4)
+        .set_data_type(F32)
+        .set_dim({2, 2, 3, 8})
+        .set_stride(hipdnn_data_sdk::utilities::generateStrides({2, 2, 3, 8}));
+    o->set_is_virtual(false);
+
+    auto validateErr = graph->validate();
+    ASSERT_TRUE(validateErr.is_good()) << validateErr.get_message();
+    auto [bin, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    hipdnn_data_sdk::utilities::Tensor<float> qT({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> kCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> vCache({5, 2, 2, 8});
+    hipdnn_data_sdk::utilities::Tensor<float> oT({2, 2, 3, 8});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenQ({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> seqLenKv({2, 1, 1, 1});
+    hipdnn_data_sdk::utilities::Tensor<int32_t> pageTable({2, 1, 3, 1});
+    qT.fillWithRandomValues(-1.0F, 1.0F, 51);
+    kCache.fillWithRandomValues(-1.0F, 1.0F, 52);
+    vCache.fillWithRandomValues(-1.0F, 1.0F, 53);
+    seqLenQ.setHostValue(3, 0, 0, 0, 0);
+    seqLenQ.setHostValue(1, 1, 0, 0, 0);
+    seqLenKv.setHostValue(6, 0, 0, 0, 0);
+    seqLenKv.setHostValue(3, 1, 0, 0, 0);
+    const std::vector<int32_t> blocks = {3, 0, 4, 2, 1, 0};
+    for(int64_t i = 0; i < 6; ++i)
+    {
+        pageTable.setHostValue(blocks[static_cast<size_t>(i)], i / 3, 0, i % 3, 0);
+    }
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, qT.memory().hostData()},
+                                                            {2, kCache.memory().hostData()},
+                                                            {3, vCache.memory().hostData()},
+                                                            {4, oT.memory().hostData()},
+                                                            {6, seqLenQ.memory().hostData()},
+                                                            {7, seqLenKv.memory().hostData()},
+                                                            {8, pageTable.memory().hostData()},
+                                                            {9, pageTable.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(bin.data(), bin.size()));
+    executor.execute(bin.data(), bin.size(), variantPack);
+
+    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(qT,
+                                kDense,
+                                vDense,
+                                oRef,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(oT, oRef));
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
 {
     // The reference produces only the log-sum-exp stats output; the running-max softmax

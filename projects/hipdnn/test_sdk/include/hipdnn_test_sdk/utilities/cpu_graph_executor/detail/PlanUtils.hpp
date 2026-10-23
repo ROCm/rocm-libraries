@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
@@ -107,6 +109,108 @@ bool isSupportedSdpaPadding(const SdpaAttributesType& nodeAttributes, const Tens
         }
     }
     return true;
+}
+
+/// Logical key extent of a paged SDPA forward node: max_seq_len_kv when set, otherwise
+/// tableSize * blockSize of the K side (or V when only V is paged). Returns -1 when the node is
+/// not a paging layout the references implement:
+/// - paging needs padding (both seq_len tensors), as cuDNN requires;
+/// - each page table is INT32 [B, 1, tableSize, 1] over a rank-4 [blocks, H, blockSize, D]
+///   container;
+/// - max_seq_len_kv must fit every page table (tableSize * blockSize);
+/// - a non-paged K or V must already be dense [B, H, maxSeqKv, D];
+/// - a bias's last dim must be maxSeqKv or 1.
+/// Returns 0 for a non-paged node, which must not set max_seq_len_kv (cuDNN rejects it).
+template <typename TensorMap>
+int64_t sdpaPagedMaxSeqKv(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                          const TensorMap& tensorMap)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto pageK = attrs.page_table_k_tensor_uid();
+    const auto pageV = attrs.page_table_v_tensor_uid();
+    if(!pageK.has_value() && !pageV.has_value())
+    {
+        return attrs.max_seq_len_kv().has_value() ? -1 : 0;
+    }
+    if(!attrs.seq_len_q_tensor_uid().has_value() || !attrs.seq_len_kv_tensor_uid().has_value())
+    {
+        return -1;
+    }
+    const auto dimsOf = [&tensorMap](int64_t uid) -> std::vector<int64_t> {
+        const auto it = tensorMap.find(uid);
+        if(it == tensorMap.end() || it->second->dims() == nullptr)
+        {
+            return {};
+        }
+        return {it->second->dims()->begin(), it->second->dims()->end()};
+    };
+    const auto qDims = dimsOf(attrs.q_tensor_uid());
+    if(qDims.size() != 4)
+    {
+        return -1;
+    }
+    const auto batch = qDims[0];
+
+    // Capacity (tableSize * blockSize) of one paged side, or -1 if its layout is unsupported.
+    const auto pagedCapacity = [&](int64_t tableUid, int64_t containerUid) -> int64_t {
+        const auto it = tensorMap.find(tableUid);
+        const auto tableDims = dimsOf(tableUid);
+        const auto containerDims = dimsOf(containerUid);
+        if(it == tensorMap.end() || it->second->data_type() != DataType::INT32
+           || tableDims.size() != 4 || tableDims[0] != batch || tableDims[1] != 1
+           || tableDims[3] != 1 || containerDims.size() != 4)
+        {
+            return -1;
+        }
+        return tableDims[2] * containerDims[2];
+    };
+    int64_t capacityK = -1;
+    int64_t capacityV = -1;
+    if(pageK.has_value())
+    {
+        capacityK = pagedCapacity(pageK.value(), attrs.k_tensor_uid());
+        if(capacityK < 0)
+        {
+            return -1;
+        }
+    }
+    if(pageV.has_value())
+    {
+        capacityV = pagedCapacity(pageV.value(), attrs.v_tensor_uid());
+        if(capacityV < 0)
+        {
+            return -1;
+        }
+    }
+
+    int64_t maxSeqKv = pageK.has_value() ? capacityK : capacityV;
+    if(attrs.max_seq_len_kv().has_value())
+    {
+        maxSeqKv = static_cast<int64_t>(attrs.max_seq_len_kv().value());
+    }
+    if(maxSeqKv <= 0 || (pageK.has_value() && maxSeqKv > capacityK)
+       || (pageV.has_value() && maxSeqKv > capacityV))
+    {
+        return -1;
+    }
+    for(const auto& [paged, uid] : {std::pair{pageK.has_value(), attrs.k_tensor_uid()},
+                                    std::pair{pageV.has_value(), attrs.v_tensor_uid()}})
+    {
+        const auto dims = dimsOf(uid);
+        if(!paged && (dims.size() != 4 || dims[0] != batch || dims[2] != maxSeqKv))
+        {
+            return -1;
+        }
+    }
+    if(attrs.attn_mask_tensor_uid().has_value())
+    {
+        const auto maskDims = dimsOf(attrs.attn_mask_tensor_uid().value());
+        if(maskDims.empty() || (maskDims.back() != maxSeqKv && maskDims.back() != 1))
+        {
+            return -1;
+        }
+    }
+    return maxSeqKv;
 }
 
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \

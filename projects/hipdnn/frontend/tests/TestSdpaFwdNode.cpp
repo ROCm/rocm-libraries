@@ -8,6 +8,12 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <tuple>
+#include <utility>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
@@ -528,6 +534,107 @@ TEST(TestSdpaFwdNode, PreValidateFailsBatchMismatchQV)
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+// Paged K/V (cuDNN layout): containers [num_blocks, H, block_size, D] with page tables
+// [B, 1, table_size, 1]. The container's leading dim is a block count and dim 2 a block size,
+// so neither is compared with Q's batch or between K and V. Engines decide whether they support
+// paging; the node only rejects impossible shapes.
+namespace
+{
+std::shared_ptr<TensorAttributes> makePageTable(int64_t batch, int64_t tableSize)
+{
+    auto t = std::make_shared<TensorAttributes>();
+    t->set_dim({batch, 1, tableSize, 1});
+    return t;
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedKvWithBlockCountUnlikeBatch)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(37, 2, 16, 64); // 37 blocks of 16 keys
+    auto v = makeTensor4D(37, 2, 16, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_paged_attention_k_table(makePageTable(2, 8));
+    attrs.set_paged_attention_v_table(makePageTable(2, 8));
+    attrs.set_paged_attention_max_seq_len_kv(100);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPagedKWithDenseV)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(9, 2, 4, 64); // paged container, block size 4
+    auto v = makeTensor4D(2, 2, 32, 64); // dense V, 32 keys
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_paged_attention_k_table(makePageTable(2, 8));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPagedDenseSideBatchMismatch)
+{
+    // K is paged, but the dense V still has to carry Q's batch.
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(9, 2, 4, 64);
+    auto v = makeTensor4D(3, 2, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_paged_attention_k_table(makePageTable(2, 8));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    EXPECT_EQ(node.pre_validate_node().code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPageTableBatchMismatch)
+{
+    // Every batch needs a page-table row.
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(9, 2, 4, 64);
+    auto v = makeTensor4D(9, 2, 4, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_paged_attention_k_table(makePageTable(2, 8));
+    attrs.set_paged_attention_v_table(makePageTable(3, 8));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    EXPECT_EQ(node.pre_validate_node().code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidatePagedBiasMustMatchMaxSeqLenKv)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(9, 2, 4, 64);
+    auto v = makeTensor4D(9, 2, 4, 64);
+    for(const auto& [biasKv, maxSeqLenKv, ok] :
+        {std::tuple{int64_t{30}, std::optional<int32_t>{30}, true},
+         std::tuple{int64_t{31}, std::optional<int32_t>{30}, false},
+         std::tuple{int64_t{1}, std::optional<int32_t>{30}, true},
+         // Without max_seq_len_kv the key length is not known to the node: the engine checks.
+         std::tuple{int64_t{31}, std::optional<int32_t>{}, true}})
+    {
+        auto attrs = makeMinimalAttrs(q, k, v);
+        attrs.set_paged_attention_k_table(makePageTable(2, 8));
+        attrs.set_paged_attention_v_table(makePageTable(2, 8));
+        if(maxSeqLenKv.has_value())
+        {
+            attrs.set_paged_attention_max_seq_len_kv(maxSeqLenKv.value());
+        }
+        attrs.set_bias(makeTensor4D(2, 8, 16, biasKv));
+
+        const GraphAttributes graphAttrs;
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        EXPECT_EQ(node.pre_validate_node().code == error_code_t::OK, ok)
+            << "bias last dim " << biasKv;
+    }
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)
