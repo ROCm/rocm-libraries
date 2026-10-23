@@ -454,8 +454,8 @@ bool maskAccepted(const data_objects::SdpaAttributes& attributes)
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
                                << "left_bound " << attributes.left_bound().value_or(-1)
                                << ", right_bound " << attributes.right_bound().value_or(-1)
-                               << " is a window; this engine serves unmasked or bottom-right "
-                                  "causal decode only");
+                               << " is a window; windows are not implemented in v1 of this "
+                                  "engine (it serves unmasked or bottom-right causal decode)");
         return false;
     default:
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "mask type " << static_cast<int>(planMask)
@@ -640,14 +640,14 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
                                << "an additive attention mask (attn_mask tensor) is not "
-                                  "supported");
+                                  "implemented in v1");
         return std::nullopt;
     }
     if(attributes.scale_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"scale_tensor"}
-                               << "a scale tensor is not supported; the kernel takes the scale "
-                                  "as a host value (attn_scale_value)");
+                               << "a scale tensor is not implemented in v1; the kernel takes the "
+                                  "scale as a host value (attn_scale_value)");
         return std::nullopt;
     }
     if(attributes.seq_len_q_tensor_uid().has_value()
@@ -655,7 +655,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"varlen"}
                                << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not supported");
+                                  "not implemented in v1");
         return std::nullopt;
     }
     if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
@@ -663,7 +663,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
        || attributes.dropout_scale_tensor_uid().has_value()
        || attributes.dropout_probability().has_value())
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"dropout"} << "dropout is not supported");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"dropout"} << "dropout is not implemented in v1");
         return std::nullopt;
     }
     if(attributes.page_table_k_tensor_uid().has_value()
@@ -671,18 +671,19 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
        || attributes.max_seq_len_kv().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"paged_kv"}
-                               << "paged K/V (page tables or max_seq_len_kv) is not supported");
+                               << "paged K/V (page tables or max_seq_len_kv) is not implemented "
+                                  "in v1");
         return std::nullopt;
     }
     if(attributes.block_mask_tensor_uid().has_value())
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"block_mask"} << "a block mask is not supported");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"block_mask"} << "a block mask is not implemented in v1");
         return std::nullopt;
     }
     if(attributes.sink_token_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"sinks"}
-                               << "attention sinks (sink_token tensor) are not supported");
+                               << "attention sinks (sink_token tensor) are not implemented in v1");
         return std::nullopt;
     }
     if(attributes.descale_q_tensor_uid().has_value()
@@ -694,7 +695,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"fp8"}
                                << "FP8 scaling tensors (descale, scale or amax) are not "
-                                  "supported");
+                                  "implemented in v1");
         return std::nullopt;
     }
     if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
@@ -704,18 +705,18 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"stats"}
                                << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
-                                  "generate_stats) are not supported; strided decode writes no "
-                                  "LSE");
+                                  "generate_stats) are not implemented in v1; the strided decode "
+                                  "path writes no LSE");
         return std::nullopt;
     }
     if(attributes.alibi_mask())
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"alibi_mask"} << "alibi_mask is not supported");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"alibi_mask"} << "alibi_mask is not implemented in v1");
         return std::nullopt;
     }
     if(attributes.padding_mask())
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"padding_mask"} << "padding_mask is not supported");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"padding_mask"} << "padding_mask is not implemented in v1");
         return std::nullopt;
     }
     // Same allow-list as the gfx950 dense pack: the MFMA operands are the graph's own
