@@ -371,6 +371,17 @@ GFX11_BATCH_PREFILL_SHAPES = {
     ((64, 32, 32, 64, 32, 64), (4, 1, 1, 4, 1, 1), (16, 16, 16, 16, 16, 16)),
 }
 
+# gfx1100 batch_prefill: each head-dim pair maps to the one M0 that has device
+# evidence. Each warp owns one 16-row WMMA slice, so the block is M0 / 16 warps of
+# 32 lanes, i.e. M0 * 2 threads: M0=128 lands on Gfx11Policy's Independent-V path
+# (block 256) and M0=64 on the fallback gemm1, which the pipeline reaches by
+# permuting P into that gemm's A distribution.
+GFX11_BATCH_PREFILL_M0 = {
+    (128, 128): 128,
+    (96, 96): 64,
+    (64, 64): 64,
+}
+
 
 def check_logits_bias(logits: str, bias: str) -> bool:
     """logits_soft_cap requires no bias.
@@ -907,21 +918,17 @@ def validate_config(
                 "gfx1100 batch_prefill must use batch_prefill_gfx11 policy"
             )
         if pipeline == "batch_prefill_gfx11":
-            # Mirror of the emission table in instance_gen. hdim 128 runs on
-            # M128/block256 through Gfx11Policy's Independent-V path; hdim 96
-            # and 64 run on M64/block128 through the fallback gemm1, which the
-            # pipeline reaches by permuting P into that gemm's A distribution.
-            gfx11_bp_m0 = {(128, 128): 128, (96, 96): 64, (64, 64): 64}
+            # Mirror of the emission table; see GFX11_BATCH_PREFILL_M0.
             if arch != "gfx1100":
                 result.add_error("batch_prefill_gfx11 is only supported on gfx1100")
             if sig.get("kv_memory_layout") != "linear":
                 result.add_error(
                     "batch_prefill_gfx11 currently supports only linear KV layout"
                 )
-            if (hdim_q, hdim_v) not in gfx11_bp_m0:
+            if (hdim_q, hdim_v) not in GFX11_BATCH_PREFILL_M0:
                 result.add_error(
                     "batch_prefill_gfx11 supports hdim pairs "
-                    "(128, 128), (96, 96) and (64, 64), got "
+                    f"{sorted(GFX11_BATCH_PREFILL_M0, reverse=True)}, got "
                     f"({hdim_q}, {hdim_v})"
                 )
             if sig.get("dropout", False):
@@ -933,7 +940,7 @@ def validate_config(
                     "batch_prefill_gfx11 does not support logits soft cap: "
                     "gfx1100 compiles with CK_TILE_FMHA_FWD_FAST_EXP2=0"
                 )
-            expected_m0 = gfx11_bp_m0.get((hdim_q, hdim_v))
+            expected_m0 = GFX11_BATCH_PREFILL_M0.get((hdim_q, hdim_v))
             wave = alg["wave"]
             if len(wave) >= 6:
                 gemm0_warps = wave[0] * wave[1] * wave[2]

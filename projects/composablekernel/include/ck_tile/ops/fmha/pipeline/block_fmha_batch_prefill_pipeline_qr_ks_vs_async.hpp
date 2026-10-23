@@ -253,12 +253,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    // Clang reports only the first failing static_assert of a class, so the specific
-    // gfx11 checks come before the general UseIndependentVBuffer one.
+    // Clang reports only the first failing static_assert of a class, so the knob check
+    // comes before the shape checks.
 #if !CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V
+    // Turning the knob off would move the M128 instances onto the fallback gemm1, which
+    // is only verified for the M64 shapes.
     static_assert(!Policy::kUseSyncKLoad,
-                  "batch_prefill_gfx11 has no fallback gemm1; "
-                  "CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V must stay 1");
+                  "batch_prefill_gfx11 M128 instances are only verified on the "
+                  "Independent-V gemm1; CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V "
+                  "must stay 1");
 #endif
     // PermuteWarpGemmCToA moves P within a warp only, so both gemms need the same
     // M-only warp layout; the permute and the K LDS layout also assume 16x16x16 WMMA
@@ -274,20 +277,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
              std::is_same_v<typename BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 16>>),
         "batch_prefill_gfx11 requires K0=32, the same M-only block warps for both gemms "
         "and 16x16x16 warp tiles");
-#if defined(__gfx11__)
-    // Device-only: kBlockSize uses get_warp_size(), which is 64 on the host pass.
     // Keyed on kUseSyncKLoad, not on the architecture: no CDNA instance sets it.
     // These are the K-staging requirements; the gemm1 shape is not among them,
     // because outside UseIndependentVBuffer the pipeline permutes P into the
-    // fallback gemm1's A distribution instead.
+    // fallback gemm1's A distribution instead. None of the terms depend on the
+    // warp size, so unlike UseIndependentVBuffer this also holds on the host pass.
     static_assert(!Policy::kUseSyncKLoad ||
                       (Problem::kKVMemoryLayout ==
                            BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
-                       Problem::BlockFmhaShape::kN0 == 32 && Problem::BlockFmhaShape::kK0 == 32 &&
-                       Problem::BlockFmhaShape::kK1 == 32 && !Problem::kHasDropout),
-                  "batch_prefill_gfx11 requires N0=32, K0=K1=32, linear KV layout "
+                       BlockFmhaShape::kN0 == 32 && BlockFmhaShape::kK1 == 32 &&
+                       !Problem::kHasDropout),
+                  "batch_prefill_gfx11 requires N0=32, K1=32, linear KV layout "
                   "and no dropout");
-#endif
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -1556,10 +1557,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             PermuteWarpGemmCToA(p_for_gemm1, p);
 #else
 #if defined(__gfx11__)
-            // Device-only for the same reason as the kUseSyncKLoad assertion above.
-            static_assert(!Policy::template UseIndependentVBuffer<Problem>(),
-                          "independent-V gemm1 needs the gfx11 C->A permute; "
-                          "do not disable P_PERMUTE while UseIndependentVBuffer holds");
+            // The host pass always takes this branch, so only the gfx11 device pass can
+            // check that the permute was not switched off. Both gemm1 paths consume P in
+            // the WMMA A distribution, not the C distribution gemm0 leaves it in.
+            static_assert(!Policy::kUseSyncKLoad,
+                          "batch_prefill_gfx11 gemm1 needs the gfx11 C->A permute; "
+                          "do not disable P_PERMUTE");
 #endif
             const auto& p_for_gemm1 = p;
 #endif

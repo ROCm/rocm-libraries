@@ -51,6 +51,7 @@ from validation import (  # noqa: E402
     DT_FP8,
     DT_FP8FP32,
     ELEMENT_SIZES,
+    GFX11_BATCH_PREFILL_M0,
     K0_MAX_SUBMAX_MAP,
     LDS_LIMITS,
     MASKS,
@@ -2378,17 +2379,6 @@ def _expand_appendkv(arch, dtypes, receipt, restrict_hdims=None):
     return configs
 
 
-# gfx1100 batch_prefill: each head-dim pair maps to the one M0 that has device
-# evidence. Block size is M0 * 2 here, so M0=128 lands on Gfx11Policy's
-# Independent-V path (block 256) and M0=64 lands on the fallback gemm1, which
-# the pipeline reaches by permuting P into that gemm's A distribution.
-GFX11_BATCH_PREFILL_M0 = {
-    (128, 128): 128,
-    (96, 96): 64,
-    (64, 64): 64,
-}
-
-
 def _expand_batch_prefill(
     arch, dtypes, receipt, allowed_masks, allowed_biases, restrict_hdims=None
 ):
@@ -2409,8 +2399,6 @@ def _expand_batch_prefill(
         if restrict_hdims is not None:
             hdims = [hv for hv in hdims if hv in restrict_hdims]
         for hq, hv in hdims:
-            if arch == "gfx1100" and (hq, hv) not in GFX11_BATCH_PREFILL_M0:
-                continue
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             bp_specs = get_batch_prefill_pipelines(dtype, hq, receipt)
             for tc in tiles:

@@ -2,6 +2,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import importlib.util
+import json
 import sys
 import os
 import unittest
@@ -261,6 +263,39 @@ class TestValidateConfig(unittest.TestCase):
         r = validate_config(cfg, SPECS)
         self.assertFalse(r.valid)
         self.assertTrue(any("block size 128" in e for e in r.errors), r.errors)
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("numpy"), "instance_gen imports fmha_utils (numpy)"
+    )
+    def test_gfx1100_batch_prefill_emission_matches_allowlist(self):
+        """Every allowlisted shape is emitted, and every emitted config validates."""
+        sys.path.insert(
+            0, os.path.join(os.path.dirname(__file__), "..", "codegen", "fmha")
+        )
+        import instance_gen
+        from fmha.validation import GFX11_BATCH_PREFILL_SHAPES
+
+        sweep = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "tile_engine",
+            "ops",
+            "fmha",
+            "configs",
+            "batch_prefill.json",
+        )
+        configs = instance_gen.expand_sweep(sweep, "gfx1100")
+        shapes = set()
+        for c in configs:
+            cfg = json.loads(c.to_codegen_json())
+            r = validate_config(cfg, SPECS)
+            self.assertTrue(r.valid, (c.name, r.errors))
+            alg = cfg["algorithm"]
+            shapes.add(
+                (tuple(alg["tile"][:6]), tuple(alg["wave"][:6]), tuple(alg["warp"][:6]))
+            )
+        self.assertEqual(shapes, GFX11_BATCH_PREFILL_SHAPES)
 
     def test_gfx1100_batch_prefill_gfx11_rejects_dropout(self):
         cfg = _gfx11_batch_prefill_config(dropout=True)
