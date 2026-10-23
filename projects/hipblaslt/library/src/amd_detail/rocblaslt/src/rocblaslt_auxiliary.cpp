@@ -3160,16 +3160,12 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
  * GPU architecture-related functions
  ******************************************************************************/
 
-struct ArchName
+std::string rocblaslt_internal_get_arch_name(const hipDeviceProp_t& prop)
 {
-    std::string operator()(const hipDeviceProp_t& prop) const
-    {
-        // strip out xnack/ecc from name
-        std::string gcnArchName(prop.gcnArchName);
-        std::string gcnArch = gcnArchName.substr(0, gcnArchName.find(":"));
-        return gcnArch;
-    }
-};
+    // strip out xnack/ecc from name
+    std::string gcnArchName(prop.gcnArchName);
+    return gcnArchName.substr(0, gcnArchName.find(":"));
+}
 
 // exported. Get architecture name
 std::string rocblaslt_internal_get_arch_name()
@@ -3178,7 +3174,7 @@ std::string rocblaslt_internal_get_arch_name()
     static_cast<void>(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName{}(deviceProperties);
+    return rocblaslt_internal_get_arch_name(deviceProperties);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

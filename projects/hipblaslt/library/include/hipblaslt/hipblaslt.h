@@ -1446,6 +1446,9 @@ hipblasStatus_t
  *  \details
  *   The matrix layout conversion helper (``C = alpha * op(A) + beta * op(B)``),
  * can be used to change the memory order of the data or to scale and shift the values.
+ * The kernels run on the device \p lightHandle was created on, which is made current for the
+ * duration of the call. \p A, \p B, \p C, \p stream, and \p alpha and \p beta when they are
+ * device pointers, must belong to that device.
  * @param[in]  lightHandle   Pointer to the allocated hipBLASLt handle for the
  * hipBLASLt context. See \ref hipblasLtHandle_t.
  * @param[in]  transformDesc Pointer to the allocated matrix transform descriptor.
@@ -1457,7 +1460,8 @@ hipblasStatus_t
  * @param[in]  Bdesc         Pointer to the layout for input matrix B.
  * @param[in]  C             Pointer to matrix C. Must be a pointer to the device address.
  * @param[out] Cdesc         Pointer to the layout for output matrix C.
- * @param[in] stream         The HIP stream where all the GPU work will be submitted.
+ * @param[in] stream         The HIP stream where all the GPU work will be submitted. Must belong to the
+ * handle's device.
  *
  * \retval HIPBLAS_STATUS_NOT_INITIALIZED   If the hipBLASLt handle has not been initialized.
  * \retval HIPBLAS_STATUS_INVALID_VALUE     If the parameters are in conflict or in an impossible configuration, for example,
