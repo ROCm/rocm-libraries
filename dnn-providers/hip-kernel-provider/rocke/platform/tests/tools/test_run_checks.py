@@ -8,10 +8,22 @@ from pathlib import Path
 import pytest
 
 
+def _runner_path() -> Path:
+    """Find the production runner in source and relocated test layouts."""
+    test_file = Path(__file__).resolve()
+    candidates = (
+        test_file.parents[3] / "tools" / "run_checks.py",
+        test_file.with_name("run_checks.py"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("run_checks.py is absent from the source and test artifact")
+
+
 @pytest.fixture
 def runner(monkeypatch):
-    path = Path(__file__).resolve().parents[3] / "tools" / "run_checks.py"
-    spec = importlib.util.spec_from_file_location("rocke_run_checks", path)
+    spec = importlib.util.spec_from_file_location("rocke_run_checks", _runner_path())
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "_has_gpu", lambda: False)
