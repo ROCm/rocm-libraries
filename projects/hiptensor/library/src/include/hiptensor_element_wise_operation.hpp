@@ -420,6 +420,24 @@ namespace ck
                 Bilinear         bilinear_op_;
                 HiptensorUnaryOp unary_op_;
             };
+
+            struct ScaleF64
+            {
+                static constexpr const char* name = "ScaleF64";
+
+                __host__ __device__ ScaleF64(double scale = 1.0)
+                    : scale_(scale)
+                {
+                }
+
+                __host__ __device__ void operator()(double& y, const double x) const
+                {
+                    y = scale_ * x;
+                }
+
+            public:
+                double scale_;
+            };
         } // namespace element_wise
     } // namespace tensor_operation
 } // namespace ck
