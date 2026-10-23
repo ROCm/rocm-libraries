@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 
 
@@ -20,6 +20,9 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
+target_include_directories(hipblaslt PRIVATE
+    "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/fp_emulation/include"
+)
 # hipblaslt itself is compiled as HIP. The rocRoller ranker includes C++20
 # headers, so it is a separate C++ library and hipblaslt only calls it.
 if(WIN32)
@@ -67,6 +70,7 @@ target_link_libraries(hipblaslt-rocroller-selection PRIVATE
     fmt::fmt-header-only)
 target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller-selection roc::origami)
 
+add_subdirectory(fp_emulation)
 # The tuning file's row format and store. A library of its own so the
 # host-only tests can link it without the rest of hipBLASLt or a device.
 add_library(hipblaslt-tuning-store STATIC)

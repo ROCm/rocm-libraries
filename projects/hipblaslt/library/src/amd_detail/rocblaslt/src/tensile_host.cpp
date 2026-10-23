@@ -642,7 +642,10 @@ namespace
         case rocblaslt_compute_f32_fast_bf8f8:
             return rocisa::DataType::Float;
         case rocblaslt_compute_f64:
+        case rocblaslt_compute_f64_emulated_fixedpoint: // native fallback path
             return rocisa::DataType::Double;
+        case rocblaslt_compute_f32_emulated_fixedpoint: // native fallback path
+            return rocisa::DataType::Float;
         case rocblaslt_compute_i32:
             return rocisa::DataType::Int32;
         default:
@@ -2694,7 +2697,11 @@ namespace
             return rocisa::DataType::XFloat32;
 
         case rocblaslt_compute_f64:
+        case rocblaslt_compute_f64_emulated_fixedpoint: // native fallback path
             return rocisa::DataType::Double;
+
+        case rocblaslt_compute_f32_emulated_fixedpoint: // native fallback path
+            return rocisa::DataType::Float;
 
         case rocblaslt_compute_i32:
             return rocisa::DataType::Int32;

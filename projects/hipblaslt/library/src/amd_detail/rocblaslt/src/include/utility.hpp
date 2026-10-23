@@ -81,8 +81,61 @@ constexpr const char* rocblaslt_compute_type_string(rocblaslt_compute_type type)
         return "f32_bf8f8_r";
     case rocblaslt_compute_f32_fast_bf8f8_fnuz:
         return "f32_bf8f8_fnuz_r";
+    case rocblaslt_compute_f64_emulated_fixedpoint:
+        return "f64_emulated_fixedpoint_r";
+    case rocblaslt_compute_f32_emulated_fixedpoint:
+        return "f32_emulated_fixedpoint_r";
     default:
         return "invalidType";
+    }
+}
+
+/* =========================================================================
+ * Fixed-point (Ozaki Scheme II, INT8) emulated compute types.
+ *
+ * These helpers are deliberately named "FixedPoint" to distinguish them from
+ * other emulation schemes (e.g. BF16x9 FP32 emulation).
+ * ========================================================================= */
+
+/* True for the compute types that request fixed-point GEMM emulation. */
+constexpr bool isFixedPointEmulatedComputeType(rocblaslt_compute_type type)
+{
+    return type == rocblaslt_compute_f64_emulated_fixedpoint
+           || type == rocblaslt_compute_f32_emulated_fixedpoint;
+}
+
+/* Data type (A/B/C/D) emulated by a fixed-point emulated compute type, or the
+ * data type that a plain compute type may emulate via the env-var path:
+ *   f64_emulated_fixedpoint, f64 -> HIP_R_64F
+ *   f32_emulated_fixedpoint, f32 -> HIP_R_32F
+ *   anything else               -> HIPBLASLT_DATATYPE_INVALID                 */
+constexpr hipDataType fixedPointEmulatedComputeDataType(rocblaslt_compute_type type)
+{
+    switch(type)
+    {
+    case rocblaslt_compute_f64_emulated_fixedpoint:
+    case rocblaslt_compute_f64:
+        return HIP_R_64F;
+    case rocblaslt_compute_f32_emulated_fixedpoint:
+    case rocblaslt_compute_f32:
+        return HIP_R_32F;
+    default:
+        return HIPBLASLT_DATATYPE_INVALID;
+    }
+}
+
+/* Native (Tensile) compute type used for the non-emulated / fallback path.
+ * Fixed-point emulated types map to f64 / f32; all others are unchanged.     */
+constexpr rocblaslt_compute_type fixedPointEmulationNativeComputeType(rocblaslt_compute_type type)
+{
+    switch(type)
+    {
+    case rocblaslt_compute_f64_emulated_fixedpoint:
+        return rocblaslt_compute_f64;
+    case rocblaslt_compute_f32_emulated_fixedpoint:
+        return rocblaslt_compute_f32;
+    default:
+        return type;
     }
 }
 
