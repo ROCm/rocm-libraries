@@ -217,6 +217,157 @@ assert comgr.loaded_compiler_info() is first
     )
 
 
+@pytest.mark.parametrize("mode", ["live", "deleted", "multiple"])
+def test_late_opt_in_rejects_external_compiler_before_torch_import(tmp_path, mode):
+    external = build_library(tmp_path / "external")
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so")
+    (bundle.parent.parent / "__init__.py").write_text(
+        "from pathlib import Path\nimport ctypes\n"
+        "Path('torch-imported').write_text('imported')\n"
+        "_compiler = ctypes.CDLL(str(Path(__file__).parent / 'lib/libamd_comgr.so'))\n"
+    )
+    other = build_library(tmp_path / "other", 22)
+    run_child(
+        tmp_path,
+        """
+import ctypes, sys
+from pathlib import Path
+from rocke.runtime import comgr
+external = ctypes.CDLL(sys.argv[1])
+if sys.argv[2] == 'deleted':
+    Path(sys.argv[1]).unlink()
+elif sys.argv[2] == 'multiple':
+    other = ctypes.CDLL(sys.argv[3])
+before = rc._mapped_comgr_files()
+assert len(before) == (2 if sys.argv[2] == 'multiple' else 1)
+assert comgr._lib is None and 'torch' not in sys.modules
+try:
+    comgr.prefer_bundled_lib()
+except comgr.ComgrError as error:
+    assert 'before first' in str(error) and 'separate process' in str(error)
+else:
+    raise AssertionError('late opt-in accepted an external compiler')
+assert not Path('torch-imported').exists()
+assert 'torch' not in sys.modules and comgr._lib is None
+assert rc._mapped_comgr_files() == before
+""",
+        external,
+        mode,
+        other,
+        ROCKE_COMGR_LIB=str(external),
+    )
+
+
+@pytest.mark.parametrize("maps", ["readable", "unavailable"])
+def test_clean_opt_in_imports_torch_without_a_retained_compiler(tmp_path, maps):
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so")
+    (bundle.parent.parent / "__init__.py").write_text(
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace\n"
+        "Path('torch-imported').write_text('imported')\n"
+        "version = SimpleNamespace(hip='7.0')\n"
+    )
+    run_child(
+        tmp_path,
+        """
+import sys
+from pathlib import Path
+from rocke.runtime import comgr
+assert comgr._lib is None and not rc._mapped_comgr_files()
+if sys.argv[2] == 'unavailable':
+    rc._PROC_MAPS = 'unavailable-maps'
+    assert rc._mapped_comgr_files() is None
+assert comgr.prefer_bundled_lib() == (7, 0)
+assert Path('torch-imported').exists() and 'torch' in sys.modules
+info = comgr.loaded_compiler_info()
+assert info.comgr_path == sys.argv[1] and info.llvm_version == (20, 2, 1)
+rc._PROC_MAPS = '/proc/self/maps'
+assert len(rc._mapped_comgr_files()) == 1
+""",
+        bundle,
+        maps,
+    )
+
+
+@pytest.mark.parametrize("alias", [False, True])
+def test_bundled_opt_in_accepts_retained_bare_name(tmp_path, alias):
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so")
+    linker_dir = bundle.parent
+    if alias:
+        linker_dir = tmp_path / "linker"
+        linker_dir.mkdir()
+        (linker_dir / bundle.name).hardlink_to(bundle)
+    run_child(
+        tmp_path,
+        """
+import os, sys
+from types import SimpleNamespace
+from rocke.runtime import comgr
+sys.modules['torch'] = SimpleNamespace(__file__=sys.argv[1],
+    version=SimpleNamespace(hip='7.0'))
+assert rc._comgr_candidate_paths(['3']) == ['libamd_comgr.so']
+first = comgr.loaded_compiler_info()
+retained = comgr._lib
+assert retained._name == 'libamd_comgr.so'
+assert os.path.samefile(first.comgr_path, sys.argv[2])
+assert os.path.samefile(rc._torch_bundled_lib('amd_comgr'), sys.argv[2])
+comgr.prefer_bundled_lib()
+assert comgr._lib is retained and comgr.loaded_compiler_info() is first
+assert len(rc._mapped_comgr_files()) == 1
+""",
+        bundle.parent.parent / "__init__.py",
+        bundle,
+        LD_LIBRARY_PATH=str(linker_dir),
+    )
+
+
+@pytest.mark.parametrize("provenance", ["unavailable", "missing_symbol"])
+@pytest.mark.parametrize("selection", ["same", "different"])
+def test_bundled_opt_in_retains_name_fallback(tmp_path, provenance, selection):
+    text = None
+    if provenance == "missing_symbol":
+        text = (
+            "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c)"
+            "{*a=20;*b=2;*c=1;}\n"
+        )
+    bundle = build_library(tmp_path / "torch" / "lib", 20, "libamd_comgr.so", text=text)
+    retained = bundle
+    if selection == "different":
+        retained = build_library(tmp_path / "external", text=text)
+    run_child(
+        tmp_path,
+        """
+import os, sys
+from types import SimpleNamespace
+from rocke.runtime import comgr
+sys.modules['torch'] = SimpleNamespace(__file__=sys.argv[1],
+    version=SimpleNamespace(hip='7.0'))
+first = comgr.loaded_compiler_info()
+retained = comgr._lib
+assert retained._name == sys.argv[2]
+os.environ.pop('ROCKE_COMGR_LIB')
+if sys.argv[3] == 'unavailable':
+    comgr._library_for_symbol = lambda fn: None
+else:
+    assert not hasattr(retained, 'amd_comgr_get_version')
+try:
+    comgr.prefer_bundled_lib()
+except comgr.ComgrError as error:
+    assert sys.argv[4] == 'different'
+    assert 'retained compiler' in str(error) and 'separate process' in str(error)
+else:
+    assert sys.argv[4] == 'same'
+assert comgr._lib is retained and comgr.loaded_compiler_info() is first
+assert len(rc._mapped_comgr_files()) == 1
+""",
+        bundle.parent.parent / "__init__.py",
+        retained,
+        provenance,
+        selection,
+        ROCKE_COMGR_LIB=str(retained),
+    )
+
+
 @pytest.mark.parametrize("mode", ["bundle", "override", "missing", "retained"])
 def test_explicit_bundled_opt_in_and_retained_handle(tmp_path, mode):
     wheel = build_library(sdk_install(tmp_path))

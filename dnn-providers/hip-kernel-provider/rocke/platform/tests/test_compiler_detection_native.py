@@ -550,3 +550,64 @@ assert bool(native.rocke_loaded_compiler_info()) == (mode == 'same')
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_late_bundle_opt_in_rejects_native_owned_compiler(native_detector, tmp_path):
+    library = build_library(
+        tmp_path / "native",
+        "void amd_comgr_get_version(void){}\n"
+        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=1;*c=2;}\n",
+    )
+    bundle = build_library(
+        tmp_path / "torch" / "lib", "void amd_comgr_get_version(void){}\n"
+    )
+    (bundle.parent.parent / "__init__.py").write_text(
+        "from pathlib import Path\nimport ctypes\n"
+        "Path('torch-imported').write_text('imported')\n"
+        "_compiler = ctypes.CDLL(str(Path(__file__).parent / 'lib/libamd_comgr.so'))\n"
+    )
+    script = """
+import ctypes, sys
+from pathlib import Path
+from rocke.runtime import comgr
+from rocke.runtime import runtime_coexistence as rc
+class Info(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_uint) for n in ('major', 'minor', 'patch')] + [
+        (n, ctypes.c_char_p) for n in
+        ('source', 'requested_comgr', 'comgr_path', 'query_library_path')]
+native = ctypes.CDLL(sys.argv[1])
+native.rocke_loaded_compiler_info.restype = ctypes.POINTER(Info)
+first = native.rocke_loaded_compiler_info()
+assert first and first.contents.major == 23
+assert first.contents.comgr_path.decode() == sys.argv[2]
+before = rc._mapped_comgr_files()
+assert len(before) == 1 and before[0][0] == sys.argv[2]
+assert comgr._lib is None and 'torch' not in sys.modules
+try:
+    comgr.prefer_bundled_lib()
+except comgr.ComgrError as error:
+    assert 'before first' in str(error) and 'separate process' in str(error)
+else:
+    raise AssertionError('late opt-in accepted a native-owned compiler')
+assert not Path('torch-imported').exists()
+assert 'torch' not in sys.modules and comgr._lib is None
+assert rc._mapped_comgr_files() == before
+current = native.rocke_loaded_compiler_info()
+assert ctypes.addressof(current.contents) == ctypes.addressof(first.contents)
+"""
+    env = dict(
+        os.environ,
+        ROCKE_COMGR_LIB=str(library),
+        PYTHONPATH=os.pathsep.join([str(tmp_path), *filter(None, sys.path)]),
+    )
+    for name in ("ROCKE_LLVM_FLAVOR", "ROCM_PATH", "ROCM_HOME", "LD_PRELOAD"):
+        env.pop(name, None)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(native_detector), str(library)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

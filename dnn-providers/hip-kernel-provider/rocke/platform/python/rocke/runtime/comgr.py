@@ -346,16 +346,17 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
 
     Import torch only on this opt-in entrypoint. A non-empty ROCKE_COMGR_LIB
     still wins, and an unloadable bundle follows ordinary discovery. Never
-    replace a retained different compiler. Returns informational ROCm package
+    import torch beside a retained or known mapped compiler, or replace a
+    retained different compiler. Returns informational ROCm package
     metadata; loaded_compiler_info() provides actual compiler evidence.
     """
     global _lib
     with _lib_lock:
         if "torch" not in sys.modules:
-            if _lib is not None:
+            if _lib is not None or (not _IS_WINDOWS and _mapped_comgr_files()):
                 raise ComgrError(
-                    "cannot import torch to select bundled COMGR after a retained "
-                    "compiler was loaded; call prefer_bundled_lib before first "
+                    "cannot import torch to select bundled COMGR after a retained compiler "
+                    "or another mapped COMGR was loaded; call prefer_bundled_lib before first "
                     "compiler use or compile in a separate process."
                 )
             try:
@@ -368,6 +369,10 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
         desired = os.environ.get("ROCKE_COMGR_LIB") or bundled
         if _lib is not None:
             retained = getattr(_lib, "_name", "")
+            try:
+                retained = _library_for_symbol(_lib.amd_comgr_get_version) or retained
+            except AttributeError:
+                pass
             try:
                 same = os.path.samefile(desired, retained)
             except OSError:
