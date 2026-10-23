@@ -373,18 +373,33 @@ struct data_descriptor_t
      *   imaginary) part of complex element `k`.
      * - From interleaved complex/hermitian to real: the reverse, i.e., the bounds
      *   of length axis 0, all other strides and distances and the offset are doubled.
+     * - From real to planar complex/hermitian: with stride `s` along length axis 0
+     *   and offset `o`, the bounds of length axis 0 are halved, its stride becomes
+     *   `2s` and the offsets become `{o, o + s}`; nothing else changes, i.e., real
+     *   element `2k` (resp. `2k + 1`) is element `k` of plane 0 (resp. plane 1).
+     * - From planar complex/hermitian to real: the reverse, i.e., the bounds of
+     *   length axis 0 are doubled, its stride is halved and the offsets become
+     *   `{get_offset(0), 0}`.
+     *
+     * @note A planar object obtained from real data describes two planes within
+     * the real data's buffer: callers must give both planes that same buffer.
+     * Likewise, reinterpreting planar data as real data is only meaningful if both
+     * planes lie in the same buffer, which this function cannot verify.
      *
      * Embedded objects are supported iff their length axis 0 is the embedding data
      * set's length axis 0: the embedding map is kept and `get_embedding_layout()`
      * of the result is the reinterpreted `get_embedding_layout()` of this object.
      * @throw An `std::invalid_argument` is thrown if this object's array type or
      * `new_array_type` is unset, if the request switches between interleaved and
-     * planar formats, or, for requests between real and interleaved complex/hermitian
-     * array types, if this object is embedded with a length axis 0 that is not the
-     * embedding's, if the stride of length axis 0 is not 1, or (from real only) if
-     * any bound of length axis 0, any other stride or distance, or the offset is odd.
-     * An `std::logic_error` is thrown for requests between real and planar
-     * complex/hermitian array types (not implemented yet).
+     * planar formats, or, for requests between real and complex/hermitian array
+     * types, if this object is embedded with a length axis 0 that is not the
+     * embedding's, or if
+     * - (real <-> interleaved) the stride of length axis 0 is not 1, or (from real
+     *   only) any bound of length axis 0, any other stride or distance, or the
+     *   offset is odd;
+     * - (real to planar) any bound of length axis 0 is odd;
+     * - (planar to real) the stride of length axis 0 is odd or
+     *   `get_offset(1) != get_offset(0) + stride / 2` for that stride.
      */
     data_descriptor_t reinterpret_as(rocfft_array_type new_array_type) const;
 

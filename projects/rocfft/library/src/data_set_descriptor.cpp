@@ -389,17 +389,49 @@ data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_
         return ret;
     }
 
-    const bool to_complex = array_type_is_real(array_type);
-    if(array_type_is_planar(to_complex ? new_array_type : array_type))
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + ": reinterpreting real data as planar complex data (or vice"
-                                 " versa) is not implemented yet.");
     // real <-> complex/hermitian: length axis 0 is split/merged, so it must be the
     // embedding's length axis 0 for get_embedding_layout() to commute with this
     if(embedding && (*embedding)[0] != 0)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
                                     + " requires length axis 0 of an embedded data set to be"
                                       " the embedding's length axis 0.");
+    const bool to_complex = array_type_is_real(array_type);
+    auto       ret        = *this;
+
+    if(array_type_is_planar(to_complex ? new_array_type : array_type))
+    {
+        // real element 2k (resp. 2k + 1) is element k of plane 0 (resp. 1): with
+        // stride s and offset o along real length axis 0, the planes have stride 2s
+        // and offsets {o, o + s} (both planes then lie in the real data's buffer).
+        // AIFFT-566 writes these offsets as "{o, o  s}" (lost symbol): "o + s" is
+        // the only reading consistent with its reverse rule (offset1 - offset0 ==
+        // stride0 / 2) and with the in-buffer positions of odd real elements.
+        if(to_complex)
+        {
+            if(len_axes[0].lower % 2 != 0 || len_axes[0].upper % 2 != 0)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + " requires even bounds along length axis 0 to reinterpret real data"
+                      " as planar data.");
+            ret.len_axes[0].lower /= 2;
+            ret.len_axes[0].upper /= 2;
+            ret.len_axes[0].inbuffer_stride *= 2;
+            ret.set_array_type_and_offsets(new_array_type,
+                                           {offsets[0], offsets[0] + len_axes[0].inbuffer_stride});
+            return ret;
+        }
+        if(len_axes[0].inbuffer_stride % 2 != 0
+           || offsets[1] != offsets[0] + len_axes[0].inbuffer_stride / 2)
+            throw std::invalid_argument(
+                ROCFFT_CURRENT_FUNCTION
+                + " requires an even stride along length axis 0 and planes offset by half of"
+                  " it to reinterpret planar data as real data.");
+        ret.len_axes[0].lower *= 2;
+        ret.len_axes[0].upper *= 2;
+        ret.len_axes[0].inbuffer_stride /= 2;
+        ret.set_array_type_and_offsets(new_array_type, {offsets[0], 0});
+        return ret;
+    }
 
     // real element 2k (resp. 2k + 1) is the real (resp. imaginary) part of complex
     // element k: positions in real units are twice the positions in complex units
@@ -420,7 +452,6 @@ data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_
                   " distances and offset to reinterpret real data as interleaved data.");
     }
     const auto convert    = [to_complex](size_t x) { return to_complex ? x / 2 : 2 * x; };
-    auto       ret        = *this;
     ret.len_axes[0].lower = convert(len_axes[0].lower);
     ret.len_axes[0].upper = convert(len_axes[0].upper);
     for(size_t dim = 1; dim < get_full_rank(); dim++)
