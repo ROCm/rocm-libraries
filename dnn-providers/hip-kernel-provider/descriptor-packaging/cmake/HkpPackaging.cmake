@@ -1319,10 +1319,40 @@ function(_hkp_shipped_engines_for_arch out_var shipped arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_root_ships_engine_for_arch(<out> <root> <engine> <arch>)
+#   TRUE when this configuration actually ships <engine> for <arch> from the pack target
+#   <root>: <root> is wired, <arch> is among the architectures it was wired for, and what
+#   that pack ships for <arch> includes <engine>.
+# ---------------------------------------------------------------------------
+function(_hkp_root_ships_engine_for_arch out_var root engine arch)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "${root}" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${root})
+    if(NOT "${arch}" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_${root})
+    if(NOT _probe_ok)
+        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${root})
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" "${arch}")
+    if("${engine}" IN_LIST _engines)
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_product_ships_engine_for_arch(<out> <engine> <arch>)
-#   TRUE when this configuration actually ships <engine> for <arch>: the `product` pack
-#   target is wired, <arch> is among the architectures it was wired for, and what that
-#   pack ships for <arch> includes <engine>.
+#   _hkp_root_ships_engine_for_arch() for the `product` pack target.
 #
 #   Arch-aware, for registrations that install into the <arch> shard and are pruned with
 #   it (the census, the external and the gpu_ref checks). Host and test sources outside
@@ -1339,29 +1369,8 @@ endfunction()
 #   reports what is wrong with the root.
 # ---------------------------------------------------------------------------
 function(hkp_product_ships_engine_for_arch out_var engine arch)
-    set(${out_var} FALSE PARENT_SCOPE)
-
-    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
-    if(NOT "product" IN_LIST _labels)
-        return()
-    endif()
-
-    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
-    if(NOT "${arch}" IN_LIST _arches)
-        return()
-    endif()
-
-    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
-    if(NOT _probe_ok)
-        set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
-        return()
-    endif()
-
-    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
-    _hkp_shipped_engines_for_arch(_engines "${_shipped}" "${arch}")
-    if("${engine}" IN_LIST _engines)
-        set(${out_var} TRUE PARENT_SCOPE)
-    endif()
+    _hkp_root_ships_engine_for_arch(_ships product "${engine}" "${arch}")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1370,6 +1379,39 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_gfx950_attention_dense_available out_var)
     hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_available(<out>)
+#   hkp_product_ships_engine_for_arch() for the exact-shape forward-convolution engine,
+#   hipkernel:Gfx950ConvFwd, on gfx950.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950ConvFwd" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_aot_available(<out>)
+#   The same predicate for the shape-generic AOT-instance engine,
+#   hipkernel:Gfx950ConvFwdAot, which ships its own bundle.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_aot_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950ConvFwdAot" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_aot_seed_available(<out>)
+#   TRUE when the `integration` test root ships hipkernel:Gfx950ConvFwdAotSeed for
+#   gfx950: the small seed catalog over hipkernel:Gfx950ConvFwdAot's native code that the
+#   integration binary pins instance by instance. Arch-aware, unlike
+#   hkp_product_offers_engine(): the test roots are always this build's own content, so
+#   a build that does not pack gfx950 has no seed to run against.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_aot_seed_available out_var)
+    _hkp_root_ships_engine_for_arch(_available integration "hipkernel:Gfx950ConvFwdAotSeed" gfx950)
     set(${out_var} "${_available}" PARENT_SCOPE)
 endfunction()
 

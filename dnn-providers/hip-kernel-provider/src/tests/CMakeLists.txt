@@ -294,6 +294,85 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # Census for the gfx950 forward-convolution production pack; same shard, same
+    # predicate shape and the same ARCHES narrowing as the dense-attention call above.
+    hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
+    if(_hkp_gfx950_conv_fwd)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwd for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for the shape-generic AOT-instance pack, hipkernel:Gfx950ConvFwdAot.
+    hkp_gfx950_conv_fwd_aot_available(_hkp_gfx950_conv_fwd_aot)
+    if(_hkp_gfx950_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
+    # integration root carries. It reads that root's own shard, which this binary
+    # otherwise never loads, so it also needs that pack built.
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_gfx950_conv_fwd_aot_seed)
+    if(_hkp_gfx950_conv_fwd_aot_seed)
+        add_dependencies(hip_kernel_provider_census_tests hkp_packaging_integration)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME integration
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotSeedPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: the integration root does not ship hipkernel:Gfx950ConvFwdAotSeed "
+            "for gfx950, so its census is not registered.")
+    endif()
+
     # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
     # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
     # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.

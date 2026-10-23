@@ -77,7 +77,7 @@ def mint_ids(config: IngestorConfig) -> dict:
     ids["udd"] = str(uuid.uuid4())
     for pack_index, pack in enumerate(config.packs):
         ids[("pack", pack_index)] = str(uuid.uuid4())
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             ids[("operation_umd", pack_index)] = str(uuid.uuid4())
         for kernel_index, _kernel in enumerate(pack.kernels):
             ids[("kernel", pack_index, kernel_index)] = str(uuid.uuid4())
@@ -221,8 +221,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -242,10 +243,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -382,7 +388,7 @@ def build_operation_umd(
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
     graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    if not config.has_operation_matchers:
         return None
     return {
         "version": "1.0",
@@ -452,7 +458,7 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple is a duplicate only when arch coverage competes: the same candidate
@@ -719,7 +725,7 @@ class IngestorGenerator:
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
+            if config.has_operation_matchers:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")

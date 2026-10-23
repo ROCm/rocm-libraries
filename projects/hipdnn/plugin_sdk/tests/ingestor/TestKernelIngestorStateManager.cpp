@@ -674,6 +674,7 @@ std::vector<bool> keepLargestBlocks(const MatchContext& /*context*/,
         largest = std::max(largest, calls.seen.back());
     }
     std::vector<bool> keep;
+    keep.reserve(calls.seen.size());
     for(const auto blockSize : calls.seen)
     {
         keep.push_back(blockSize == largest);
