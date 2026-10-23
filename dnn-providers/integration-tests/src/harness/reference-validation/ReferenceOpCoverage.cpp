@@ -252,8 +252,7 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps()
 {
     // Every entry here is a promise to delete it. The GPU Sdpa reference
     // dispatches through a dtype-keyed plan registry (GpuSdpaFwdSignatureKey.hpp)
-    // with no FP8 tuple, and its plan builders reject variable sequence lengths
-    // outright (GpuSdpaFwdPlan.hpp, GpuSdpaRaggedFwdPlan.hpp). These are being
+    // with no FP8 tuple (GpuSdpaFwdPlan.hpp, GpuSdpaRaggedFwdPlan.hpp). These are being
     // implemented; until they are, these bundles must fail applicability rather
     // than vanish, and the run must not be red for a gap we have already
     // written down.
@@ -263,14 +262,8 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps()
     // group entries below apply to it. It declines ragged tensors.
     static const std::vector<KnownReferenceGap> s_gaps = {
         {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::GPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_nomask_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::GPU,
          "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented, and no FP8 plan exists"},
+         "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
         {ReferenceExecutorType::GPU,
          "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
          "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},

@@ -1679,3 +1679,149 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
     compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
+
+// ============================================================================
+// Padding (seq_len_q / seq_len_kv): GPU reference vs CPU reference.
+// ============================================================================
+
+// Per-batch lengths with Sq != Skv in every batch, so a wrong bottom-right offset or a read of
+// padding shows up. Every padding slot of Q/K/V holds NaN. Padded query rows must give O = 0
+// and LSE = -inf on both references; live rows must agree within the GPU tolerance.
+struct GpuPaddingCase
+{
+    const char* name;
+    int64_t rightBound; // -1 = no causal, 0 = causal
+    bool topLeft;
+    bool withBias;
+};
+
+class TestGpuSdpaFwdPaddingFp32 : public ::testing::TestWithParam<GpuPaddingCase>
+{
+};
+
+TEST_P(TestGpuSdpaFwdPaddingFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto p = GetParam();
+    constexpr int64_t BATCH = 3;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 9;
+    constexpr int64_t SKV = 12;
+    constexpr int64_t D = 16;
+    const std::vector<int32_t> lensQ = {4, 9, 2};
+    const std::vector<int32_t> lensKv = {12, 5, 7};
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    Tensor<float> q({BATCH, H, SQ, D});
+    Tensor<float> k({BATCH, H, SKV, D});
+    Tensor<float> v({BATCH, H, SKV, D});
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    Tensor<float> lseCpu({BATCH, H, SQ, 1});
+    Tensor<float> lseGpu({BATCH, H, SQ});
+    Tensor<float> bias({SQ, SKV});
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    q.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
+    v.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 1);
+    bias.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 2);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        seqLenQ.setHostValue(lensQ[static_cast<size_t>(b)], b, 0, 0, 0);
+        seqLenKv.setHostValue(lensKv[static_cast<size_t>(b)], b, 0, 0, 0);
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t d = 0; d < D; ++d)
+            {
+                for(int64_t s = lensQ[static_cast<size_t>(b)]; s < SQ; ++s)
+                {
+                    q.setHostValue(nan, b, h, s, d);
+                }
+                for(int64_t s = lensKv[static_cast<size_t>(b)]; s < SKV; ++s)
+                {
+                    k.setHostValue(nan, b, h, s, d);
+                    v.setHostValue(nan, b, h, s, d);
+                }
+            }
+        }
+    }
+    oGpu.fillWithValue(nan);
+    lseGpu.fillWithValue(nan);
+    // Non-const accesses so the host edits migrate to the device (see compareGpuVsCpuSdpaFwd).
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
+    bias.memory().hostData();
+    seqLenQ.memory().hostData();
+    seqLenKv.memory().hostData();
+
+    Tensor<float>* biasPtr = p.withBias ? &bias : nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oCpu,
+                                0.25f,
+                                static_cast<const TensorBase<float>*>(biasPtr),
+                                -1,
+                                p.rightBound,
+                                p.topLeft,
+                                &lseCpu,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+    GpuFpReferenceSdpa::fprop(q,
+                              k,
+                              v,
+                              oGpu,
+                              0.25f,
+                              static_cast<TensorBase<float>*>(biasPtr),
+                              -1,
+                              p.rightBound,
+                              p.topLeft,
+                              &lseGpu,
+                              SdpaSoftmaxProbabilityMode::FLOAT,
+                              &seqLenQ,
+                              &seqLenKv);
+
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                const float cpu = lseCpuView.getHostValue(std::vector<int64_t>{b, h, s, 0});
+                const float gpu = lseGpuView.getHostValue(std::vector<int64_t>{b, h, s});
+                if(std::isinf(cpu))
+                {
+                    EXPECT_EQ(gpu, cpu) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                else
+                {
+                    EXPECT_NEAR(gpu, cpu, gpuRefFwdTolerance<float>())
+                        << "b=" << b << " h=" << h << " s=" << s;
+                }
+                if(s >= lensQ[static_cast<size_t>(b)])
+                {
+                    EXPECT_TRUE(std::isinf(cpu) && cpu < 0) << "padded row LSE b=" << b;
+                    EXPECT_EQ(oGpu.getHostValue(b, h, s, 0), 0.0f) << "padded row O b=" << b;
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaFwdPaddingFp32,
+                         ::testing::Values(GpuPaddingCase{"NoMask", -1, true, false},
+                                           GpuPaddingCase{"CausalTopLeft", 0, true, false},
+                                           GpuPaddingCase{"CausalBottomRight", 0, false, false},
+                                           GpuPaddingCase{"CausalBottomRightBias", 0, false, true}),
+                         [](const ::testing::TestParamInfo<GpuPaddingCase>& info) {
+                             return std::string(info.param.name);
+                         });
