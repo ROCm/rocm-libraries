@@ -3753,8 +3753,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                     std::vector<HipHostBuffer>& auxiliaryBuffers = arg.gradient ? hE : hE_gold;
                     if(auxiliaryBuffers.size() > static_cast<size_t>(gemmIdx))
                     {
-                        Tensor auxiliary
-                            = hostBufferTensor(auxiliaryBuffers, Taux, dLayout, pointerArrayMode);
+                        const auto auxiliaryLayout = problem.auxiliary->logicalBatchLayout(
+                            HIPBLAS_OP_N, static_cast<size_t>(batchIdx), pointerArrayMode);
+                        Tensor auxiliary = hostBufferTensor(
+                            auxiliaryBuffers, Taux, auxiliaryLayout, pointerArrayMode);
                         if(arg.gradient)
                             epilogueOptions.auxiliaryInput = auxiliary;
                         else

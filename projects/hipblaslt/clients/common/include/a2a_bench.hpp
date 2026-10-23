@@ -7,22 +7,23 @@
 // process, started by an external launcher; identity and rendezvous come from
 // the environment variables torchrun sets.
 
-#include "allclose.hpp"
 #include "benchmark_hooks.hpp"
 #include "hipblaslt_arguments.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "multi_gpu.hpp"
-#include "norm.hpp"
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <roc/hostnumerics/comparison.hpp>
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <SdmaQueue.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -50,12 +51,12 @@ namespace hipblaslt_bench
         void* dRecv[kRecvSlices]                                     = {};
         void* recvPtrs[kRecvSlices][HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
 
-        hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
+        hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
         TcpRendezvous*                                               rendezvous = nullptr;
 
-        RankResources()                                = default;
-        RankResources(const RankResources&)            = delete;
+        RankResources()                     = default;
+        RankResources(const RankResources&) = delete;
         RankResources& operator=(const RankResources&) = delete;
 
         ~RankResources()
@@ -95,27 +96,26 @@ namespace hipblaslt_bench
         }
     };
 
-#define CHECK_HIP_RC(expr)                                                        \
-    do                                                                            \
-    {                                                                             \
-        const hipError_t _e = (expr);                                             \
-        if(_e != hipSuccess)                                                      \
-        {                                                                         \
-            hipblaslt_cerr << "error: " << #expr << " -> " << hipGetErrorString(_e) \
-                           << "\n";                                                \
-            return false;                                                         \
-        }                                                                         \
+#define CHECK_HIP_RC(expr)                                                                   \
+    do                                                                                       \
+    {                                                                                        \
+        const hipError_t _e = (expr);                                                        \
+        if(_e != hipSuccess)                                                                 \
+        {                                                                                    \
+            hipblaslt_cerr << "error: " << #expr << " -> " << hipGetErrorString(_e) << "\n"; \
+            return false;                                                                    \
+        }                                                                                    \
     } while(0)
 
-#define CHECK_LT_RC(expr)                                                         \
-    do                                                                            \
-    {                                                                             \
-        const hipblasStatus_t _s = (expr);                                        \
-        if(_s != HIPBLAS_STATUS_SUCCESS)                                          \
-        {                                                                         \
-            hipblaslt_cerr << "error: " << #expr << " -> " << int(_s) << "\n";      \
-            return false;                                                         \
-        }                                                                         \
+#define CHECK_LT_RC(expr)                                                      \
+    do                                                                         \
+    {                                                                          \
+        const hipblasStatus_t _s = (expr);                                     \
+        if(_s != HIPBLAS_STATUS_SUCCESS)                                       \
+        {                                                                      \
+            hipblaslt_cerr << "error: " << #expr << " -> " << int(_s) << "\n"; \
+            return false;                                                      \
+        }                                                                      \
     } while(0)
 
     inline int64_t shard_of(const Arguments& arg)
@@ -125,21 +125,29 @@ namespace hipblaslt_bench
 
     inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
-        std::vector<hipblasLtBfloat16> hostA(size_t(arg.K[0]) * arg.M[0]);
-        std::vector<hipblasLtBfloat16> hostB(size_t(arg.K[0]) * arg.N[0]);
-
-        g_hipblaslt_seed = hipblaslt_rng_t(env.rank + 1);
-        hipblaslt_seedrand();
-        hipblaslt_init_hpl(hostA.data(), size_t(arg.K[0]), size_t(arg.M[0]), size_t(arg.K[0]));
-        hipblaslt_init_hpl(hostB.data(), size_t(arg.K[0]), size_t(arg.N[0]), size_t(arg.K[0]));
+        using namespace roc::hostnumerics;
+        Tensor hostA(
+            ScalarType::BFloat16,
+            Layout::contiguousFirstDimensionFastest(Shape{size_t(arg.K[0]), size_t(arg.M[0])}));
+        Tensor hostB(
+            ScalarType::BFloat16,
+            Layout::contiguousFirstDimensionFastest(Shape{size_t(arg.K[0]), size_t(arg.N[0])}));
+        hipblaslt::hostnumerics::initializeMatrix(hostA,
+                                                  hipblaslt::hostnumerics::MatrixRole::A,
+                                                  hipblaslt_initialization::hpl,
+                                                  uint64_t(env.rank) * 2 + 1);
+        hipblaslt::hostnumerics::initializeMatrix(hostB,
+                                                  hipblaslt::hostnumerics::MatrixRole::B,
+                                                  hipblaslt_initialization::hpl,
+                                                  uint64_t(env.rank) * 2 + 2);
 
         CHECK_HIP_RC(hipMemcpy(res.dA,
-                               hostA.data(),
-                               hostA.size() * sizeof(hipblasLtBfloat16),
+                               hostA.rawEncodedBackingStorage().data(),
+                               hostA.rawEncodedBackingStorage().size(),
                                hipMemcpyHostToDevice));
         CHECK_HIP_RC(hipMemcpy(res.dB,
-                               hostB.data(),
-                               hostB.size() * sizeof(hipblasLtBfloat16),
+                               hostB.rawEncodedBackingStorage().data(),
+                               hostB.rawEncodedBackingStorage().size(),
                                hipMemcpyHostToDevice));
         return true;
     }
@@ -192,15 +200,17 @@ namespace hipblaslt_bench
                 if(float(gold[i]) != 0.0f)
                     ++nonzero;
 
-            // allclose_check_general reports the tightest pair this block passes,
-            // or 1 when none does.
-            double atol = 1.0, rtol = 1.0;
-            allClose = allclose_check_general(
-                           'F', shard, arg.N[0], shard, gold.data(), landed.data(), atol, rtol)
-                       && allClose;
-
-            const double e = std::abs(
-                norm_check_general('F', shard, arg.N[0], shard, gold.data(), landed.data()));
+            using namespace roc::hostnumerics;
+            const auto layout
+                = Layout::contiguousFirstDimensionFastest(Shape{size_t(shard), size_t(arg.N[0])});
+            const auto expected = Tensor::copyEncodedBackingStorage(
+                ScalarType::BFloat16, layout, std::as_bytes(std::span(gold)));
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                ScalarType::BFloat16, layout, std::as_bytes(std::span(landed)));
+            // SDMA transfers must preserve each value exactly.
+            const auto report = compare(observed, expected, allCloseComparisonOptions(0.0, 0.0));
+            allClose          = report.passed() && allClose;
+            const double e    = std::abs(report.relativeFrobeniusError);
             if(e > normError)
                 normError = e;
         }
@@ -223,11 +233,11 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipSetDevice(env.local_rank));
         CHECK_HIP_RC(hipStreamCreate(&res.stream));
 
-        const size_t bytesA    = size_t(arg.K[0]) * arg.M[0] * sizeof(hipblasLtBfloat16);
-        const size_t bytesB    = size_t(arg.K[0]) * arg.N[0] * sizeof(hipblasLtBfloat16);
-        const size_t bytesD    = size_t(arg.M[0]) * arg.N[0] * sizeof(hipblasLtBfloat16);
-        const size_t bytesRecv = size_t(arg.a2a_world) * arg.N[0] * shard_of(arg)
-                                 * sizeof(hipblasLtBfloat16);
+        const size_t bytesA = size_t(arg.K[0]) * arg.M[0] * sizeof(hipblasLtBfloat16);
+        const size_t bytesB = size_t(arg.K[0]) * arg.N[0] * sizeof(hipblasLtBfloat16);
+        const size_t bytesD = size_t(arg.M[0]) * arg.N[0] * sizeof(hipblasLtBfloat16);
+        const size_t bytesRecv
+            = size_t(arg.a2a_world) * arg.N[0] * shard_of(arg) * sizeof(hipblasLtBfloat16);
 
         CHECK_HIP_RC(hipMalloc(&res.dA, bytesA));
         CHECK_HIP_RC(hipMalloc(&res.dB, bytesB));
@@ -249,7 +259,7 @@ namespace hipblaslt_bench
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
                     srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
-                res.queues[j] = {res.ownedQueues.back()->ringBase(),
+                res.queues[j]             = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
                                  (void*)q.Queue_write_ptr_aql,
                                  (void*)q.Queue_DoorBell_aql};
@@ -286,8 +296,7 @@ namespace hipblaslt_bench
                 return false;
 
         CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
-        CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused,
-                                              HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+        CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
         CHECK_LT_RC(
             hipblasLtFusedEpilogueSetAttribute(res.fused,
                                                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
@@ -298,26 +307,22 @@ namespace hipblaslt_bench
                                                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
                                                res.recvPtrs[0],
                                                arg.a2a_world * sizeof(res.recvPtrs[0][0])));
-        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
-            &arg.a2a_extent,
-            sizeof(arg.a2a_extent)));
+        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(res.fused,
+                                                       HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
+                                                       &arg.a2a_extent,
+                                                       sizeof(arg.a2a_extent)));
         const hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
-            &mode,
-            sizeof(mode)));
+            res.fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE, &mode, sizeof(mode)));
 
-        CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
-            &res.lay[0], HIP_R_16BF, arg.K[0], arg.M[0], arg.K[0]));
-        CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
-            &res.lay[1], HIP_R_16BF, arg.K[0], arg.N[0], arg.K[0]));
-        CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
-            &res.lay[2], HIP_R_16BF, arg.M[0], arg.N[0], arg.M[0]));
-        CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
-            &res.lay[3], HIP_R_16BF, arg.M[0], arg.N[0], arg.M[0]));
+        CHECK_LT_RC(
+            hipblasLtMatrixLayoutCreate(&res.lay[0], HIP_R_16BF, arg.K[0], arg.M[0], arg.K[0]));
+        CHECK_LT_RC(
+            hipblasLtMatrixLayoutCreate(&res.lay[1], HIP_R_16BF, arg.K[0], arg.N[0], arg.K[0]));
+        CHECK_LT_RC(
+            hipblasLtMatrixLayoutCreate(&res.lay[2], HIP_R_16BF, arg.M[0], arg.N[0], arg.M[0]));
+        CHECK_LT_RC(
+            hipblasLtMatrixLayoutCreate(&res.lay[3], HIP_R_16BF, arg.M[0], arg.N[0], arg.M[0]));
 
         CHECK_LT_RC(hipblasLtMatmulDescCreate(&res.mm, HIPBLAS_COMPUTE_32F, HIP_R_32F));
         const hipblasOperation_t opT = HIPBLAS_OP_T, opN = HIPBLAS_OP_N;
@@ -329,11 +334,10 @@ namespace hipblaslt_bench
             res.mm, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &res.fused, sizeof(res.fused)));
 
         CHECK_LT_RC(hipblasLtMatmulPreferenceCreate(&res.pref));
-        CHECK_LT_RC(hipblasLtMatmulPreferenceSetAttribute(
-            res.pref,
-            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-            &kWorkspaceSize,
-            sizeof(kWorkspaceSize)));
+        CHECK_LT_RC(hipblasLtMatmulPreferenceSetAttribute(res.pref,
+                                                          HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                          &kWorkspaceSize,
+                                                          sizeof(kWorkspaceSize)));
 
         return fill_operands(env, arg, res);
     }
