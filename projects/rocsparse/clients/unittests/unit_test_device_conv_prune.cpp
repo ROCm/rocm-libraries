@@ -96,7 +96,7 @@ namespace
     }
 
     // `rows` rows with `per_row` entries at the columns 0 .. per_row - 1. The values
-    // alternate between 0.25 and 1.5.
+    // alternate between 0.25 and 1.5 or -1.5.
     template <typename T>
     HostCsr<T> make_rows(I rows, I per_row, int base)
     {
@@ -110,7 +110,8 @@ namespace
             for(I k = 0; k < per_row; ++k)
             {
                 a.ind.push_back(k + base);
-                a.val.push_back(static_cast<T>(k % 2 == 0 ? 0.25 : 1.5));
+                a.val.push_back(
+                    static_cast<T>(k % 2 == 0 ? 0.25 : ((i + k) % 4 == 1 ? 1.5 : -1.5)));
             }
             a.ptr.push_back(base + a.ind.size());
         }
@@ -168,7 +169,7 @@ namespace
         SCOPED_TRACE("per_row " + std::to_string(per_row) + " " + trace(c));
         const auto a    = make_rows<T>(4, per_row, c.base_a);
         const T    thr  = 0.5;
-        const auto want = keep_entries(a, c.base_c, [&](T v) { return v > thr; });
+        const auto want = keep_entries(a, c.base_c, [&](T v) { return std::abs(v) > thr; });
         const I    nnz  = a.nnz();
 
         MatDescr  descr_a(base_of(c.base_a)), descr_c(base_of(c.base_c));
@@ -370,9 +371,10 @@ namespace
         SCOPED_TRACE("per_row " + std::to_string(per_row) + " pct " + std::to_string(pct) + " "
                      + trace(c));
         auto a = make_rows<T>(4, per_row, c.base_a);
-        // Distinct magnitudes, so that every percentage selects its own threshold.
+        // Distinct magnitudes, so that every percentage selects its own threshold. Every
+        // third entry is negative: the percentage is taken over the absolute values.
         for(size_t k = 0; k < a.val.size(); ++k)
-            a.val[k] = static_cast<T>(1 + (k * 7) % 97);
+            a.val[k] = static_cast<T>((k % 3 == 1 ? -1 : 1) * static_cast<int>(1 + (k * 7) % 97));
         const T    thr  = threshold_of(a, pct);
         const auto want = keep_entries(a, c.base_a, [&](T v) { return std::abs(v) > thr; });
         const I    nnz  = a.nnz();
@@ -660,8 +662,8 @@ namespace
         // No entry equals the threshold, whose treatment the header describes both ways.
         const int  m = 9, n = 7, ld = 11;
         const T    thr  = T(40.5);
-        const auto A    = make_dense<T>(m, n, ld, false);
-        const auto want = dense_keep(A, m, n, ld, base, [&](T v) { return v > thr; });
+        const auto A    = make_dense<T>(m, n, ld, true);
+        const auto want = dense_keep(A, m, n, ld, base, [&](T v) { return std::abs(v) > thr; });
 
         MatDescr         descr(base_of(base));
         DevBuf<T>        d_A(A), d_thr(std::vector<T>{thr});

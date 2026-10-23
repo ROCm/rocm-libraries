@@ -52,7 +52,8 @@ namespace
         {
             std::vector<std::pair<I, float>> row;
             for(int k = 0; k < std::min<int>(2 + (r % 3), n); ++k)
-                row.emplace_back((r + k) % n, ((r + k) % 2 == 0) ? 2.0f + k : 0.5f);
+                row.emplace_back((r + k) % n,
+                                 ((r + k) % 2 == 0) ? (r % 2 ? -2.0f - k : 2.0f + k) : 0.5f);
             std::sort(row.begin(), row.end());
             for(const auto& e : row)
             {
