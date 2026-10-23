@@ -69,6 +69,9 @@ public:
         }
     }
 
+    hipsparseLocalHandle_t(const hipsparseLocalHandle_t&) = delete;
+    hipsparseLocalHandle_t& operator=(const hipsparseLocalHandle_t&) = delete;
+
     // Allow hipsparseLocalHandle_t to be used anywhere hipsparseHandle_t is expected
     operator hipsparseHandle_t&()
     {
@@ -155,7 +158,7 @@ private:
 };
 
 // Exact match for the wrapper, so this beats the implicit conversion to
-// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error 
+// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error
 // instead of destroying the descriptor twice.
 hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&) = delete;
 
