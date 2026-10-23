@@ -18,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <type_traits>
 #include <vector>
@@ -81,11 +82,12 @@ namespace
 
     struct BadElement
     {
-        int64_t batch;
-        int64_t row;
-        int64_t col;
-        double  expected; // value a correct kernel stores
-        double  got;
+        int64_t               batch;
+        int64_t               row;
+        int64_t               col;
+        double                expected; // value a correct kernel stores
+        double                got;
+        std::optional<double> readback;
     };
 
     constexpr size_t kMaxReported = 8;
@@ -97,8 +99,10 @@ namespace
         int64_t            offset = e.batch * stride + e.col * ld + e.row;
         std::ostringstream s;
         s << "batch " << e.batch << ", row " << e.row << ", col " << e.col << ": expected "
-          << e.expected << ", got " << e.got << " (element offset " << offset << " = 0x" << std::hex
-          << offset << std::dec;
+          << e.expected << ", got " << e.got;
+        if(e.readback && *e.readback != e.got && !(std::isnan(*e.readback) && std::isnan(e.got)))
+            s << ", encoded readback " << *e.readback;
+        s << " (element offset " << offset << " = 0x" << std::hex << offset << std::dec;
         if(offset >= (int64_t(1) << 32))
             s << ", at or above 2^32";
         else if(offset >= (int64_t(1) << 31))
@@ -158,7 +162,8 @@ namespace
                                             int64_t(element.row),
                                             int64_t(element.column),
                                             plan.roundedValue(element.row, element.column),
-                                            element.storedValue});
+                                            element.storedValue,
+                                            stored_at(element.row, element.column)});
                 }
             for(size_t i : check.badRows)
                 for(size_t j : check.badColumns)
