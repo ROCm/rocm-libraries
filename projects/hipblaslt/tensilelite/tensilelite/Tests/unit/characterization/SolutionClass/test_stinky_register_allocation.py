@@ -29,12 +29,12 @@ def make(solution, assembler, isa_info_map):
     (0, 0),
     (2, 2),
     ("apply", 2),
-    ("2,classes=s", 2),
-    ("mode=apply,allocator=greedy-compact,unbankable=auto", 2),
+    ("2,classes=s", "2,classes=s"),
+    ("mode=apply,allocator=greedy-compact,unbankable=auto", "2,allocator=greedy-compact"),
     ("off,classes=vs", 0),
-    ("apply,classes=vs", "2,classes=vs"),
-    ("classes=vs,2", "2,classes=vs"),
-    ("force,unbankable=hold,classes=vs", "3,classes=vs,unbankable=hold"),
+    ("apply,classes=vs", 2),
+    ("classes=vs,2", 2),
+    ("force,unbankable=hold,classes=vs", "3,unbankable=hold"),
 ])
 def test_a_solution_keeps_the_shortest_spelling(make, value, canonical):
     assert make(value)[KEY] == canonical

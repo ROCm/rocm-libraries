@@ -1253,7 +1253,7 @@ validParameters = { # we need to make sure this matches develop
     # allocator, unbankable, quadrant, ...) are listed in StinkyTofu's
     # docs/developer/register-allocation.md, "Configuring allocation", and
     # StinkyTofu parses them, so Tensile accepts exactly what the pipeline runs.
-    # A solution keeps the shortest spelling: "apply" and "2,classes=s" are both
+    # A solution keeps the shortest spelling: "apply" and "2,classes=vs" are both
     # 2. The kernel name records only the mode: nothing for 0, STRA<mode>
     # otherwise. The string's other settings stay in the solution and out of
     # the name, so two configs with one mode are one kernel, built with the

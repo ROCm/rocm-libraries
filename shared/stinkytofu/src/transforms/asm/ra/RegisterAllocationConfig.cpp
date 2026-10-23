@@ -22,7 +22,10 @@ using Mode = RegisterAllocationMode;
 using Unbankable = RegisterAllocationOptions::UnbankableOperands;
 using Quadrant = RegisterAllocationOptions::Quadrant;
 
-constexpr const char* kKernelAllocator = "greedy-compact";
+// What a kernel gets when its configuration names no classes or allocator.
+constexpr RegClassSet kKernelClasses = RegClassSet::all();
+constexpr const char* kKernelAllocator =
+    "greedy-compact+greedy-compact-largest+greedy-compact-program";
 
 std::string_view trimmed(std::string_view text) {
     const size_t first = text.find_first_not_of(" \t\r\n");
@@ -166,7 +169,7 @@ Expected<RegisterAllocationConfig> parseRegisterAllocationConfig(
     RegisterAllocationOptions& options = config.options;
     if (kernel) {
         config.mode = Mode::Off;
-        options.allocate = RegClassSet::only(RegType::S);
+        options.allocate = kKernelClasses;
         options.allocator = kKernelAllocator;
     } else {
         config.mode = Mode::Shadow;
@@ -314,7 +317,7 @@ std::string canonicalRegisterAllocationConfig(const RegisterAllocationConfig& co
     const RegisterAllocationOptions defaults;
     std::vector<std::string> words{mode};
 
-    if (options.allocate != RegClassSet::only(RegType::S))
+    if (options.allocate != kKernelClasses)
         words.push_back("classes=" + classesName(options.allocate));
     if (options.allocator != kKernelAllocator) words.push_back("allocator=" + options.allocator);
     if (options.unbankableOperands != defaults.unbankableOperands)

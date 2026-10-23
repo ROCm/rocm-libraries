@@ -179,12 +179,12 @@ Where all of it lives, under both `include/stinkytofu/` and `src/`:
 --RegisterAllocationPass=allocator=greedy-compact,classes=v,regionEnd=C,apply,report
 ```
 
-The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by the same parser; section 12.2 covers the grammar and how the two callers differ. Three defaults differ between them. The tool keeps the ones it always had, `shadow`, `classes=v` and `allocator=greedy`; a kernel's configuration (TensileLite and the pipeline) defaults to `off`, `classes=s` and `allocator=greedy-compact`. The table gives both where they differ.
+The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by the same parser; section 12.2 covers the grammar and how the two callers differ. Three defaults differ between them. The tool keeps the ones it always had, `shadow`, `classes=v` and `allocator=greedy`; a kernel's configuration (TensileLite and the pipeline) defaults to `off`, `classes=vs` and `allocator=greedy-compact-program+greedy-compact-largest+greedy-compact`. The table gives both where they differ.
 
 | Option | Meaning |
 |---|---|
 | `shadow`, `apply`, `force`, or `0`..`3` | the mode, also spelled `mode=<word>`. `apply` and `force` write the colouring through `destroyAttachedSSA`; `shadow` colours without writing. Default: `shadow` in the tool, `off` in a kernel |
-| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact` in a kernel |
+| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact-program+greedy-compact-largest+greedy-compact` in a kernel |
 | `classes=<vs>` | class axis of allocation scope; see section 3. Default: `v` in the tool, `s` in a kernel |
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
 | `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key, or join with `+`, for disjoint runs |
@@ -270,7 +270,7 @@ no values is reported rather than silently colouring nothing:
 `RegisterAllocationOptions` and `stinkytofu-opt` default to VGPRs alone. No ABI
 range is reserved, and scalar allocation is still an explicit opt-in there even
 when a placement rule forbids some bases (section 14.5). A kernel's configuration
-is the exception: it defaults to `classes=s` (section 12.2).
+is the exception: it defaults to `classes=vs` (section 12.2).
 
 ```bash
 --LiftAsmRegistersToSSAPass=classes=s \
@@ -629,7 +629,7 @@ They constrain each other only when they appear together in one operand.
 
 | Name | Class | Summary |
 |---|---|---|
-| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default of `RegisterAllocationOptions` and `stinkytofu-opt`; a kernel's configuration defaults to `greedy-compact` |
+| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default of `RegisterAllocationOptions` and `stinkytofu-opt`. A kernel's configuration defaults to the chain `greedy-compact-program+greedy-compact-largest+greedy-compact` |
 | `greedy-compact` | `CompactingGreedyAllocator` | the same, with hints off, so placement packs from the bottom |
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | the same again, but ordering blocks by how few legal bases they have rather than by how hot they are |
 | `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | packing from the bottom in program order: the block that becomes live first goes first |
@@ -995,8 +995,8 @@ The words may come in any order:
 | Key | Values | Kernel default | Meaning |
 |---|---|---|---|
 | mode | `off`, `shadow`, `apply`, `force`, or `0`..`3`, bare or as `mode=` | `off` | 1 colours and reports; 2 and 3 also rewrite. TensileLite reads 3 as apply that may re-judge an over-budget kernel |
-| `classes=` | `s`, `v`, `vs` | `s` | what to lift and allocate; any other class keeps the producer's registers |
-| `allocator=` | a registered name, or several joined with `+` | `greedy-compact` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
+| `classes=` | `s`, `v`, `vs` | `vs` | what to lift and allocate; any other class keeps the producer's registers |
+| `allocator=` | a registered name, or several joined with `+` | `greedy-compact-program+greedy-compact-largest+greedy-compact` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
 | `unbankable=` | `auto`, `allocate`, `hold` | `auto` | operands that cannot name a VGPR bank; see below |
 | `quadrant=` | `any`, `prefer` | `any` | `prefer` searches the producer's 256-register bank for each block before the rest of the file |
 | `rules=`, `noRule=`, `noRules`, `ruleAudit` | as in section 2.1 | none | force rule statuses (section 14) |
@@ -1004,7 +1004,7 @@ The words may come in any order:
 
 Two dialects read the list. A kernel's configuration, which is what TensileLite and the pipeline read, has the defaults above and refuses `report`, `emitRegisterMap`, `emitSymbolBreadcrumbs` and `dumpBlocks`: those only shape diagnostics, and the pipeline always reports, always writes breadcrumbs, and writes placement tables under `StinkyTofuRegisterAllocationDump`. The tool's dialect accepts them, and defaults to `shadow`, `classes=v` and `allocator=greedy`, as `stinkytofu-opt` always has. A word the dialect does not know, a value a key does not take, two different modes, or an unregistered allocator is an error that names the word. TensileLite reports it when it validates the YAML.
 
-**Canonical spelling and kernel names.** `canonicalRegisterAllocationConfig` writes a configuration back out as the shortest list that means the same thing: the mode as a digit, then only the settings that differ from the kernel defaults, in the order of the table above, with lists sorted. A configuration that is only a mode is just the digit, and mode off is `0` whatever else it sets. TensileLite keeps that spelling in the solution, so `"apply"`, `"2,classes=s"` and `2` are one kernel, and the solution (in the benchmark data and the library logic) is where a kernel's full configuration is recorded.
+**Canonical spelling and kernel names.** `canonicalRegisterAllocationConfig` writes a configuration back out as the shortest list that means the same thing: the mode as a digit, then only the settings that differ from the kernel defaults, in the order of the table above, with lists sorted. A configuration that is only a mode is just the digit, and mode off is `0` whatever else it sets. TensileLite keeps that spelling in the solution, so `"apply"`, `"2,classes=vs"` and `2` are one kernel, and the solution (in the benchmark data and the library logic) is where a kernel's full configuration is recorded.
 
 The kernel name records only the mode: no tag for mode 0, so a kernel that does not opt in keeps its name, and `STRA1`, `STRA2` or `STRA3` otherwise. The other settings stay in the solution and out of the name. Tensile compiles and deduplicates by that name, so two configurations with one mode are one kernel, and the first of them is the one compiled. Tensile prints a warning for each configuration it does not compile, naming the first kernel affected (`RegisterAllocationMerges`, when solutions are deduplicated and when kernels are grouped). A benchmark that compares such configurations needs one run for each.
 

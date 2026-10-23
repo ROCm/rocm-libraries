@@ -37,11 +37,12 @@ std::string canonical(std::string_view text) {
 
 }  // namespace
 
-TEST(RegisterAllocationConfigTest, AKernelDefaultsToOffWithSgprsAndGreedyCompact) {
+TEST(RegisterAllocationConfigTest, AKernelDefaultsToOffWithBothClassesAndTheChain) {
     const RegisterAllocationConfig config = parsed("");
     EXPECT_EQ(config.mode, Mode::Off);
-    EXPECT_EQ(config.options.allocate, RegClassSet::only(RegType::S));
-    EXPECT_EQ(config.options.allocator, "greedy-compact");
+    EXPECT_EQ(config.options.allocate, RegClassSet::all());
+    EXPECT_EQ(config.options.allocator,
+              "greedy-compact-program+greedy-compact-largest+greedy-compact");
     EXPECT_EQ(config.options.unbankableOperands, Unbankable::Auto);
     EXPECT_EQ(config.options.quadrant, Quadrant::Any);
     EXPECT_FALSE(config.options.applyToOperands);
@@ -148,8 +149,12 @@ TEST(RegisterAllocationConfigTest, TheToolRefusesModeOff) {
 
 TEST(RegisterAllocationConfigTest, CanonicalSpellingDropsDefaultsAndUsesTheDigit) {
     EXPECT_EQ(canonical("apply"), "2");
-    EXPECT_EQ(canonical("2,classes=s"), "2");
-    EXPECT_EQ(canonical("mode=apply,allocator=greedy-compact,unbankable=auto,quadrant=any"), "2");
+    EXPECT_EQ(canonical("2,classes=vs,allocator=greedy-compact-program+greedy-compact-largest+"
+                        "greedy-compact"),
+              "2");
+    EXPECT_EQ(canonical("2,classes=s"), "2,classes=s");
+    EXPECT_EQ(canonical("mode=apply,allocator=greedy-compact,unbankable=auto,quadrant=any"),
+              "2,allocator=greedy-compact");
     EXPECT_EQ(canonical("shadow"), "1");
     EXPECT_EQ(canonical("force"), "3");
 }
@@ -160,9 +165,9 @@ TEST(RegisterAllocationConfigTest, CanonicalSpellingOfModeOffIsZeroWhateverElseI
 }
 
 TEST(RegisterAllocationConfigTest, CanonicalSpellingHasAFixedOrderAndSortedLists) {
-    EXPECT_EQ(canonical("noVerify,quadrant=prefer,classes=vs,3,rules=B+A,pinReg=v5+s0:3,"
+    EXPECT_EQ(canonical("noVerify,quadrant=prefer,classes=s,3,rules=B+A,pinReg=v5+s0:3,"
                         "unbankable=hold,noRule=Z,regionEnd=end,rules=A"),
-              "3,classes=vs,unbankable=hold,quadrant=prefer,rules=A+B,noRule=Z,pinReg=s0:3+v5,"
+              "3,classes=s,unbankable=hold,quadrant=prefer,rules=A+B,noRule=Z,pinReg=s0:3+v5,"
               "regionEnd=end,noVerify");
     EXPECT_EQ(canonical("2,rules=B,rules=all"), "2,rules=all+B");
 }
@@ -195,8 +200,9 @@ TEST(RegisterAllocationConfigTest, AKernelTakesItsModeFromTheNumber) {
 
     config = kernelRegisterAllocationConfig(2, "");
     ASSERT_FALSE(config.hasError());
-    EXPECT_EQ(config->options.allocate, RegClassSet::only(RegType::S));
-    EXPECT_EQ(config->options.allocator, "greedy-compact");
+    EXPECT_EQ(config->options.allocate, RegClassSet::all());
+    EXPECT_EQ(config->options.allocator,
+              "greedy-compact-program+greedy-compact-largest+greedy-compact");
 
     EXPECT_TRUE(kernelRegisterAllocationConfig(2, "bogus").hasError());
 }
@@ -204,7 +210,7 @@ TEST(RegisterAllocationConfigTest, AKernelTakesItsModeFromTheNumber) {
 TEST(RegisterAllocationConfigTest, OnlyAnApplyingModeRewritesAnAllocatedClass) {
     EXPECT_TRUE(kernelRewritesRegisters(2, "", RegType::S));
     EXPECT_TRUE(kernelRewritesRegisters(3, "", RegType::S));
-    EXPECT_FALSE(kernelRewritesRegisters(2, "", RegType::V));
+    EXPECT_TRUE(kernelRewritesRegisters(2, "", RegType::V));
     EXPECT_TRUE(kernelRewritesRegisters(2, "2,classes=vs", RegType::V));
     EXPECT_FALSE(kernelRewritesRegisters(2, "2,classes=v", RegType::S));
     EXPECT_FALSE(kernelRewritesRegisters(1, "1,classes=vs", RegType::S));
