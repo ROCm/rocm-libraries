@@ -143,6 +143,9 @@ public:
     /// @param sinkToken        Optional attention sink, FP32 [1, H, 1, 1]: one unscaled logit per
     ///                         query head that joins the softmax max and denominator but has no
     ///                         value row. LSE includes it.
+    /// @param dropoutMask      Optional explicit dropout mask (cuDNN custom dropout), FP32
+    ///                         [B or 1, H or 1, Sq, Skv]. O uses P * dropoutScale * mask.
+    /// @param dropoutScale     Dropout scale (usually 1 / (1 - p)); 1 when unset.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -166,7 +169,9 @@ public:
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
+                        std::optional<float> dropoutScale = std::nullopt)
     {
         if(q.dims().size() != 4)
         {
@@ -255,6 +260,9 @@ public:
         // Per-batch valid lengths (padding). Resolved on the calling thread for the same reason.
         const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
         const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
+        validateDropoutMask(dropoutMask, batch, numHeads, seqQ, seqKv);
+        // Dropout with an explicit mask (cuDNN): O uses P * dropoutScale * mask; LSE does not.
+        const auto dropoutFactor = static_cast<ComputeDataType>(dropoutScale.value_or(1.0F));
 
         // Attention sink (cuDNN): one unscaled logit per query head, [1, H, 1, 1].
         if(sinkToken != nullptr
@@ -396,6 +404,7 @@ public:
                 for(int64_t skv = 0; skv < liveKv; ++skv)
                 {
                     acc += probs[static_cast<size_t>(skv)]
+                           * dropoutKeep<ComputeDataType>(dropoutMask, dropoutFactor, b, h, sq, skv)
                            * static_cast<ComputeDataType>(
                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
@@ -601,7 +610,10 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>* dBias
         = nullptr,
         const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
+        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
+        std::optional<float> dropoutScale = std::nullopt,
+        std::optional<float> dropoutScaleInv = std::nullopt)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -740,6 +752,12 @@ public:
         const auto scale = static_cast<ComputeDataType>(attnScaleValue.value_or(1.0F));
         const auto validQ = resolveSeqLens(seqLenQ, seqLenKv, batch, seqQ, "seqLenQ");
         const auto validKv = resolveSeqLens(seqLenKv, seqLenQ, batch, seqKv, "seqLenKv");
+        validateDropoutMask(dropoutMask, batch, numHeadsQ, seqQ, seqKv);
+        // Dropout with an explicit mask, composed as cuDNN's backward does: D is scaled by
+        // dropoutScaleInv (1 when unset), dP is masked, dS is scaled by dropoutScale, and dV uses
+        // P * dropoutScale * mask. dBias reduces the dropout-scaled dS.
+        const auto dropoutFactor = static_cast<ComputeDataType>(dropoutScale.value_or(1.0F));
+        const auto dropoutInv = static_cast<ComputeDataType>(dropoutScaleInv.value_or(1.0F));
 
         // Accumulate gradients in FP32 to match GPU kernel behavior.
         // The GPU ASM kernel uses FP32 accumulators (A32 path) and only converts
@@ -824,6 +842,7 @@ public:
                             o.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
                         dVal += doVal * oVal;
                     }
+                    dVal *= dropoutInv;
 
                     // Step 2: Recompute attention scores and probabilities
                     // Option A: Use LSE if available (efficient)
@@ -959,7 +978,10 @@ public:
                                 v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                             dpVal += doVal * vVal;
                         }
-                        dpBuffer[static_cast<size_t>(skv)] = dpVal;
+                        dpBuffer[static_cast<size_t>(skv)]
+                            = dpVal
+                              * dropoutKeep(
+                                  dropoutMask, static_cast<ComputeDataType>(1.0), b, hQ, sq, skv);
                     }
 
                     // Step 4: Compute dS = P * (dP - D)  [softmax backward]
@@ -972,7 +994,8 @@ public:
                             continue;
                         }
 
-                        const ComputeDataType dsVal = probs[static_cast<size_t>(skv)]
+                        const ComputeDataType dsVal = dropoutFactor
+                                                      * probs[static_cast<size_t>(skv)]
                                                       * (dpBuffer[static_cast<size_t>(skv)] - dVal);
                         const ComputeDataType dsScaled
                             = dsVal * static_cast<ComputeDataType>(scale);
@@ -1010,7 +1033,9 @@ public:
                         {
                             const auto doVal = static_cast<ComputeDataType>(
                                 dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
-                            const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
+                            const auto dvContrib
+                                = probs[static_cast<size_t>(skv)]
+                                  * dropoutKeep(dropoutMask, dropoutFactor, b, hQ, sq, skv) * doVal;
 
                             dvAccum[dvIdx(b, kvHeadV, skv, dv)] += dvContrib;
                         }
@@ -1097,6 +1122,45 @@ public:
     }
 
 private:
+    /// Explicit dropout mask (cuDNN custom dropout): rank-4 [B or 1, H or 1, Sq, Skv].
+    static void validateDropoutMask(const hipdnn_data_sdk::utilities::TensorBase<float>* mask,
+                                    int64_t batch,
+                                    int64_t heads,
+                                    int64_t seqQ,
+                                    int64_t seqKv)
+    {
+        if(mask == nullptr)
+        {
+            return;
+        }
+        const auto& d = mask->dims();
+        if(d.size() != 4 || (d[0] != batch && d[0] != 1) || (d[1] != heads && d[1] != 1)
+           || d[2] != seqQ || d[3] != seqKv)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa: dropoutMask must be [B or 1, H or 1, Sq, Skv]");
+        }
+    }
+
+    /// Dropout factor for one (b, h, sq, skv): scale * mask, or 1 without dropout.
+    template <class ComputeDataType>
+    static ComputeDataType dropoutKeep(const hipdnn_data_sdk::utilities::TensorBase<float>* mask,
+                                       ComputeDataType scale,
+                                       int64_t b,
+                                       int64_t h,
+                                       int64_t sq,
+                                       int64_t skv)
+    {
+        if(mask == nullptr)
+        {
+            return static_cast<ComputeDataType>(1.0);
+        }
+        const auto& d = mask->dims();
+        return scale
+               * static_cast<ComputeDataType>(mask->getHostValue(
+                   std::vector<int64_t>{d[0] == 1 ? 0 : b, d[1] == 1 ? 0 : h, sq, skv}));
+    }
+
     /// Per-batch valid sequence lengths. With no seq_len tensor every batch uses the full
     /// length. The two seq_len tensors must be given together (cuDNN: padding needs both); each
     /// holds one INT32 value per batch, and every value must lie in [0, maxLen].

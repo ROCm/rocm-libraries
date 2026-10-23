@@ -6,11 +6,13 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 /// Result of extracting diagonal band mask parameters from SDPA node attributes.
 struct DiagonalBandParams
@@ -233,6 +235,76 @@ bool isSupportedSdpaSink(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttribu
     }
     const std::vector<int64_t> dims(sinkIt->second->dims()->begin(), sinkIt->second->dims()->end());
     return dims == std::vector<int64_t>{1, qIt->second->dims()->Get(1), 1, 1};
+}
+
+/// Whether an SDPA node's dropout is one the references implement: none, or cuDNN's custom
+/// dropout with an explicit FLOAT mask [B or 1, H or 1, Sq, Skv] and a single-element FLOAT
+/// dropout_scale. Philox dropout (dropout_probability / seed / offset) is declined: the
+/// references cannot reproduce a kernel's random stream. Works for forward and backward
+/// attributes; the backward's dropout_scale_inv is checked by the caller.
+template <typename SdpaAttributesType, typename TensorMap>
+bool isSupportedSdpaDropout(const SdpaAttributesType& attrs, const TensorMap& tensorMap)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    if(attrs.dropout_probability().has_value() || attrs.seed_tensor_uid().has_value()
+       || attrs.offset_tensor_uid().has_value())
+    {
+        return false;
+    }
+    const auto maskUid = attrs.dropout_mask_tensor_uid();
+    const auto scaleUid = attrs.dropout_scale_tensor_uid();
+    if(!maskUid.has_value())
+    {
+        return !scaleUid.has_value();
+    }
+    if(!scaleUid.has_value())
+    {
+        return false;
+    }
+    const auto maskIt = tensorMap.find(maskUid.value());
+    const auto scaleIt = tensorMap.find(scaleUid.value());
+    const auto qIt = tensorMap.find(attrs.q_tensor_uid());
+    const auto kIt = tensorMap.find(attrs.k_tensor_uid());
+    if(maskIt == tensorMap.end() || scaleIt == tensorMap.end() || qIt == tensorMap.end()
+       || kIt == tensorMap.end() || maskIt->second->dims() == nullptr
+       || scaleIt->second->dims() == nullptr || qIt->second->dims() == nullptr
+       || kIt->second->dims() == nullptr || maskIt->second->data_type() != DataType::FLOAT
+       || scaleIt->second->data_type() != DataType::FLOAT)
+    {
+        return false;
+    }
+    int64_t scaleCount = 1;
+    for(const auto dim : *scaleIt->second->dims())
+    {
+        scaleCount *= dim;
+    }
+    const auto* m = maskIt->second->dims();
+    const auto* q = qIt->second->dims();
+    const auto* k = kIt->second->dims();
+    return scaleCount == 1 && m->size() == 4 && q->size() == 4 && k->size() == 4
+           && (m->Get(0) == q->Get(0) || m->Get(0) == 1)
+           && (m->Get(1) == q->Get(1) || m->Get(1) == 1) && m->Get(2) == q->Get(2)
+           && m->Get(3) == k->Get(2);
+}
+
+/// A one-element FLOAT operand of a CPU plan: a pass-by-value or baked scalar, or an ordinary
+/// tensor whose host pointer is in the variant pack (the CPU executor binds host memory).
+inline float
+    resolveHostScalarOperand(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& attrs,
+                             const std::unordered_map<int64_t, void*>& variantPack,
+                             const char* name)
+{
+    if(attrs.is_runtime_pass_by_value || attrs.value.value != nullptr)
+    {
+        return hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+            attrs, variantPack, name);
+    }
+    const auto it = variantPack.find(attrs.uid);
+    if(it == variantPack.end() || it->second == nullptr)
+    {
+        throw std::runtime_error(std::string(name) + " tensor missing from the variant pack");
+    }
+    return *static_cast<const float*>(it->second);
 }
 
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \

@@ -1837,6 +1837,138 @@ TEST(TestCpuFpReferenceSdpaBwd, DBiasZeroOnBandMaskedPositions)
         std::invalid_argument);
 }
 
+// Dropout with an explicit mask (cuDNN custom dropout): O = (P * scale * mask) V. With
+// dropoutScaleInv = 1 / scale the backward is the exact gradient, including dBias.
+TEST(TestCpuFpReferenceSdpaGradCheck, ExplicitMaskDropout)
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 2;
+    constexpr int64_t SEQ_Q = 3;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr float SCALE = 0.7f;
+    constexpr float KEEP = 0.6f;
+    const float dropoutScale = 1.0f / KEEP;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> bias({SEQ_Q, SEQ_KV});
+    Tensor<float> keepMask({1, HEADS_Q, SEQ_Q, SEQ_KV}); // broadcast over batch
+    q.fillWithRandomValues(-0.5f, 0.5f, 9500);
+    k.fillWithRandomValues(-0.5f, 0.5f, 9501);
+    v.fillWithRandomValues(-0.5f, 0.5f, 9502);
+    dO.fillWithRandomValues(-0.5f, 0.5f, 9503);
+    bias.fillWithRandomValues(-0.5f, 0.5f, 9504);
+    Tensor<float> uniform({1, HEADS_Q, SEQ_Q, SEQ_KV});
+    uniform.fillWithRandomValues(0.0f, 1.0f, 9505);
+    for(size_t i = 0; i < keepMask.elementCount(); ++i)
+    {
+        keepMask.memory().hostData()[i] = uniform.memory().hostData()[i] < KEEP ? 1.0f : 0.0f;
+    }
+
+    const auto fwd = [&]() {
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    SCALE,
+                                    &bias,
+                                    -1,
+                                    0,
+                                    false,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    &keepMask,
+                                    dropoutScale);
+    };
+    fwd();
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM});
+    Tensor<float> dBias({SEQ_Q, SEQ_KV});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 SCALE,
+                                 nullptr,
+                                 &bias,
+                                 -1,
+                                 0,
+                                 false,
+                                 &dBias,
+                                 nullptr,
+                                 nullptr,
+                                 &keepMask,
+                                 dropoutScale,
+                                 KEEP);
+
+    auto fwdLoss = [&]() -> double {
+        fwd();
+        return computeDotProductLoss(dO, o);
+    };
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (dropout)");
+    checkGradient(k, dK, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (dropout)");
+    checkGradient(v, dV, {BATCH, HEADS_KV, SEQ_KV, HEAD_DIM}, fwdLoss, "dV (dropout)");
+    checkGradient(bias, dBias, {SEQ_Q, SEQ_KV}, fwdLoss, "dBias (dropout)");
+}
+
+// Dropout does not renormalize: O = scale * sum_j P_j * mask_j * V_j, and the LSE is the
+// pre-dropout softmax's.
+TEST(TestCpuFpReferenceSdpaFp64, ExplicitMaskDropoutForwardClosedForm)
+{
+    Tensor<double> q({1, 1, 1, 2});
+    Tensor<double> k({1, 1, 3, 2});
+    Tensor<double> v({1, 1, 3, 1});
+    Tensor<double> o({1, 1, 1, 1});
+    Tensor<float> lse({1, 1, 1, 1});
+    q.fillWithValue(0.0); // uniform softmax: P_j = 1/3
+    k.fillWithValue(1.0);
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(10.0, 0, 0, 1, 0);
+    v.setHostValue(100.0, 0, 0, 2, 0);
+    Tensor<float> keepMask({1, 1, 1, 3});
+    keepMask.setHostValue(1.0f, 0, 0, 0, 0);
+    keepMask.setHostValue(0.0f, 0, 0, 0, 1);
+    keepMask.setHostValue(1.0f, 0, 0, 0, 2);
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                &lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &keepMask,
+                                2.0f);
+    // Compute type is fp32, so the result is exact to about 1e-7 relative.
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0 * (1.0 + 100.0) / 3.0, 1e-4);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(3.0), 1e-6);
+}
+
 TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
 {
     // Combined: GQA + causal mask

@@ -130,7 +130,8 @@ dimension must be reduced.
 |---------|--------------|---------------|
 | Log-sum-exp `stats` output | Supported | Required input |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported (same rules) |
-| Dropout (including `dropout_probability` alone) | Not supported | Not supported |
+| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Supported |
+| Philox dropout (`dropout_probability`, seed, offset) and RNG_DUMP | Not supported | Not supported |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
