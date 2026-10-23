@@ -163,7 +163,6 @@ class TestValidation:
         {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
         {"TDMInst": 2}, {"DebugStreamK": 1},
         {"ProblemType": {"OutputAmaxD": True}},
-        {"ProblemType": {"Gradient": True, "UseBias": True}},
     ])
     def test_unsupported_spatial_capabilities_fail_explicitly(self, overrides):
         from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast

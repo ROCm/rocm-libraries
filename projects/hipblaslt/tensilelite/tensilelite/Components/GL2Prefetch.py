@@ -8,7 +8,7 @@ from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCmpEQU32, SLShiftRightB32, SLoadB64, SWaitCnt
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
-    scalarStaticRemainder
+    scalarStaticRemainder, BranchIfZero
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
 
@@ -206,6 +206,12 @@ class GL2PrefetchLoad(GL2Prefetch):
             tmpSgprIdx1 = tmpSgprRes.idx + 1
             tmpSgprIdx2 = tmpSgprRes.idx + 2
             tmpSgprIdx3 = tmpSgprRes.idx + 3
+            unusedInputDone = None
+            if writer.isUnusedInputAtAlphaZero(kernel, tc):
+                unusedInputDone = Label(writer.labels.getNameInc(f"InputBias{tc}PrefetchAddressDone"), "")
+                mod.add(BranchIfZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(),
+                                    tmpSgprIdx0, writer.states.laneSGPRCount,
+                                    unusedInputDone, kernel["WavefrontSize"]))
             # Cooperative thread index over the whole cluster. Flatten this
             # workgroup's cluster-local (tile, share) position into a single index
             # and offset the wave's Serial by it, so the cluster's threads jointly
@@ -333,6 +339,8 @@ class GL2PrefetchLoad(GL2Prefetch):
                 dst = f"{vgprAddrBaseName}_{i}"
                 mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2)))
 
+        if unusedInputDone is not None:
+            mod.add(unusedInputDone)
         writer.vgprPool.checkIn(tmpVgprIdx)
         writer.vgprPool.checkIn(tmpVgprCoalIdx)
         return mod
@@ -383,9 +391,18 @@ class GL2PrefetchLoad(GL2Prefetch):
     def issueLoad(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
+        unusedInputDone = None
+        if writer.isUnusedInputAtAlphaZero(kernel, tc):
+            unusedInputDone = Label(writer.labels.getNameInc(f"InputBias{tc}PrefetchDone"), "")
+            with writer.allocTmpSgpr(max(1, writer.states.laneSGPRCount)) as tmp:
+                mod.add(BranchIfZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(),
+                                    tmp.idx, writer.states.laneSGPRCount,
+                                    unusedInputDone, kernel["WavefrontSize"]))
         for i in range(tp["gl2nl"]):
             addrName = f"GL2PrefetchAddr{tc}_{i}"
             mod.add(GlobalPrefetchB8(vgpr(addrName, 2), sgpr("off", isOff=True), self.globalModifiers))
+        if unusedInputDone is not None:
+            mod.add(unusedInputDone)
         return mod
 
     def incrementAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
