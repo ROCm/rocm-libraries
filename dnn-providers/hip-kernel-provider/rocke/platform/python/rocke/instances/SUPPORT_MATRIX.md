@@ -105,6 +105,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
 | `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
+| `dw_wgrad_mfma` / `grouped_wgrad_mfma` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0`, any filter) and 4/8-channel grouped wgrad, stride 1, on `mfma_f32_4x4x4`; partial slots + `dw_wgrad_fold`; need `ds_read_b64_tr_b16`. AOT sweep only, not yet wired into dispatch |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 
 ---

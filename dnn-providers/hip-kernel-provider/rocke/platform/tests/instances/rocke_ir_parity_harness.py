@@ -1304,12 +1304,14 @@ def build_direct_nongrouped(
 
 def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
     """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
-    fold; ``problem`` overrides the DirectConvProblem fields (unused by the
-    fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
+    dw_mfma / grouped_mfma / fold; ``problem`` overrides the DirectConvProblem
+    fields (unused by the fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
     where the C++ engine is gated byte-identical by check_byte_identity.py."""
 
     def _build():
         from kernels.common import conv_direct_dw_wgrad as dw
+        from kernels.common import conv_direct_dw_wgrad_mfma as dwm
+        from kernels.common import conv_direct_grouped_wgrad_mfma as gwm
         from kernels.common import conv_direct_wgrad_gather as wg
         from kernels.common import conv_direct_wgrad_tiled as wt
         from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -1338,6 +1340,11 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
             "dw_lds": (dw.DwWgradLdsSpec, dw.build_dw_wgrad_lds),
             "dw_cols": (dw.DwWgradColsSpec, dw.build_dw_wgrad_cols),
             "gather": (wg.WgradGatherSpec, wg.build_wgrad_gather),
+            "dw_mfma": (dwm.DwWgradMfmaSpec, dwm.build_dw_wgrad_mfma),
+            "grouped_mfma": (
+                gwm.GroupedWgradMfmaSpec,
+                gwm.build_grouped_wgrad_mfma,
+            ),
         }[kind]
         return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
 
@@ -4536,7 +4543,8 @@ def cases():
 
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
     # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
-    # depthwise partial-slot kernels and their fold, and the small-C gather.
+    # depthwise partial-slot kernels and their fold, the small-C gather, and
+    # the 4x4x4 MFMA depthwise and 4/8-channel grouped kernels.
     # The full branch matrix (and the C++ twins) lives in
     # library/tests/parity/conv_direct_grouped_emit.* (indices 95+).
     for _case_id, _kind, _prob, _over in (
@@ -4579,6 +4587,30 @@ def cases():
             "gather",
             dict(cpg=24, kpg=96, stride=2, H=30, W=40),
             dict(wave_k16=1, waves_k=6, rows_per_seg=8, target_blocks=256),
+        ),
+        (
+            "dw_mfma_7x7_c192",
+            "dw_mfma",
+            dict(groups=192, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=56, W=56),
+            dict(q_tiles=8, rows_per_chunk=28),
+        ),
+        (
+            "dw_mfma_7x7_unfold3",
+            "dw_mfma",
+            dict(groups=1024, cpg=1, kpg=1, KH=7, KW=7, PAD=3, N=8, H=7, W=7),
+            dict(rows_per_chunk=14, unfold_n=3),
+        ),
+        (
+            "grouped_mfma_c4",
+            "grouped_mfma",
+            dict(groups=32, cpg=4, kpg=4, H=56, W=56),
+            dict(wave_q4=2),
+        ),
+        (
+            "grouped_mfma_c8_fp16",
+            "grouped_mfma",
+            dict(groups=32, cpg=8, kpg=8, H=56, W=56, dtype="fp16"),
+            dict(wave_q4=2, prefetch=3),
         ),
     ):
         add(
