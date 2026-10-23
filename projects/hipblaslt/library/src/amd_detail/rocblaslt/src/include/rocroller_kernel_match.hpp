@@ -36,10 +36,12 @@ inline bool rocRollerKernelNameMatchesTile(const std::string&           kernel,
     // The prefix match stops at _Float_ and the tile match starts at WGT_, so the
     // scale tokens in between are never inspected. A pre-swizzled kernel carries
     // PSTA_/PTA_/PSTB_/PTB_ there and would otherwise match a non-pre-swizzled
-    // problem on tile shape alone. None are checked in and useRocRoller() turns
-    // the pre-swizzled pairs away, so reject them; if pre-swizzled rocRoller
-    // kernels are ever added this has to become a positive match on the problem's
-    // own scale format rather than a blanket reject.
+    // problem on tile shape alone. None are checked in, so reject them; if
+    // pre-swizzled rocRoller kernels are ever added this has to become a positive
+    // match on the problem's own scale format rather than a blanket reject.
+    // useRocRoller() is not the guard here: it turns a pre-swizzled scale layout
+    // away only for FP4 x FP4 and E4M3 x E4M3, so every other pre-swizzled pair
+    // still reaches this function.
     if(kernel.find("_PSTA_") != std::string::npos || kernel.find("_PTA_") != std::string::npos
        || kernel.find("_PSTB_") != std::string::npos || kernel.find("_PTB_") != std::string::npos)
         return false;
