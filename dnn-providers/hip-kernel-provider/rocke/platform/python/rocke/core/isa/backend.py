@@ -161,6 +161,15 @@ class ISABackend:
         return True
 
     @property
+    def has_fp8_scale_conversion(self) -> bool:
+        """Whether the target has the fused scale-and-convert fp8/bf8
+        instructions (``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``). Only gfx950
+        overrides this to ``True``. Elsewhere LLVM may still select the
+        intrinsic and write an encoding the GPU does not have, so the lowerer
+        refuses the ops rather than emitting them."""
+        return False
+
+    @property
     def has_async_lds_counter(self) -> bool:
         """Whether the target has the gfx1250 dedicated async-DMA counter
         (``s_wait_asynccnt`` + ``global_load_async_to_lds``). Only gfx1250
@@ -261,6 +270,11 @@ class Gfx950Backend(ISABackend):
     """CDNA4 / MI350-MI355. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
     160 KB LDS. This is the historical default; its output is the byte-identical
     baseline."""
+
+    @property
+    def has_fp8_scale_conversion(self) -> bool:
+        # gfx950 added ``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``.
+        return True
 
 
 class Gfx9MfmaBackend(ISABackend):

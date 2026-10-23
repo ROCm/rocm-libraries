@@ -84,6 +84,15 @@ All remaining shapes.  Key knob decisions:
 
 ### Knob reference
 
+Every knob a selector resolves must also reach the launcher cache key
+(`_tiled_cache_key` / `_tiled_3d_cache_key` in
+[`attention_unified.py`](../../kernels/common/attention_unified.py)): add the
+selector's resolved output there when you wire it. The key is computed per launch
+without building the spec, so a missing entry lets two shapes that build different
+kernels share one cached binary.
+[`test_attention_tiled_cache_key.py`](../../tests/test_attention_tiled_cache_key.py)
+fails when key equality and built-spec equality disagree.
+
 Tiled-3D knobs (gfx942 and gfx950 split-KV segment kernel) come first; the
 Knob Catalog in `platform/dsl_docs/optimization/optimization_runbook.md`
 (§12.1.K2) lists them with the other 3D fields.
