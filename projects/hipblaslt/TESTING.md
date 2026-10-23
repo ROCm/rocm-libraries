@@ -1161,7 +1161,7 @@ for this document.
 
 Testing for hipBLASLt and TensileLite grew up one lane and one incident at a time, and it shows. The
 same TensileLite suite runs in four lanes, while gfx1250 gets no test stage at all and a rocRoller-only
-pull request gets no hipBLASLt Math CI jobs. Known-bad behavior is suppressed in eight different ways.
+pull request gets no hipBLASLt Math CI jobs. Known-bad behavior is suppressed in nine different ways.
 The kinds of test have multiplied (unit, characterization, client GTest, `Tests/common`, emulation,
 stress, sanitizer, benchmark) without a shared rule for what each one is for or where it should run.
 The gaps recorded in this document are real, but fixing them one at a time would leave that shape in
@@ -1551,6 +1551,12 @@ the weekly cadence exists.
   limits travel with that number. Failed tests still contributed coverage, and generated kernels were
   outside the measurement, so it says nothing about kernel coverage. Equal lines are also not enough
   on their own to prune a case (philosophy rule 7).
+- **Keep TheRock's `Test tensilelite` job inside its time limit**
+  ([#14049](https://github.com/ROCm/rocm-libraries/issues/14049)). `quick` and `standard` select the
+  same unit tests, and `quick` runs under a 15-minute cap. Several unit tests read the metadata of
+  every shipped custom kernel, so the job's wall time grows with each kernel added. Metadata parsing
+  is now much cheaper, but nothing yet stops the job from growing back past the cap. Tiering the
+  unit tests so `quick` is a real subset is the durable fix.
 - **Shard TheRock's `tensilelite-common` job** (AIHPBLAS-5040). gfx950 is on the pull-request path
   as of the TheRock pin of 2026-10-02, and the job still runs unsharded with a 180-minute timeout.
   gfx950 takes about two hours, so the job is already a two-hour gate on pull requests. Split the
@@ -1646,7 +1652,7 @@ cadence, and pull requests get a performance number.
 long, both languages get static analysis on a pull request, and the characterization-to-unit
 migration has a target.
 
-- **Govern known-bug entries as one thing** (AIHPBLAS-5031). Eight mechanisms suppress or record
+- **Govern known-bug entries as one thing** (AIHPBLAS-5031). Nine mechanisms suppress or record
   known-bad behavior and none of them share a convention. The proposal, which needs team agreement
   before it becomes policy, is four rules:
 
@@ -1658,9 +1664,10 @@ migration has a target.
     than assumed.
   - A fix fails the build, so the entry deletes itself.
 
-  Two mechanisms cannot satisfy the third rule today, so adopting this means changing them or
-  accepting a stated exception. Start by splitting flaky from known-failing in the client quarantine
-  list, which is the largest and blindest surface.
+  Some mechanisms cannot satisfy the third rule today, among them the client quarantine list and the
+  coverage-pass filters, so adopting this means changing them or accepting a stated exception. Start
+  by splitting flaky from known-failing in the client quarantine list, which is the largest and
+  blindest surface.
 
 - **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
   what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
