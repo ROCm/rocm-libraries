@@ -10,6 +10,7 @@ This document describes the environment variables and runtime configuration opti
   - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+  - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
   - [Logging Variables](#logging-variables)
@@ -288,6 +289,37 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
+
+### Engine Applicability Threading
+
+The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, every check still runs on the calling thread. Internally, a provider with two or more ingestor engines reaches that point through a begin-all, finish-all sequence in which the engines share one device lookup and one catalog key, rather than the one-engine-at-a-time loop. This is an implementation detail of the hip-kernel-provider, not a stable interface; it can change without notice, and nothing here depends on it.
+
+Applicability results are identical either way: the same engines, in the same order, and the same error when one fails.
+
+The threshold is the only setting. A call uses at most min(pending engines, CPUs the process may run on, 9) threads, the calling thread included.
+
+#### HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS
+
+Overrides the threshold, for calibration. The least work, in kernel variants, a call must be able to hand to other threads before it uses any. The offloadable work is the sum of the pending engines' arch-eligible variants minus the largest engine's, which stays on the calling thread. Calls under the threshold, or with fewer than two pending engines, stay on the calling thread.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | `50` variants (the default) |
+| `<n>`, n ≥ 0 | Offload when at least `n` variants can be offloaded; `0` offloads whenever two engines are pending |
+
+Anything that is not a non-negative integer is ignored, treated as unset, and logs a warning naming the variable and the value.
+
+**Example:**
+```bash
+#Offload whenever two or more engines are pending, to measure the dispatch cost
+export HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS=0
+```
+
+**Notes:**
+- The variable is read on every call that has at least two pending engines.
+- Engines that answer from their catalog cache, or decline the graph before walking variants, are never pending.
+- Worker threads belong to the plugin and live until the last hipDNN handle is destroyed. They are created on the first call that offloads work.
+- Workers are limited process-wide to half the CPUs the process may run on (at least 1), shared by every concurrent call. A call that finds none free runs on its own thread; it never waits for a worker.
 
 ### Caching
 
