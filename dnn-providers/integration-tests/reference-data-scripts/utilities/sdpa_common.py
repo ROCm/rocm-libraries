@@ -66,19 +66,24 @@ def to_physical_layout(tensor, layout):
 def build_bound_mask(s_q, s_kv, left_bound, right_bound, top_left_alignment):
     """Boolean keep-mask [S_q, S_kv] from the graph's diagonal-band parameters.
 
-    This is the vectorized negation of the CPU reference executor's `isMasked()`
-    (CpuFpReferenceSdpa.hpp), which both reference executors share, so the golden
-    data encodes exactly the band the device-under-test is asked to produce:
+        This is the vectorized negation of the CPU reference executor's `isMasked()`
+        (CpuFpReferenceSdpa.hpp), which both reference executors share, so the golden
+        data encodes exactly the band the device-under-test is asked to produce:
 
-      masked if right_bound >= 0 and skv >= sq + 1 + offset + right_bound
-      masked if left_bound  >= 0 and skv <  sq + offset - left_bound
+          masked if right_bound >= 0 and skv >= sq + 1 + offset + right_bound
+          masked if left_bound  >= 0 and skv <= sq + offset - left_bound
 
-    where offset is 0 for top-left alignment and (S_kv - S_q) for bottom-right.
-    A bound of -1 (or None) means "unbounded" on that side. Returns None when
-    neither bound constrains anything, so callers can take the dense fast path.
+    left_bound is cuDNN's: it keeps that many keys including the diagonal
+    (SdpaSemanticsRegister SEM-001), so 0 would keep no keys and is rejected.
+
+        where offset is 0 for top-left alignment and (S_kv - S_q) for bottom-right.
+        A bound of -1 (or None) means "unbounded" on that side. Returns None when
+        neither bound constrains anything, so callers can take the dense fast path.
     """
     left = -1 if left_bound is None else left_bound
     right = -1 if right_bound is None else right_bound
+    if left == 0:
+        raise ValueError("left_bound = 0 keeps no keys (cuDNN rejects it)")
     if left < 0 and right < 0:
         return None
 
@@ -90,7 +95,7 @@ def build_bound_mask(s_q, s_kv, left_bound, right_bound, top_left_alignment):
     if right >= 0:
         keep &= col < (row + 1 + offset + right)
     if left >= 0:
-        keep &= col >= (row + offset - left)
+        keep &= col > (row + offset - left)
     return keep
 
 
@@ -98,14 +103,13 @@ def causal_window_bounds(causal, window_left, window_right):
     """Map the forward generator's causal/window arguments to band parameters.
 
     Returns (left_bound, right_bound, top_left_alignment) with -1 meaning
-    unbounded. A causal mask is the band whose right bound is 0; an explicit
-    --window-right can only narrow it further, so the two compose as a minimum
-    rather than the window overriding the causal constraint.
+    unbounded. Resolved exactly as the forward graph serializes them (cuDNN setter
+    composition): causal sets right_bound = 0, and an explicit --window-right
+    replaces it. Taking the minimum instead would keep right_bound at 0 while the
+    graph says window_right.
     """
     left_bound = window_left if window_left >= 0 else -1
-    right_bound = window_right if window_right >= 0 else -1
-    if causal != "none":
-        right_bound = 0 if right_bound < 0 else min(0, right_bound)
+    right_bound = window_right if window_right >= 0 else (0 if causal != "none" else -1)
     return left_bound, right_bound, causal != "bottom_right"
 
 

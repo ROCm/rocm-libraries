@@ -107,7 +107,10 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         (--sweep-bundle-dir/--case-id). Bundles without --additive-mask are
 #         byte-identical to 1.0.0; the mask is drawn after dO, so it extends the
 #         RNG draw order rather than disturbing it.
-GENERATOR_VERSION = "1.1.0"
+# 1.2.0 — --left-bound is cuDNN's left_bound: it keeps that many keys including the
+#         diagonal (SdpaSemanticsRegister SEM-001), so it must be >= 1. Windowed
+#         bundles from earlier versions keep one more key and must be regenerated.
+GENERATOR_VERSION = "1.2.0"
 
 # Backward tensor UID assignment. These match the checked-in graph-only
 # SdpaBackward template topology (integration-test-bundles/*/SdpaBackward/), so
@@ -662,9 +665,12 @@ def generate_bundles(
         errors.append(f"GQA is not supported yet: H_q ({H_q}) must equal H_kv ({H_kv})")
     if min_val >= max_val:
         errors.append(f"--min ({min_val}) must be less than --max ({max_val})")
-    for name, bound in [("--left-bound", left_bound), ("--right-bound", right_bound)]:
-        if bound is not None and bound < 0:
-            errors.append(f"{name} must be >= 0 when given (omit it for unbounded)")
+    if left_bound is not None and left_bound < 1:
+        errors.append(
+            "--left-bound must be >= 1 when given (cuDNN: it counts the diagonal key)"
+        )
+    if right_bound is not None and right_bound < 0:
+        errors.append("--right-bound must be >= 0 when given (omit it for unbounded)")
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -883,7 +889,8 @@ def main():
         "--left-bound",
         type=int,
         default=None,
-        help="KV positions kept to the left of the diagonal; omit for unbounded",
+        help="cuDNN left_bound: KV positions kept up to and including the diagonal "
+        "(must be >= 1); omit for unbounded",
     )
     parser.add_argument(
         "--right-bound",
