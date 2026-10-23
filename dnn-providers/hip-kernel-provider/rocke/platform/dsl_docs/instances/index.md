@@ -41,7 +41,8 @@ implementation.
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
+| `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `instances/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec` | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
 | `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
@@ -226,7 +227,7 @@ From `helpers/README.md`:
 | batched_gemm | - | - | - | - | - | yes | - | (wraps gemm_universal) |
 | grouped_gemm | - | planned | - | - | - | yes | - | (wraps gemm_universal) |
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
-| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
+| conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}), `chiplet_transform_chunked_runtime` (`helpers.grid`, `xcd_tiles`) |
 | conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
 | conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |

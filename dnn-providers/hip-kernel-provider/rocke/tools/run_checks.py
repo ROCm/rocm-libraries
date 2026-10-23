@@ -15,13 +15,16 @@
 #   guard    -- relative-path guard        (platform tests/run_all.py)
 #   gate     -- byte-identity gate         (BOTH llvm20 and llvm22 unless --flavor pins one)
 #   parity   -- platform instance .py/.c parity emitters
-#   pytest   -- auto-globs platform/tests + library/tests
+#   pytest   -- auto-globs platform/tests + library/tests; the pinned GPU
+#               reference suites run as their own step and report when skipped
 #   numeric  -- on-GPU numeric correctness (needs a HIP device)
 #
 # --steps picks a subset, e.g. `--steps numeric` (just the correctness lane) or
 # `--steps gate,parity`. --op scopes an OPERATOR/family across the stages that
 # can filter (parity, pytest, numeric, and the gate) so you can run one
-# operator's checks, e.g. `--steps numeric --op fmha_bwd`. All paths are derived
+# operator's checks, e.g. `--steps numeric --op fmha_bwd`. The pinned GPU
+# reference suites are never --op scoped: their test names carry the reference
+# operation (e.g. conv, sdpa), not the operator/family. All paths are derived
 # from this file so the tree stays copy-able; cross-platform (no bash/nproc/sudo).
 #
 # Usage:
@@ -40,6 +43,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROCKE = Path(__file__).resolve().parents[1]  # tools -> rocke
@@ -83,6 +87,36 @@ def _discover_pytest_dirs() -> list[Path]:
     return dirs
 
 
+def _discover_pinned_reference_tests() -> list[Path]:
+    # Pinned GPU reference suites (test_<operation>_pinned_reference.py) skip
+    # unless this machine has an enrolled processor and an extracted bundle.
+    # They run as a separate step with -rs and are never -k scoped, so a run
+    # with zero pinned comparisons is reported instead of passing silently.
+    return sorted((LIBRARY / "tests").glob("test_*_pinned_reference.py"))
+
+
+def _unexercised_pinned(junit: Path, suites: list[Path]) -> list[str]:
+    # Operations whose pinned suite executed no test, per pytest's junit report.
+    # Skipping other processors' cases is normal; one executed test is enough.
+    try:
+        cases = list(ET.parse(junit).getroot().iter("testcase"))
+    except (OSError, ET.ParseError):
+        return []
+    idle = []
+    for suite in suites:
+        ran = [
+            c
+            for c in cases
+            if suite.stem in c.get("classname", "").split(".")
+            and c.find("skipped") is None
+        ]
+        if not ran:
+            idle.append(
+                suite.stem.removeprefix("test_").removesuffix("_pinned_reference")
+            )
+    return idle
+
+
 def _run(label: str, cmd: list[str], env: dict, cwd: Path | None = None) -> int:
     print(f"\n== {label} ==\n$ {' '.join(cmd)}", flush=True)
     rc = subprocess.run(cmd, env=env, cwd=str(cwd) if cwd else None).returncode
@@ -113,7 +147,8 @@ def main() -> int:
     ap.add_argument(
         "--op",
         default="",
-        help="scope to an OPERATOR/family substring across pytest, numeric, and the gate",
+        help="scope to an OPERATOR/family substring across pytest (except the pinned "
+        "GPU reference suites), numeric, and the gate",
     )
     ap.add_argument(
         "--flavor",
@@ -136,6 +171,7 @@ def main() -> int:
     flavors = (args.flavor,) if args.flavor else FLAVORS
     gpu = _has_gpu()
     pytest_dirs = _discover_pytest_dirs()
+    pinned_tests = _discover_pinned_reference_tests()
 
     if args.list:
         print(
@@ -155,6 +191,10 @@ def main() -> int:
         pt = ", ".join(str(d.relative_to(ROCKE)) for d in pytest_dirs) or "NONE FOUND"
         print(
             f"  pytest dirs  : {pt + (f' (-k {op})' if op else '') if 'pytest' in steps else 'skip'}"
+        )
+        pinned = ", ".join(p.name for p in pinned_tests) or "NONE FOUND"
+        print(
+            f"  pinned refs  : {pinned + ' (never -k scoped)' if 'pytest' in steps else 'skip'}"
         )
         if "numeric" in steps:
             print(
@@ -216,13 +256,26 @@ def main() -> int:
             )
 
     # pytest -- auto-discovered dirs; GPU-only tests inside self-skip without a device
+    unexercised: list[str] = []
     if "pytest" in steps:
         if pytest_dirs:
-            cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+            base = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+            cmd = list(base)
             if op:
                 cmd += ["-k", op]
+            cmd += [f"--ignore={p}" for p in pinned_tests]
             cmd += [str(d) for d in pytest_dirs]
             status |= _run("pytest", cmd, env, cwd=ROCKE)
+            # pinned GPU references -- never -k scoped; -rs prints why they skipped
+            if pinned_tests:
+                with tempfile.TemporaryDirectory() as tmp:
+                    junit = Path(tmp) / "pinned.xml"
+                    cmd = base + ["-rs", f"--junitxml={junit}"]
+                    cmd += [str(p) for p in pinned_tests]
+                    status |= _run(
+                        "pytest [pinned GPU references]", cmd, env, cwd=ROCKE
+                    )
+                    unexercised = _unexercised_pinned(junit, pinned_tests)
         else:
             print("\n== pytest: NO test dirs discovered ==")
 
@@ -264,8 +317,15 @@ def main() -> int:
             print("\n== numeric: SKIPPED (no HIP device visible) ==")
 
     print(
-        f"\n{'=' * 48}\nrocke checks: {'ALL PASSED' if status == 0 else 'FAILURES PRESENT'}\n{'=' * 48}"
+        f"\n{'=' * 48}\nrocke checks: {'ALL PASSED' if status == 0 else 'FAILURES PRESENT'}"
     )
+    if unexercised:
+        # A skip is not a failure, but a green run must not read as pinned coverage.
+        print(
+            f"pinned GPU reference comparisons did NOT run for {', '.join(unexercised)} "
+            "(reasons above); see TESTING.md to run them"
+        )
+    print("=" * 48)
     return 1 if status else 0
 
 
