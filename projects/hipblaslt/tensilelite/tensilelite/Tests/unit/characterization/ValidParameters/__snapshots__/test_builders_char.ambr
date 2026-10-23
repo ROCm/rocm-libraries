@@ -1488,6 +1488,7 @@
     'StaggerU',
     'StaggerUMapping',
     'StaggerUStride',
+    'StinkySubtile',
     'StinkyTofuParameters',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
@@ -2637,6 +2638,14 @@
         16,
       ]),
       'len': 10,
+      'type': 'list',
+    }),
+    'StinkySubtile': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({

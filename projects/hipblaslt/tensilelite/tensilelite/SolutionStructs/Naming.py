@@ -252,6 +252,14 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # Same reasoning as TDMFuse, except it also has to appear once it is on: it
+    # changes the emitted assembly, so without it two kernels differing only in
+    # the StinkyTofu post-pass collide on one name and dedup to one.
+    if state.get("StinkySubtile", False):
+      requiredParametersTemp.add("StinkySubtile")
+    else:
+      requiredParametersTemp.discard("StinkySubtile")
+
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):
       requiredParametersTemp.add("LDSSegmentBRotate")
