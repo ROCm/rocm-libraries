@@ -285,6 +285,10 @@ class _SetupNewTilePapTdmWriter:
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return KernelWriter.isPrefetchAcrossPersistentEnabled(self, kernel)
 
+    def papPgr2PipelineEnabled(self, kernel, tpa, tpb):
+        # This fixture exercises StreamK PGR1 setup and WaveIdx lifetime.
+        return False
+
     def _nextLdsToken(self, idx):
         return KernelWriter._nextLdsToken(self, idx)
 
@@ -1803,6 +1807,7 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert not sol["_SeparateEpilogueLds"]
     assert sol["LdsOffsetBias"] == 0
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
+
 
 @pytest.mark.parametrize("problem, reason", [
     ({"UseBias": 1, "Gradient": True, "BiasSrc": "A"}, "bias"),
