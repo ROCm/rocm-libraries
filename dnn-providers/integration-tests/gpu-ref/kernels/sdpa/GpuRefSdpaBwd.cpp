@@ -69,6 +69,10 @@ __device__ COMPUTE_TYPE
                            + d * a.kStr.s[3]]);
     }
     COMPUTE_TYPE s = dot * static_cast<COMPUTE_TYPE>(a.scale);
+    if(a.softcap > 0.0f)
+    {
+        s = a.softcap * tanhf(s / a.softcap);
+    }
     if(a.mask != nullptr)
     {
         const auto* mask = static_cast<const MASK_TYPE*>(a.mask);
@@ -117,6 +121,29 @@ __device__ COMPUTE_TYPE
                            + dv * a.vStr.s[3]]);
     }
     return acc;
+}
+
+// Derivative of the logit softcap at (b, h, sq, skv): 1 - tanh^2(s / c) for the scaled score s
+// (before bias), or 1 without softcap. dQ and dK take it; dBias and dV do not.
+__device__ COMPUTE_TYPE
+    softcapGrad(const SdpaBwdArgs& a, long long b, long long h, long long sq, long long skv)
+{
+    if(!(a.softcap > 0.0f))
+    {
+        return static_cast<COMPUTE_TYPE>(1);
+    }
+    const auto* q = static_cast<const Q_TYPE*>(a.q);
+    const auto* k = static_cast<const K_TYPE*>(a.k);
+    const long long kvHeadK = h / (a.numHeads / a.numHeadsK);
+    COMPUTE_TYPE dot = static_cast<COMPUTE_TYPE>(0);
+    for(long long d = 0; d < a.headDim; ++d)
+    {
+        dot += toAccum(q[b * a.qStr.s[0] + h * a.qStr.s[1] + sq * a.qStr.s[2] + d * a.qStr.s[3]])
+               * toAccum(k[b * a.kStr.s[0] + kvHeadK * a.kStr.s[1] + skv * a.kStr.s[2]
+                           + d * a.kStr.s[3]]);
+    }
+    const COMPUTE_TYPE t = tanhf(dot * static_cast<COMPUTE_TYPE>(a.scale) / a.softcap);
+    return static_cast<COMPUTE_TYPE>(1) - t * t;
 }
 
 // Explicit dropout mask value for (b, h, sq, skv); 1 without dropout.
@@ -231,7 +258,8 @@ extern "C" __global__ void sdpaBwdDqRef(SdpaBwdArgs a)
             {
                 continue;
             }
-            acc += dS(a, b, h, sq, skv) * static_cast<COMPUTE_TYPE>(a.scale)
+            acc += dS(a, b, h, sq, skv) * softcapGrad(a, b, h, sq, skv)
+                   * static_cast<COMPUTE_TYPE>(a.scale)
                    * toAccum(k[b * a.kStr.s[0] + kvHeadK * a.kStr.s[1] + skv * a.kStr.s[2]
                                + d * a.kStr.s[3]]);
         }
@@ -269,7 +297,8 @@ extern "C" __global__ void sdpaBwdDkRef(SdpaBwdArgs a)
                 {
                     continue;
                 }
-                acc += dS(a, b, h, sq, skv) * static_cast<COMPUTE_TYPE>(a.scale)
+                acc += dS(a, b, h, sq, skv) * softcapGrad(a, b, h, sq, skv)
+                       * static_cast<COMPUTE_TYPE>(a.scale)
                        * toAccum(q[b * a.qStr.s[0] + h * a.qStr.s[1] + sq * a.qStr.s[2]
                                    + d * a.qStr.s[3]]);
             }
