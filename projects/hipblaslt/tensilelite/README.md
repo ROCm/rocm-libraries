@@ -42,6 +42,21 @@ tox -e coverage-unit
 
 Runs only Python unit tests.
 
+### Updating Python dependencies
+
+After editing dependency declarations in `pyproject.toml`, run from this directory:
+
+```bash
+# Keep compatible pins; new dependencies use the latest compatible versions.
+uv lock
+python scripts/generate_requirements.py
+python scripts/generate_requirements.py --check
+```
+
+To select a version, use `uv lock --upgrade-package <package>==<version>`.
+Regenerate the requirements afterward and review the version changes. See uv's
+[lock update rules](https://docs.astral.sh/uv/concepts/projects/sync/#upgrading-locked-package-versions).
+
 ### Pre-commit hook (affected tests)
 
 An opt-in git pre-commit hook runs the unit + characterization tests affected by
