@@ -336,6 +336,27 @@ TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
     EXPECT_EQ(outcome.discardedNegativeSamples, 1);
 }
 
+TEST(TestAutotune, RunUntilStableUnstalledPassBudgetsNegativesByMaxIterations)
+{
+    // The unstalled budget is maxIterations, not windowSize or the stalled budget of two:
+    // either of those would fail this candidate on its fourth negative reading.
+    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, -4.0f, 10.0f, 10.0f, 10.0f}, -1, 0};
+    timer.quality = TimingQuality::UNSTALLED;
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/false,
+                                                    timer,
+                                                    noopRunUntilStableLog);
+
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 10.0f, 10.0f}));
+    EXPECT_EQ(outcome.discardedNegativeSamples, 4);
+    EXPECT_EQ(timer.callCount, 7);
+}
+
 TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
 {
     // Stalled timing can read negative for every sample of short work (seen on Windows).
