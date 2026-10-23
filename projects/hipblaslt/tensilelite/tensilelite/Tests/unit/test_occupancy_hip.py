@@ -29,8 +29,8 @@ from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
 
 # ── rocisa / Tensile imports ────────────────────────────────────────────────────
 from rocisa import rocIsa
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 
 # ── GPU detection ───────────────────────────────────────────────────────────────
@@ -87,12 +87,13 @@ def _init_rocisa(gfx: str):
     return ri
 
 
-def _make_writer(ri) -> KernelWriterAssembly:
+def _make_writer(ri, gfx: str) -> KernelWriterAssembly:
     """Construct a minimal KernelWriterAssembly with arch/reg caps wired in."""
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
+        version=tuple(gfxToIsa(gfx)),
     )
     return kw
 
@@ -325,7 +326,7 @@ OCCUPANCY_CASES = [
 def test_hip_occupancy_matches_tensile(
     required_gfx, num_vgprs, lds_bytes, num_threads, description, tmp_path
 ):
-    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with Tensile."""
+    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with tensilelite."""
     if GFX_TARGET != required_gfx:
         pytest.skip(
             f"Test requires {required_gfx}, detected {GFX_TARGET}"
@@ -333,7 +334,7 @@ def test_hip_occupancy_matches_tensile(
 
     # ── 1. Tensile prediction ─────────────────────────────────────────────────
     ri = _init_rocisa(required_gfx)
-    kw = _make_writer(ri)
+    kw = _make_writer(ri, required_gfx)
     arch_caps = ri.getArchCaps()
 
     # doubleVgpr=True on ArchAccUnifiedRegs architectures (gfx90a / gfx942 / gfx950)
@@ -403,7 +404,7 @@ def test_gfx950_occupancy_not_overcounted(tmp_path):
     This test fails if the fix is absent or reverted.
     """
     ri = _init_rocisa("gfx950")
-    kw = _make_writer(ri)
+    kw = _make_writer(ri, "gfx950")
     arch_caps = ri.getArchCaps()
 
     assert arch_caps["MaxWavesPerSimd"] == 8, (

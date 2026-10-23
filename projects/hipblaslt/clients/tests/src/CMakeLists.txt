@@ -19,6 +19,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/candidate_search_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
@@ -35,6 +36,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
 )
 
 if(NOT WIN32)
