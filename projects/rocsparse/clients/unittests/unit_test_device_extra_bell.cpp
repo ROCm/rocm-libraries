@@ -96,28 +96,28 @@ namespace
         Scalar<float>    beta(cplx(-0.5, 0.0), r.device);
         PointerModeGuard mode(handle, mode_of(r.device));
 
-        size_t bsz = 0;
-        for(rocsparse_spmm_stage stage : {rocsparse_spmm_stage_buffer_size,
-                                          rocsparse_spmm_stage_preprocess,
-                                          rocsparse_spmm_stage_compute})
-        {
-            DevBuf<char> buffer(bsz > 0 ? bsz : 1);
-            ASSERT_TRUE(buffer.ptr);
-            ASSERT_EQ(rocsparse_spmm(handle,
-                                     r.opA,
-                                     rocsparse_operation_none,
-                                     alpha.get(),
-                                     sp.p,
-                                     mB.p,
-                                     beta.get(),
-                                     mC.p,
-                                     rocsparse_datatype_f32_r,
-                                     rocsparse_spmm_alg_bell,
-                                     stage,
-                                     &bsz,
-                                     buffer.ptr),
-                      rocsparse_status_success);
-        }
+        size_t bsz  = 0;
+        auto   spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return rocsparse_spmm(handle,
+                                  r.opA,
+                                  rocsparse_operation_none,
+                                  alpha.get(),
+                                  sp.p,
+                                  mB.p,
+                                  beta.get(),
+                                  mC.p,
+                                  rocsparse_datatype_f32_r,
+                                  rocsparse_spmm_alg_bell,
+                                  stage,
+                                  &bsz,
+                                  buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> buffer(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(buffer.ptr);
+        for(rocsparse_spmm_stage stage :
+            {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+            ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const Dense want = axpby(0.0, Dense(Mc, r.n), -0.5, C0);
@@ -239,26 +239,27 @@ namespace
         const T alpha = from_c<T>(cplx(1.5, -0.5));
         const T beta  = from_c<T>(cplx(-0.5, 0.25));
         size_t  sbsz  = 0;
-        for(rocsparse_spmm_stage stage : {rocsparse_spmm_stage_buffer_size,
-                                          rocsparse_spmm_stage_preprocess,
-                                          rocsparse_spmm_stage_compute})
-        {
-            DevBuf<char> sbuf(sbsz);
-            ASSERT_EQ(rocsparse_spmm(handle,
-                                     rocsparse_operation_none,
-                                     rocsparse_operation_none,
-                                     &alpha,
-                                     sp.p,
-                                     mX.p,
-                                     &beta,
-                                     mC.p,
-                                     dt,
-                                     rocsparse_spmm_alg_bell,
-                                     stage,
-                                     &sbsz,
-                                     sbuf.ptr),
-                      rocsparse_status_success);
-        }
+        auto    spmm  = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return rocsparse_spmm(handle,
+                                  rocsparse_operation_none,
+                                  rocsparse_operation_none,
+                                  &alpha,
+                                  sp.p,
+                                  mX.p,
+                                  &beta,
+                                  mC.p,
+                                  dt,
+                                  rocsparse_spmm_alg_bell,
+                                  stage,
+                                  &sbsz,
+                                  buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> sbuf(sbsz > 0 ? sbsz : 1);
+        ASSERT_TRUE(sbuf.ptr);
+        for(rocsparse_spmm_stage stage :
+            {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+            ASSERT_EQ(spmm(stage, sbuf.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         const Dense want = axpby(to_c<T>(alpha), matmul(A, X), to_c<T>(beta), C0);
         expect_dense_equal<T>(
