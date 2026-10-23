@@ -273,7 +273,7 @@ public:
             CHECK_TENSOR_EXISTS(tensorMap, attrs->dropout_scale_inv_tensor_uid().value());
             const auto inv = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(attrs->dropout_scale_inv_tensor_uid().value()));
-            if(elementCount(inv) != 1 || inv.data_type != DataType::FLOAT
+            if(hipdnn_test_sdk::detail::elementCount(inv) != 1 || inv.data_type != DataType::FLOAT
                || !attrs->dropout_mask_tensor_uid().has_value())
             {
                 return false;
@@ -288,8 +288,9 @@ public:
             CHECK_TENSOR_EXISTS(tensorMap, attrs->scale_tensor_uid().value());
             const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(attrs->scale_tensor_uid().value()));
-            if(elementCount(scale) != 1
-               || (!isHostScalarOperand(scale) && scale.data_type != DataType::FLOAT))
+            if(hipdnn_test_sdk::detail::elementCount(scale) != 1
+               || (!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scale)
+                   && scale.data_type != DataType::FLOAT))
             {
                 return false;
             }
