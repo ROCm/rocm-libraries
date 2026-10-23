@@ -272,7 +272,8 @@ bool rocke_deep_fused_conv_pool_is_valid_spec(const rocke_deep_fused_conv_pool_s
 
 /* deep_fused_conv_pool_signature(spec): manifest signature
  *   A:f16, B:f16, Y:f16, W1:f16,
- *   W1_bytes:i32, A_bytes:i32, B_bytes:i32, Y_bytes:i32
+ *   W1_bytes:i32, A_bytes:i32, B_bytes:i32, Y_bytes:i32,
+ *   then conv0's AOT problem block (rocke_conv_fwd_problem_block) as i32s.
  * Entries are arena-owned. On ROCKE_OK *out_items / *out_count hold the array. */
 rocke_status_t rocke_deep_fused_conv_pool_signature(rocke_arena_t* arena,
                                                     const rocke_deep_fused_conv_pool_spec_t* spec,

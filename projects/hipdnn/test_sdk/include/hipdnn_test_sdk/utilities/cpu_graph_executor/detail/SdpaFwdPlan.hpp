@@ -22,18 +22,20 @@ namespace hipdnn_test_sdk::detail
 
 struct SdpaFwdParams
 {
-    SdpaFwdParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
-                  int64_t leftBound,
-                  int64_t rightBound,
-                  bool topLeftAlignment,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
-                  = nullptr,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
-                  = nullptr)
+    SdpaFwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
+        std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
+        int64_t leftBound,
+        int64_t rightBound,
+        bool topLeftAlignment,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -48,6 +50,15 @@ struct SdpaFwdParams
         , lseTensor(lseAttributes != nullptr
                         ? std::make_optional(unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , descaleQTensor(descaleQAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleQAttributes))
+                             : std::nullopt)
+        , descaleKTensor(descaleKAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleKAttributes))
+                             : std::nullopt)
+        , descaleVTensor(descaleVAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
+                             : std::nullopt)
     {
     }
 
@@ -61,9 +72,16 @@ struct SdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
 };
 
-template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
+template <typename QDataType,
+          typename KDataType,
+          typename VDataType,
+          typename ODataType,
+          typename Mask = float>
 class SdpaFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -93,10 +111,10 @@ public:
         auto shallowOTensor
             = createShallowTensor<ODataType>(_params.oTensor, variantPack.at(_params.oTensor.uid));
 
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowAttnMaskTensor;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
-            shallowAttnMaskTensor = createShallowTensor<float>(
+            shallowAttnMaskTensor = createShallowTensor<Mask>(
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
@@ -107,6 +125,28 @@ public:
                                                           variantPack.at(_params.lseTensor->uid));
         }
 
+        // FP8 descale tensors (float32). Absent for non-fp8 graphs.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleQ;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleK;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleV;
+        if(_params.descaleQTensor.has_value())
+        {
+            shallowDescaleQ = createShallowTensor<float>(
+                *_params.descaleQTensor, variantPack.at(_params.descaleQTensor->uid));
+        }
+        if(_params.descaleKTensor.has_value())
+        {
+            shallowDescaleK = createShallowTensor<float>(
+                *_params.descaleKTensor, variantPack.at(_params.descaleKTensor->uid));
+        }
+        if(_params.descaleVTensor.has_value())
+        {
+            shallowDescaleV = createShallowTensor<float>(
+                *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
+        }
+
+        // Runtime attention scale: resolve the folded scale operand (runtime tensor
+        // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {
@@ -114,17 +154,21 @@ public:
                 _params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
-        utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
-            *shallowQTensor,
-            *shallowKTensor,
-            *shallowVTensor,
-            *shallowOTensor,
-            effectiveScale,
-            shallowAttnMaskTensor.get(),
-            _params.leftBound,
-            _params.rightBound,
-            _params.topLeftAlignment,
-            shallowLseTensor.get());
+        utilities::CpuFpReferenceSdpa::
+            forward<QDataType, KDataType, VDataType, ODataType, float, Mask>(
+                *shallowQTensor,
+                *shallowKTensor,
+                *shallowVTensor,
+                *shallowOTensor,
+                effectiveScale,
+                shallowAttnMaskTensor.get(),
+                _params.leftBound,
+                _params.rightBound,
+                _params.topLeftAlignment,
+                shallowLseTensor.get(),
+                shallowDescaleQ.get(),
+                shallowDescaleK.get(),
+                shallowDescaleV.get());
     }
 
 private:
@@ -134,7 +178,9 @@ private:
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
 class SdpaFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -142,6 +188,7 @@ public:
     using KDataType = utilities::DataTypeToNative<KDataTypeEnum>;
     using VDataType = utilities::DataTypeToNative<VDataTypeEnum>;
     using ODataType = utilities::DataTypeToNative<ODataTypeEnum>;
+    using MaskType = utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -164,6 +211,26 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
+
+        // The builder's mask dtype must match the graph: UNSET builds only mask-free graphs,
+        // every other builder only graphs whose mask tensor has exactly that dtype.
+        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+        {
+            if(nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
+        }
 
         // Unsupported mask modes
         if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
@@ -203,11 +270,26 @@ public:
             return false;
         }
 
-        // Unsupported: FP8 quantization / descaling
-        if(nodeAttributes->descale_q_tensor_uid().has_value()
-           || nodeAttributes->descale_k_tensor_uid().has_value()
-           || nodeAttributes->descale_v_tensor_uid().has_value()
-           || nodeAttributes->descale_s_tensor_uid().has_value()
+        // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
+        // requirement that q/k/v descales are all provided for fp8) and rejected
+        // for non-fp8 inputs.
+        constexpr bool IS_FP8_INPUT
+            = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
+        const int numQkvDescales
+            = static_cast<int>(nodeAttributes->descale_q_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_k_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_v_tensor_uid().has_value());
+        if((IS_FP8_INPUT && numQkvDescales != 3) || (!IS_FP8_INPUT && numQkvDescales != 0))
+        {
+            return false;
+        }
+
+        // Unsupported regardless of dtype: softmax/output (de)quantization. The
+        // forward reference models only q/k/v descales.
+        if(nodeAttributes->descale_s_tensor_uid().has_value()
            || nodeAttributes->scale_s_tensor_uid().has_value()
            || nodeAttributes->scale_o_tensor_uid().has_value()
            || nodeAttributes->amax_s_tensor_uid().has_value()
@@ -271,10 +353,20 @@ public:
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
 
+        const auto* descaleQPtr = nodeAttributes->descale_q_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_q_tensor_uid().value())
+                                      : nullptr;
+        const auto* descaleKPtr = nodeAttributes->descale_k_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_k_tensor_uid().value())
+                                      : nullptr;
+        const auto* descaleVPtr = nodeAttributes->descale_v_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_v_tensor_uid().value())
+                                      : nullptr;
+
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
 
-        return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType>>(
+        return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, MaskType>>(
             SdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                           *tensorMap.at(nodeAttributes->k_tensor_uid()),
                           *tensorMap.at(nodeAttributes->v_tensor_uid()),
@@ -284,7 +376,10 @@ public:
                           rightBound,
                           isTopLeft,
                           attnMaskPtr,
-                          lsePtr));
+                          lsePtr,
+                          descaleQPtr,
+                          descaleKPtr,
+                          descaleVPtr));
     }
 };
 

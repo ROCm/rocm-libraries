@@ -4,10 +4,10 @@
 #include <limits>
 #include <string>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenConvPlanBuilder.hpp"
@@ -15,42 +15,6 @@
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
-
-// These miopenConvolution*GetWorkSpaceSizeRange entry points are exported from
-// libMIOpen but intentionally absent from the public miopen.h, so we declare them
-// locally to call them. The signatures are copied verbatim from MIOpen, whose
-// no-op top-level `const` on the pointer-typedef parameters trips clang-tidy, so
-// we suppress those checks to keep the prototypes identical.
-// NOLINTBEGIN(misc-misplaced-const,readability-avoid-const-params-in-decls)
-extern "C" {
-miopenStatus_t
-    miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
-                                                  const miopenTensorDescriptor_t wDesc,
-                                                  const miopenTensorDescriptor_t xDesc,
-                                                  const miopenConvolutionDescriptor_t convDesc,
-                                                  const miopenTensorDescriptor_t yDesc,
-                                                  size_t* minWorkspaceSize,
-                                                  size_t* maxWorkspaceSize);
-
-miopenStatus_t
-    miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
-                                                       const miopenTensorDescriptor_t dyDesc,
-                                                       const miopenTensorDescriptor_t wDesc,
-                                                       const miopenConvolutionDescriptor_t convDesc,
-                                                       const miopenTensorDescriptor_t dxDesc,
-                                                       size_t* minWorkspaceSize,
-                                                       size_t* maxWorkspaceSize);
-
-miopenStatus_t miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(
-    miopenHandle_t handle,
-    const miopenTensorDescriptor_t dyDesc,
-    const miopenTensorDescriptor_t xDesc,
-    const miopenConvolutionDescriptor_t convDesc,
-    const miopenTensorDescriptor_t dwDesc,
-    size_t* minWorkspaceSize,
-    size_t* maxWorkspaceSize);
-}
-// NOLINTEND(misc-misplaced-const,readability-avoid-const-params-in-decls)
 
 namespace miopen_plugin
 {
@@ -477,6 +441,16 @@ size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Convolution plan builder supports only single node graphs. Graph has "
                 + std::to_string(opGraph.nodeCount()) + " nodes");
+    }
+
+    // Benchmarking runs Find, which should see every solver. The range max bounds them all and,
+    // unlike miopen*GetWorkSpaceSize, does not change with the find-db. A default cached by
+    // initializeExecutionSettings() already holds it.
+    if(executionSettings.benchmarkingEnabled()
+       && !executionSettings.workspaceSizeLimit().has_value()
+       && !executionSettings.defaultWorkspaceSize().has_value())
+    {
+        return getWorkspaceSizeRange(handle, opGraph).max;
     }
 
     const auto& node = opGraph.getNode(0);

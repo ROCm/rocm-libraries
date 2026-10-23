@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -19,8 +20,8 @@
 #include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
-#include "ContentCarryingTestGraph.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
@@ -28,6 +29,7 @@ namespace
 {
 
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 KernelDefinition definitionFor(uint8_t kernel, uint8_t pack = 0xF0, uint8_t dispatch = 0xD0)
 {
@@ -218,29 +220,46 @@ WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
     return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
 }
 
-/// THE NO-EVICTION REGRESSION GUARD: the winner cache sits beside an LruCache in the
-/// same class, so "tidying" it into that neighbour is a live temptation. Evicting a
-/// winner costs a GPU sweep, not a rematch.
-TEST(TestIngestorWinnerCacheStateManager, TheEarliestEntrySurvivesFarPastAnyPlausibleLruCapacity)
+/// RFC 0019 §9.2: the winner cache is capacity-bounded.
+TEST(TestIngestorWinnerCacheStateManager, TheWinnerCacheHoldsNoMoreEntriesThanItsCapacity)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
+    constexpr size_t CAPACITY = 4;
+    // No engine name, so nothing reaches disk: this is purely about the in-memory bound.
+    const auto manager = makeIdentifiedStateManager(EngineIdentity{}, CAPACITY);
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto first = keyForIndex(graph, 0);
     const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
 
-    manager->recordWinner(first, record);
-
-    // Well past DEFAULT_CATALOG_CACHE_CAPACITY (256), which is what an LruCache here
-    // would have been sized at.
-    for(int index = 1; index <= 1000; ++index)
+    for(int index = 0; index < static_cast<int>(CAPACITY) * 3; ++index)
     {
-        manager->recordWinner(keyForIndex(graph, index), record);
+        manager->recordWinner(keyForIndex(graph, index), record, WinnerWriteCause::FRESH_MISS);
     }
 
-    EXPECT_EQ(manager->winnerCacheSize(), 1001U);
-    EXPECT_TRUE(manager->winnerFor(first).has_value())
-        << "the first entry must still be served after 1000 later insertions";
+    EXPECT_EQ(manager->winnerCacheSize(), CAPACITY);
+}
+
+/// Eviction is by disuse, so the bound costs a re-measure of an idle graph, not the hot one.
+TEST(TestIngestorWinnerCacheStateManager, ALookupSavesARankingFromEvictionAndAnIdleOnePays)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeIdentifiedStateManager(EngineIdentity{}, 2);
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto stillUsed = keyForIndex(graph, 0);
+    const auto idle = keyForIndex(graph, 1);
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+
+    manager->recordWinner(stillUsed, record, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(idle, record, WinnerWriteCause::FRESH_MISS);
+
+    // The lookup is the "still being executed" signal; `idle` is not asked for again.
+    ASSERT_TRUE(manager->winnerFor(stillUsed).has_value());
+
+    manager->recordWinner(keyForIndex(graph, 2), record, WinnerWriteCause::FRESH_MISS);
+
+    EXPECT_TRUE(manager->winnerFor(stillUsed).has_value())
+        << "the ranking that was looked up most recently must survive the bound";
+    EXPECT_FALSE(manager->winnerFor(idle).has_value())
+        << "the ranking nothing asked for is the one the bound spends";
 }
 
 TEST(TestIngestorWinnerCacheStateManager, RecordingTheSameKeyTwiceReplacesRatherThanAccumulates)
@@ -250,9 +269,12 @@ TEST(TestIngestorWinnerCacheStateManager, RecordingTheSameKeyTwiceReplacesRather
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto key = keyForIndex(graph, 7);
 
-    manager->recordWinner(key, WinnerRecord{entryFor(definitionFor(0x01), 5.0)});
     manager->recordWinner(
-        key, WinnerRecord{entryFor(definitionFor(0x02), 1.0), entryFor(definitionFor(0x03), 2.0)});
+        key, WinnerRecord{entryFor(definitionFor(0x01), 5.0)}, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(
+        key,
+        WinnerRecord{entryFor(definitionFor(0x02), 1.0), entryFor(definitionFor(0x03), 2.0)},
+        WinnerWriteCause::FRESH_MISS);
 
     EXPECT_EQ(manager->winnerCacheSize(), 1U);
     const auto stored = manager->winnerFor(key);
@@ -267,7 +289,7 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyRecordIsNotStored)
     const auto manager = makeStateManager();
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
 
-    manager->recordWinner(keyForIndex(graph, 1), WinnerRecord{});
+    manager->recordWinner(keyForIndex(graph, 1), WinnerRecord{}, WinnerWriteCause::FRESH_MISS);
 
     EXPECT_EQ(manager->winnerCacheSize(), 0U)
         << "an all-unusable sweep has no ranking; storing one would read as a covered hit";
@@ -279,6 +301,14 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
+    const ContentCarryingTestGraph validGraph{ContentCarryingTestGraph::Spec{}};
+
+    // A valid record is present first, so the assertion below distinguishes "the
+    // unusable-key record was rejected" from "recordWinner() does nothing at all".
+    manager->recordWinner(keyForIndex(validGraph, 0),
+                          WinnerRecord{entryFor(definitionFor(0x01), 1.0)},
+                          WinnerWriteCause::FRESH_MISS);
+    ASSERT_EQ(manager->winnerCacheSize(), 1U);
 
     // Supplies no bytes(), taking IGraph's default: valid or not, it cannot be keyed.
     class BytelessGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
@@ -333,9 +363,10 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
     const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
     ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
 
-    manager->recordWinner(key, WinnerRecord{entryFor(definitionFor(0x01), 1.0)});
+    manager->recordWinner(
+        key, WinnerRecord{entryFor(definitionFor(0x01), 1.0)}, WinnerWriteCause::FRESH_MISS);
 
-    EXPECT_EQ(manager->winnerCacheSize(), 0U)
+    EXPECT_EQ(manager->winnerCacheSize(), 1U)
         << "an unkeyable graph never matches on lookup, so the entry would be unreachable";
 }
 
@@ -346,41 +377,6 @@ TEST(TestIngestorWinnerCacheStateManager, AMissReturnsNulloptRatherThanAnEmptyRe
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
 
     EXPECT_FALSE(manager->winnerFor(keyForIndex(graph, 99)).has_value());
-}
-
-/// The soft threshold has no observable effect other than its log line, so the log
-/// assertion is the only possible test of it.
-TEST(TestIngestorWinnerCacheStateManager, TheGrowthWarningFiresOnceAndOnlyPastTheThreshold)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
-
-    // Fill to exactly the threshold: indices 0..threshold-1 is `threshold` entries, and
-    // the warning fires only once size exceeds it.
-    const auto threshold = StateManager::WINNER_CACHE_WARNING_THRESHOLD;
-    for(size_t index = 0; index < threshold; ++index)
-    {
-        manager->recordWinner(keyForIndex(graph, static_cast<int>(index)), record);
-    }
-    ASSERT_EQ(manager->winnerCacheSize(), threshold);
-    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "past the soft threshold"))
-        << "the warning must not fire at exactly the threshold:\n"
-        << recorder.getRecordedLogsAsString();
-
-    manager->recordWinner(keyForIndex(graph, static_cast<int>(threshold)), record);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "past the soft threshold"))
-        << recorder.getRecordedLogsAsString();
-
-    // And it stays quiet afterwards rather than re-logging on every later insert.
-    const auto afterFirstWarning = recorder.getRecordedLogsAsString();
-    manager->recordWinner(keyForIndex(graph, static_cast<int>(threshold) + 2), record);
-    EXPECT_EQ(recorder.getRecordedLogsAsString(), afterFirstWarning)
-        << "the growth warning is reported once, not per insertion";
 }
 
 /// A record covering the WHOLE catalog orders it, and rank() is never consulted. The
@@ -406,12 +402,41 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
     }
 
     const auto freshManager = makeStateManager();
-    freshManager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, record);
+    freshManager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
+                               record,
+                               WinnerWriteCause::FRESH_MISS);
     const auto ordered = freshManager->sortedDefinitions(context);
 
     ASSERT_EQ(ordered.size(), catalog.size());
     EXPECT_EQ(ordered.front().kernelId, catalog.back().kernelId)
         << "a covering record must decide the order, not the heuristic";
+}
+
+/// A resolved device that names no arch cannot be told apart from another one: folding
+/// two of them into one winner-cache key would serve a measurement taken elsewhere.
+/// `GenericPlanBuilder::contextFor` throws on this, so the guard here defends callers
+/// that build a MatchContext directly.
+TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE9));
+
+    auto properties = testDeviceProperties();
+    ASSERT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "this test needs a catalog that is non-empty when the arch is named";
+
+    properties.gcnArchName.clear();
+
+    EXPECT_TRUE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "an unidentified device must match no kernel";
+
+    // The catalog cache is keyed on (graph, device ordinal), not arch: an empty-arch
+    // lookup that wrote its rejected, empty catalog under that key would permanently
+    // hide this device's real catalog once the arch is known again.
+    properties.gcnArchName = testDeviceProperties().gcnArchName;
+    EXPECT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "an unresolved-arch lookup must not poison this device's cached catalog";
 }
 
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
@@ -437,7 +462,9 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
         reversed.push_back(entryFor(*entry, time));
         time += 1.0;
     }
-    manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, reversed);
+    manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
+                          reversed,
+                          WinnerWriteCause::FRESH_MISS);
 
     // Second sort, same manager: the measured order must now win.
     const auto measuredOrder = manager->sortedDefinitions(context);
@@ -467,7 +494,8 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
     // Record only the LAST candidate, so coverage fails.
     const auto manager = makeStateManager();
     manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
-                          WinnerRecord{entryFor(heuristicOrder.back(), 0.1)});
+                          WinnerRecord{entryFor(heuristicOrder.back(), 0.1)},
+                          WinnerWriteCause::FRESH_MISS);
 
     const auto ordered = manager->sortedDefinitions(context);
 
@@ -476,8 +504,8 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
         << "an uncovering record must not reorder anything";
 }
 
-/// The cache sits under its own mutex. Concurrent readers and writers must neither race
-/// nor lose entries; this is the guard for someone removing the lock as "unneeded".
+/// Stress concurrent readers and writers. These assertions check entry survival and
+/// whole-record reads; they do not prove race freedom without ThreadSanitizer.
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEntry)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -496,7 +524,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEn
             for(int index = 0; index < PER_THREAD; ++index)
             {
                 const int unique = thread * PER_THREAD + index;
-                manager->recordWinner(keyForIndex(graph, unique), record);
+                manager->recordWinner(
+                    keyForIndex(graph, unique), record, WinnerWriteCause::FRESH_MISS);
                 // Interleave reads so writers and readers genuinely overlap.
                 (void)manager->winnerFor(keyForIndex(graph, unique));
                 (void)manager->winnerCacheSize();
@@ -533,7 +562,7 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
     const WinnerRecord longRecord{entryFor(definitionFor(0x02), 1.0),
                                   entryFor(definitionFor(0x03), 2.0),
                                   entryFor(definitionFor(0x04), 3.0)};
-    manager->recordWinner(contended, shortRecord);
+    manager->recordWinner(contended, shortRecord, WinnerWriteCause::FRESH_MISS);
 
     std::atomic<bool> torn{false};
     std::atomic<int> reads{0};
@@ -546,7 +575,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
             for(int index = 0; index < 500; ++index)
             {
                 manager->recordWinner(contended,
-                                      (writer + index) % 2 == 0 ? shortRecord : longRecord);
+                                      (writer + index) % 2 == 0 ? shortRecord : longRecord,
+                                      WinnerWriteCause::FRESH_MISS);
             }
         });
     }
@@ -653,13 +683,19 @@ private:
     std::filesystem::path _path;
 };
 
-/// A device whose arch carries the feature suffix a real gfx942 reports.
+/// The suffixed arch a real gfx942 reports, with nonzero memory properties so a codec that
+/// drops one is caught.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
 {
     DeviceProperties properties;
     properties.gcnArchName = "gfx942:sramecc+:xnack-";
     properties.warpSize = 64;
     properties.multiProcessorCount = multiProcessorCount;
+    // MI300X: 192 GiB of HBM3 -- past 2^32, so a 32-bit round trip would truncate it.
+    properties.totalGlobalMem = std::size_t{206'141'652'992};
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2'600'000;
+    properties.sharedMemPerBlock = 65'536;
     return properties;
 }
 
@@ -674,6 +710,9 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
     return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
 }
 
+/// UUID text is already a plain path component, so it reaches the shard path verbatim.
+const std::string UHD_ID = toString(HEURISTIC_ID);
+
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.
 TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroughTheShard)
@@ -686,7 +725,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
 
     {
         const auto writer = makeNamedStateManager("test:CrossInstance");
-        writer->recordWinner(key, recordFor(0x11, 1.5));
+        writer->recordWinner(key, recordFor(0x11, 1.5), WinnerWriteCause::FRESH_MISS);
     }
 
     const auto reader = makeNamedStateManager("test:CrossInstance");
@@ -698,11 +737,106 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
     EXPECT_EQ(served->front().kernelId, testId(0x11));
 }
 
-/// gcnArchName is raw, driver-supplied and suffixed. ALMIOPEN-2451's design record
-/// requires the arch directory to be the stripped base target id and to stay readable, so
-/// a user can find and delete one arch's cache by eye: `gfx942`, not `gfx942-<hash>` and
-/// not an opaque digest. Run on Linux CI, where a Windows-only break in the ':' handling
-/// would otherwise never surface.
+/// RFC 0019 §9.2: a retrained model keeps its UHD id, so the content hash must separate it.
+/// Checked through the real shard, since what matters is what a later process serves.
+TEST(TestIngestorWinnerCacheStateManager, ANewModelDoesNotInheritTheOldModelsPersistedRankings)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("model_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const EngineIdentity trained{"test:ModelIdentity", {1, 0, 0}, UHD_ID, "aaaa1111bbbb2222"};
+    {
+        const auto writer = makeIdentifiedStateManager(trained);
+        writer->recordWinner(key, recordFor(0x21, 1.5), WinnerWriteCause::FRESH_MISS);
+    }
+
+    // Same engine, same revision, same UHD id: only the model artifact was retrained.
+    EngineIdentity retrained = trained;
+    retrained.modelHash = "cccc3333dddd4444";
+    const auto afterRetraining = makeIdentifiedStateManager(retrained);
+
+    EXPECT_FALSE(afterRetraining->winnerFor(key).has_value())
+        << "a retrained model must not be handed the previous model's measured order";
+
+    // The original identity still reads its record, so the miss above is invalidation.
+    const auto rereader = makeIdentifiedStateManager(trained);
+    ASSERT_TRUE(rereader->winnerFor(key).has_value());
+    EXPECT_EQ(rereader->winnerFor(key)->front().kernelId, testId(0x21));
+}
+
+/// With no content identity, later weights are indistinguishable, so the disk cache is
+/// declined; the in-memory cache still works.
+TEST(TestIngestorWinnerCacheStateManager, AnEngineWithoutContentIdentityPersistsNoRankings)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("no_content_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    EngineIdentity unidentified{"test:NoContentIdentity", {1, 0, 0}, UHD_ID};
+    unidentified.contentIdentified = false;
+    EXPECT_TRUE(winnerCacheShardPath(unidentified, properties.gcnArchName).empty());
+    {
+        const auto writer = makeIdentifiedStateManager(unidentified);
+        writer->recordWinner(key, recordFor(0x23, 1.5), WinnerWriteCause::FRESH_MISS);
+        ASSERT_TRUE(writer->winnerFor(key).has_value())
+            << "declining the disk cache must not cost the in-memory one";
+    }
+
+    EXPECT_FALSE(makeIdentifiedStateManager(unidentified)->winnerFor(key).has_value())
+        << "a model with no content identity must not hand a later process its ranking";
+}
+
+/// A UED revision bump can change what a pack admits or a knob means with the UHD unchanged.
+TEST(TestIngestorWinnerCacheStateManager, ANewEngineRevisionDoesNotInheritPersistedRankings)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("revision_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const EngineIdentity released{"test:RevisionIdentity", {1, 0, 0}, UHD_ID, "aaaa1111bbbb2222"};
+    {
+        const auto writer = makeIdentifiedStateManager(released);
+        writer->recordWinner(key, recordFor(0x22, 1.5), WinnerWriteCause::FRESH_MISS);
+    }
+
+    EngineIdentity bumped = released;
+    bumped.version = {1, 1, 0};
+    const auto afterBump = makeIdentifiedStateManager(bumped);
+
+    EXPECT_FALSE(afterBump->winnerFor(key).has_value())
+        << "a bumped engine revision must not read the previous revision's records";
+}
+
+/// "No UHD" leaves every model component defaulted; it must not collide with a real UHD,
+/// whose measured order says nothing about declared-order selection.
+TEST(TestIngestorWinnerCache, AnEngineWithNoUhdGetsItsOwnShardDirectory)
+{
+    const ScopedCacheDir cacheDir("no_uhd_identity");
+    const EngineIdentity withModel{"test:NoUhd", {1, 0, 0}, UHD_ID, "aaaa1111bbbb2222"};
+    const EngineIdentity withoutModel{"test:NoUhd", {1, 0, 0}};
+
+    const auto modelled = winnerCacheShardPath(withModel, "gfx942");
+    const auto bare = winnerCacheShardPath(withoutModel, "gfx942");
+
+    ASSERT_FALSE(modelled.empty());
+    ASSERT_FALSE(bare.empty());
+    EXPECT_NE(modelled, bare);
+    // The arch stays the last directory either way, so one arch's cache can be deleted by eye.
+    EXPECT_EQ(modelled.parent_path().filename().string(), "gfx942");
+    EXPECT_EQ(bare.parent_path().filename().string(), "gfx942");
+}
+
+/// gcnArchName is raw, driver-supplied and suffixed. The arch directory is required to be
+/// the stripped base target id and to stay readable, so a user can find and delete one
+/// arch's cache by eye: `gfx942`, not `gfx942-<hash>` and not an opaque digest. Run on
+/// Linux CI, where a Windows-only break in the ':' handling would otherwise never surface.
 ///
 /// Falsifying mutation: wrap the arch in sanitizeForPath(). The exact-equality check below
 /// fails on the appended hash suffix.
@@ -710,7 +844,7 @@ TEST(TestIngestorWinnerCache, TheArchShardComponentIsTheReadableBaseTargetId)
 {
     const ScopedCacheDir cacheDir("arch_component");
 
-    const auto path = winnerCacheShardPath("test:ArchComponent", "gfx942:sramecc+:xnack-");
+    const auto path = winnerCacheShardPath({"test:ArchComponent"}, "gfx942:sramecc+:xnack-");
     ASSERT_FALSE(path.empty());
 
     EXPECT_EQ(path.parent_path().filename().string(), "gfx942")
@@ -727,7 +861,7 @@ TEST(TestIngestorWinnerCache, TheArchShardComponentIsTheReadableBaseTargetId)
 /// name that reads like a different arch. Callers already treat an empty path as
 /// in-memory-only.
 ///
-/// Falsifying mutation: drop the isPlainArchComponent() guard in winnerCacheShardPath().
+/// Falsifying mutation: drop the isPlainPathComponent() guard in winnerCacheShardPath().
 /// Every case below then yields a non-empty path, and the first walks out of the tree.
 TEST(TestIngestorWinnerCache, AnArchThatIsNotAPlainComponentDeclinesTheShard)
 {
@@ -736,7 +870,7 @@ TEST(TestIngestorWinnerCache, AnArchThatIsNotAPlainComponentDeclinesTheShard)
     for(const std::string_view hostile :
         {"../../../evil", "gfx942/../../escape", "gfx942\\evil", ".", "..", "", "gfx942 evil"})
     {
-        EXPECT_TRUE(winnerCacheShardPath("test:ArchComponent", hostile).empty())
+        EXPECT_TRUE(winnerCacheShardPath({"test:ArchComponent"}, hostile).empty())
             << "an arch that is not a plain path component produced a shard path: \"" << hostile
             << "\"";
     }
@@ -755,12 +889,14 @@ TEST(TestIngestorWinnerCacheStateManager, TwoDevicesOnOneArchShareAShardAndStayD
 
     {
         const auto manager = makeNamedStateManager("test:CoarseShard");
-        manager->recordWinner(keyFor(graph, fewerUnits), recordFor(0x21, 1.0));
-        manager->recordWinner(keyFor(graph, moreUnits), recordFor(0x22, 2.0));
+        manager->recordWinner(
+            keyFor(graph, fewerUnits), recordFor(0x21, 1.0), WinnerWriteCause::FRESH_MISS);
+        manager->recordWinner(
+            keyFor(graph, moreUnits), recordFor(0x22, 2.0), WinnerWriteCause::FRESH_MISS);
     }
 
-    const auto path = winnerCacheShardPath("test:CoarseShard", fewerUnits.gcnArchName);
-    ASSERT_EQ(path, winnerCacheShardPath("test:CoarseShard", moreUnits.gcnArchName));
+    const auto path = winnerCacheShardPath({"test:CoarseShard"}, fewerUnits.gcnArchName);
+    ASSERT_EQ(path, winnerCacheShardPath({"test:CoarseShard"}, moreUnits.gcnArchName));
     ASSERT_TRUE(std::filesystem::exists(path));
 
     const auto reader = makeNamedStateManager("test:CoarseShard");
@@ -780,7 +916,7 @@ TEST(TestIngestorWinnerCacheStateManager, AVersionMismatchedShardIsDeclinedAndLo
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto properties = suffixedDeviceProperties();
 
-    const auto path = winnerCacheShardPath("test:VersionMismatch", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:VersionMismatch"}, properties.gcnArchName);
     ASSERT_FALSE(path.empty());
     std::filesystem::create_directories(path.parent_path());
     {
@@ -824,10 +960,10 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
 
     {
         const auto writer = makeNamedStateManager("test:MalformedLine");
-        writer->recordWinner(key, recordFor(0x31, 1.0));
+        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
     }
 
-    const auto path = winnerCacheShardPath("test:MalformedLine", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:MalformedLine"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
         std::ofstream out(path, std::ios::app);
@@ -847,6 +983,286 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
     EXPECT_EQ(servedAfterGarbage->front().kernelId, testId(0x32));
 }
 
+/// A record line missing the per-line format-version field is a foreign or pre-upgrade
+/// line: skip it like any other malformed line, per the per-line format-version stamp
+/// design, rather than parsing it as version 1 by default.
+TEST(TestIngestorWinnerCacheStateManager, ALineMissingTheFormatFieldIsSkipped)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("format_field_missing");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const auto laterProperties = suffixedDeviceProperties(400);
+    const auto laterKey = keyFor(graph, laterProperties);
+
+    {
+        const auto writer = makeNamedStateManager("test:FormatFieldMissing");
+        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path = winnerCacheShardPath({"test:FormatFieldMissing"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        malformed.erase("v");
+        std::ofstream out(path, std::ios::app);
+        out << malformed.dump() << "\n";
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
+            << "\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:FormatFieldMissing");
+    EXPECT_TRUE(reader->winnerFor(key).has_value());
+    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
+        << "a line with no 'v' field must be skipped, not adopted as version 1";
+    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
+        << "the good line after the malformed one must still load";
+}
+
+/// A record line stamped with a format version this build does not recognize is a
+/// future or otherwise-incompatible line: skip it, don't parse fields whose meaning
+/// may have changed.
+TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("format_field_wrong_version");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const auto laterProperties = suffixedDeviceProperties(400);
+    const auto laterKey = keyFor(graph, laterProperties);
+
+    {
+        const auto writer = makeNamedStateManager("test:FormatFieldWrongVersion");
+        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path
+        = winnerCacheShardPath({"test:FormatFieldWrongVersion"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        malformed["v"] = detail::WINNER_LINE_FORMAT_VERSION + 1;
+        std::ofstream out(path, std::ios::app);
+        out << malformed.dump() << "\n";
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
+            << "\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:FormatFieldWrongVersion");
+    EXPECT_TRUE(reader->winnerFor(key).has_value());
+    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
+        << "a line stamped with a future format version must be skipped";
+    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
+        << "the good line after the malformed one must still load";
+}
+
+/// A non-integer warp_size (e.g. a float) must not silently truncate through
+/// nlohmann's get<int>(); decodeWinnerRecordLine() must decline the line instead.
+TEST(TestIngestorWinnerCacheStateManager, ALineWithANonIntegerWarpSizeIsSkipped)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("warp_size_non_integer");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const auto laterProperties = suffixedDeviceProperties(400);
+    const auto laterKey = keyFor(graph, laterProperties);
+
+    {
+        const auto writer = makeNamedStateManager("test:WarpSizeNonInteger");
+        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path = winnerCacheShardPath({"test:WarpSizeNonInteger"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        malformed["device"]["warp_size"] = 64.5;
+        std::ofstream out(path, std::ios::app);
+        out << malformed.dump() << "\n";
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
+            << "\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:WarpSizeNonInteger");
+    EXPECT_TRUE(reader->winnerFor(key).has_value());
+    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
+        << "a non-integer warp_size must be declined, not truncated";
+    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
+        << "the good line after the malformed one must still load";
+}
+
+/// A multi_processor_count outside int's range must not silently wrap through a
+/// static_cast from int64_t; decodeWinnerRecordLine() must decline the line instead.
+TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCountIsSkipped)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("multi_processor_count_out_of_range");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const auto laterProperties = suffixedDeviceProperties(400);
+    const auto laterKey = keyFor(graph, laterProperties);
+
+    {
+        const auto writer = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
+        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path
+        = winnerCacheShardPath({"test:MultiProcessorCountOutOfRange"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        malformed["device"]["multi_processor_count"] = 4294967296LL;
+        std::ofstream out(path, std::ios::app);
+        out << malformed.dump() << "\n";
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
+            << "\n";
+    }
+
+    const auto reader = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
+    EXPECT_TRUE(reader->winnerFor(key).has_value());
+    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
+        << "an out-of-int-range multi_processor_count must be declined, not wrapped";
+    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
+        << "the good line after the malformed one must still load";
+}
+
+/// The codec must carry the memory fields DeviceKey compares: a separately built key for the
+/// same live device must still hit.
+TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLiveDevicesKey)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("memory_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+
+    {
+        const auto writer = makeNamedStateManager("test:MemoryIdentity");
+        writer->recordWinner(keyFor(graph, suffixedDeviceProperties()),
+                             recordFor(0x41, 1.0),
+                             WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto liveKey = keyFor(graph, suffixedDeviceProperties());
+    const auto served = makeNamedStateManager("test:MemoryIdentity")->winnerFor(liveKey);
+    ASSERT_TRUE(served.has_value())
+        << "a persisted record must be found again by the device that measured it";
+    EXPECT_EQ(served->front().kernelId, testId(0x41));
+
+    // A board of the same arch and CU count with different HBM must miss.
+    auto otherBoard = suffixedDeviceProperties();
+    otherBoard.totalGlobalMem /= 2;
+    EXPECT_FALSE(makeNamedStateManager("test:MemoryIdentity")
+                     ->winnerFor(keyFor(graph, otherBoard))
+                     .has_value());
+}
+
+/// A version-1 line has no memory fields; decoding them as zero would serve it to any device
+/// whose memory properties are unresolved.
+TEST(TestIngestorWinnerCacheStateManager, APreviousFormatLineIsAMissNeverAZeroMemoryDevice)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("previous_format");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties unresolvedMemory;
+    unresolvedMemory.gcnArchName = "gfx942:sramecc+:xnack-";
+    unresolvedMemory.warpSize = 64;
+    unresolvedMemory.multiProcessorCount = 304;
+    const auto zeroMemoryKey = keyFor(graph, unresolvedMemory);
+
+    {
+        // Creates the shard (and its version line) under an unrelated key.
+        const auto writer = makeNamedStateManager("test:PreviousFormat");
+        writer->recordWinner(keyFor(graph, suffixedDeviceProperties()),
+                             recordFor(0x51, 1.0),
+                             WinnerWriteCause::FRESH_MISS);
+    }
+    const auto path = winnerCacheShardPath({"test:PreviousFormat"}, unresolvedMemory.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        // Exactly what the previous build wrote: version 1, arch/warp/CU only.
+        auto previous
+            = nlohmann::json::parse(encodeWinnerRecordLine(zeroMemoryKey, recordFor(0x52, 2.0)));
+        previous["v"] = 1;
+        for(const char* field :
+            {"total_global_mem", "memory_bus_width", "memory_clock_rate", "shared_mem_per_block"})
+        {
+            previous["device"].erase(field);
+        }
+        std::ofstream out(path, std::ios::app);
+        out << previous.dump() << "\n";
+    }
+
+    EXPECT_FALSE(makeNamedStateManager("test:PreviousFormat")->winnerFor(zeroMemoryKey).has_value())
+        << "a previous-format line must miss, not decode its absent fields as zero";
+}
+
+/// A current-format line missing any device field is declined, never decoded as zero.
+TEST(TestIngestorWinnerCache, ALineMissingAnyDeviceFieldIsDeclined)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto line
+        = encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties()), recordFor(0x61, 1.0));
+    ASSERT_TRUE(decodeWinnerRecordLine(line).has_value());
+
+    for(const char* field : {"gcn_arch_name",
+                             "warp_size",
+                             "multi_processor_count",
+                             "total_global_mem",
+                             "memory_bus_width",
+                             "memory_clock_rate",
+                             "shared_mem_per_block"})
+    {
+        SCOPED_TRACE(field);
+        auto truncated = nlohmann::json::parse(line);
+        truncated["device"].erase(field);
+        EXPECT_FALSE(decodeWinnerRecordLine(truncated.dump()).has_value());
+    }
+}
+
+/// Shard A_old, B, C, A_new at capacity 2: eviction may cost a miss, but A_old must never be
+/// served over A_new.
+TEST(TestIngestorWinnerCacheStateManager, AnEvictedNewerLineNeverLetsAnOlderDuplicateBack)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("last_line_wins_bounded");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const EngineIdentity engine{"test:LastLineWinsBounded"};
+    const auto keyA = keyFor(graph, suffixedDeviceProperties(100));
+    const auto keyB = keyFor(graph, suffixedDeviceProperties(200));
+    const auto keyC = keyFor(graph, suffixedDeviceProperties(300));
+
+    {
+        const auto writer = makeIdentifiedStateManager(engine, 2);
+        writer->recordWinner(keyA, recordFor(0x71, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+    const auto path = winnerCacheShardPath(engine, keyA.device.properties().gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    {
+        std::ofstream out(path, std::ios::app);
+        out << encodeWinnerRecordLine(keyB, recordFor(0x72, 1.0)) << "\n";
+        out << encodeWinnerRecordLine(keyC, recordFor(0x73, 1.0)) << "\n";
+        out << encodeWinnerRecordLine(keyA, recordFor(0x74, 1.0)) << "\n";
+    }
+
+    const auto served = makeIdentifiedStateManager(engine, 2)->winnerFor(keyA);
+    ASSERT_TRUE(served.has_value()) << "the shard's newest lines must be the resident ones";
+    EXPECT_NE(served->front().kernelId, testId(0x71))
+        << "the superseded first line for A was served over the last one";
+    EXPECT_EQ(served->front().kernelId, testId(0x74));
+}
+
 /// A manager built without an engine name has no shard path to compose, so it neither
 /// reads nor writes even with a writable cache directory configured.
 TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
@@ -858,7 +1274,7 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
     const auto key = keyFor(graph, properties);
 
     const auto manager = makeStateManager();
-    manager->recordWinner(key, recordFor(0x41, 1.0));
+    manager->recordWinner(key, recordFor(0x41, 1.0), WinnerWriteCause::FRESH_MISS);
 
     EXPECT_TRUE(manager->winnerFor(key).has_value());
 
@@ -872,11 +1288,10 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnnamedEngineTouchesNoFile)
 /// never through a manager: a manager-mediated count can never see a duplicate append,
 /// because duplicates collapse last-wins when merged into `_winnerCache`, and
 /// `readAllLines()` (used by `winnerFor`) also only ever returns the merged view, not a
-/// per-line tally. Every racing thread on the shared key writes a byte-identical
-/// `(kernelId, packId, dispatchId)` sequence (`timeMs` varies), matching
-/// `rankedIdsEqual()`'s ignore-timeMs comparison -- otherwise `writeBackToShard()` would
-/// legitimately append a superseding line per thread and the expected count would not
-/// be fixed.
+/// per-line tally. Every racing thread on the shared key writes with the DEFAULT
+/// (fresh-miss) write cause, so the presence gate in `writeBackToShard()` adopts every
+/// write after the first regardless of ranked-id content -- otherwise a per-thread
+/// append would run and the expected count would not be fixed.
 ///
 /// Falsifying mutation: make the in-process mutex in `acquireLineStoreLock()` a no-op,
 /// leaving only the file-level fcntl lock. POSIX fcntl locks are (process, inode)-scoped,
@@ -915,10 +1330,11 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsE
             {
                 if(t % 2 == 0)
                 {
-                    // Half the threads race the SAME key with the SAME ranked ids: the
-                    // only sequence rankedIdsEqual() ever treats as unchanged, so every
-                    // write after the first must adopt rather than append.
-                    manager->recordWinner(sharedKey, recordFor(0x71, 1.0 + i));
+                    // Half the threads race the SAME key: the fresh-miss presence gate
+                    // adopts every write after the first regardless of ranked-id content,
+                    // so every write after the first must adopt rather than append.
+                    manager->recordWinner(
+                        sharedKey, recordFor(0x71, 1.0 + i), WinnerWriteCause::FRESH_MISS);
                 }
                 else
                 {
@@ -928,7 +1344,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsE
                     DeviceProperties distinctProperties = suffixedDeviceProperties();
                     distinctProperties.multiProcessorCount = 1000 + t;
                     manager->recordWinner(keyFor(graph, distinctProperties),
-                                          recordFor(static_cast<uint8_t>(0x80 + t), 1.0 + i));
+                                          recordFor(static_cast<uint8_t>(0x80 + t), 1.0 + i),
+                                          WinnerWriteCause::FRESH_MISS);
                 }
             }
         });
@@ -938,7 +1355,7 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsE
         thread.join();
     }
 
-    const auto path = winnerCacheShardPath("test:ConcurrentRecordWinner", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:ConcurrentRecordWinner"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     std::ifstream shardFile(path);
     ASSERT_TRUE(shardFile.is_open());
@@ -995,11 +1412,11 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsE
 /// replacing the earlier line, and the winning value is the ranking last observed by
 /// disk order.
 ///
-/// Falsifying mutation: revert `writeBackToShard()`'s `rankedIdsEqual()` gate to the
-/// pre-A1 "adopt whenever ANY on-disk record for the key exists" behavior (drop the
-/// `&& rankedIdsEqual(*onDiskWinner, record)` check). The genuinely different
-/// 4-kernel write then adopts the stale 3-kernel line instead of appending: the shard
-/// stays at 2 raw lines (version + one record) instead of 3.
+/// Falsifying mutation: pass `WinnerWriteCause::FRESH_MISS` (the default) on the second
+/// `recordWinner()` call below instead of `COVERAGE_REBENCHMARK`. The presence gate in
+/// `writeBackToShard()` then adopts the stale 3-kernel line instead of appending the
+/// genuinely different 4-kernel one: the shard stays at 2 raw lines (version + one
+/// record) instead of 3.
 TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWins)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1018,11 +1435,11 @@ TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWin
 
     {
         const auto writer = makeNamedStateManager("test:SupersedingRecord");
-        writer->recordWinner(key, threeKernelRecord);
-        writer->recordWinner(key, fourKernelRecord);
+        writer->recordWinner(key, threeKernelRecord, WinnerWriteCause::FRESH_MISS);
+        writer->recordWinner(key, fourKernelRecord, WinnerWriteCause::COVERAGE_REBENCHMARK);
     }
 
-    const auto path = winnerCacheShardPath("test:SupersedingRecord", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:SupersedingRecord"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     std::ifstream shardFile(path);
     ASSERT_TRUE(shardFile.is_open());
@@ -1045,10 +1462,10 @@ TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWin
 /// B1.3 -- writing the SAME ranking twice adopts the on-disk copy both times and never
 /// grows the shard.
 ///
-/// Falsifying mutation: delete the `rankedIdsEqual()` early-return in
-/// `writeBackToShard()` (always append). The shard then gains a line on the identical
-/// second `recordWinner()` call, and `rawLines.size()` below observes 2 record lines
-/// instead of 1.
+/// Falsifying mutation: change the write-back gate in `writeBackToShard()` to always
+/// append regardless of `WinnerWriteCause` (drop the presence check). The shard then
+/// gains a line on the identical second `recordWinner()` call, and `rawLines.size()`
+/// below observes 2 record lines instead of 1.
 TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsNoLine)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1060,13 +1477,15 @@ TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsN
                               entryFor(definitionFor(0x92), 2.0)};
 
     const auto manager = makeNamedStateManager("test:IdenticalRecordTwice");
-    manager->recordWinner(key, record);
-    // Same ranked ids, different timeMs -- rankedIdsEqual() ignores timeMs, so this must
-    // adopt, not append.
+    manager->recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
+    // A fresh-miss write (the default) adopts whatever line is already present for the
+    // key, regardless of ranked-id content -- it never compares rankings.
     manager->recordWinner(
-        key, WinnerRecord{entryFor(definitionFor(0x91), 9.0), entryFor(definitionFor(0x92), 9.0)});
+        key,
+        WinnerRecord{entryFor(definitionFor(0x91), 9.0), entryFor(definitionFor(0x92), 9.0)},
+        WinnerWriteCause::FRESH_MISS);
 
-    const auto path = winnerCacheShardPath("test:IdenticalRecordTwice", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:IdenticalRecordTwice"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     std::ifstream shardFile(path);
     ASSERT_TRUE(shardFile.is_open());
@@ -1079,11 +1498,11 @@ TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsN
                                       "unchanged second write must not append";
 }
 
-/// B1.3 -- on the ADOPT path (on-disk ranking already matches by `rankedIdsEqual()`,
-/// which ignores `timeMs`), the value that reaches `_winnerCache` must be the ON-DISK
-/// record `writeBackToShard()` returned, not the caller's argument re-stored under its
-/// own name. `timeMs` is the only field that can tell them apart here, since
-/// `rankedIdsEqual()` treats them as the same ranking by design.
+/// B1.3 -- on the ADOPT path (a fresh-miss write finds a record already present for the
+/// key), the value that reaches `_winnerCache` must be the ON-DISK record
+/// `writeBackToShard()` returned, not the caller's argument re-stored under its own
+/// name. `timeMs` is the only field that can tell them apart here, since the presence
+/// gate adopts regardless of content.
 ///
 /// Falsifying mutation: in `recordWinner()`, change
 /// `_winnerCache[key] = std::move(adopted);` to `_winnerCache[key] = record;` (the
@@ -1101,15 +1520,17 @@ TEST(TestIngestorWinnerCacheStateManager, TheValueStoredInMemoryAfterAdoptionIsT
 
     {
         const auto writer = makeNamedStateManager("test:InMemoryAfterAdopt");
-        writer->recordWinner(key, recordFor(0xA1, 1.0)); // disk's timeMs stays 1.0
+        writer->recordWinner(
+            key, recordFor(0xA1, 1.0), WinnerWriteCause::FRESH_MISS); // disk's timeMs stays 1.0
     }
 
     // A second, independent manager: its in-memory cache does not already hold this
     // key, so the only way `timeMs` reaches it is through writeBackToShard()'s return.
-    // Same ranked ids as the disk line, different timeMs -- rankedIdsEqual() calls this
-    // unchanged, so the disk's original entry (timeMs 1.0) must be what is adopted.
+    // A fresh-miss write (the default) adopts whatever is already present for the key
+    // regardless of ranked-id content, so the disk's original entry (timeMs 1.0) must be
+    // what is adopted.
     const auto second = makeNamedStateManager("test:InMemoryAfterAdopt");
-    second->recordWinner(key, recordFor(0xA1, 99.0));
+    second->recordWinner(key, recordFor(0xA1, 99.0), WinnerWriteCause::FRESH_MISS);
 
     const auto inMemory = second->winnerFor(key);
     ASSERT_TRUE(inMemory.has_value());
@@ -1120,11 +1541,12 @@ TEST(TestIngestorWinnerCacheStateManager, TheValueStoredInMemoryAfterAdoptionIsT
            "adoption, not the caller's own argument re-stored under its own timeMs";
 }
 
-/// B1.3 -- a shard already holding TWO lines for one key: the write-back comparison
-/// must be made against the LAST one. This is what makes last-match scanning
-/// load-bearing; with a first-match scan the comparison would run against the FIRST
-/// (stale) line and this test fails -- see the mutation note on
-/// ASupersedingRecordWidensTheShardAndWins above.
+/// B1.3 -- a shard already holding TWO lines for one key: a fresh-miss write's ADOPT
+/// value must come from the LAST line, not the first. The presence gate no longer
+/// compares rankings, so append-vs-adopt cannot falsify a first-match scan any more --
+/// both scans find "some" entry and both adopt. Only the CONTENT adopted distinguishes
+/// them: a first-match scan would return the stale 0xB1 line instead of the last-written
+/// 0xB2 one.
 TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLine)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1138,19 +1560,26 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
 
     {
         const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
-        writer->recordWinner(key, firstRecord); // line 1: 0xB1
-        writer->recordWinner(key, secondRecord); // line 2: 0xB2 (genuinely different)
+        writer->recordWinner(
+            key, firstRecord, WinnerWriteCause::FRESH_MISS); // line 1: 0xB1, fresh miss
+        // A re-benchmark, forced to append even though a line for this key already
+        // exists: the presence gate alone would otherwise adopt line 1 and never widen
+        // the shard to two lines.
+        writer->recordWinner(
+            key, secondRecord, WinnerWriteCause::COVERAGE_REBENCHMARK); // line 2: 0xB2
     }
 
-    // A third write repeating the LAST line's ranking. A last-match scan adopts (no
-    // append); a first-match scan would compare against 0xB1, see a difference, and
-    // append a third line.
+    // A third, fresh-miss write. The presence gate adopts unconditionally once ANY line
+    // exists for the key, so this neither appends nor depends on which line matched --
+    // but the VALUE adopted must be line 2's (0xB2, timeMs 1.0), not line 1's, which only
+    // a last-match scan guarantees.
     {
         const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
-        writer->recordWinner(key, WinnerRecord{entryFor(definitionFor(0xB2), 9.0)});
+        writer->recordWinner(
+            key, WinnerRecord{entryFor(definitionFor(0xB2), 9.0)}, WinnerWriteCause::FRESH_MISS);
     }
 
-    const auto path = winnerCacheShardPath("test:TwoLinesLastWins", properties.gcnArchName);
+    const auto path = winnerCacheShardPath({"test:TwoLinesLastWins"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     std::ifstream shardFile(path);
     ASSERT_TRUE(shardFile.is_open());
@@ -1159,8 +1588,102 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
     {
         rawLines.push_back(line);
     }
-    ASSERT_EQ(rawLines.size(), 3U) << "version line plus exactly two record lines; a "
-                                      "first-match comparison would wrongly append a third";
+    ASSERT_EQ(rawLines.size(), 3U)
+        << "version line plus exactly two record lines; a fresh-miss write must never append";
+
+    const auto reader = makeNamedStateManager("test:TwoLinesLastWins");
+    const auto served = reader->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0xB2))
+        << "a first-match scan would have adopted the stale 0xB1 line instead";
+    EXPECT_DOUBLE_EQ(served->front().timeMs, 1.0)
+        << "adopting must return line 2's on-disk value (timeMs 1.0), not the third "
+           "write's own argument (timeMs 9.0)";
+}
+
+/// The adopt-gate cost this replaced: an ordinary second run of the SAME graph, with
+/// benchmark measurement noise reordering the ranking, must not widen the shard. Two
+/// fresh-miss writes racing (or repeating) the same key with genuinely different ranked
+/// order both count as "a record already exists" under the presence gate, so the second
+/// adopts rather than appends.
+///
+/// Falsifying mutation: compare rankings again (e.g. reintroduce a ranking-equality
+/// check gating the fresh-miss adopt). A noisy reorder would then look like a
+/// genuinely different ranking and append, and `rawLines.size()` below would observe 2
+/// record lines instead of 1.
+TEST(TestIngestorWinnerCacheStateManager, ANoisyReorderOnAFreshMissDoesNotGrowTheShard)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("noisy_reorder_fresh_miss");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const WinnerRecord firstOrder{entryFor(definitionFor(0xC1), 1.0),
+                                  entryFor(definitionFor(0xC2), 2.0)};
+    const WinnerRecord reorderedIds{entryFor(definitionFor(0xC2), 3.0),
+                                    entryFor(definitionFor(0xC1), 4.0)};
+
+    const auto manager = makeNamedStateManager("test:NoisyReorderFreshMiss");
+    manager->recordWinner(key, firstOrder, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key, reorderedIds, WinnerWriteCause::FRESH_MISS);
+
+    const auto path = winnerCacheShardPath({"test:NoisyReorderFreshMiss"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+    ASSERT_EQ(rawLines.size(), 2U)
+        << "version line plus exactly one record line; two fresh-miss writes for one key "
+           "must never widen the shard, regardless of ranked-id order";
+
+    const auto served = manager->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 2U);
+    EXPECT_EQ(served->front().kernelId, testId(0xC1))
+        << "the adopted ranking must be the FIRST-written one";
+}
+
+/// The complement of the test above: a coverage-triggered re-benchmark always appends,
+/// even when the newly measured ranking happens to repeat the on-disk one exactly.
+///
+/// Falsifying mutation: gate the `COVERAGE_REBENCHMARK` append on a ranking comparison
+/// (e.g. skip the append when the new ranking equals the on-disk one). The identical
+/// second write below would then adopt instead of appending, and `rawLines.size()`
+/// would observe 1 record line instead of 2.
+TEST(TestIngestorWinnerCacheStateManager, ACoverageRebenchmarkAppendsEvenWhenTheRankingIsUnchanged)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("coverage_rebenchmark_unchanged_ranking");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    const WinnerRecord record{entryFor(definitionFor(0xD1), 1.0),
+                              entryFor(definitionFor(0xD2), 2.0)};
+
+    const auto manager = makeNamedStateManager("test:CoverageRebenchmarkUnchanged");
+    manager->recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key, record, WinnerWriteCause::COVERAGE_REBENCHMARK);
+
+    const auto path
+        = winnerCacheShardPath({"test:CoverageRebenchmarkUnchanged"}, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream shardFile(path);
+    ASSERT_TRUE(shardFile.is_open());
+    std::vector<std::string> rawLines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        rawLines.push_back(line);
+    }
+    ASSERT_EQ(rawLines.size(), 3U)
+        << "version line plus two record lines; a coverage re-benchmark must append even "
+           "when the ranking it measured is unchanged from the shard's";
 }
 
 /// The pair below is driven by ctest, not gtest: the writer runs in one process, exits,
@@ -1195,7 +1718,9 @@ TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShard
             reversedIds.push_back(kernel->kernelId);
             timeMs += 1.0;
         }
-        writer->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}}, record);
+        writer->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
+                             record,
+                             WinnerWriteCause::FRESH_MISS);
     }
 
     // A manager that has recorded nothing: its in-memory cache is empty, so the only
@@ -1230,10 +1755,10 @@ TEST(TestIngestorWinnerCacheCrossProcess, DISABLED_WriterLeavesARecordOnDisk)
         << "the ctest registration must supply a shared cache directory";
 
     const auto manager = makeNamedStateManager(CROSS_PROCESS_ENGINE);
-    manager->recordWinner(crossProcessKey(), recordFor(0x51, 4.25));
+    manager->recordWinner(crossProcessKey(), recordFor(0x51, 4.25), WinnerWriteCause::FRESH_MISS);
 
     const auto path
-        = winnerCacheShardPath(CROSS_PROCESS_ENGINE, suffixedDeviceProperties().gcnArchName);
+        = winnerCacheShardPath({CROSS_PROCESS_ENGINE}, suffixedDeviceProperties().gcnArchName);
     ASSERT_FALSE(path.empty());
     EXPECT_TRUE(std::filesystem::exists(path))
         << "the writer process left no shard for the reader process to find";

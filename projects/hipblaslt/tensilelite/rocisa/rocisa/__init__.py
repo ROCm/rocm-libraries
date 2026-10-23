@@ -39,6 +39,32 @@ def _candidate_dll_dirs(dep_dlls, ext_dir):
     return ordered
 
 
+def _installed_dll_dirs(ext_dir):
+    """Windows dependency dirs for an installed _rocisa (no _dll_dirs.py present).
+
+    A build tree gets exact dependency paths from _dll_dirs.py; an install does
+    not, and since Python 3.8 the extension loader ignores PATH. The installed
+    extension sits at <prefix>/lib/hipblaslt/rocisa while its dependency DLLs
+    (HIP runtime, comgr, origami, stinkytofu) live in the merged ROCm
+    <prefix>/bin. Return that bin/ (three levels up) plus the bin/ of any standard
+    ROCM_PATH/HIP_PATH/ROCM_HOME, mirroring hipdnn_frontend. Callers guard each
+    entry with os.path.isdir, so a wrong guess is a harmless no-op. Pure and
+    host-agnostic so it can be unit-tested off Windows.
+    """
+    import os
+
+    dirs = [
+        os.path.normpath(
+            os.path.join(ext_dir, os.pardir, os.pardir, os.pardir, "bin")
+        )
+    ]
+    for var in ("ROCM_PATH", "HIP_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root:
+            dirs.append(os.path.join(root, "bin"))
+    return dirs
+
+
 def _register_win_dll_dirs() -> None:
     """Register _candidate_dll_dirs via os.add_dll_directory on Windows.
 
@@ -49,12 +75,16 @@ def _register_win_dll_dirs() -> None:
     """
     import os
 
+    ext_dir = os.path.dirname(__file__)
     try:
         # Source/integrated build: CMake emits the resolved dependency DLL paths.
         from ._dll_dirs import DEP_DLLS
     except ImportError:
         DEP_DLLS = []  # Installed package: deps resolve via the merged layout.
-    for d in _candidate_dll_dirs(DEP_DLLS, os.path.dirname(__file__)):
+    dll_dirs = _candidate_dll_dirs(DEP_DLLS, ext_dir)
+    if not DEP_DLLS:
+        dll_dirs = dll_dirs + _installed_dll_dirs(ext_dir)
+    for d in dll_dirs:
         if os.path.isdir(d):
             try:
                 os.add_dll_directory(d)
@@ -86,8 +116,14 @@ def _import_rocisa():
 # ``rocisa_stinkytofu_adaptor`` shim (a rocisa-shaped facade backed by the
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
+#
+# The default is ALWAYS the native rocisa backend -- there is no hardware
+# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
+# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
 
-_BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+_BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
+_BACKEND = _BACKEND_RAW
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -246,19 +282,21 @@ def _stinkytofu_available() -> "tuple[bool, str]":
     return True, ""
 
 
-def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bool:
+def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
+                     auto_detected=False) -> bool:
     """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
 
     Emits a warning *only* when the stinkytofu backend was explicitly requested
-    but we have to fall back to native — so an unnoticed silent fallback becomes
-    visible, with a cause-specific reason attached. ``available_fn`` and
-    ``load_fn`` share the same ``(ok, reason)`` contract; the reason is surfaced
-    verbatim so each distinct failure mode produces its own warning. Requesting
-    anything else (or unset) selects native without touching the probes and
-    without warning.
+    (or auto-detected) but we have to fall back to native — so an unnoticed
+    silent fallback becomes visible, with a cause-specific reason attached.
+    ``available_fn`` and ``load_fn`` share the same ``(ok, reason)`` contract;
+    the reason is surfaced verbatim so each distinct failure mode produces its
+    own warning. Requesting anything else (or unset) selects native without
+    touching the probes and without warning.
     """
     if requested != "stinkytofu":
         return False
+    _origin = "auto-detected for gfx1250" if auto_detected else "ROCISA_BACKEND=stinkytofu"
     available, avail_reason = available_fn()
     if not available:
         warn(avail_reason, stacklevel=2)
@@ -266,15 +304,16 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bo
     ok, reason = load_fn()
     if not ok:
         warn(
-            f"ROCISA_BACKEND=stinkytofu requested but the adapter failed to load "
-            f"({reason}){_FALLBACK}",
+            f"stinkytofu backend ({_origin}) requested but the adapter failed "
+            f"to load ({reason}){_FALLBACK}",
             stacklevel=2,
         )
         return False
     return True
 
 
-if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter):
+if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
+                    auto_detected=False):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:

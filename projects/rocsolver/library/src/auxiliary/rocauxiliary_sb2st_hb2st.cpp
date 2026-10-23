@@ -30,6 +30,13 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+ * ===========================================================================
+ *    hb2st is not intended for inclusion in the public API.
+ *    It is used as a step in eigenvalue solvers (heev*).
+ * ===========================================================================
+ */
+
 //------------------------------------------------------------------------------
 // Reduces Hermitian/symmetric band matrix A to real symmetric tridiagonal form
 // by a unitary similarity transformation:

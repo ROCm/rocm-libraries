@@ -28,15 +28,15 @@
 std::string rocfft_spirv_cb_t::get_hash() const
 {
     std::string ret;
-    if(!symbol_name || !bitcode_data || !bitcode_len_bytes)
+    if(symbol_name.empty() || bitcode_data.empty())
         return ret;
     // compute sha256 of symbol name + spirv code, output hex string as
     // this will go into the kernel's name
 
     sha256_buff state;
     sha256_init(&state);
-    sha256_update(&state, symbol_name, std::strlen(symbol_name));
-    sha256_update(&state, bitcode_data, bitcode_len_bytes);
+    sha256_update(&state, symbol_name.data(), symbol_name.size());
+    sha256_update(&state, bitcode_data.data(), bitcode_data.size());
 
     ret.resize(64);
     sha256_finalize(&state);

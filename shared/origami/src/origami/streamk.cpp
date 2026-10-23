@@ -290,7 +290,6 @@ size_t grid_analytical(const problem_t& problem,
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
-  size_t K     = problem.size.k;
   size_t batch = problem.batch;
 
   size_t MT_M = config.mt.m;
@@ -326,6 +325,38 @@ size_t grid_analytical(const problem_t& problem,
   return best_grid;
 }
 
+static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
+                                          size_t tiles,
+                                          size_t iters_per_tile,
+                                          size_t cu_count,
+                                          size_t batch) {
+  if (sk_grid == 0 || sk_grid >= tiles) return sk_grid;
+
+  // Batched GEMMs benefit from SK tile-streaming (consecutive batch tiles share
+  // A/B data in L1/L2); skip all corrections for batch > 1.
+  if (batch > 1) return sk_grid;
+
+  // ipt == 1: pure tile-streaming.  DP's N-locality wins over a bounded
+  // tile-count window; outside it, keep SK.
+  if (iters_per_tile <= 1) {
+    if (cu_count > 0 && tiles >= cu_count * 2 && tiles < cu_count * 32) return tiles;
+    return sk_grid;
+  }
+
+  // Keep SK when DP would leave its last wave largely idle (DP_eff < 80%).
+  if (cu_count > 0) {
+    const size_t dp_waves    = (tiles + cu_count - 1) / cu_count;
+    const size_t dp_cu_steps = dp_waves * cu_count;
+    if (tiles < 0.8 * dp_cu_steps) return sk_grid;
+  }
+
+  // DP fills its waves well: force DP if any CTA would straddle a tile boundary,
+  // since those CTAs write partial workspace and need an extra fixup pass.
+  const size_t iters_total = tiles * iters_per_tile;
+  const size_t floor_iters = iters_total / sk_grid;
+  return (floor_iters % iters_per_tile != 0) ? tiles : sk_grid;
+}
+
 // @param cu_budget Internal genuine-cap budget: the resolved CU cap when the
 //        caller supplied a genuine cap (problem.num_cus is positive and below
 //        the physical N_CU), else 0 ("no genuine cap / use all CUs"). Computed
@@ -345,28 +376,6 @@ size_t grid_k_split_aware(const problem_t& problem,
 
   const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
 
-  // Returns true if the candidate sk_grid produces per-CTA k-iter stripes whose
-  // contiguous-dim footprint does not align to a full cache line on either operand.
-  auto causes_partial_cachelines = [&](size_t candidate_grid) -> bool {
-    constexpr size_t CACHE_LINE_BYTES = 128;
-    if (candidate_grid == 0 || iters_per_tile == 0) return false;
-    const size_t iters_total    = num_iters_total(tiles, iters_per_tile);
-    const size_t iters_per_cta  = num_iters_per_cta(iters_total, candidate_grid);
-    const size_t fragment_iters = iters_per_cta % iters_per_tile;
-    const size_t bpe_a          = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-    const size_t bpe_b          = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
-    const size_t a_contig_bytes = (problem.a_transpose == transpose_t::T)
-                                      ? fragment_iters * config.mt.k * bpe_a
-                                      : 0;
-    const size_t b_contig_bytes = (problem.b_transpose == transpose_t::N)
-                                      ? fragment_iters * config.mt.k * bpe_b
-                                      : 0;
-    auto not_aligned_to_cache_line = [](size_t bytes) {
-      return bytes > 0 && (bytes % CACHE_LINE_BYTES) != 0;
-    };
-    return not_aligned_to_cache_line(a_contig_bytes) || not_aligned_to_cache_line(b_contig_bytes);
-  };
-
   // More tiles than CUs
   // Distribute tiles evenly across maximum number of CUs
   // Split remaining tiles as evenly as possible for better caching
@@ -385,10 +394,6 @@ size_t grid_k_split_aware(const problem_t& problem,
       // Check if higher occupancy would cause excessive workspace requirements (set current limit
       // to 128MB)
       if ((tiles % frac_grid != 0) && (tile_size * frac_grid > 128ull * 1024ull * 1024ull))
-        continue;
-
-      // Skip grids whose per-CTA k-iter fragment crosses a cache line boundary
-      if (causes_partial_cachelines(frac_grid)) 
         continue;
 
       if (frac_grid <= virt_cu_count) {
@@ -437,9 +442,14 @@ size_t grid_k_split_aware(const problem_t& problem,
 
   if (tiles % sk_grid != 0 && tile_size * sk_grid > config.workspace_size) sk_grid = tiles;
 
+  // Partial-tile and DP-efficiency correction: only applies to the streaming
+  // case (tiles > cu_count).  K-split grids (tiles <= cu_count) intentionally
+  // produce non-tile-aligned grids and must not be corrected to DP.
+  if (tiles > cu_count)
+    sk_grid = correct_sk_grid_for_partial_tiles(sk_grid, tiles, iters_per_tile, cu_count,
+                                                problem.batch);
   return sk_grid;
 }
-
 size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,

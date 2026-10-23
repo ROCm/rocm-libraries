@@ -25,6 +25,10 @@ _deps/
 *.so
 *.hsaco
 
+# --- AOT kernel cache: the conv benchmarks' --compile-all default output
+#     (./kernel_cache, relative to wherever the benchmark is run from) ---
+kernel_cache/
+
 # --- Local scratch: logs, perf JSON dumps, ad-hoc studies ---
 *.log
 logs/

@@ -594,13 +594,17 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         // funcptr callback
         if(!plan.desc.storeOps.has_spirv() && info.get_store_cb_fns())
         {
-            cb_ptrs.store_cb_fn = execPlan.outputPtr.get(
-                info.get_store_cb_fns(), nullptr, execPlan.location.comm_rank, info);
+            cb_ptrs.store_cb_fn = execPlan.outputPtr.get(info.get_store_cb_fns(),
+                                                         info.get_store_cb_fns(),
+                                                         execPlan.location.comm_rank,
+                                                         info);
         }
         if(info.get_store_cb_data())
         {
-            cb_ptrs.store_cb_data = execPlan.outputPtr.get(
-                nullptr, info.get_store_cb_data(), execPlan.location.comm_rank, info);
+            cb_ptrs.store_cb_data = execPlan.outputPtr.get(info.get_store_cb_data(),
+                                                           info.get_store_cb_data(),
+                                                           execPlan.location.comm_rank,
+                                                           info);
         }
     }
 

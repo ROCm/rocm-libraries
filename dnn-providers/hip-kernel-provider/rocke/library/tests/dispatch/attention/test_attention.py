@@ -5,8 +5,11 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
+from fractions import Fraction
 
 from dispatch.attention import (
+    AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
@@ -18,15 +21,83 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
+# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
+# kernels write LSE, so every other candidate must keep declining it.
+_GFX950_DENSE_FEATURES = {
+    "band",
+    "causal",
+    "full_attention",
+    "lse",
+    "sinks",
+    "sliding_window",
+}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_RDNA_WMMA_FEATURES = {
+    "causal",
+    "causal_bottom_right",
+    "sliding_window",
+    "window_bounds",
+    "noncausal_window",
+    "lse",
+    "sinks",
+    "fp8",
+    "softcap",
+    "alibi",
+    "qq_bias",
+    "window_right",
+    "attn_bias",
+    "layout_dense",
+    "layout_bhsd",
+    "layout_ragged",
+    "layout_paged",
+    "runtime_head_dims",
+}
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal"},
-    "attention_gfx950_dense": {"causal", "sinks", "sliding_window"},
-    "attention_d256_decode": {"causal"},
+    "attention_strided_decode": {
+        "strided_kv",
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+    },
+    "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
+    "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
+    "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
-    "attention_gfx942_dense_pipe": {"causal", "sinks", "sliding_window"},
-    "attention_gfx950_d256": {"causal"},
-    "attention_unified_2d": {"causal", "fp8", "sinks", "sliding_window"},
-    "attention_unified_3d": {"causal", "fp8", "sinks", "sliding_window"},
+    "attention_rdna_wmma_prefill": _RDNA_WMMA_FEATURES,
+    "attention_rdna_wmma_decode": _RDNA_WMMA_FEATURES,
+    # The opt-in tuned RDNA WMMA candidates serve exactly what the auto routes do.
+    **{
+        f"attention_{arch}_wmma_{kind}": _RDNA_WMMA_FEATURES
+        for arch in ("gfx11_generic", "gfx1151", "gfx12_generic", "gfx1201")
+        for kind in ("prefill", "decode")
+    },
+    "attention_gfx942_dense_pipe": {
+        "causal",
+        "causal_bottom_right",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx950_d256": {"causal", "causal_bottom_right"},
+    "attention_unified_2d": {
+        "band",
+        "causal",
+        "causal_bottom_right",
+        "full_attention",
+        "fp8",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_unified_3d": {
+        "band",
+        "causal",
+        "causal_bottom_right",
+        "full_attention",
+        "fp8",
+        "sinks",
+        "sliding_window",
+    },
 }
 
 # Request kwargs that turn each attention feature on. Keyed by the vocabulary so
@@ -34,20 +105,39 @@ EXPECTED_FEATURES = {
 # listed) rather than inheriting silence.
 _ENABLE_FEATURE = {
     "causal": {"mask_type": 1},
-    "sliding_window": {"sliding_window": 256},
+    "causal_bottom_right": {"mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL},
+    # A window on a causal mask; ``band`` is the non-causal one (NO_MASK + a window).
+    "sliding_window": {
+        "sliding_window": 256,
+        "mask_type": AttentionMaskType.TOP_LEFT_CAUSAL,
+    },
+    "band": {"sliding_window": 256, "right_bound": 64},
+    # No bound on either side; the base case is a causal mask.
+    "full_attention": {"mask_type": AttentionMaskType.NO_MASK},
     "sinks": {"use_sinks": True},
     "fp8": {"use_fp8": True},
 }
 
 # Features the dispatch spec (hence kernel_name / spec hash) actually encodes.
 # ``fp8`` is carried on AttentionSpec; ``sliding_window`` reroutes 3d->2d and
-# path is in the name. ``causal`` and ``sinks`` are a PRE-EXISTING gap: the spec
-# is built from (path, head_size, block_size, dtype, gqa, use_fp8) only, so
-# toggling the mask or sinks does not change kernel_name today. That fix belongs
-# on the consumers that key a compile cache on kernel_name() and is out of scope
-# here; the gap is frozen below so a future fix trips the test instead of
-# passing silently.
-_IDENTITY_ENCODED = {"fp8", "sliding_window"}
+# path is in the name. On gfx950 the mask is encoded too: ``causal`` as the top-left
+# ``tl`` token (see ``AttentionSpec.causal_top_left``) and ``band`` as ``rbu`` /
+# ``rb<R>`` -- which is what this test's ``causal`` / ``band`` cases exercise.
+# ``sinks`` is a PRE-EXISTING gap: the spec is built from (path, head_size,
+# block_size, dtype, gqa, use_fp8) only, so toggling sinks does not change
+# kernel_name today. That fix belongs on the consumers that key a compile cache
+# on kernel_name() and is out of scope here; the gap is frozen below so a future
+# fix trips the test instead of passing silently. (On gfx942 / gfx1250 the tiled
+# kernels are still unconditionally causal, so NO_MASK keeps the bottom-right name
+# there; gfx950 selects a distinct body for it.)
+_IDENTITY_ENCODED = {
+    "band",
+    "causal",
+    "causal_bottom_right",
+    "full_attention",
+    "fp8",
+    "sliding_window",
+}
 
 
 def _attn(arch="gfx950", **kw):
@@ -63,6 +153,126 @@ def _attn(arch="gfx950", **kw):
     )
     base.update(kw)
     return AttentionRequest(**base)
+
+
+class _IntegerLike:
+    """Minimal graph-frontend integer scalar (``operator.index`` protocol)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
+class TestAttentionMaskType(unittest.TestCase):
+    def test_public_enum_exports_canonical_ordinals(self):
+        import dispatch.attention as attention
+
+        self.assertIs(attention.AttentionMaskType, AttentionMaskType)
+        self.assertIn("AttentionMaskType", attention.__all__)
+        self.assertEqual(
+            [(member.name, member.value) for member in AttentionMaskType],
+            [
+                ("NO_MASK", 0),
+                ("TOP_LEFT_CAUSAL", 1),
+                ("BOTTOM_RIGHT_CAUSAL", 2),
+                ("SLIDING_WINDOW", 3),
+            ],
+        )
+
+    def test_enum_and_raw_int_share_normalized_and_request_hash_identity(self):
+        enum_req = _attn(mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+        int_req = _attn(mask_type=2)
+
+        self.assertEqual(enum_req.normalized(), int_req.normalized())
+        self.assertEqual(enum_req.features(), frozenset({"causal"}))
+        enum_result = dispatch_attention(enum_req)
+        int_result = dispatch_attention(int_req)
+        self.assertEqual(enum_result.candidate.name, "attention_unified_2d")
+        self.assertEqual(enum_result.candidate.name, int_result.candidate.name)
+        self.assertEqual(enum_result.spec, int_result.spec)
+        self.assertEqual(
+            enum_result.kernel_id.request_hash,
+            int_result.kernel_id.request_hash,
+        )
+
+    def test_integer_like_exact_ordinals_are_accepted(self):
+        for ordinal in range(4):
+            with self.subTest(ordinal=ordinal):
+                req = _attn(mask_type=_IntegerLike(ordinal))
+                self.assertEqual(req.normalized()["mask_type"], ordinal)
+                if ordinal == AttentionMaskType.SLIDING_WINDOW:
+                    # Valid ordinal, but it names a band: with no bound at all there
+                    # is nothing to serve.
+                    with self.assertRaisesRegex(ValueError, "names a band"):
+                        dispatch_attention(req)
+                    dispatch_attention(replace(req, sliding_window=256))
+                else:
+                    dispatch_attention(req)
+
+    def test_non_integer_and_unknown_ordinals_are_rejected_clearly(self):
+        invalid = (
+            "2",
+            2.0,
+            1.5,
+            Fraction(2, 1),
+            Fraction(3, 2),
+            -1,
+            4,
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError, r"mask_type.*exact integer ordinal"
+                ):
+                    dispatch_attention(_attn(mask_type=value))
+
+
+class TestAttentionBottomRightRouting(unittest.TestCase):
+    def test_moving_bottom_right_is_a_distinct_request_feature(self):
+        moving = _attn(
+            seqlen_q=512,
+            seqlen_k=1024,
+            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        )
+        equal_length = _attn(mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+
+        self.assertEqual(
+            moving.features(), frozenset({"causal", "causal_bottom_right"})
+        )
+        self.assertEqual(equal_length.features(), frozenset({"causal"}))
+
+    def test_bottom_right_auto_preserves_unified_prefill_and_decode(self):
+        for sq, sk, path in ((256, 512, "2d"), (1, 8192, "3d")):
+            with self.subTest(path=path):
+                req = _attn(
+                    batch=1,
+                    nhead_q=8,
+                    nhead_k=1,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                    num_cus=120,
+                )
+                result = dispatch_attention(req)
+                self.assertEqual(result.candidate.name, f"attention_unified_{path}")
+                self.assertEqual(result.spec.path, path)
+
+    def test_bottom_right_still_rejects_top_left_only_standalone_kernels(self):
+        for arch, algorithm in (
+            ("gfx942", "attention_dense"),
+            ("gfx1250", "wmma_attention_fwd"),
+        ):
+            with self.subTest(arch=arch):
+                req = _attn(
+                    arch=arch,
+                    seqlen_k=1024,
+                    mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                    algorithm=algorithm,
+                )
+                with self.assertRaises(ValueError):
+                    dispatch_attention(req)
 
 
 class TestAttentionDispatch(unittest.TestCase):
@@ -88,7 +298,14 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "unified_2d")
 
     def test_sliding_window_routes_2d(self):
-        r = dispatch_attention(_attn(seqlen_q=128, seqlen_k=4096, sliding_window=256))
+        r = dispatch_attention(
+            _attn(
+                seqlen_q=128,
+                seqlen_k=4096,
+                sliding_window=256,
+                mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            )
+        )
         self.assertEqual(r.spec.path, "2d")
 
     def test_long_kv_small_grid_routes_3d(self):
@@ -156,27 +373,51 @@ class TestAttentionDispatch(unittest.TestCase):
         # A new candidate, or a features edit on an existing one, must be listed
         # in EXPECTED_FEATURES -- it cannot inherit a widened set unnoticed.
         actual = {
-            c.name: set(c.capability.supports_features) for c in attention_candidates()
+            c.name: set(c.capability.supports_features)
+            for c in attention_candidates()
+            if c.algorithm != "unified_tuning"
         }
         self.assertEqual(actual, EXPECTED_FEATURES)
+        tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
+        self.assertTrue(tuning)
+        for candidate in tuning:
+            with self.subTest(candidate=candidate.name):
+                self.assertEqual(
+                    set(candidate.capability.supports_features),
+                    set(ATTENTION_FEATURES),
+                )
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the
-        # spec encodes must change kernel_name; the frozen causal/sinks gap must
-        # not (until the consumer-side fix lands, which will flip these).
+        # spec encodes must change kernel_name; the frozen sinks gap must not
+        # (until the consumer-side fix lands, which will flip it).
         self.assertEqual(set(_ENABLE_FEATURE), set(ATTENTION_FEATURES))
-        base = _attn(batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192)
-        base_name = dispatch_attention(base).spec.kernel_name()
         for feature in sorted(ATTENTION_FEATURES):
             with self.subTest(feature=feature):
-                variant = _attn(
+                common = dict(
                     batch=1,
                     nhead_q=16,
                     nhead_k=16,
                     seqlen_q=1,
                     seqlen_k=8192,
-                    **_ENABLE_FEATURE[feature],
                 )
+                base_kw = {}
+                if feature == "causal_bottom_right":
+                    # Dense kernels bake the diagonal; unified kernels obtain
+                    # their shifted diagonal from runtime sequence lengths.
+                    common.update(
+                        seqlen_q=512,
+                        seqlen_k=1024,
+                        algorithm="attention_dense_grid",
+                        spec_id="gfx950_dense_grid",
+                    )
+                    base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
+                elif feature in ("sliding_window", "full_attention"):
+                    # Same causal mask on the base side: only the feature toggles.
+                    base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
+                base = _attn(**common, **base_kw)
+                variant = _attn(**common, **_ENABLE_FEATURE[feature])
+                base_name = dispatch_attention(base).spec.kernel_name()
                 variant_name = dispatch_attention(variant).spec.kernel_name()
                 if feature in _IDENTITY_ENCODED:
                     self.assertNotEqual(base_name, variant_name)
