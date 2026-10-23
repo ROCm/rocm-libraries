@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from .ir import BF8E5M2, BF16, F16, F32, FP8E4M3, I8, I32, U8, Op, Type, VectorType
-from .tf32 import TF32_MMA, tf32_mma_error
+from .tf32 import TF32_MMA, mma_instruction_id, tf32_mma_error
 
 # These are the implemented instructions' fixed emission signatures, independent
 # of the authoring catalog's logical src2/dst metadata. Packed instructions use
@@ -66,7 +66,7 @@ def validate_mfma(op: Op) -> None:
     MFMA emitter imposes its own physical signature before emitting any text.
     XF32 retains its existing logical TF32 diagnostics.
     """
-    op_id = op.attrs.get("op_id", op.name.removeprefix("tile."))
+    op_id = mma_instruction_id(op)
     if op_id in TF32_MMA:
         error = tf32_mma_error(op_id, op.operands, op.results)
         if error:

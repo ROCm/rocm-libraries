@@ -71,8 +71,20 @@ def tf32_mma_error(op_id, operands, results=None):
     return None
 
 
+def mma_instruction_id(op):
+    """Resolve the instruction selected by neutral or concrete MMA dispatch."""
+    if op.name.startswith("tile.mfma"):
+        concrete_id = op.name.removeprefix("tile.")
+        if "op_id" in op.attrs and op.attrs["op_id"] != concrete_id:
+            raise ValueError(
+                f"concrete MFMA {op.name} has conflicting op_id {op.attrs['op_id']}"
+            )
+        return concrete_id
+    return op.attrs.get("op_id", op.name.removeprefix("tile."))
+
+
 def tf32_op_error(op):
-    op_id = op.attrs.get("op_id", op.name.removeprefix("tile."))
+    op_id = mma_instruction_id(op)
     error = (
         tf32_mma_error(op_id, op.operands, op.results)
         if op.name == "tile.mma" or op.name.startswith(("tile.mfma", "tile.wmma"))

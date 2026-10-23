@@ -9,6 +9,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/tf32_internal.h"
 
 #define CHECK(expr)                                            \
     do                                                         \
@@ -100,7 +101,29 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
     rocke_b_ret(&builder);
     char expected[160] = {};
     const bool xf32 = strcmp(spec->source, "tf32") == 0;
-    if(variant == 1 || variant == 2)
+    if(variant == 11 || variant == 12)
+    {
+        // The native parser accepts neutral tile.mma; exercise its shared
+        // pre-dispatch gate directly for Python's concrete MFMA names.
+        op->name = "tile.mfma_f32_16x16x4_f32";
+        const char* attribute = variant == 11 ? spec->id : "mfma_f32_16x16x16_f16";
+        rocke_attr_set_str(&builder, &op->attrs, "op_id", attribute);
+        const char* error = rocke_tf32_op_error(op);
+        if(variant == 12)
+        {
+            snprintf(expected,
+                     sizeof(expected),
+                     "concrete MFMA %s has conflicting op_id %s",
+                     op->name,
+                     attribute);
+            CHECK(error && strcmp(error, expected) == 0);
+        }
+        else
+            CHECK(error == NULL);
+        rocke_ir_builder_free(&builder);
+        return 0;
+    }
+    else if(variant == 1 || variant == 2)
     {
         op->operands[variant - 1]->type = rocke_i32();
         if(xf32)
@@ -249,5 +272,7 @@ int main()
             for(int variant = 0; variant <= (spec.scaled ? 10 : 8); ++variant)
                 CHECK(check_case(&spec, variant, generic) == 0);
     CHECK(check_packed_carriers() == 0);
+    CHECK(check_case(&cases[0], 11, 0) == 0);
+    CHECK(check_case(&cases[0], 12, 0) == 0);
     return 0;
 }

@@ -428,6 +428,51 @@ def test_mfma_hip_gate_rejects_non_integer_carrier_counts(case, concrete):
             lowerer.lower_op(op)
 
 
+@pytest.mark.parametrize(
+    "case,attribute",
+    [
+        (CASES[2], CASES[0][1]),
+        (CASES[0], CASES[2][1]),
+        (CASES[2], CASES[11][1]),
+        (CASES[11], CASES[0][1]),
+    ],
+)
+@pytest.mark.parametrize("engine", ["python", "hip"])
+def test_mfma_rejects_conflicting_instruction_identity(case, attribute, engine):
+    kernel, op = _kernel(case, concrete=True)
+    if case == CASES[2] and attribute == CASES[0][1]:
+        _corrupt_type(kernel, op, "src0", F32)
+        _corrupt_type(kernel, op, "src1", F32)
+    op.attrs["op_id"] = attribute
+    error = f"concrete MFMA {op.name} has conflicting op_id {attribute}"
+    _assert_rejects(kernel, case, "llvm23", error, engine)
+    if engine == "python":
+        lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor="llvm23")
+        with pytest.raises(ValueError, match=f"^{error}$"):
+            lowerer.lower_op(op)
+        assert lowerer._needs_intrin == {}
+        assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize("case", CASES[:3])
+@pytest.mark.parametrize("engine", ["python", "hip"])
+def test_mfma_matching_instruction_identity_preserves_output(case, engine):
+    kernel, op = _kernel(case, concrete=True)
+    if engine == "hip":
+        expected = lower_kernel_to_hip(kernel, arch=case[0])
+        op.attrs["op_id"] = case[1]
+        assert lower_kernel_to_hip(kernel, arch=case[0]) == expected
+    else:
+        expected = _lower_kernel_to_llvm_python(
+            kernel, arch=case[0], llvm_flavor="llvm23"
+        )
+        op.attrs["op_id"] = case[1]
+        actual = _lower_kernel_to_llvm_python(
+            kernel, arch=case[0], llvm_flavor="llvm23"
+        )
+        assert actual == expected
+
+
 @pytest.mark.parametrize("case", CASES[-1:])
 @pytest.mark.parametrize("role", ["src3", "src4"])
 @pytest.mark.parametrize("ty", [F32, I64, VectorType(I32, 1), VectorType(I8, 4)])
