@@ -31,6 +31,10 @@ from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
 from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON, write_shipped
 
+# quick: no hipcc/comgr (the marker's definition); TestRealArchiveReaders needs only
+# rocm_kpack, as other quick files do.
+pytestmark = pytest.mark.quick
+
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()
@@ -900,18 +904,19 @@ class _ReaderArtifact:
         self.kdps = [{"id": "kdp-selected", "engine": ENGINE["id"], "arch": [ARCH]}]
         declarations = [consumer()]
         if shared:
+            schema = self.schemas[0]
             if distinct_kmd:
                 schema = copy.deepcopy(FULL_KMD)
                 schema["id"] = "kmd-second"
                 schema["fields"][0]["default_value"] = 256
                 self.schemas.append(schema)
-                engine = dict(ENGINE, id="ued-second", metadata=schema["id"])
-                self.engines.append(engine)
-                declarations.append(
-                    consumer(engine_id=engine["id"], kmd_id=schema["id"])
-                )
+            engine = dict(
+                ENGINE, id="ued-second", name="demo:Sibling", metadata=schema["id"]
+            )
+            self.engines.append(engine)
+            declarations.append(consumer(engine_id=engine["id"], kmd_id=schema["id"]))
             self.kdps.append(
-                {"id": "kdp-sibling", "engine": self.engines[-1]["id"], "arch": [ARCH]}
+                {"id": "kdp-sibling", "engine": engine["id"], "arch": [ARCH]}
             )
         contract = contract_of(*declarations)
         if inherited and self.inline:
@@ -942,10 +947,13 @@ class _ReaderArtifact:
         agreement.publish(self.ukd, observations, agreement.canonical_records(records))
         # No shared Python references between mutable descriptors and old evidence.
         self.ukd = json.loads(json.dumps(self.ukd))
-        self.profile = root / "profile.json"
-        self.profile.write_text(
+        self.manifest = root / "manifest.json"
+        self.manifest.write_text(
             json.dumps(
-                {"bundle": "selected", "vocabulary": {"dtype": ["BF16", "FP16"]}}
+                {
+                    "engine": {"name": ENGINE["name"]},
+                    "specialization": {"vocabulary": {"dtype": ["BF16", "FP16"]}},
+                }
             )
         )
         self.save()
@@ -1046,8 +1054,8 @@ class _ReaderArtifact:
             str(self.root),
             "--mode",
             "full",
-            "--profile",
-            str(self.profile),
+            "--manifest",
+            str(self.manifest),
         ]
         extra = ["--kpack-python-dir", str(self.python_dir)] if self.python_dir else []
         return [

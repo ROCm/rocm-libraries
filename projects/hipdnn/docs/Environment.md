@@ -1,4 +1,4 @@
-#hipDNN Environment Configuration
+# hipDNN Environment Configuration
 
 This document describes the environment variables and runtime configuration options for hipDNN.
 
@@ -7,8 +7,10 @@ This document describes the environment variables and runtime configuration opti
 - [Environment Variables](#environment-variables)
   - [Backend Library Discovery](#backend-library-discovery)
   - [Plugin Discovery](#plugin-discovery)
+  - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+  - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
   - [Logging Variables](#logging-variables)
@@ -61,10 +63,10 @@ Specifies the directory path where hipDNN will search for engine plugins (shared
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to current working directory) |
+| (unset)    | Uses default path: `hipdnn_plugins/engines/` (relative to the hipDNN backend library's directory) |
 | `<path>`   | Search for engine plugins in the specified directory  |
 
-When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+When set, this variable completely overrides the default search path. The path can be absolute or relative. A relative path is resolved against the hipDNN backend library's directory, not the current working directory.
 
 **Example:**
 ```bash
@@ -84,10 +86,10 @@ Specifies the directory path where hipDNN will search for heuristic plugins (sha
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to current working directory) |
+| (unset)    | Uses default path: `hipdnn_plugins/heuristics/` (relative to the hipDNN backend library's directory) |
 | `<path>`   | Search for heuristic plugins in the specified directory |
 
-When set, this variable completely overrides the default search path. The path can be absolute or relative to the current working directory.
+When set, this variable completely overrides the default search path. The path can be absolute or relative. A relative path is resolved against the hipDNN backend library's directory, not the current working directory.
 
 **Example:**
 ```bash
@@ -102,6 +104,47 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
 - Ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`
 
+### Kernel Ingestor Descriptors
+
+Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` (the hip-kernel-provider) build engines from descriptor trees: JSON descriptors and the model artifacts they name. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+
+#### HIPDNN_DESCRIPTOR_DIR
+
+Replaces the provider's own descriptor tree. This is the only variable that can remove shipped descriptors.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Uses the `arch_content/hip-kernel-provider` directory beside the loaded provider library, else the configure-time install location |
+| `<path>`   | Loads this directory instead of the provider's own tree |
+
+A value that is not an existing directory is ignored with a warning, and the default tree is used.
+
+#### HIPDNN_DESCRIPTOR_RUNTIME_DIR
+
+An additional descriptor root loaded after the provider's tree (or `HIPDNN_DESCRIPTOR_DIR`). It adds descriptors beside the shipped ones and never replaces them. A value that is not an existing directory is ignored with a warning.
+
+#### HIPDNN_DESCRIPTOR_PATH
+
+A list of additional descriptor roots, loaded in order after `HIPDNN_DESCRIPTOR_RUNTIME_DIR`. Entries are separated by `:` on Linux and `;` on Windows; empty entries are skipped. Like `HIPDNN_DESCRIPTOR_RUNTIME_DIR` it is additive. Entries are not checked for existence: an entry that is not installed on this machine contributes nothing, without a warning.
+
+**Example:**
+```bash
+export HIPDNN_DESCRIPTOR_RUNTIME_DIR=/opt/site/hipdnn-descriptors
+export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptors
+```
+
+**Notes:**
+- On Linux, all three variables are ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`: a descriptor can name a shared library (`custom_library`) that the provider then loads. Windows has no equivalent execution mode, so they are always honored there.
+
+#### HIPDNN_DISABLE_ENGINES
+
+A comma-separated list of ingestor engines to skip before registration. Each entry can be an engine name, a 64-bit engine ID (decimal or `0x` hex), or the engine descriptor UUID. Engine names and decimal IDs are matched exactly, so they are case-sensitive. Hex IDs and UUIDs are matched case-insensitively. An entry that matches nothing is ignored, so one list can span providers. The list is read on every descriptor load.
+
+```bash
+export HIPDNN_DISABLE_ENGINES="hipkernel:SomeEngine,0x1A2B3C4D5E6F7080"
+```
+
+
 ### Heuristic Policy Selection
 
 hipDNN's heuristic framework selects an engine for each graph by running a configurable list of selection policies (the *outer loop*). The following variables tune that loop and the behavior of two built-in policies.
@@ -113,28 +156,39 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
 | (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. |
-| `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed;
-empty tokens are skipped.|
+| `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
 
-    This variable has the** highest priority** — it overrides both the descriptor attribute and the
-            built
-        - in default.
+This variable has the **highest priority**: it overrides both the descriptor attribute and the built-in default.
 
-              ** Example : **
+**Example:**
 ```bash
-#By name
-                           export HIPDNN_HEUR_POLICY_ORDER
-    = "SelectionHeuristic::Config,SelectionHeuristic::StaticOrdering"
+# By name
+export HIPDNN_HEUR_POLICY_ORDER="SelectionHeuristic::Config,SelectionHeuristic::StaticOrdering"
 
-#By raw ID(or mixed names + IDs)
-    export HIPDNN_HEUR_POLICY_ORDER
-    = "-1234567890123456789,SelectionHeuristic::StaticOrdering"
+# By raw ID (or mixed names + IDs)
+export HIPDNN_HEUR_POLICY_ORDER="-1234567890123456789,SelectionHeuristic::StaticOrdering"
 ```
 
-      ####HIPDNN_HEUR_CONFIG_PATH
+#### HIPDNN_HEUR_RANKING_METRIC
 
-          Path to a JSON rule file consumed by the `SelectionHeuristic::Config` built
-      - in policy.The file maps convolution op + tensor - shape patterns to a preferred engine name; the policy walks conv-like nodes in the serialized graph and, on the first matching rule, reorders the candidate engines so the chosen one runs first. Re-read on every `Finalize` invocation — there is no process-wide cache.
+Overrides the ranking metric the prediction policies (`SelectionHeuristic::ModeA` / `SelectionHeuristic::ModeB`) order engines by (RFC 0019 §4.4, §11.4). Read by every `EngineHeuristicDescriptor::finalize()` call, with the same precedence as `HIPDNN_HEUR_POLICY_ORDER`: this variable, then the descriptor's `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT` attribute, then the default.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset or empty) | Use the descriptor attribute if set; otherwise `tflops`. |
+| `tflops`   | Calibrated throughput in TFLOPS; higher ranks first. |
+| `time`     | Predicted device time in milliseconds; lower ranks first. |
+
+Any other value is logged as an error and ignored: the descriptor attribute, else `tflops`, applies as if the variable were unset. Engines are never ranked by a metric other than the effective one. The effective metric is stamped into every configuration in `HIPDNN_ATTR_ENGINEHEUR_RESULTS`, so the chosen engine picks its kernel by the same metric at plan build. It affects only engine heuristic descriptors; the per-query `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` and `HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT` attributes are not overridden.
+
+**Example:**
+```bash
+export HIPDNN_HEUR_RANKING_METRIC=time
+```
+
+#### HIPDNN_HEUR_CONFIG_PATH
+
+Path to a JSON rule file consumed by the `SelectionHeuristic::Config` built-in policy. The file maps convolution op + tensor-shape patterns to a preferred engine name; the policy walks conv-like nodes in the serialized graph and, on the first matching rule, reorders the candidate engines so the chosen one runs first. Re-read on every `Finalize` invocation — there is no process-wide cache.
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
@@ -150,7 +204,9 @@ export HIPDNN_HEUR_CONFIG_PATH=/etc/hipdnn/engine_overrides.json
 
 #### HIPDNN_HEUR_FALLBACK_ENGINE_ORDER
 
-Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list.
+Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`, `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list, however well a prediction policy would score it.
+
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` still rank the listed engines by prediction; unscored engines (and ties between equal scores) follow the order written here.
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
@@ -163,10 +219,10 @@ Entries that are not among the current candidates are silently skipped. If no li
 
 **Example:**
 ```bash
-#By name
+# By name
 export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
 
-#By ID, in the form printed for an engine that declares no name, mixed with a name
+# By ID, in the form printed for an engine that declares no name, mixed with a name
 export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
 
@@ -186,34 +242,21 @@ not select or move the cache's on-disk location, which remains `HIPDNN_CACHE_DIR
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
 | (unset)    | Exact-match cache enabled (default). |
-| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable the exact-match cache;
-the policy falls through directly to the fuzzy rules and static ordering.|
-    | Anything else(including `0`, `false`, `off`)
-    | Cache remains **enabled ** — presence alone does not disable it,
-    and an operator scripting `HIPDNN_DISABLE_EXACT_ENGINE_CACHE = 0` gets the behavior that
-        spelling implies.|
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable the exact-match cache; the policy falls through directly to the fuzzy rules and static ordering. |
+| Anything else (including `0`, `false`, `off`) | Cache remains **enabled**. Presence alone does not disable it, and an operator scripting `HIPDNN_DISABLE_EXACT_ENGINE_CACHE=0` gets the behavior that spelling implies. |
 
-        Values are matched case - insensitively against the literal truthy set above after trimming
-        surrounding whitespace;
-    an unrecognized value is silently treated as unset rather than rejected
-        .Read fresh on every `policyFinalize()` call,
-                              so a change takes effect without a process restart.
+Values are matched case-insensitively against the literal truthy set above after trimming surrounding whitespace. An unrecognized value is silently treated as unset rather than rejected. Read fresh on every `policyFinalize()` call, so a change takes effect without a process restart.
 
-                                  **Example:
-**
+**Example:**
 ```bash
-#Disable the exact - match cache for this run; only fuzzy rules and static
-#ordering are consulted.
- export HIPDNN_DISABLE_EXACT_ENGINE_CACHE
-    = 1
+# Disable the exact-match cache for this run; only fuzzy rules and static
+# ordering are consulted.
+export HIPDNN_DISABLE_EXACT_ENGINE_CACHE=1
 ```
 
-          * *Notes
-    : **-Disabling this cache does not disable the fuzzy `HIPDNN_HEUR_CONFIG_PATH` mechanism — the
-          two are independent policies within `SelectionHeuristic::Config`.
-      - A cache entry that names a candidate engine never actually benchmarked is rejected
-          automatically regardless of this variable; this variable is the coarse-grained on/off
-  switch, not a way to tune that per-entry applicability check.
+**Notes:**
+- Disabling this cache does not disable the fuzzy `HIPDNN_HEUR_CONFIG_PATH` mechanism — the two are independent policies within `SelectionHeuristic::Config`.
+- A cache entry that names a candidate engine never actually benchmarked is rejected automatically regardless of this variable; this variable is the coarse-grained on/off switch, not a way to tune that per-entry applicability check.
 
 ### Benchmarking
 
@@ -233,18 +276,50 @@ The override needs no autotune call and no knob setting to take effect: setting 
 
 **Example:**
 ```bash
-#Force benchmarking on for every provider that implements the knob
+# Force benchmarking on for every provider that implements the knob
 export HIPDNN_FORCE_BENCHMARKING=1
 
-#Force it off, even if a caller's knob or autotune run asked for it
+# Force it off, even if a caller's knob or autotune run asked for it
 export HIPDNN_FORCE_BENCHMARKING=0
 ```
 
 **Notes:**
 - With benchmarking on and no matching ranking cached, the first `execute()` of a plan samples every knob-filtered candidate kernel, so it is slower than subsequent calls. The ingestor memoizes the ranking per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
+- For MIOpen convolution, forcing benchmarking on makes plans without `global.workspace_size_limit` use the maximum workspace MIOpen reports, which can be far larger than the default.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
+
+### Engine Applicability Threading
+
+The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, every check still runs on the calling thread. Internally, a provider with two or more ingestor engines reaches that point through a begin-all, finish-all sequence in which the engines share one device lookup and one catalog key, rather than the one-engine-at-a-time loop. This is an implementation detail of the hip-kernel-provider, not a stable interface; it can change without notice, and nothing here depends on it.
+
+Applicability results are identical either way: the same engines, in the same order, and the same error when one fails.
+
+The threshold is the only setting. A call uses at most min(pending engines, CPUs the process may run on, 9) threads, the calling thread included.
+
+#### HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS
+
+Overrides the threshold, for calibration. The least work, in kernel variants, a call must be able to hand to other threads before it uses any. The offloadable work is the sum of the pending engines' arch-eligible variants minus the largest engine's, which stays on the calling thread. Calls under the threshold, or with fewer than two pending engines, stay on the calling thread.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | `50` variants (the default) |
+| `<n>`, n ≥ 0 | Offload when at least `n` variants can be offloaded; `0` offloads whenever two engines are pending |
+
+Anything that is not a non-negative integer is ignored, treated as unset, and logs a warning naming the variable and the value.
+
+**Example:**
+```bash
+#Offload whenever two or more engines are pending, to measure the dispatch cost
+export HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS=0
+```
+
+**Notes:**
+- The variable is read on every call that has at least two pending engines.
+- Engines that answer from their catalog cache, or decline the graph before walking variants, are never pending.
+- Worker threads belong to the plugin and live until the last hipDNN handle is destroyed. They are created on the first call that offloads work.
+- Workers are limited process-wide to half the CPUs the process may run on (at least 1), shared by every concurrent call. A call that finds none free runs on its own thread; it never waits for a worker.
 
 ### Caching
 
@@ -264,10 +339,10 @@ Each feature owns a child directory beneath the root, so caches never collide: t
 
 **Example:**
 ```bash
-#Point every hipDNN cache at a scratch directory, e.g.for a CI job
+# Point every hipDNN cache at a scratch directory, e.g. for a CI job
 export HIPDNN_CACHE_DIR=/tmp/hipdnn-cache
 
-#Isolate one reproduction from a developer's normal cache
+# Isolate one reproduction from a developer's normal cache
 export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 ```
 
@@ -275,17 +350,12 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - Caching is **on by default**. Setting `HIPDNN_CACHE_DIR` to an empty string does **not**
   disable caching -- an empty value is treated as unset and the per-user default applies,
   leaving the cache enabled. Use `HIPDNN_DISABLE_CACHE` (below) to turn it off.
-- Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically. Each record line also carries an independent per-line format-version stamp, so a foreign or pre-upgrade line appended to an otherwise-valid shard is skipped rather than misparsed, even when the outer version-line stamp alone cannot separate two builds. That happens whenever `git rev-parse --short HEAD` cannot resolve a commit hash at configure time (no `.git` directory, git not installed, `ERROR_QUIET`-suppressed failure) -- `VersionUtils.cmake` then falls back to a constant `unknown` tweak, so the version stamp degrades from per-commit to per-semver and stops distinguishing any of the commits sharing that build.
-- The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`, not the `winners-<base-arch>-v<N>.jsonl` naming the original design specified: the engine level was added so two engines in one process do not share a shard, and the version moved from the file name into a directory so a version bump leaves a whole subtree to delete rather than sibling files to filter. The engine component is passed through `sanitizeForPath()`, which the original design rejected as inventing a naming scheme -- but engine names are provider-supplied and reach the filesystem directly, so a name carrying `:` (every current name does, e.g. `test:CrossInstance`) is not a legal Windows path component. `sanitizeForPath()`'s hash suffix makes a collision between two sanitized engine names improbable, not impossible (a 64-bit FNV-1a collision, ~2^-64 per pair), which is a fact worth knowing when eyeballing the engine directory name. The arch component is deliberately **not** sanitized: it is validated by `isPlainArchComponent()` and kept verbatim, so `gfx942` reads as `gfx942`.
-- Deleting the cache root at any time is safe on both Linux and Windows: `writeBackToShard()` recreates the directory and file and registers a fresh inode/handle on every write-back, so the registry keeps appending correctly after a mid-run delete. On Windows this relies on `FILE_SHARE_DELETE`, added so another process can delete a shard's parent directory while this process still holds the shard open; `TestLineStore.AShardsParentDirectoryCanBeRemovedWhileTheRegistryHoldsItOpen` confirms on Windows CI that NTFS reclaims the deleted directory's name while this process keeps running, even though the registry never closes that handle.
+- Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically. A build made without git metadata cannot tell commits apart, so its stamp changes with the release version, not with each commit.
+- The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`. The engine directory name is a filesystem-safe form of the engine name. The architecture name is used as is, so `gfx942` appears as `gfx942`.
+- Deleting the cache root at any time is safe on Linux and Windows. hipDNN recreates it on the next write, and a run in progress keeps working.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
-- A lookup alone can create a file: `openLineStore()` opens (creating it if absent) the shard
-  file and writes its version-stamp line before the caller learns whether the key it is querying
-  has a record in it. A pure read miss therefore still leaves a version-stamped, otherwise-empty
-  shard behind. This is a property of the shared `LineStore` layer underneath every disk cache --
-  both the ingestor winner cache and the autotune ranking cache do it -- not something specific
-  to one subtree.
+- A lookup in the ingestor winner cache can create a file. A read miss still leaves an empty shard file, stamped with the version, behind. A lookup in the autotune ranking cache creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
 
 #### HIPDNN_DISABLE_CACHE
 
@@ -298,35 +368,27 @@ process instead of reusing a persisted ranking).
 |------------|--------------------------------------------------------|
 | (unset)    | No effect. Caching follows `HIPDNN_CACHE_DIR` as described above (the default) |
 | `1`, `true`, `on`, `yes`, `enable`, `enabled` | Disable on-disk caching |
-| Any other value | Ignored;
-treated as unset(fails open, not silently on) |
+| Any other value | Ignored; treated as unset (fails open, not silently on) |
 
-    Values are case -insensitive and tolerant of surrounding whitespace,
-    matching
-`HIPDNN_FORCE_BENCHMARKING`'s parsing.
+Values are case-insensitive and tolerant of surrounding whitespace, matching `HIPDNN_FORCE_BENCHMARKING`'s parsing.
 
-        **Example:
-**
+**Example:**
 ```bash
-#Disable the on - disk cache for one run, e.g.to force a clean re - benchmark
- export HIPDNN_DISABLE_CACHE
-    = 1
+# Disable the on-disk cache for one run, e.g. to force a clean re-benchmark
+export HIPDNN_DISABLE_CACHE=1
 ```
 
-      * *Notes : **-Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error,
-    but the disable wins.- Read once per `cacheRoot()` call, not cached across the process,
-    so it can be toggled between runs without restarting anything long
-        - lived.
+**Notes:**
+- Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error, but the disable wins.
+- Read each time hipDNN resolves the cache root, not once per process, so it can be toggled between runs without restarting anything long-lived.
 
-          ## #Autotune Ranking Cache(`autotune - rankings /`)
+### Autotune Ranking Cache (`autotune-rankings/`)
 
-              The second `HIPDNN_CACHE_DIR` consumer : the exact
-        - match engine - ranking record consulted by the
-`SelectionHeuristic::Config` built
-        - in policy and gated by `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` (above)
-              .It persists the engine order an exhaustive autotune run measured,
-    keyed on the(graph, device) pair that produced it, so a later process facing the identical graph on the identical
-device can reuse the ranking instead of re-benchmarking.
+The second `HIPDNN_CACHE_DIR` consumer: the exact-match engine-ranking record consulted by the
+`SelectionHeuristic::Config` built-in policy and gated by `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` (above).
+It persists the engine order an exhaustive autotune run measured, keyed on the (graph, device) pair
+that produced it, so a later process facing the identical graph on the identical device can reuse
+the ranking instead of re-benchmarking.
 
 **On-disk layout:**
 `$HIPDNN_CACHE_DIR/autotune-rankings/<data_sdk-version>/<combined-key-hex>.jsonl` -- one shard
@@ -360,74 +422,52 @@ already has recorded (e.g. a run scoped with an engine filter) is declined outri
 narrower sweep can never regress a full-coverage record to one that then fails every later
 lookup.
 
-**A lookup never creates anything.** Reads open the shard without `O_CREAT`, so a key with no
-shard is an ordinary miss leaving behind no file and no open descriptor; only the write path
-creates the versioned subtree and its shards. The read path runs for every graph on the
-default heuristic policy list over an unbounded key space, so a creating read would cost one
-empty file and one process-lifetime descriptor per distinct graph ever looked up.
+**A lookup never creates anything.** A key with no stored ranking is an ordinary miss. It leaves
+no file behind and holds no open file handle; only a write creates the versioned subtree and its
+shards. This matters because the lookup runs for every graph on the default heuristic policy list
+over an unbounded key space, so a lookup that created files would leave one empty file per distinct
+graph ever looked up.
 
 **Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
 `[BuiltInConfig] policyFinalize:` log fragment:
 
 | Log fragment                            | Meaning                                                            |
 |------------------------------------------|---------------------------------------------------------------------|
-| `disabled`                              | `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` is set;
-lookup skipped entirely | | `unkeyable(no device properties set)`
-        | The descriptor never had device properties set | | `unkeyable(empty graph or device view)`
-        | The serialized graph
-    or device buffer was empty | | `exact - match cache miss`
-           | The(graph, device) key has no shard record | | `exact - match cache unavailable` (warn)
-           | The shard could not be opened,
-    locked, or read, or its version line did not match this build | | `rejected-- unsampled`
-                             | A live candidate engine was never sampled by the stored ranking |
-                             | `declined-- malformed record` (warn)
-                             | The stored order holds an engine id more than once,
-    so it cannot be applied to the candidate set.Re - run the exhaustive sweep to replace it |
-        | `declined-- fewer than 2 candidates`
-        | Fewer than two ids remain after filtering the stored order to live candidates |
-        | `hit(exact)` | Every stored id is a live candidate;
-the stored order applies unchanged | | `hit(partial)`
-    | The stored order applies after dropping sampled - but - now - absent ids |
+| `disabled`                              | `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` is set; lookup skipped entirely |
+| `unkeyable(no device properties set)`   | The descriptor never had device properties set |
+| `unkeyable(empty graph or device view)` | The serialized graph or device buffer was empty |
+| `exact-match cache miss`                | The (graph, device) key has no shard record |
+| `exact-match cache unavailable` (warn)  | The shard could not be opened, locked, or read, or its version line did not match this build |
+| `rejected--unsampled`                   | A live candidate engine was never sampled by the stored ranking |
+| `declined--malformed record` (warn)     | The stored order holds an engine id more than once, so it cannot be applied to the candidate set. Re-run the exhaustive sweep to replace it |
+| `declined--fewer than 2 candidates`     | Fewer than two ids remain after filtering the stored order to live candidates |
+| `hit(exact)`                            | Every stored id is a live candidate; the stored order applies unchanged |
+| `hit(partial)`                          | The stored order applies after dropping sampled-but-now-absent ids |
 
-    Every one of these is a fall - through,
-    not an error : on any decline the outer heuristic loop simply continues to the
-                   fuzzy `HIPDNN_HEUR_CONFIG_PATH` rules
-        and static ordering,
-    exactly as if the exact
-                - match cache did not exist.
+Every one of these is a fall-through, not an error: on any decline the outer heuristic loop simply
+continues to the fuzzy `HIPDNN_HEUR_CONFIG_PATH` rules and static ordering, exactly as if the
+exact-match cache did not exist.
 
-                      * *Deleting `autotune
-                - rankings
-                      /` is always safe
-                           .**Every read path above fails soft to
-                              "consult
-                              the fuzzy rules instead
-                              " -- there is no path that treats a missing, empty, or unreadable shard as
-                              an error.The next matching graph simply autotunes
-            and repopulates it
-                    .
+**Deleting `autotune-rankings/` is always safe.** Every read path above fails soft to "consult the
+fuzzy rules instead" -- there is no path that treats a missing, empty, or unreadable shard as an
+error. The next matching graph simply autotunes and repopulates it.
 
-                ## #Logging Variables
+### Logging Variables
 
-                hipDNN provides the following environment variables to control logging behavior
-    :####HIPDNN_LOG_LEVEL
+hipDNN provides the following environment variables to control logging behavior:
 
-     Sets the minimum severity that will be emitted.Levels are inclusive
-    : choosing a level enables messages at that level
-            and all higher severities.
+#### HIPDNN_LOG_LEVEL
 
-                    | Level | Description | | -- -- -- --
-                    | -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-                    | | `off` | Disables all logging(default) | | `info`
-                    | General informational messages | | `warn`
-                    | Potential issues that do not interrupt execution | | `error `
-                    | Recoverable errors that may affect results
-        or performance | | `fatal`| Unrecoverable errors; the operation will not continue      |
+Sets the minimum severity that will be emitted. Levels are inclusive: choosing a level enables
+messages at that level and all higher severities.
 
-**Example:**
-```bash
-export HIPDNN_LOG_LEVEL=info
-```
+| Level | Description |
+|-------|-------------|
+| `off` | Disables all logging (default) |
+| `info` | General informational messages |
+| `warn` | Potential issues that do not interrupt execution |
+| `error` | Recoverable errors that may affect results or performance |
+| `fatal` | Unrecoverable errors; the operation will not continue |
 
 #### HIPDNN_LOG_FILE
 
@@ -456,6 +496,22 @@ This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 export HIPDNN_LOG_GRAPH_DIR=/tmp/hipdnn_graphs
 ```
 
+#### Execution plan run counts
+
+With `HIPDNN_LOG_LEVEL=info`, each successful `hipdnnBackendExecute` call writes one log line. The line identifies the execution plan and shows how many times that plan has been submitted:
+
+```text
+API success: [hipdnnBackendExecute] executionPlan=ExecutionPlanDescriptor: {planId=3, graphId=1b4e28ba-2fa1-4d3b-a3f5-ef19b5a7633b, workspaceSize=0, engineId=..., engineConfig=0x...}, executionCount=42
+```
+
+- `planId` is unique for each execution plan in the process.
+- `graphId` is the ID of the graph that the plan was finalized from. It matches the `graph_<id>.json` file name from `HIPDNN_LOG_GRAPH_DIR`. A plan loaded from a serialized plan shows `graphId=(none)`.
+- `executionCount` starts at 1 for each plan and increases by 1 for each successful submission of that plan. A call that returns an error does not increase the count.
+
+`hipdnnBackendExecute` queues the work on the handle's stream and can return before the GPU work finishes. `executionCount` therefore counts successful submissions, not completed GPU executions.
+
+To get the submission count for each plan, use the largest `executionCount` value for each `planId`.
+
 ### MIOpen Plugin Logging
 
 > [!TIP]
@@ -480,13 +536,13 @@ Controls the random number generator seed used across hipDNN tests. This allows 
 
 **Examples:**
 ```bash
-#Use a specific seed for consistent results
+# Use a specific seed for consistent results
 export HIPDNN_GLOBAL_TEST_SEED=42
 
-#Use default seed(1) for reproducible tests
+# Use default seed (1) for reproducible tests
 unset HIPDNN_GLOBAL_TEST_SEED
 
-#Use random seed for each test run
+# Use random seed for each test run
 export HIPDNN_GLOBAL_TEST_SEED=RANDOM
 ```
 
