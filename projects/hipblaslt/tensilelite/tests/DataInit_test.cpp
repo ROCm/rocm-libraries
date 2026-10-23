@@ -187,6 +187,34 @@ namespace
 
 } // namespace
 
+TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
+{
+    using namespace TensileLite::Client;
+    po::variables_map args;
+    const std::array  omitted{"use-bias",
+                             "bias-source",
+                             "use-scaleCD",
+                             "use-scaleAlphaVec",
+                             "use-gradient",
+                             "output-amaxD"};
+    for(const auto& entry : makeMinimalClientArgs(0))
+        if(std::ranges::find(omitted, entry.first) == omitted.end())
+            args.insert(entry);
+    alignas(ClientProblemFactory) std::array<std::byte, sizeof(ClientProblemFactory)> storage;
+    storage.fill(std::byte{0xa5});
+    auto destroy = [](ClientProblemFactory* factory) { std::destroy_at(factory); };
+    std::unique_ptr<ClientProblemFactory, decltype(destroy)> factory(
+        std::construct_at(reinterpret_cast<ClientProblemFactory*>(storage.data()), args), destroy);
+    ASSERT_EQ(factory->problems().size(), 1u);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory->problems().front());
+    EXPECT_FALSE(problem.useE());
+    EXPECT_FALSE(problem.useGradient());
+    EXPECT_FALSE(problem.outputAmaxD());
+    EXPECT_EQ(problem.useBias(), 0);
+    EXPECT_FALSE(problem.useScaleCD());
+    EXPECT_EQ(problem.useScaleAlphaVec(), 0);
+}
+
 TEST(HostNumericsDataInitialization, GeneratesStridedProblemDependentPatterns)
 {
     TensorDescriptor   descriptor("t", rocisa::DataType::Float, {2, 3}, {1, 4});
@@ -1611,10 +1639,12 @@ TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatterns
         for(const char* name : {"init-mx-a", "init-mx-b"})
             setOption(args, name, InitMode::SerialDim0);
         ClientProblemFactory factory(args);
-        DataInitialization   dataInit(args, factory);
-        const auto&          problem
-            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
-        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+        auto& problem = dynamic_cast<ContractionProblemGemm&>(*factory.problems().front());
+        // Exercise gfx950's free-dimension padding on every architecture.
+        problem.setMXScaleA(rocisa::DataType::E8, 32, {}, true);
+        problem.setMXScaleB(rocisa::DataType::E8, 32, {}, true);
+        DataInitialization dataInit(args, factory);
+        const auto         inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
             dataInit.prepareCPUInputs(problem));
         ASSERT_NE(inputs, nullptr);
         for(bool matrixA : {true, false})
@@ -1658,7 +1688,9 @@ TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatterns
             for(size_t row = 0; row < scaleDescriptor.sizes()[0]; ++row)
                 for(size_t col = 0; col < scaleDescriptor.sizes()[1]; ++col)
                 {
-                    const bool padding = (blockAxis == 0 ? row : col) >= blocks;
+                    const bool padding
+                        = (blockAxis == 0 ? row : col) >= blocks
+                          || (blockAxis == 0 ? col : row) >= descriptor.sizes()[1 - blockAxis];
                     EXPECT_EQ(scales.loadAs<float>({row, col, 0}),
                               padding ? 0.0f : ordinaryScales.loadAs<float>({row, col, 0}));
                 }

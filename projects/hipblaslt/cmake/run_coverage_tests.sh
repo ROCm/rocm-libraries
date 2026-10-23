@@ -77,8 +77,7 @@ run_pass() {
     local filter="$3"
     shift 3
     echo "Coverage pass '${name}' (${gating}): GTEST_FILTER=${filter} $*"
-    env "$@" "${TEST_BINARY}" --gtest_filter="${filter}" \
-        --precompile=hipblaslt-test-precompile.db
+    env "$@" "${TEST_BINARY}" --gtest_filter="${filter}"
     local status=$?
     summary+=("${name} (${gating}): exit ${status}")
     if [[ "${gating}" == "gating" ]] && (( status != 0 && exit_status == 0 )); then
