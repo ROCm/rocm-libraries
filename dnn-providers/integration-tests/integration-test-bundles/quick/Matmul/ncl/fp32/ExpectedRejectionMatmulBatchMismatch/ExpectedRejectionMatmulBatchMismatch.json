@@ -1,9 +1,9 @@
 {
   "compute_data_type": "float",
-  "intermediate_data_type": "half",
-  "io_data_type": "half",
+  "intermediate_data_type": "float",
+  "io_data_type": "float",
   "is_override_shape_enabled": false,
-  "name": "ExpectedRejectionMatmulKMismatch",
+  "name": "ExpectedRejectionMatmulBatchMismatch",
   "nodes": [
     {
       "compute_data_type": "float",
@@ -21,14 +21,16 @@
   "tensors": [
     {
       "alignment": 16,
-      "data_type": "half",
+      "data_type": "float",
       "dims": [
+        3,
         16,
         128
       ],
       "is_runtime_pass_by_value": false,
       "name": "Matmul_0::C",
       "strides": [
+        2048,
         128,
         1
       ],
@@ -37,32 +39,36 @@
     },
     {
       "alignment": 16,
-      "data_type": "half",
+      "data_type": "float",
       "dims": [
+        3,
         16,
         32
       ],
       "is_runtime_pass_by_value": false,
       "name": "a",
       "strides": [
-        1,
-        16
+        512,
+        32,
+        1
       ],
       "uid": 1,
       "virtual": false
     },
     {
       "alignment": 16,
-      "data_type": "half",
+      "data_type": "float",
       "dims": [
-        31,
+        2,
+        32,
         128
       ],
       "is_runtime_pass_by_value": false,
       "name": "b",
       "strides": [
+        4096,
         1,
-        31
+        32
       ],
       "uid": 2,
       "virtual": false

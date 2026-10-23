@@ -1,8 +1,0 @@
-{
-  "format_version": 1,
-  "generator": "hand-authored",
-  "reference_source": "none: expected_rejection bundle (never executed)",
-  "operation": "Matmul",
-  "expected_rejection": true,
-  "notes": "Twin of quick/Matmul/Default case 16_128_fp16_05e316 with B reshaped to [31,128], so the contraction dimension K disagrees (A has 32). Invalid per the hipDNN contract (MatmulNode::pre_validate_node requires A.K == B.K)."
-}
