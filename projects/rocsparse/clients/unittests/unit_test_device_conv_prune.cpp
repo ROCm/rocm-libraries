@@ -513,7 +513,7 @@ namespace
             }
 
         // A percentage outside of [0, 100] is invalid. The header documents
-        // invalid_size, the library returns invalid_value.
+        // invalid_size, the library returns invalid_value (AISPARSE-904).
         DevBuf<double> val(std::vector<double>{1.0, 2.0});
         DevBuf<I>      rp(std::vector<I>{0, 1, 2}), ci(std::vector<I>{0, 1});
         I              nnz_c = 0;
@@ -873,7 +873,7 @@ namespace
         EXPECT_EQ(compute(handle, 40.0, m - 1, d_val, d_ind, temp), st_size);
         EXPECT_EQ(compute(handle, 40.0, m, d_val, d_ind, nullptr), st_ptr);
         // The header documents invalid_size for an invalid percentage, the library returns
-        // invalid_value.
+        // invalid_value (AISPARSE-904).
         EXPECT_STATUS_IN(compute(handle, -1.0, m, d_val, d_ind, temp), st_size, st_val);
         I count = 0;
         EXPECT_STATUS_IN(rocsparse_dprune_dense2csr_nnz_by_percentage(

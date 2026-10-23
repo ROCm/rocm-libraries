@@ -452,7 +452,7 @@ namespace
 
         EXPECT_EQ(rocsparse_ell_set_strided_batch(nullptr, 2, 10), st_ptr);
         // The header documents invalid_size for an invalid batch count or stride, while
-        // the implementation returns invalid_value; accept both.
+        // the implementation returns invalid_value; accept both (AISPARSE-904).
         EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 0, 10), st_size, st_val);
         EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 2, -1), st_size, st_val);
         // A positive stride with a batch count of one is not covered by the header.
@@ -761,7 +761,7 @@ namespace
         EXPECT_EQ(copy(nullptr, nullptr, dst), st_ptr);
         EXPECT_EQ(copy(nullptr, src, nullptr), st_ptr);
         // The header documents invalid_value for different data types while the
-        // implementation returns not_implemented; accept both.
+        // implementation returns not_implemented; accept both (AISPARSE-904).
         EXPECT_STATUS_IN(copy(nullptr, src, dst_double), st_val, rocsparse_status_not_implemented);
         EXPECT_EQ(copy(nullptr, src, tall), st_val);
         EXPECT_EQ(copy(nullptr, src, wide), st_val);
@@ -1052,10 +1052,11 @@ namespace
 
     TEST_F(ConvDescr, PrintBlockedEll)
     {
-        // Library bug: for a blocked ELL matrix, internal_spmat_print reads rows * width
-        // indices and width * rows * dim^2 values, more than the descriptor's arrays hold
-        // for a block size above one. The buffers are over-allocated so that the read
-        // stays in bounds, and only the part that follows from the descriptor is checked.
+        // Library bug (AISPARSE-921): for a blocked ELL matrix, internal_spmat_print
+        // reads rows * width indices and width * rows * dim^2 values, more than the
+        // descriptor's arrays hold for a block size above one. The buffers are
+        // over-allocated so that the read stays in bounds, and only the part that
+        // follows from the descriptor is checked.
         constexpr int      rows = 4, cols = 6, dim = 2, width = 4;
         std::vector<float> val(rows * width);
         std::iota(val.begin(), val.end(), 1.0f);

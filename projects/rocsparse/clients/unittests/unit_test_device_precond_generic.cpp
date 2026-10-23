@@ -342,7 +342,7 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
 namespace
 {
     // The header documents invalid_size for a wrong data size, the library returns
-    // invalid_value for a non-zero one: either is accepted.
+    // invalid_value for a non-zero one: either is accepted (AISPARSE-928).
     void expect_size_error(rocsparse_status st)
     {
         EXPECT_TRUE(st == rocsparse_status_invalid_size || st == rocsparse_status_invalid_value)
@@ -586,7 +586,8 @@ namespace
     void check_all_row_shapes(rocsparse_handle handle, const std::string& what)
     {
         const run_options opt;
-        constexpr bool    real_only = (K == Kind::ic);
+        // spic0 gets no imaginary parts (AISPARSE-903).
+        constexpr bool real_only = (K == Kind::ic);
         // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
         const auto shape = [](const csr_matrix<T>& lower) {
             return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;

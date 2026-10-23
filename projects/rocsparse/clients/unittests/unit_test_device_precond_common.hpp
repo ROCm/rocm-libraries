@@ -325,7 +325,7 @@ namespace precond_ut
 
     // Precondition of the generators below: the longest row does not have exactly
     // 32, 64, 128, 256 or 512 entries (the slot counts of the csric0 / csrildlt0
-    // hash tables on a wavefront of 32).
+    // hash tables on a wavefront of 32; AISPARSE-896).
     inline bool is_hash_table_size(int32_t row_length)
     {
         return row_length == 32 || row_length == 64 || row_length == 128 || row_length == 256
@@ -1340,7 +1340,8 @@ namespace precond_ut
 
     // Expected factor of a scalar matrix for each kind. For IC(0) only the
     // lower triangle is a factor; the entries above it are not compared. The IC(0)
-    // reference has no numeric boost (its semantics are not documented).
+    // reference has no numeric boost: spic0 ignores the numeric boost set on its
+    // descriptor (AISPARSE-927).
     template <Kind K, typename T>
     std::vector<T> reference(const csr_matrix<T>& a, const run_options& opt)
     {

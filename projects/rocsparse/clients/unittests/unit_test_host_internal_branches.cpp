@@ -88,11 +88,12 @@ extern "C" rocsparse_status rocsparse_argdescr_get_function_name(const void*  ar
 namespace
 {
     // The inline specializations in rocsparse_templates.hpp are never called by
-    // the library. Zero sizes return before any device work, which still
+    // the library (AISPARSE-921). Zero sizes return before any device work, which still
     // executes every line of the wrapper. bsrmv, gebsrmv and csrmm reject the
     // null handle before any launch. The csrsv header documents invalid_handle,
-    // but the m == 0 quick return runs before the handle check and succeeds, so
-    // both are accepted; a success must still write the (empty) buffer size.
+    // but the m == 0 quick return runs before the handle check and succeeds
+    // (AISPARSE-929), so both are accepted; a success must still write the (empty)
+    // buffer size.
     template <typename T>
     void expect_template_wrappers_reject_null_handle()
     {

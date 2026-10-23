@@ -59,9 +59,9 @@ namespace
         }
     }
 
-    // Library bug: for a matrix it does not support, rocsparse_create_extract_descr lets
-    // a rocsparse_status thrown by the descriptor constructor escape the C API instead of
-    // returning it. Both behaviours are accepted.
+    // Library bug (AISPARSE-925): for a matrix it does not support,
+    // rocsparse_create_extract_descr lets a rocsparse_status thrown by the descriptor
+    // constructor escape the C API instead of returning it. Both behaviours are accepted.
     rocsparse_status create_extract(ExtractDescr&               descr,
                                     rocsparse_const_spmat_descr source,
                                     rocsparse_spmat_descr       target)

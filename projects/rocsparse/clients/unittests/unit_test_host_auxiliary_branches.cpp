@@ -162,7 +162,7 @@ namespace
     }
 
     // The header documents invalid_size for a bad batch count or stride, but
-    // the library returns invalid_value. Either is accepted.
+    // the library returns invalid_value. Either is accepted (AISPARSE-904).
     bool is_invalid_size_or_value(rocsparse_status status)
     {
         return status == rocsparse_status_invalid_size || status == rocsparse_status_invalid_value;

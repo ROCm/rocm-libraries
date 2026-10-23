@@ -135,7 +135,7 @@ TEST_F(ExtraBell, no_stored_blocks_scales_C)
             r.opA    = opA;
             r.device = device;
             // The transposed quick return scales a k x n block, so only
-            // a square block grid keeps it inside C.
+            // a square block grid keeps it inside C (AISPARSE-924).
             if(opA == rocsparse_operation_transpose)
                 r.kb = r.mb;
             run_empty_bell(handle, r);

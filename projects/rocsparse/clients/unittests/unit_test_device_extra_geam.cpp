@@ -220,7 +220,7 @@ namespace
     // C = alpha * A + beta * B where A and B have no rows / no columns / no
     // entries: C has no entries. Combined and split stage sequences.
     // C is always supplied up front: rocsparse_spgeam analysis without C and
-    // with empty operands writes through a null pointer (library bug).
+    // with empty operands writes through a null pointer (library bug, AISPARSE-926).
     template <typename T>
     void empty_spgeam(rocsparse_handle handle, int64_t m, int64_t n, bool split)
     {

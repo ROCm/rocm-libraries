@@ -420,7 +420,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2csc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2coo.cpp
-  # csritilu0x_*_impl has no public wrapper in the itilu0 API. The symbols
+  # csritilu0x_*_impl has no public wrapper in the itilu0 API (AISPARSE-921). The symbols
   # are hidden in librocsparse, so the defining TUs (and the x-driver TUs they
   # reference) are compiled into this test binary.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
@@ -431,12 +431,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/common.cpp
   # csxsldu buffer-size and preprocess are hidden and the C wrappers are
-  # garbage-collected from librocsparse. Compile the defining TUs so the
+  # garbage-collected from librocsparse (AISPARSE-921). Compile the defining TUs so the
   # column-direction and same-direction branches can run.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_buffer_size.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_preprocess.cpp
   # rocsparse::internal_spmat_print is declared in a library-internal
-  # header, called by nothing in the library and hidden in librocsparse.
+  # header, called by nothing in the library and hidden in librocsparse
+  # (AISPARSE-921).
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_internal_spmat_print.cpp
 )
 

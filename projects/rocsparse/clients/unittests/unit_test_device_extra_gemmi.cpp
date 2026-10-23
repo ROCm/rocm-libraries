@@ -129,7 +129,7 @@ TEST_F(ExtraGemmi, quick_returns)
     {
         GemmiCase c;
         c.device = device;
-        c.pad    = 0;
+        c.pad    = 0; // AISPARSE-923
         c.k      = 0;
         run_gemmi<float>(handle, c);
         if(HasFatalFailure())

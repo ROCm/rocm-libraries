@@ -177,9 +177,10 @@ namespace
         expect_small_residual(ilu_pattern_residual(a, got), a);
     }
 
-    // spildlt0 with I / J indices. `boost` sets the numeric boost, on both the matrix info
-    // and the descriptor because the library has read each of them, with a tolerance
-    // that replaces every pivot by one; `copy_diag` also requests D
+    // spildlt0 with I / J indices. `boost` sets the numeric boost with a tolerance that
+    // replaces every pivot by one. spildlt0 does not apply the boost set on its
+    // descriptor (AISPARSE-909; spic0 has the same gap, AISPARSE-927), so the test also
+    // sets it on the matrix info, which the factorization reads. `copy_diag` also requests D
     // in a separate array. The singularity tolerance of the exact-pivot case is above every
     // pivot.
     template <typename T, typename I, typename J>
