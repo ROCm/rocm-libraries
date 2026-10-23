@@ -100,6 +100,14 @@ struct FreivaldsCheck {
     std::vector<FreivaldsException> badElements;
 };
 
+struct FreivaldsCheckOptions {
+    // Absolute error in the computed result before its output conversion.
+    // Zero retains exact equality. A bound must be finite, nonnegative and
+    // strictly below 0.5 so an integer fast-path error cannot be hidden.
+    // Nonzero bounds currently require F32 computation.
+    double maximumAbsoluteComputationError = 0;
+};
+
 class FreivaldsPlan;
 using FreivaldsPreparation = std::variant<FreivaldsPlan, FreivaldsPreparationFailure>;
 
@@ -117,9 +125,11 @@ class FreivaldsPlan {
     // A caller checking several batches may further restrict exception work
     // to the remainder of a shared budget. This never raises the plan's limit.
     FreivaldsCheck check(const Tensor& observed,
-                         size_t exceptionLimit = std::numeric_limits<size_t>::max()) const;
+                         size_t exceptionLimit = std::numeric_limits<size_t>::max(),
+                         const FreivaldsCheckOptions& options = {}) const;
     FreivaldsCheck check(const FreivaldsObservation& observation,
-                         size_t exceptionLimit = std::numeric_limits<size_t>::max()) const;
+                         size_t exceptionLimit = std::numeric_limits<size_t>::max(),
+                         const FreivaldsCheckOptions& options = {}) const;
 
     // Independently useful for bounded diagnostics/exception lists. Coordinates
     // are checked. The plan owns compact immutable inputs used by these calls.

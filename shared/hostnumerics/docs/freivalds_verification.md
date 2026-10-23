@@ -88,6 +88,59 @@ device kernel actually scanned every element. Adapter tests must exercise that
 contract. The HIP-free `plan.check(tensor)` is a reference implementation of the
 same observation protocol and numerical check.
 
+### Optional computation error
+
+Both check overloads accept `FreivaldsCheckOptions` after the exception limit.
+Its default `maximumAbsoluteComputationError = 0` retains exact output equality.
+A caller can supply an absolute error bound on the computed linear result
+**before** output conversion. The bound must be finite, nonnegative and strictly
+below 0.5; otherwise the check returns `Unsupported`. Nonzero bounds currently
+require F32 computation; other compute types retain the exact contract.
+
+An exceptional stored value is accepted when it lies between the encoded
+endpoints of `exactValue +/- bound`. Error-free addition locates each endpoint
+between representable double values, then rounds inward to F32 before encoding
+because the computed scalar is itself representable in F32. This prevents a tiny
+bound at a large reference value from admitting a whole extra ULP. Comparing
+the encoded endpoints includes a legitimate
+change at a narrow output's rounding tie: for example, a small positive error
+at the exact integer 2049 can change an F16 output from 2048 to 2050. NaNs still
+fail, and an infinity is accepted only if the endpoint conversion permits it.
+
+The integer fast path and modular arithmetic are unchanged. Below the output's
+consecutive-integer threshold, an integer computed within a bound below 0.5
+must be the correct integer. Noninteger results enter the exception path;
+their ideal integers still enter both projections after comparison. Exception
+budgets and completeness requirements remain in force. The field probability
+argument concerns errors outside this explicitly permitted numerical interval.
+The bound does not extend preparation to arbitrary floating-point operands.
+
+The hipBLASLt and TensileLite clients supply a provisional gfx11 policy for
+F16/BF16 operands with F32 accumulation. Gfx11 DOT2 complements terms opposing
+the accumulator's sign without the usual increment, so even exact integer
+cancellation can leave a residual. This was independently reproduced on Linux
+in [rocm-systems issue 12056](https://github.com/ROCm/rocm-systems/issues/12056)
+and explains the gfx1101 smoke failure.
+
+For unit roundoff `u = 2^-24`, the issue's arithmetic model bounds each DOT2
+alignment/complement step and final F32 rounding by six unit roundoffs. Eight
+pairs per WMMA, including its masked K tail, give `48 * ceil(K/16)`; ten further
+operations cover the clients' linear epilogue. With
+`q = (48 * ceil(K/16) + 10) * u` and
+`M = max(maximumPartialMagnitude, maximumResultMagnitude)`, the client uses
+the outward-rounded allowance `M * q / (1-q)`. Absolute-sum preparation bounds
+cover cancellation and linear scaling. `q >= 1` produces an infinite bound,
+which the verifier refuses, as it does any allowance reaching 0.5.
+
+This client policy assumes the modeled WMMA reduction and linear epilogue;
+it is not production qualification for every kernel's padding, split reduction
+or arithmetic sequence. Kernel-specific bounds should be reconsidered before
+production use. The ordinary client retains exact checking when activation or
+amax reconstruction consumes the verified stored values. Other architectures,
+input/compute types and zero K retain the exact default. The smoke regression
+forces the gfx11 policy on any available GPU, checks a known cancellation
+residual, and verifies that a deliberate integer corruption still fails.
+
 `Passed` means a complete observation agreed. `Mismatch` is a numerical failure.
 `Unsupported` at preparation means that the operation lacks a certified
 numerical contract. `Incomplete` reports an exhausted budget or malformed,

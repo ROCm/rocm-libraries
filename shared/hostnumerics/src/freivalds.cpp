@@ -261,6 +261,7 @@ struct FreivaldsPlan::Data {
     } request;
     FreivaldsStatistics statistics;
     FreivaldsLimits limits;
+    ScalarType computeType = ScalarType::Float32;
     size_t k = 0;
     int64_t alpha = 1, beta = 0, outputScale = 1;
     std::vector<int64_t> rowScale, columnScale;
@@ -324,6 +325,7 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
         throw std::runtime_error("Invalid Freivalds probe algorithm.");
     auto data = std::make_shared<FreivaldsPlan::Data>();
     data->limits = limits;
+    data->computeType = operation.accumulatorType;
     data->k = k;
     auto& request = data->request;
     request.identity = nextIdentity.fetch_add(1, std::memory_order_relaxed);
@@ -545,7 +547,8 @@ double FreivaldsPlan::roundedValue(size_t row, size_t column) const {
                                     m_data->request.outputType);
 }
 
-FreivaldsCheck FreivaldsPlan::check(const Tensor& observed, size_t exceptionLimit) const {
+FreivaldsCheck FreivaldsPlan::check(const Tensor& observed, size_t exceptionLimit,
+                                    const FreivaldsCheckOptions& options) const {
     if (observed.shape() != m_data->request.shape || observed.type() != m_data->request.outputType)
         throw std::runtime_error("Freivalds observed tensor shape/type does not match the plan.");
     FreivaldsObservation observation;
@@ -553,7 +556,7 @@ FreivaldsCheck FreivaldsPlan::check(const Tensor& observed, size_t exceptionLimi
     observation.checkedElements = observed.elementCount();
     observation.rowSums = Tensor(ScalarType::UInt64, Shape{m_data->rows.size()});
     observation.columnSums = Tensor(ScalarType::UInt64, Shape{m_data->columns.size()});
-    if (observation.checkedElements == 0) return check(observation, exceptionLimit);
+    if (observation.checkedElements == 0) return check(observation, exceptionLimit, options);
     exceptionLimit = std::min(exceptionLimit, m_data->request.maximumExceptions);
     const detail::RuntimeMatrixReader<double> reader(observed);
     const detail::RuntimeVectorReader<uint64_t> rowsReader(observation.rowSums),
@@ -586,12 +589,23 @@ FreivaldsCheck FreivaldsPlan::check(const Tensor& observed, size_t exceptionLimi
                     add(columnsReader[j], multiplyResidues(residue, m_data->request.leftProbe[i])));
             }
         }
-    return check(observation, exceptionLimit);
+    return check(observation, exceptionLimit, options);
 }
 
-FreivaldsCheck FreivaldsPlan::check(const FreivaldsObservation& observation,
-                                    size_t exceptionLimit) const {
+FreivaldsCheck FreivaldsPlan::check(const FreivaldsObservation& observation, size_t exceptionLimit,
+                                    const FreivaldsCheckOptions& options) const {
     FreivaldsCheck result;
+    const double error = options.maximumAbsoluteComputationError;
+    if (!std::isfinite(error) || error < 0 || error >= 0.5) {
+        result.status = VerificationStatus::Unsupported;
+        result.reason = "Freivalds computation error must be finite, nonnegative and below 0.5.";
+        return result;
+    }
+    if (error != 0 && m_data->computeType != ScalarType::Float32) {
+        result.status = VerificationStatus::Unsupported;
+        result.reason = "Freivalds computation error bounds currently require F32 computation.";
+        return result;
+    }
     auto incompleteResult = [&](std::string reason) {
         result.status = VerificationStatus::Incomplete;
         result.reason = std::move(reason);
@@ -647,10 +661,38 @@ FreivaldsCheck FreivaldsPlan::check(const FreivaldsObservation& observation,
     result.badElements.reserve(
         std::min(observation.exceptions.size(), m_data->limits.maxReportedIndices));
     const detail::PreparedExactOutput convertOutput(m_data->request.outputType);
+    const auto computationEndpoint = [error](double exact, bool upper) {
+        const double delta = upper ? error : -error;
+        double sum = exact + delta;
+        const double part = sum - exact;
+        // TwoSum retains the rounding error without relying on a wider long double.
+        const double remainder = (exact - (sum - part)) + (delta - part);
+        // The computed value is representable in F32. Round endpoints inward
+        // so adding a small bound to a large integer cannot admit an extra ULP.
+        if ((upper && remainder < 0) || (!upper && remainder > 0))
+            sum = std::nextafter(sum, upper ? -std::numeric_limits<double>::infinity()
+                                            : std::numeric_limits<double>::infinity());
+        float value = static_cast<float>(sum);
+        if ((upper && static_cast<double>(value) > sum) ||
+            (!upper && static_cast<double>(value) < sum))
+            value = std::nextafter(value, upper ? -std::numeric_limits<float>::infinity()
+                                                : std::numeric_limits<float>::infinity());
+        return static_cast<double>(value);
+    };
     for (const auto& exception : observation.exceptions) {
         const int64_t exact = exactValue(exception.row, exception.column);
         const double rounded = convertOutput(static_cast<double>(exact));
-        if (rounded != exception.storedValue) {
+        bool matches = rounded == exception.storedValue;
+        if (!matches && error != 0) {
+            // Compare encoded endpoints: a small computation error can cross
+            // an output-rounding tie even when it is far below one output ULP.
+            const double lower =
+                convertOutput(computationEndpoint(static_cast<double>(exact), false));
+            const double upper =
+                convertOutput(computationEndpoint(static_cast<double>(exact), true));
+            matches = exception.storedValue >= lower && exception.storedValue <= upper;
+        }
+        if (!matches) {
             ++result.badElementCount;
             if (result.badElements.size() < m_data->limits.maxReportedIndices)
                 result.badElements.push_back(exception);
