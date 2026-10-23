@@ -62,6 +62,12 @@ DTYPE_BYTES = {k: v // 8 for k, v in DTYPE_BITS.items()}
 K0_MAX_SUBMAX_MAP = {32: 32, 64: 64, 96: 128, 128: 128, 256: 256}
 
 SUPPORTED_PAGE_SIZE = [1, 16, 1024]
+# Page sizes the gfx125 TDM pipelines take at run time (kFmhaRuntimePageSize[Gather]): page
+# views when each warp's K/V rows lie in one page, else TDM gathers.
+RUNTIME_PAGE_SIZE = 0
+RUNTIME_PAGE_SIZE_GATHER = -1
+PAGE_SIZE_NAME = {RUNTIME_PAGE_SIZE: "rt", RUNTIME_PAGE_SIZE_GATHER: "rtg"}
+TDM_PIPELINES = ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
 SUPPORTED_KV_MEMORY_LAYOUT = ["vectorized", "linear"]
 SUPPORTED_KV_LOOKUP_TABLE = ["vllm", "sglang"]
 KV_MEMORY_LAYOUT_ENUM_MAP = {
@@ -259,7 +265,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ({F_kv_load_check})) {{
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && ({F_page_check}) && ({F_kv_load_check})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
@@ -321,7 +327,9 @@ class FmhaFwdApiTrait:
     constraint: CppConstraint
     kv_memory_layout: str
     kv_lookup_table: str
-    page_size: int = 1  # page block size
+    page_size: int = 1  # page block size (RUNTIME_PAGE_SIZE[_GATHER]: at run time)
+    # K/V rows of a K/V tile each warp reads (runtime page views)
+    kv_warp_rows: int = 0
     use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
     # False for archs without GLOBAL_LOAD_LDS kernels (gfx125): BUFFER_LOAD then only
     # requires the K/V offsets to fit int32.
@@ -340,6 +348,19 @@ class FmhaFwdApiTrait:
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
             + ("-gload" if self.use_global_load else "-bload")
         )
+
+    @property
+    def page_check(self) -> str:
+        if self.page_size == RUNTIME_PAGE_SIZE:
+            # each warp's K/V rows lie in one page
+            return f"t.page_size > 0 && t.page_size % {self.kv_warp_rows} == 0"
+        if self.page_size == RUNTIME_PAGE_SIZE_GATHER:
+            # a gather row index counts K/V rows from the start of the cache
+            return (
+                "t.page_size > 0 && a.batch_stride_k % a.stride_k == 0"
+                " && a.batch_stride_v % a.stride_v == 0"
+            )
+        return f"t.page_size == {self.page_size}"
 
     @property
     def kv_load_check(self) -> str:
@@ -584,6 +605,7 @@ class FmhaFwdApiPool:
                             trait.kv_lookup_table
                         ],
                         F_page_size=trait.page_size,
+                        F_page_check=trait.page_check,
                         F_sink=BOOL_MAP[trait.sink],
                         F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[trait.use_global_load],
                         F_kv_load_check=trait.kv_load_check,
@@ -754,7 +776,8 @@ class FmhaFwdKernel:
     def name(self) -> str:
         # TODO: we don't encode idx here
         return (
-            f"fmha_batch_prefill_d{self.F_hdim}_{self.F_dtype}_{self.F_mode}_ps{self.F_page_size}_"
+            f"fmha_batch_prefill_d{self.F_hdim}_{self.F_dtype}_{self.F_mode}"
+            + f"_ps{PAGE_SIZE_NAME.get(self.F_page_size, self.F_page_size)}_"
             + ("gload_" if self.F_use_global_load else "bload_")
             + self.F_tile.name
             + "_"
@@ -793,6 +816,7 @@ class FmhaFwdKernel:
             kv_memory_layout=self.F_pipeline.F_kv_memory_layout,
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
             page_size=self.F_page_size,
+            kv_warp_rows=self.F_tile.F_bn0 // (self.F_tile.F_rm0 * self.F_tile.F_rn0),
             use_global_load=self.F_use_global_load,
             has_global_load_lds=self.F_has_global_load_lds,
             arch_host=(
@@ -811,6 +835,10 @@ class KernelComponentFactory:
     @classmethod
     def is_tile_supported(cls, tile, pipeline) -> bool:
         return True
+
+    @classmethod
+    def get_page_sizes(cls, pipeline) -> List[int]:
+        return SUPPORTED_PAGE_SIZE
 
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
@@ -974,6 +1002,16 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         return pipeline.tag == "qr_async"
 
     @classmethod
+    def get_page_sizes(cls, pipeline) -> List[int]:
+        # fp16/bf16 TDM pipelines: page 1024 as compiled, any other page size at run time
+        # (a vectorized KV cache: page views only, its pages hold whole warps' rows)
+        if pipeline.tag not in TDM_PIPELINES or pipeline.F_qscale != "no":
+            return SUPPORTED_PAGE_SIZE
+        if pipeline.F_kv_memory_layout == "vectorized":
+            return [1024, RUNTIME_PAGE_SIZE]
+        return [1024, RUNTIME_PAGE_SIZE, RUNTIME_PAGE_SIZE_GATHER]
+
+    @classmethod
     def get_pipelines(cls, dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
         pipelines = []
         # As in fmha_fwd: qr_tdm_pingpong on its grids, then qr_tdm_sched for
@@ -1022,6 +1060,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
                     continue
 
                 pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
+
         # dropout on the fp16/bf16 TDM pipelines; as in fmha_fwd, qr_tdm_sched and
         # qr_tdm_pingpong only on masked attention, qr_tdm_sched from 1024 rows
         def dropout_copy(p):
@@ -1159,8 +1198,7 @@ def get_fwd_blobs(
                 ):
                     continue
 
-                # Generate kernels for both page_size=16 and page_size=1024
-                for page_size in SUPPORTED_PAGE_SIZE:
+                for page_size in factory.get_page_sizes(pipeline):
                     if page_size == 1 and pipeline.F_kv_memory_layout != "linear":
                         continue
                     # kv_blockscale requires page_size >= kN0 (tile.F_bn0)

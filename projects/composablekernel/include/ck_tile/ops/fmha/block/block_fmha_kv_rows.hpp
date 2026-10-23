@@ -67,7 +67,10 @@ struct BlockFmhaPagedKVRows
           k_page_rows(k_page_rows_),
           v_page_rows(v_page_rows_),
           page_size(page_size_),
-          row_offset(row_offset_)
+          row_offset(row_offset_),
+          page_shift(page_size_ > 0 && (page_size_ & (page_size_ - 1)) == 0
+                         ? __builtin_ctz(static_cast<unsigned>(page_size_))
+                         : -1)
     {
     }
 
@@ -82,6 +85,8 @@ struct BlockFmhaPagedKVRows
     // kPageSize == 0 only: rows per page, and the page row of sequence row 0
     index_t page_size  = kPageSize;
     index_t row_offset = 0;
+    // kPageSize == 0: log2 of a power-of-two page size (pages are found by shifts), else -1
+    index_t page_shift = -1;
 
     CK_TILE_DEVICE index_t rows_per_page() const
     {
@@ -89,6 +94,21 @@ struct BlockFmhaPagedKVRows
             return kPageSize;
         else
             return page_size;
+    }
+    // Page index and row within the page of page row `r`.
+    CK_TILE_DEVICE index_t page_of(index_t r) const
+    {
+        if constexpr(kPageSize > 0)
+            return r / kPageSize;
+        else
+            return page_shift >= 0 ? r >> page_shift : r / page_size;
+    }
+    CK_TILE_DEVICE index_t row_in_page(index_t r) const
+    {
+        if constexpr(kPageSize > 0)
+            return r % kPageSize;
+        else
+            return page_shift >= 0 ? r & (page_size - 1) : r % page_size;
     }
     // Row of the sequence's pages (from the start of its first page) holding sequence row `row`.
     CK_TILE_DEVICE index_t page_row(index_t row) const
@@ -139,8 +159,8 @@ struct BlockFmhaPagedKVRows
     // Physical page holding sequence row `row`.
     CK_TILE_DEVICE index_t physical_page(index_t row) const
     {
-        return __builtin_amdgcn_readfirstlane(page_idx[__builtin_amdgcn_readfirstlane(
-            min(page_row(row) / rows_per_page(), max_page))]);
+        return __builtin_amdgcn_readfirstlane(
+            page_idx[__builtin_amdgcn_readfirstlane(min(page_of(page_row(row)), max_page))]);
     }
 
     // Point `window` at sequence row `row`.
@@ -160,9 +180,9 @@ struct BlockFmhaPagedKVRows
             const auto fetch = [&](index_t first_row) {
                 const index_t r    = first_row + static_cast<index_t>(__lane_id());
                 const index_t pr   = page_row(r);
-                const index_t page = page_idx[min(pr / rows_per_page(), max_page)];
+                const index_t page = page_idx[min(page_of(pr), max_page)];
                 // unsigned: TDM row indices span 32 bits
-                return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + pr % rows_per_page()
+                return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + row_in_page(pr)
                                     : 0xffffffffu;
             };
             if(seq_row == g.next_row)
@@ -181,7 +201,7 @@ struct BlockFmhaPagedKVRows
 
             // A wave-uniform page index keeps the page table read on the scalar path.
             const index_t page_id =
-                __builtin_amdgcn_readfirstlane(min(warp_page_row / psize, max_page));
+                __builtin_amdgcn_readfirstlane(min(page_of(warp_page_row), max_page));
             if(page_id != cached_page_id)
             {
                 cached_page    = __builtin_amdgcn_readfirstlane(page_idx[page_id]);

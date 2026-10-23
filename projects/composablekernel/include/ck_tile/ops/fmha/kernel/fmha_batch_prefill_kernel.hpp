@@ -98,7 +98,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     static constexpr auto kKVMemoryLayout   = FmhaPipeline::Problem::kKVMemoryLayout;
     static constexpr auto kKVLookupTable    = FmhaPipeline::Problem::kKVLookupTable;
     static constexpr index_t kPageBlockSize = FmhaPipeline::Problem::kPageBlockSize;
-    static constexpr index_t kVectorSize    = FmhaPipeline::Problem::kVectorSize;
+    // the page size from the kernel arguments (the TDM pipelines only)
+    static constexpr bool kIsRuntimePageSize = FmhaPipeline::Problem::kIsRuntimePageSize;
+    static constexpr index_t kVectorSize     = FmhaPipeline::Problem::kVectorSize;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
@@ -107,6 +109,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         detail::is_batch_prefill_segmented_tdm_pipeline<FmhaPipeline>::value;
     static constexpr bool kIsTdmPipeline =
         detail::is_batch_prefill_tdm_pipeline<FmhaPipeline>::value || kIsSegmentedTdmPipeline;
+    static_assert(kIsTdmPipeline || !kIsRuntimePageSize,
+                  "only the TDM pipelines take the page size at run time");
     static constexpr bool kUseAsyncCopy = [] {
         if constexpr(kIsTdmPipeline)
             return false;
@@ -1309,8 +1313,14 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         // Last valid index into this batch's page table; load_physical_pages clamps
         // page-table reads to [0, max_page_table_idx] to prevent OOB into the next
         // batch's pages. Empty batch (seqlen_k == 0) clamps to 0.
+        const index_t page_block_size = [&]() {
+            if constexpr(kIsRuntimePageSize)
+                return kargs.page_block_size;
+            else
+                return kPageBlockSize;
+        }();
         const index_t max_page_table_idx =
-            kargs.seqlen_k > 0 ? (kargs.seqlen_k - 1) / kPageBlockSize : 0;
+            kargs.seqlen_k > 0 ? (kargs.seqlen_k - 1) / page_block_size : 0;
 
         auto o_acc_tile = [&] {
             if constexpr(kIsTdmPipeline)
@@ -1378,12 +1388,17 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                 // Pages smaller than a warp's K/V rows are read with TDM gathers.
                 constexpr index_t kKVWarpRows =
                     FmhaPipeline::kN0 / (FmhaPipeline::kBlockSize / get_warp_size());
-                constexpr index_t kGatherWarpRows =
-                    kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
+                constexpr index_t kGatherWarpRows = [] {
+                    if constexpr(kIsRuntimePageSize)
+                        return FmhaPipeline::Problem::kRuntimePageGather ? kKVWarpRows : 0;
+                    else
+                        return kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
+                }();
                 static_assert(!kVectorizedKV || kGatherWarpRows == 0,
                               "a vectorized KV cache needs pages of whole warp K/V rows");
+                constexpr index_t kKVRowsPageSize = kIsRuntimePageSize ? 0 : kPageBlockSize;
                 const auto kv_rows =
-                    BlockFmhaPagedKVRows<kPageBlockSize,
+                    BlockFmhaPagedKVRows<kKVRowsPageSize,
                                          remove_cvref_t<decltype(make_k_view)>,
                                          remove_cvref_t<decltype(make_v_view)>,
                                          kGatherWarpRows,
@@ -1393,7 +1408,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                                         make_k_view,
                                                         make_v_view,
                                                         kargs.batch_stride_k / kargs.stride_k,
-                                                        kargs.batch_stride_v / kargs.stride_v};
+                                                        kargs.batch_stride_v / kargs.stride_v,
+                                                        page_block_size};
                 // Q (and PERTENSOR K) descales are already in sm_scale.
                 const float* k_descale_tdm  = nullptr;
                 const float* v_descale_tdm  = nullptr;

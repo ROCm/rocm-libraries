@@ -475,7 +475,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
         // K tile in LDS
-        auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
+        auto k_lds_ptr                    = reinterpret_cast<KDataType*>(smem_ptr);
         [[maybe_unused]] auto k_lds_store = generate_tuple(
             [&](auto i_buf) {
                 return make_tile_window(
@@ -712,7 +712,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         // Initial K SRD rebase (no-op for page_size < kN0, uses flat loads instead)
         rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
 
-        constexpr auto k_oob_ck = bool_constant<true>{};
+        constexpr auto k_oob_ck                  = bool_constant<true>{};
         [[maybe_unused]] constexpr auto k_pre_np = [&]() {
             if constexpr(kPadSeqLenK &&
                          (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||

@@ -2114,10 +2114,7 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
     a logits soft cap, and other archs unchanged."""
 
     def test_tdm_instances_and_dispatch(self):
-        from codegen.ops.fmha_fwd_splitkv import (
-            FmhaFwdSplitKVApiPool,
-            get_fwd_splitkv_blobs,
-        )
+        from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs
 
         kernels = get_fwd_splitkv_blobs(
             ["gfx1250"], "*d128_bf16*", 0, "simplified", [128]
@@ -2176,6 +2173,56 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
                     {k.F_pipeline.tag for k in kernels}
                     & {"qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"}
                 )
+
+
+class TestGfx125BatchPrefillPageSizes(unittest.TestCase):
+    """batch_prefill on gfx1250: the fp16/bf16 TDM pipelines take page 1024 as compiled and
+    any other page size at run time (page views, and TDM gathers for linear K/V); the async
+    pipeline and other archs keep pages of 1, 16 and 1024."""
+
+    def test_page_sizes_and_dispatch(self):
+        from codegen.ops import fmha_batch_prefill as bp
+
+        pool, kernels = bp.get_fwd_blobs(
+            "*d128_bf16*", 0, [128], "simplified", ["gfx1250"]
+        )
+        tdm = [k for k in kernels if k.F_pipeline.tag in bp.TDM_PIPELINES]
+        for kernel in kernels:
+            with self.subTest(kernel=kernel.name):
+                if kernel.F_pipeline.tag not in bp.TDM_PIPELINES:
+                    self.assertIn(kernel.F_page_size, bp.SUPPORTED_PAGE_SIZE)
+                elif kernel.F_pipeline.F_kv_memory_layout == "vectorized":
+                    self.assertIn(kernel.F_page_size, (1024, bp.RUNTIME_PAGE_SIZE))
+                else:
+                    self.assertIn(
+                        kernel.F_page_size,
+                        (1024, bp.RUNTIME_PAGE_SIZE, bp.RUNTIME_PAGE_SIZE_GATHER),
+                    )
+        self.assertEqual(
+            {k.F_page_size for k in tdm},
+            {1024, bp.RUNTIME_PAGE_SIZE, bp.RUNTIME_PAGE_SIZE_GATHER},
+        )
+        self.assertTrue(any("_psrt_" in k.name for k in tdm))
+        self.assertTrue(any("_psrtg_" in k.name for k in tdm))
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            bp.write_fwd_api(pool, Path(output_dir))
+            api = (Path(output_dir) / "fmha_batch_prefill_api.cpp").read_text()
+        # page views: each warp's 16 or 32 K/V rows in one page; gathers: page strides in rows
+        self.assertIn("t.page_size % 16 == 0", api)
+        self.assertIn("t.page_size % 32 == 0", api)
+        self.assertIn("a.batch_stride_k % a.stride_k == 0", api)
+        # the compiled page size is tried before the run-time ones of the same pipeline
+        self.assertLess(
+            api.index("(t.page_size == 1024)"), api.index("t.page_size % 16 == 0")
+        )
+
+    def test_other_archs_keep_compiled_page_sizes(self):
+        from codegen.ops import fmha_batch_prefill as bp
+
+        _, kernels = bp.get_fwd_blobs("*d128_bf16*", 0, [128], "simplified", ["gfx950"])
+        self.assertTrue(kernels)
+        self.assertEqual({k.F_page_size for k in kernels}, set(bp.SUPPORTED_PAGE_SIZE))
 
 
 class TestGfx125TdmDropoutCodegen(unittest.TestCase):

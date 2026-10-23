@@ -789,8 +789,8 @@ TEST_P(ForcedPipeline, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   "linear",
-                                                   "vllm",
+                                                   "auto",
+                                                   "block_table",
                                                    api,
                                                    pipeline);
         if(tile != nullptr && *tile == '\0')
@@ -901,8 +901,8 @@ TEST_P(PagedKVGappy, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   "linear",
-                                                   "vllm",
+                                                   "auto",
+                                                   "block_table",
                                                    "pagedkv",
                                                    pipeline,
                                                    0,
@@ -969,8 +969,8 @@ TEST(TestCkTileFmhaFwd, SkipMinSeqlenQ)
                                                COMMON_ARGS,
                                                std::nullopt,
                                                &selected_kernel,
-                                               "linear",
-                                               "vllm",
+                                               "auto",
+                                               "block_table",
                                                "fwd",
                                                "",
                                                16);
@@ -1063,8 +1063,8 @@ TEST_P(TdmLogitsSoftCap, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   "linear",
-                                                   "vllm",
+                                                   "auto",
+                                                   "block_table",
                                                    api,
                                                    pipeline);
         CHECK_RESULT(result);
@@ -1169,8 +1169,8 @@ TEST_P(TdmDropout, DataTypeConfig)
             stream_config,
             std::nullopt,
             &selected_kernel,
-            "linear",
-            "vllm",
+            "auto",
+            "block_table",
             api,
             pipeline);
         CHECK_RESULT(result);
@@ -1249,8 +1249,8 @@ TEST_P(TdmSplitKVSink, DataTypeConfig)
             stream_config,
             std::nullopt,
             &selected_kernel,
-            "linear",
-            "vllm",
+            "auto",
+            "block_table",
             "splitkv",
             pipeline);
         CHECK_RESULT(result);
@@ -1491,9 +1491,9 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
 
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 // batch_prefill: group mode with a paged KV cache, in aiter's KV layouts and page tables
-// (sglang: kv_indptr/kv_page_indices/kv_last_page_lens, vllm: 2D block table). On gfx125
+// (indptr: kv_indptr/kv_page_indices/kv_last_page_lens, block_table: 2D). On gfx125
 // the pipeline in the kernel name is checked as well, so a silent fallback from TDM to the
-// async pipeline is caught; other archs only have the async pipeline.
+// async pipeline is caught; other archs only have the async pipeline (pages of 1, 16, 1024).
 // hdim_q, hdim_v, seqlen_q, seqlen_k, mask, page_block_size, kv_layout, kv_lookup, i_perm,
 // gfx125 pipeline
 using BatchPrefillCase =
@@ -1507,19 +1507,29 @@ INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     BatchPrefill,
     Values(
+        BatchPrefillCase{128, 128, 300, 1000, "0", 1024, "auto", "indptr", false, "_qr_tdm_sched_"},
         BatchPrefillCase{
-            128, 128, 300, 1000, "0", 1024, "linear", "sglang", false, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 513, 2100, "b", 1024, "linear", "vllm", true, "_qr_tdm_sched_"},
+            128, 128, 513, 2100, "b", 1024, "auto", "block_table", true, "_qr_tdm_sched_"},
         BatchPrefillCase{
-            64, 64, 200, 1500, "b:128,0", 1024, "linear", "sglang", false, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 8, 900, "b", 1024, "linear", "sglang", false, "_qr_tdm_vr"},
-        BatchPrefillCase{96, 96, 200, 700, "0", 1024, "linear", "sglang", true, "_qr_tdm_vr"},
-        BatchPrefillCase{256, 256, 130, 1100, "b", 1024, "linear", "vllm", false, "_qr_tdm_vr"},
-        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "linear", "sglang", false, "_qr_tdm_sched_"},
-        BatchPrefillCase{64, 64, 300, 1000, "0", 16, "linear", "vllm", true, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "linear", "sglang", false, "_qr_tdm_vr"},
-        BatchPrefillCase{64, 64, 300, 1000, "b", 1, "linear", "vllm", true, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "vectorized", "vllm", true, "_qr_async_"}));
+            64, 64, 200, 1500, "b:128,0", 1024, "auto", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 8, 900, "b", 1024, "auto", "indptr", false, "_qr_tdm_vr"},
+        BatchPrefillCase{96, 96, 200, 700, "0", 1024, "auto", "indptr", true, "_qr_tdm_vr"},
+        BatchPrefillCase{
+            256, 256, 130, 1100, "b", 1024, "auto", "block_table", false, "_qr_tdm_vr"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "auto", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{64, 64, 300, 1000, "0", 16, "auto", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "auto", "indptr", false, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "b", 1, "auto", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "vec", "block_table", true, "_qr_tdm_vr"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 64, "vec", "indptr", false, "_qr_tdm_vr"},
+        // page sizes taken at run time on gfx125: page views, and TDM gathers (page 7)
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 32, "nhd", "block_table", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            64, 64, 300, 1000, "t:64,32", 48, "nhd", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 2049, "0", 7, "hnd", "indptr", true, "_qr_tdm_vr"},
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 7, "nhd", "block_table", true, "_qr_tdm_sched_"}));
 
 TEST_P(BatchPrefill, DataTypeConfig)
 {
@@ -1535,6 +1545,9 @@ TEST_P(BatchPrefill, DataTypeConfig)
                     kv_lookup,
                     i_perm,
                     gfx125_pipeline] = GetParam();
+        if(!ck_tile::is_gfx125_supported() &&
+           !(page_block_size == 1 || page_block_size == 16 || page_block_size == 1024))
+            GTEST_SKIP() << "other page sizes run on the gfx125 TDM pipelines only";
 
         // fixed per-sequence lengths, so max_seqlen_q selects the pipeline deterministically
         constexpr int batch = 3;
@@ -1599,11 +1612,11 @@ class BatchPrefillPingPong : public TestWithParam<BatchPrefillPingPongCase>
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     BatchPrefillPingPong,
-    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "sglang", false, "_b64x"},
-           BatchPrefillPingPongCase{100, 500, "b", 16, "vllm", true, "_b64x"},
-           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "sglang", false, "_b64x"},
-           BatchPrefillPingPongCase{8, 532, "0", 16, "vllm", true, "_b16x"},
-           BatchPrefillPingPongCase{8, 532, "b", 1, "sglang", false, "_b16x"}));
+    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "indptr", false, "_b64x"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "block_table", true, "_b64x"},
+           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "indptr", false, "_b64x"},
+           BatchPrefillPingPongCase{8, 532, "0", 16, "block_table", true, "_b16x"},
+           BatchPrefillPingPongCase{8, 532, "b", 1, "indptr", false, "_b16x"}));
 
 TEST_P(BatchPrefillPingPong, DataTypeConfig)
 {
@@ -1651,7 +1664,7 @@ TEST_P(BatchPrefillPingPong, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   "linear",
+                                                   "auto",
                                                    kv_lookup);
         CHECK_RESULT(result);
         EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;

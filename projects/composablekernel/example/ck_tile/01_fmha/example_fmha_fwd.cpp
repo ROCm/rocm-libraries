@@ -108,11 +108,16 @@ auto create_args(int argc, char* argv[])
                 "# of splits for key/value. 0 to determine actual number by heuristic")
         .insert("page_block_size", "0", "paged-kvcache block size. 0 means not use paged-kvcahe")
         .insert("kv_layout",
-                "linear",
-                "batch_prefill KV cache layout: linear or vectorized (16-byte vectors)")
+                "auto",
+                "paged KV cache layout (P pages, S = page_block_size, H = nhead_k, D = hdim, "
+                "x = 16 bytes of elements): nhd: K/V [P, S, H, D]; hnd: K/V [P, H, S, D]; "
+                "vec: K [P, H, D/x, S, x], V [P, H, S/x, D, x] (batch_prefill); "
+                "auto: nhd with -iperm=0, hnd with -iperm=1")
         .insert("kv_lookup",
-                "vllm",
-                "batch_prefill page table: vllm (2D block table) or sglang (1D indptr/indices)")
+                "block_table",
+                "paged KV page table: block_table: int32 [batch, max_pages_per_seq]; indptr: "
+                "int32 kv_indptr [batch + 1], kv_page_indices, kv_last_page_lens [batch] "
+                "(batch_prefill)")
         .insert("api",
                 "auto",
                 "attention API to run: auto (batch_prefill, pagedkv, splitkv, then fwd, as the "

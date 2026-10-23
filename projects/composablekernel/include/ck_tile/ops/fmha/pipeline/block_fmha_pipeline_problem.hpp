@@ -169,9 +169,12 @@ struct BlockFmhaBatchPrefillPipelineProblem
                                       kProgressiveDsLoadK_>
 {
     static constexpr index_t kPageBlockSize = kPageBlockSize_;
-    static_assert(kPageBlockSize > 0, "kPageBlockSize must be positive");
-    static_assert((kPageBlockSize & (kPageBlockSize - 1)) == 0,
-                  "kPageBlockSize must be power of two");
+    // kFmhaRuntimePageSize(Gather): the page size comes from the kernel arguments
+    static constexpr bool kIsRuntimePageSize = kPageBlockSize <= kFmhaRuntimePageSize;
+    static constexpr bool kRuntimePageGather = kPageBlockSize == kFmhaRuntimePageSizeGather;
+    static_assert(kIsRuntimePageSize ||
+                      (kPageBlockSize > 0 && (kPageBlockSize & (kPageBlockSize - 1)) == 0),
+                  "kPageBlockSize must be a power of two, or taken at run time");
 
     // KV cache load addressing mode. GLOBAL_LOAD_LDS handles >2GB pools via
     // 64-bit addressing; BUFFER_LOAD (default) uses SRD buffer_load for the
@@ -189,7 +192,8 @@ struct BlockFmhaBatchPrefillPipelineProblem
                   "kQKHeaddim must be divisible by kVectorSize");
     static_assert(!(kPageBlockSize == 1 && kIsVectorizedLayout),
                   "page_size=1 only supports linear KV cache layout");
-    static_assert(!kIsVectorizedLayout || kPageBlockSize % kVectorSize == 0,
+    static_assert(!kIsVectorizedLayout || (kIsRuntimePageSize ? !kRuntimePageGather
+                                                              : kPageBlockSize % kVectorSize == 0),
                   "kPageBlockSize must be divisible by kVectorSize for vectorized layout");
     static_assert(kIsGroupMode_, "Batch prefill requires group mode");
 
