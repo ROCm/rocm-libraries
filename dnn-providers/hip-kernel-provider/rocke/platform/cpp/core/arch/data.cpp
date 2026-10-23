@@ -109,202 +109,6 @@ static void _mfma_acc_32x32(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 16x16x16 A operand: (lane % 16, k_blk*4 + slot). */
-static void _mfma_a_16x16(rocke_ir_builder_t* b,
-                          rocke_value_t* lane,
-                          int slot,
-                          rocke_value_t** out0,
-                          rocke_value_t** out1)
-{
-    rocke_value_t *c16, *m_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c16 = rocke_b_const_i32(b, 16);
-    m_in_atom = rocke_b_mod(b, lane, c16);
-    k_blk = rocke_b_div(b, lane, c16);
-    /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
-     * (with its const 4) to emit before const(slot) to match Python's
-     * left-to-right arg evaluation (C call-arg order is unspecified). */
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 4));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = m_in_atom;
-    if(out1)
-        *out1 = k;
-}
-
-/* MFMA 16x16x16 B operand: (k_blk*4 + slot, lane % 16). */
-static void _mfma_b_16x16(rocke_ir_builder_t* b,
-                          rocke_value_t* lane,
-                          int slot,
-                          rocke_value_t** out0,
-                          rocke_value_t** out1)
-{
-    rocke_value_t *c16, *n_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c16 = rocke_b_const_i32(b, 16);
-    n_in_atom = rocke_b_mod(b, lane, c16);
-    k_blk = rocke_b_div(b, lane, c16);
-    /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
-     * (with its const 4) to emit before const(slot) to match Python's
-     * left-to-right arg evaluation (C call-arg order is unspecified). */
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 4));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = k;
-    if(out1)
-        *out1 = n_in_atom;
-}
-
-/* MFMA 32x32x8 A operand: (lane % 32, k_blk*4 + slot). */
-static void _mfma_a_32x32x8(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
-{
-    rocke_value_t *c32, *m_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c32 = rocke_b_const_i32(b, 32);
-    m_in_atom = rocke_b_mod(b, lane, c32);
-    k_blk = rocke_b_div(b, lane, c32);
-    /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
-     * (with its const 4) to emit before const(slot) to match Python's
-     * left-to-right arg evaluation (C call-arg order is unspecified). */
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 4));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = m_in_atom;
-    if(out1)
-        *out1 = k;
-}
-
-/* MFMA 32x32x8 B operand: (k_blk*4 + slot, lane % 32). */
-static void _mfma_b_32x32x8(rocke_ir_builder_t* b,
-                            rocke_value_t* lane,
-                            int slot,
-                            rocke_value_t** out0,
-                            rocke_value_t** out1)
-{
-    rocke_value_t *c32, *n_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c32 = rocke_b_const_i32(b, 32);
-    n_in_atom = rocke_b_mod(b, lane, c32);
-    k_blk = rocke_b_div(b, lane, c32);
-    /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
-     * (with its const 4) to emit before const(slot) to match Python's
-     * left-to-right arg evaluation (C call-arg order is unspecified). */
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 4));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = k;
-    if(out1)
-        *out1 = n_in_atom;
-}
-
-/* MFMA 16x16x32 A operand: (lane % 16, k_blk*8 + slot). K-packed CDNA3 atom;
- * the lane's <8 x half> covers the contiguous block K=[k_blk*8 : k_blk*8+8]
- * (per MfmaAtom.f16_16x16x32, hardware-verified to 1e-3; the flat-concat
- * alternative validates only to 1e-2). */
-static void _mfma_a_16x16x32(rocke_ir_builder_t* b,
-                             rocke_value_t* lane,
-                             int slot,
-                             rocke_value_t** out0,
-                             rocke_value_t** out1)
-{
-    rocke_value_t *c16, *m_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c16 = rocke_b_const_i32(b, 16);
-    m_in_atom = rocke_b_mod(b, lane, c16);
-    k_blk = rocke_b_div(b, lane, c16);
-    /* k = b.add(b.mul(k_blk, b.const_i32(8)), b.const_i32(slot)). Pin the mul
-     * (with its const 8) before const(slot) to match Python's left-to-right
-     * arg evaluation (C call-arg order is unspecified). */
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 8));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = m_in_atom;
-    if(out1)
-        *out1 = k;
-}
-
-/* MFMA 16x16x32 B operand: (k_blk*8 + slot, lane % 16). */
-static void _mfma_b_16x16x32(rocke_ir_builder_t* b,
-                             rocke_value_t* lane,
-                             int slot,
-                             rocke_value_t** out0,
-                             rocke_value_t** out1)
-{
-    rocke_value_t *c16, *n_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c16 = rocke_b_const_i32(b, 16);
-    n_in_atom = rocke_b_mod(b, lane, c16);
-    k_blk = rocke_b_div(b, lane, c16);
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 8));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = k;
-    if(out1)
-        *out1 = n_in_atom;
-}
-
-/* MFMA 32x32x16 A operand: (lane % 32, k_blk*8 + slot). The K=16 sibling of
- * _mfma_a_32x32x8; same CDNA3 K-packing (contiguous 8-K block per k_blk) as
- * the verified 16x16x32 atom (per MfmaAtom.f16_32x32x16). */
-static void _mfma_a_32x32x16(rocke_ir_builder_t* b,
-                             rocke_value_t* lane,
-                             int slot,
-                             rocke_value_t** out0,
-                             rocke_value_t** out1)
-{
-    rocke_value_t *c32, *m_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c32 = rocke_b_const_i32(b, 32);
-    m_in_atom = rocke_b_mod(b, lane, c32);
-    k_blk = rocke_b_div(b, lane, c32);
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 8));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = m_in_atom;
-    if(out1)
-        *out1 = k;
-}
-
-/* MFMA 32x32x16 B operand: (k_blk*8 + slot, lane % 32). */
-static void _mfma_b_32x32x16(rocke_ir_builder_t* b,
-                             rocke_value_t* lane,
-                             int slot,
-                             rocke_value_t** out0,
-                             rocke_value_t** out1)
-{
-    rocke_value_t *c32, *n_in_atom, *k_blk, *k;
-    ROCKE_ATI_COORD_GUARD(b, out0, out1);
-    c32 = rocke_b_const_i32(b, 32);
-    n_in_atom = rocke_b_mod(b, lane, c32);
-    k_blk = rocke_b_div(b, lane, c32);
-    {
-        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 8));
-        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
-    }
-    if(out0)
-        *out0 = k;
-    if(out1)
-        *out1 = n_in_atom;
-}
-
 /* MFMA 16x16x4 fp32 / f64 A operand (#8348): one scalar per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
 static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
@@ -383,6 +187,47 @@ static void _mfma_b_32x32x2_f32(rocke_ir_builder_t* b,
         *out0 = k;
     if(out1)
         *out1 = n_in_atom;
+}
+
+/* Dense MFMA A operand whose A has Rows rows (Python _mfma_operand_map's a_map):
+ * (lane % Rows, (lane / Rows) * KPerLane + slot). Each lane's K run is one
+ * contiguous block: for the K-packed CDNA3 16x16x32 f16 atom this packing is
+ * hardware-verified to 1e-3, while the flat-concat alternative validates only
+ * to 1e-2. */
+template <int Rows, int KPerLane>
+static void _mfma_operand_a(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
+{
+    rocke_value_t *c_rows, *row, *k_blk, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c_rows = rocke_b_const_i32(b, Rows);
+    row = rocke_b_mod(b, lane, c_rows);
+    k_blk = rocke_b_div(b, lane, c_rows);
+    /* Pin the mul (with its constant) before const(slot): Python evaluates
+     * add's arguments left to right. */
+    {
+        rocke_value_t* k_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, KPerLane));
+        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot));
+    }
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = k;
+}
+
+/* Dense MFMA B operand (Python _mfma_operand_map's b_map): the A map with the
+ * coordinates swapped, ((lane / Rows) * KPerLane + slot, lane % Rows). */
+template <int Rows, int KPerLane>
+static void _mfma_operand_b(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
+{
+    _mfma_operand_a<Rows, KPerLane>(b, lane, slot, out1, out0);
 }
 
 /* MFMA 16x16x4 f64 accumulator: slot i -> (i*4 + lane // 16, lane % 16). */
@@ -750,90 +595,35 @@ static const rocke_layout_map_t lm_wmma_scale_k16_a
 static const rocke_layout_map_t lm_wmma_scale_k16_b
     = {ROCKE_MMA_ROLE_B_SCALE, 8, 32, _wmma_gfx1250_b_scale};
 
-/* --- mfma_f32_16x16x16_f16 / _bf16: a/b/c all present (frag 4/4/4, wave64) --- */
-static const rocke_layout_map_t lm_mfma_16x16x16_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_16x16};
-static const rocke_layout_map_t lm_mfma_16x16x16_b = {ROCKE_MMA_ROLE_B, 4, 64, _mfma_b_16x16};
-static const rocke_layout_map_t lm_mfma_16x16x16_c = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
+/* --- Dense MFMA A and B operand maps by (rows, K per lane): one formula,
+ * _mfma_operand_a / _mfma_operand_b (Python _mfma_operand_map), for every
+ * f16, bf16, xf32, fp8, bf8 and i8 atom. The f32 and f64 atoms, one element per
+ * lane, use lm_mfma_16x16x4_a/_b and lm_mfma_32x32x2_f32_a/_b below. --- */
+#define ROCKE_ATI_MFMA_OPERAND_MAPS(rows, k_per_lane)                            \
+    static const rocke_layout_map_t lm_mfma_operand_##rows##_##k_per_lane##_a    \
+        = {ROCKE_MMA_ROLE_A, k_per_lane, 64, _mfma_operand_a<rows, k_per_lane>}; \
+    static const rocke_layout_map_t lm_mfma_operand_##rows##_##k_per_lane##_b    \
+        = {ROCKE_MMA_ROLE_B, k_per_lane, 64, _mfma_operand_b<rows, k_per_lane>};
+ROCKE_ATI_MFMA_OPERAND_MAPS(16, 2)
+ROCKE_ATI_MFMA_OPERAND_MAPS(32, 2)
+ROCKE_ATI_MFMA_OPERAND_MAPS(16, 4)
+ROCKE_ATI_MFMA_OPERAND_MAPS(32, 4)
+ROCKE_ATI_MFMA_OPERAND_MAPS(16, 8)
+ROCKE_ATI_MFMA_OPERAND_MAPS(32, 8)
+ROCKE_ATI_MFMA_OPERAND_MAPS(16, 16)
+ROCKE_ATI_MFMA_OPERAND_MAPS(32, 16)
+#undef ROCKE_ATI_MFMA_OPERAND_MAPS
 
-/* --- mfma_f32_16x16x32_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/4, wave64).
- * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
-static const rocke_layout_map_t lm_mfma_16x16x32_a = {ROCKE_MMA_ROLE_A, 8, 64, _mfma_a_16x16x32};
-static const rocke_layout_map_t lm_mfma_16x16x32_b = {ROCKE_MMA_ROLE_B, 8, 64, _mfma_b_16x16x32};
+/* --- 16x16 MFMA accumulators, 4 per lane (f16, bf16, xf32, fp8, bf8, i8) --- */
+static const rocke_layout_map_t lm_mfma_16x16x16_c = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 static const rocke_layout_map_t lm_mfma_16x16x32_c = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 
-/* --- mfma_f32_32x32x8_f16: a/b/c present (frag 4/4/16, wave64) --- */
-static const rocke_layout_map_t lm_mfma_32x32x8_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_32x32x8};
-static const rocke_layout_map_t lm_mfma_32x32x8_b = {ROCKE_MMA_ROLE_B, 4, 64, _mfma_b_32x32x8};
+/* --- 32x32 MFMA accumulators, 16 per lane (f16, bf16, xf32, fp8, bf8, i8) --- */
 static const rocke_layout_map_t lm_mfma_32x32x8_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
-
-/* --- mfma_f32_32x32x16_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/16, wave64).
- * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
-static const rocke_layout_map_t lm_mfma_32x32x16_a = {ROCKE_MMA_ROLE_A, 8, 64, _mfma_a_32x32x16};
-static const rocke_layout_map_t lm_mfma_32x32x16_b = {ROCKE_MMA_ROLE_B, 8, 64, _mfma_b_32x32x16};
 static const rocke_layout_map_t lm_mfma_32x32x16_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
 
-static void _mfma_a_16x16x8_xf32(
-    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
-{
-    rocke_value_t* c = rocke_b_const_i32(b, 16);
-    rocke_value_t* axis = rocke_b_mod(b, lane, c);
-    rocke_value_t* group = rocke_b_div(b, lane, c);
-    rocke_value_t* two = rocke_b_const_i32(b, 2);
-    rocke_value_t* base = rocke_b_mul(b, group, two);
-    rocke_value_t* index = rocke_b_const_i32(b, slot);
-    rocke_value_t* k = rocke_b_add(b, base, index);
-    *c0 = axis;
-    *c1 = k;
-}
-
-static void _mfma_b_16x16x8_xf32(
-    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
-{
-    rocke_value_t* c = rocke_b_const_i32(b, 16);
-    rocke_value_t* axis = rocke_b_mod(b, lane, c);
-    rocke_value_t* group = rocke_b_div(b, lane, c);
-    rocke_value_t* two = rocke_b_const_i32(b, 2);
-    rocke_value_t* base = rocke_b_mul(b, group, two);
-    rocke_value_t* index = rocke_b_const_i32(b, slot);
-    rocke_value_t* k = rocke_b_add(b, base, index);
-    *c0 = k;
-    *c1 = axis;
-}
-
-static void _mfma_a_32x32x4_xf32(
-    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
-{
-    rocke_value_t* c = rocke_b_const_i32(b, 32);
-    rocke_value_t* axis = rocke_b_mod(b, lane, c);
-    rocke_value_t* group = rocke_b_div(b, lane, c);
-    rocke_value_t* two = rocke_b_const_i32(b, 2);
-    rocke_value_t* base = rocke_b_mul(b, group, two);
-    rocke_value_t* index = rocke_b_const_i32(b, slot);
-    rocke_value_t* k = rocke_b_add(b, base, index);
-    *c0 = axis;
-    *c1 = k;
-}
-
-static void _mfma_b_32x32x4_xf32(
-    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
-{
-    rocke_value_t* c = rocke_b_const_i32(b, 32);
-    rocke_value_t* axis = rocke_b_mod(b, lane, c);
-    rocke_value_t* group = rocke_b_div(b, lane, c);
-    rocke_value_t* two = rocke_b_const_i32(b, 2);
-    rocke_value_t* base = rocke_b_mul(b, group, two);
-    rocke_value_t* index = rocke_b_const_i32(b, slot);
-    rocke_value_t* k = rocke_b_add(b, base, index);
-    *c0 = k;
-    *c1 = axis;
-}
-
-static const rocke_layout_map_t lm_xf32_16_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_16x16x8_xf32};
-static const rocke_layout_map_t lm_xf32_16_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_16x16x8_xf32};
-static const rocke_layout_map_t lm_xf32_32_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_32x32x4_xf32};
-static const rocke_layout_map_t lm_xf32_32_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_32x32x4_xf32};
-
-/* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
+/* --- mfma_f32_16x16x4_f32 (frag 1/1/4, wave64; also the f64 16x16x4 A and B):
+ * one element per lane, K = lane / 16 --- */
 static const rocke_layout_map_t lm_mfma_16x16x4_a = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4};
 static const rocke_layout_map_t lm_mfma_16x16x4_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4};
 static const rocke_layout_map_t lm_mfma_16x16x4_f32_c
@@ -1049,6 +839,21 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_16x16x32_bf8", 4},
     {"mfma_f32_32x32x16_fp8", 16},
     {"mfma_f32_32x32x16_bf8", 16},
+    /* --- MFMA mixed fp8 x bf8 (wave64) --- */
+    {"mfma_f32_16x16x32_fp8_bf8", 4},
+    {"mfma_f32_16x16x32_bf8_fp8", 4},
+    {"mfma_f32_32x32x16_fp8_bf8", 16},
+    {"mfma_f32_32x32x16_bf8_fp8", 16},
+    /* --- MFMA bf16 without the _1k suffix (wave64) --- */
+    {"mfma_f32_16x16x8_bf16", 4},
+    {"mfma_f32_32x32x4_bf16", 16},
+    /* --- MFMA i8 -> i32 (wave64) --- */
+    {"mfma_i32_16x16x16_i8", 4},
+    {"mfma_i32_32x32x8_i8", 16},
+    {"mfma_i32_16x16x32_i8", 4},
+    {"mfma_i32_32x32x16_i8", 16},
+    {"mfma_i32_16x16x64_i8", 4},
+    {"mfma_i32_32x32x32_i8", 16},
     /* --- MFMA MX (wave64), frag lengths only --- */
     {"mfma_f32_16x16x128_fp8", 4},
     {"mfma_scale_f32_16x16x128_f8f6f4", 4},
@@ -1110,7 +915,8 @@ static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op
 
 /* ----------------------------- gfx908 (CDNA1) ---------------------------- */
 /* wave64, 64 KB LDS, no async_lds, no fp8/bf8, f64 or _1k bf16 MFMA; separate
- * 256-entry VGPR and AGPR files. Same op rows as the gfx942 f32 and f16 atoms. */
+ * 256-entry VGPR and AGPR files. f32, f16, i8 and (without the _1k suffix)
+ * bf16 MFMA. */
 static const rocke_mma_op_t k_mma_gfx908[] = {
     {"mma",
      "fp32",
@@ -1154,8 +960,8 @@ static const rocke_mma_op_t k_mma_gfx908[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "fp16",
@@ -1169,8 +975,68 @@ static const rocke_mma_op_t k_mma_gfx908[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     16,
+     16,
+     16,
+     "mfma_i32_16x16x16_i8",
+     4,
+     4,
+     4,
+     64,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     32,
+     32,
+     8,
+     "mfma_i32_32x32x8_i8",
+     4,
+     4,
+     16,
+     64,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "bf16",
+     "bf16",
+     "fp32",
+     16,
+     16,
+     8,
+     "mfma_f32_16x16x8_bf16",
+     2,
+     2,
+     4,
+     64,
+     &lm_mfma_operand_16_2_a,
+     &lm_mfma_operand_16_2_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "bf16",
+     "bf16",
+     "fp32",
+     32,
+     32,
+     4,
+     "mfma_f32_32x32x4_bf16",
+     2,
+     2,
+     16,
+     64,
+     &lm_mfma_operand_32_2_a,
+     &lm_mfma_operand_32_2_b,
      &lm_mfma_32x32x8_c},
 };
 
@@ -1191,8 +1057,8 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "fp16",
@@ -1206,8 +1072,8 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
     {"mma",
      "bf16",
@@ -1221,8 +1087,8 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "bf16",
@@ -1236,9 +1102,84 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
+    {"mma",
+     "fp32",
+     "fp32",
+     "fp32",
+     16,
+     16,
+     4,
+     "mfma_f32_16x16x4_f32",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f32_c},
+    {"mma",
+     "fp32",
+     "fp32",
+     "fp32",
+     32,
+     32,
+     2,
+     "mfma_f32_32x32x2_f32",
+     1,
+     1,
+     16,
+     64,
+     &lm_mfma_32x32x2_f32_a,
+     &lm_mfma_32x32x2_f32_b,
+     &lm_mfma_32x32x2_f32_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     16,
+     16,
+     16,
+     "mfma_i32_16x16x16_i8",
+     4,
+     4,
+     4,
+     64,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     32,
+     32,
+     8,
+     "mfma_i32_32x32x8_i8",
+     4,
+     4,
+     16,
+     64,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     16,
+     16,
+     4,
+     "mfma_f64_16x16x4_f64",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f64_c},
 };
 
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
@@ -1255,8 +1196,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      2,
      4,
      64,
-     &lm_xf32_16_a,
-     &lm_xf32_16_b,
+     &lm_mfma_operand_16_2_a,
+     &lm_mfma_operand_16_2_b,
      &lm_mfma_16x16x4_f32_c},
     {"mma",
      "tf32",
@@ -1270,8 +1211,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      2,
      16,
      64,
-     &lm_xf32_32_a,
-     &lm_xf32_32_b,
+     &lm_mfma_operand_32_2_a,
+     &lm_mfma_operand_32_2_b,
      &lm_mfma_32x32x2_f32_c},
 
     {"mma",
@@ -1346,8 +1287,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "fp16",
@@ -1361,8 +1302,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
     {"mma",
      "bf16",
@@ -1376,8 +1317,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "bf16",
@@ -1391,8 +1332,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
     {"mma",
      "fp8e4m3",
@@ -1406,8 +1347,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp8e4m3",
@@ -1421,8 +1362,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf8e5m2",
@@ -1436,8 +1377,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf8e5m2",
@@ -1451,9 +1392,99 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     16,
+     16,
+     32,
+     "mfma_i32_16x16x32_i8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     32,
+     32,
+     16,
+     "mfma_i32_32x32x16_i8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "fp8e4m3",
+     "bf8e5m2",
+     "fp32",
+     16,
+     16,
+     32,
+     "mfma_f32_16x16x32_fp8_bf8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "bf8e5m2",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     32,
+     "mfma_f32_16x16x32_bf8_fp8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "fp8e4m3",
+     "bf8e5m2",
+     "fp32",
+     32,
+     32,
+     16,
+     "mfma_f32_32x32x16_fp8_bf8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "bf8e5m2",
+     "fp8e4m3",
+     "fp32",
+     32,
+     32,
+     16,
+     "mfma_f32_32x32x16_bf8_fp8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
 };
 
 /* ----------------------------- gfx950 (CDNA) ----------------------------- */
@@ -2100,8 +2131,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "fp16",
@@ -2115,8 +2146,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp16",
@@ -2130,8 +2161,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
     {"mma",
      "fp16",
@@ -2145,8 +2176,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf16",
@@ -2160,8 +2191,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      4,
      4,
      64,
-     &lm_mfma_16x16x16_a,
-     &lm_mfma_16x16x16_b,
+     &lm_mfma_operand_16_4_a,
+     &lm_mfma_operand_16_4_b,
      &lm_mfma_16x16x16_c},
     {"mma",
      "bf16",
@@ -2175,8 +2206,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf16",
@@ -2190,8 +2221,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      4,
      16,
      64,
-     &lm_mfma_32x32x8_a,
-     &lm_mfma_32x32x8_b,
+     &lm_mfma_operand_32_4_a,
+     &lm_mfma_operand_32_4_b,
      &lm_mfma_32x32x8_c},
     {"mma",
      "bf16",
@@ -2205,8 +2236,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "fp8e4m3",
@@ -2220,8 +2251,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp8e4m3",
@@ -2235,8 +2266,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf8e5m2",
@@ -2250,8 +2281,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf8e5m2",
@@ -2265,9 +2296,144 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     16,
+     16,
+     32,
+     "mfma_i32_16x16x32_i8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     32,
+     32,
+     16,
+     "mfma_i32_32x32x16_i8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     16,
+     16,
+     4,
+     "mfma_f64_16x16x4_f64",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f64_c},
+    {"mma",
+     "fp8e4m3",
+     "bf8e5m2",
+     "fp32",
+     16,
+     16,
+     32,
+     "mfma_f32_16x16x32_fp8_bf8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "bf8e5m2",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     32,
+     "mfma_f32_16x16x32_bf8_fp8",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "fp8e4m3",
+     "bf8e5m2",
+     "fp32",
+     32,
+     32,
+     16,
+     "mfma_f32_32x32x16_fp8_bf8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "bf8e5m2",
+     "fp8e4m3",
+     "fp32",
+     32,
+     32,
+     16,
+     "mfma_f32_32x32x16_bf8_fp8",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
+     &lm_mfma_32x32x8_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     16,
+     16,
+     64,
+     "mfma_i32_16x16x64_i8",
+     16,
+     16,
+     4,
+     64,
+     &lm_mfma_operand_16_16_a,
+     &lm_mfma_operand_16_16_b,
+     &lm_mfma_16x16x16_c},
+    {"mma",
+     "i8",
+     "i8",
+     "i32",
+     32,
+     32,
+     32,
+     "mfma_i32_32x32x32_i8",
+     16,
+     16,
+     16,
+     64,
+     &lm_mfma_operand_32_16_a,
+     &lm_mfma_operand_32_16_b,
+     &lm_mfma_32x32x8_c},
     /* TF32 via BF16x3 emulation. No native encoding: each row issues three
      * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
      * operands. Frag lengths, wave size and layout maps are inherited verbatim
@@ -2293,8 +2459,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     &lm_mfma_16x16x32_a,
-     &lm_mfma_16x16x32_b,
+     &lm_mfma_operand_16_8_a,
+     &lm_mfma_operand_16_8_b,
      &lm_mfma_16x16x32_c,
      NULL,
      NULL,
@@ -2317,8 +2483,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     &lm_mfma_32x32x16_a,
-     &lm_mfma_32x32x16_b,
+     &lm_mfma_operand_32_8_a,
+     &lm_mfma_operand_32_8_b,
      &lm_mfma_32x32x16_c,
      NULL,
      NULL,

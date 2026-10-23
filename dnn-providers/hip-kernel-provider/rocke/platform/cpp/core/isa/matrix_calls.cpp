@@ -6,7 +6,6 @@
  * cpp/core/lower_llvm/matrix_call.cpp. */
 #include "rocke/matrix_calls_internal.h"
 
-#include <array>
 #include <mutex>
 #include <set>
 #include <string>
@@ -21,15 +20,84 @@
 namespace ckc
 {
 
+/* A dense CDNA MFMA (Python _cdna_mfma): (A, B, C, cbsz, abid, blgp) with
+ * cbsz, abid and blgp all 0; A and B share one register type and the result
+ * takes the accumulator's. */
+static const rocke_matrix_arg_t k_cdna_mfma_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i32", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i32", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i32", 0, true},
+};
+
+static constexpr rocke_matrix_form_t as_is(rocke_matrix_register_t reg)
+{
+    return rocke_matrix_form_t{ROCKE_MATRIX_FORM_AS_IS, reg};
+}
+
+static constexpr rocke_matrix_register_t reg(const char* elem, int count)
+{
+    return rocke_matrix_register_t{{elem, count}, NULL, 0};
+}
+
+static constexpr rocke_matrix_call_t
+    cdna_mfma(const char* intrinsic, rocke_matrix_register_t operand, rocke_matrix_register_t acc)
+{
+    return rocke_matrix_call_t{intrinsic,
+                               k_cdna_mfma_args,
+                               (int)(sizeof(k_cdna_mfma_args) / sizeof(k_cdna_mfma_args[0])),
+                               as_is(operand),
+                               as_is(operand),
+                               as_is(acc),
+                               as_is(acc),
+                               NULL};
+}
+
+/* Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
+ * same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use). */
+static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
+static constexpr rocke_matrix_register_t k_fp8_x8 = {{"i32", 2}, k_i64_from_llvm22, 1};
+
 /* op_id -> call, for every MMA instruction lowered from data rather than by a
  * hand-written handler (Python MATRIX_CALLS, same order). */
-static const std::array<rocke_matrix_call_entry_t, 0> k_matrix_calls{};
+static const rocke_matrix_call_entry_t k_matrix_calls[] = {
+    /* CDNA i8 -> i32: four i8 per lane in one word (CDNA1-2), eight in an i64
+     * (CDNA3), sixteen in four words (CDNA4). */
+    {"mfma_i32_16x16x16_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.16x16x16i8", reg("i32", 0), reg("i32", 4))},
+    {"mfma_i32_32x32x8_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.32x32x8i8", reg("i32", 0), reg("i32", 16))},
+    {"mfma_i32_16x16x32_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.16x16x32.i8", reg("i64", 0), reg("i32", 4))},
+    {"mfma_i32_32x32x16_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.32x32x16.i8", reg("i64", 0), reg("i32", 16))},
+    {"mfma_i32_16x16x64_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.16x16x64.i8", reg("i32", 4), reg("i32", 4))},
+    {"mfma_i32_32x32x32_i8",
+     cdna_mfma("llvm.amdgcn.mfma.i32.32x32x32.i8", reg("i32", 4), reg("i32", 16))},
+    /* CDNA bf16 without the _1k suffix: two bf16 per lane as <2 x i16>. */
+    {"mfma_f32_16x16x8_bf16",
+     cdna_mfma("llvm.amdgcn.mfma.f32.16x16x8bf16", reg("i16", 2), reg("f32", 4))},
+    {"mfma_f32_32x32x4_bf16",
+     cdna_mfma("llvm.amdgcn.mfma.f32.32x32x4bf16", reg("i16", 2), reg("f32", 16))},
+    /* CDNA3+ mixed fp8 x bf8 and bf8 x fp8. */
+    {"mfma_f32_16x16x32_fp8_bf8",
+     cdna_mfma("llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8", k_fp8_x8, reg("f32", 4))},
+    {"mfma_f32_16x16x32_bf8_fp8",
+     cdna_mfma("llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8", k_fp8_x8, reg("f32", 4))},
+    {"mfma_f32_32x32x16_fp8_bf8",
+     cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.fp8.bf8", k_fp8_x8, reg("f32", 16))},
+    {"mfma_f32_32x32x16_bf8_fp8",
+     cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8", k_fp8_x8, reg("f32", 16))},
+};
 
 const rocke_matrix_call_entry_t* rocke_matrix_calls(int* out_count)
 {
     if(out_count)
-        *out_count = (int)k_matrix_calls.size();
-    return k_matrix_calls.data();
+        *out_count = (int)(sizeof(k_matrix_calls) / sizeof(k_matrix_calls[0]));
+    return k_matrix_calls;
 }
 
 const rocke_matrix_call_t* rocke_matrix_call_for(const char* op_id)

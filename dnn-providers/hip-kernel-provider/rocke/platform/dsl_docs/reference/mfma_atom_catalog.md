@@ -173,8 +173,8 @@ sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
 `mfma_f32_32x32x16_bf16`; see the
 [emulation description](../architecture/xf32_bf16x3_emulation.md).
 
-gfx942 declares two f64 atoms in the arch catalog. Both hold one f64 value per
-lane for A and B.
+gfx942 declares two f64 atoms in the arch catalog; gfx90a and gfx950 declare
+`mfma_f64_16x16x4_f64` only. Both hold one f64 value per lane for A and B.
 
 `mfma_f64_16x16x4_f64` uses the fp32 16x16x4 A/B lane maps
 (`row`/`col = lane % 16`, `k = lane / 16`). C/D hold four f64 values per lane

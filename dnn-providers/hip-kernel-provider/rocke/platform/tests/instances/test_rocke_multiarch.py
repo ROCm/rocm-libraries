@@ -71,8 +71,12 @@ class TestArchTarget(unittest.TestCase):
             [
                 "mfma_f32_16x16x16_f16",
                 "mfma_f32_16x16x4_f32",
+                "mfma_f32_16x16x8_bf16",
                 "mfma_f32_32x32x2_f32",
+                "mfma_f32_32x32x4_bf16",
                 "mfma_f32_32x32x8_f16",
+                "mfma_i32_16x16x16_i8",
+                "mfma_i32_32x32x8_i8",
             ],
         )
         self.assertIsInstance(backend_for("gfx908"), Gfx9MfmaBackend)

@@ -368,6 +368,23 @@ if(BUILD_TESTING)
                  rocke_matrix_call_lowering)
   endif()
 
+  # The CDNA MFMA catalog rows and lane maps beyond f16 / bf16 / fp8 / bf8.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/cdna_mfma_ops.cpp")
+    add_executable(rocke_cdna_mfma_ops core/cdna_mfma_ops.cpp)
+    target_link_libraries(rocke_cdna_mfma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_cdna_mfma_ops
+             COMMAND rocke_cdna_mfma_ops)
+    set_tests_properties(rocke_cdna_mfma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_cdna_mfma_ops)
+    set_target_properties(rocke_cdna_mfma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_cdna_mfma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_cdna_mfma_ops)
+  endif()
+
   # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
   # that rocke_b_mma consults to size a tile.mma result vector.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_frag_ssot.cpp")
