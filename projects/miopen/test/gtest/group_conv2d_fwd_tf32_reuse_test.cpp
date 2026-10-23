@@ -84,8 +84,13 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
     using Base::weights;
     using Base::wspace;
 
-    // compute_type must be set before the base SetUp() consumes it.
-    GroupConvTF32Reuse() { compute_type = "TF32"; }
+    // Set compute_type before the base SetUp() consumes it. Done here rather than in a constructor
+    // to avoid cppcheck uninitDerivedMemberVar on the base fixture's members.
+    void SetUp() override
+    {
+        compute_type = "TF32";
+        Base::SetUp();
+    }
 
     // These tests do their own verification, so suppress the base reference-conv check.
     void TearDown() override {}
