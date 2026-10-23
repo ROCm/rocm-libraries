@@ -58,7 +58,7 @@ void testing_csr2csr_compress_bad_arg(const Arguments& argus)
     std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
     hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
 
     auto csr_row_ptr_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (safe_size + 1)), device_free};
@@ -322,9 +322,9 @@ void testing_csr2csr_compress(Arguments argus)
     std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
     hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, idx_base));
 
-    hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
 
     srand(12345ULL);
 

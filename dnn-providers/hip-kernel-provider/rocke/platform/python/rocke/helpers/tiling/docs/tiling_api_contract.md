@@ -198,6 +198,22 @@ reached into ad-hoc by tooling.
 
 ---
 
+## 8. Coordinate graphs -- `tensor_transforms`
+
+One line per rule; the rules themselves are in `tensor_transforms_api.md` (section in brackets).
+
+- **The graph holds no tensor and no bound.** A length lives only on the `TensorDesc`; a halo is an `offset`,
+  never a restated length, and there is no PAD kind (sec 3).
+- **Validity comes from coordinates, never from addresses**: a check exists exactly where a coordinate's range
+  can leave an input domain, a read domain or its tensor bound (sec 7).
+- **No flags.** Whether an axis is checked follows from data (ranges against domains and bounds); there is no
+  per-axis switch and no `bounds=` override (sec 7).
+- **Structured address invariants**: one uniform term per set of graph inputs, a per-lane part that starts at 0
+  and fits i32, a Python-int constant, widths chosen from unconditioned ranges so no lane's arithmetic can
+  overflow (sec 9).
+
+---
+
 ## Where the domain theory lives (point, never restate)
 
 | topic | owner |
@@ -207,3 +223,4 @@ reached into ad-hoc by tooling.
 | interleaving recipe, C-store coalescing, access width | `tiling_interleaving_design.md` |
 | stage classes, edge kinds, bridge gating | `label_flow_and_transforms.md` |
 | banks, served groups, swizzle/pad, binding stage | `lds_banks.md` |
+| coordinate graphs, split addresses, derived bound checks | `tensor_transforms_api.md` |

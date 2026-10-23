@@ -17,33 +17,38 @@
 #                   recorder that silently drops ops. Pure Python, always run.
 #   parity matrix   the real gate: for every kernel and arch, the .ll produced
 #                   by replaying through the C++ engine must be BYTE-IDENTICAL
-#                   to the Python lowerer's. Needs a shared librocke.
+#                   to the Python lowerer's. Resolves or builds a source-matched
+#                   shared librocke.
 #   standalone CLI  the same byte-identity, but through a binary with no Python
 #                   in the process at all -- the shape this actually deploys in.
-#                   Needs the CMake target to have been built.
-#
-# The last two are skipped (never silently passed) when their artifact is
-# missing, and the skip reason names the command that produces it.
+#                   It comes from the same source-keyed artifact bundle.
 
 import os
+import pkgutil
 import subprocess
 import sys
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import pytest
 
+import rocke.portable_ir.tests as _unit_tests
+
 _HERE = Path(__file__).resolve().parent
 _PLATFORM = _HERE.parents[1]  # tests/portable_ir -> tests -> platform
 _PYROOT = _PLATFORM / "python"
-_LIBRARY = _PLATFORM.parent / "library"
+_LIBRARY_ROOTS = (
+    _PLATFORM.parent / "library",  # source tree: rocke/library
+    _PLATFORM / "tests" / "library",  # installed tree: <test-root>/tests/library
+)
 
 
 def _env():
     """Subprocess env with the engine package (and the library tree) importable."""
     env = dict(os.environ)
     parts = [str(_PYROOT)]
-    if (_LIBRARY / "kernels").is_dir():
-        parts.append(str(_LIBRARY))
+    parts.extend(str(root) for root in _LIBRARY_ROOTS if (root / "kernels").is_dir())
     if env.get("PYTHONPATH"):
         parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(parts)
@@ -54,37 +59,36 @@ def _env():
     return env
 
 
+@dataclass(frozen=True)
+class _PortableIrArtifacts:
+    library: str
+    replay_cli: str
+
+
+@cache
+def _portable_ir_artifacts() -> _PortableIrArtifacts:
+    """Resolve one source-matched artifact bundle for the pytest session."""
+    from rocke.portable_ir.src import online
+
+    library = online.resolve_library_path()
+    replay_cli = online.resolve_replay_cli_path()
+    assert library is not None and replay_cli is not None
+    online.validate_artifact_bundle(library, replay_cli)
+    return _PortableIrArtifacts(library=library, replay_cli=replay_cli)
+
+
 def _online_lib():
-    """Path to a prebuilt shared librocke, or None."""
-    import tempfile
-
-    for cand in (
-        os.environ.get("ROCKE_ONLINE_LIB"),
-        os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so"),
-        str(_PLATFORM / "build" / "librocke.so"),
-    ):
-        if cand and os.path.exists(cand):
-            return cand
-    return None
+    return _portable_ir_artifacts().library
 
 
+@cache
 def _replay_cli():
-    """Path to the built standalone replay CLI, or None."""
-    env = os.environ.get("ROCKE_REPLAY_CLI")
-    if env and os.path.exists(env):
-        return env
-    import tempfile
+    """Resolve the standalone CLI without imposing a shared-library dependency."""
+    from rocke.portable_ir.src import online
 
-    roots = [
-        Path(tempfile.gettempdir()) / "rocke_verify",
-        Path(tempfile.gettempdir()) / "rocke_online" / "core",
-        _PLATFORM / "build",
-    ]
-    for root in roots:
-        cand = root / "tests" / "rocke_portable_ir_replay_cli"
-        if cand.exists():
-            return str(cand)
-    return None
+    replay_cli = online.resolve_replay_cli_path()
+    assert replay_cli is not None
+    return replay_cli
 
 
 def _run(args, **kw):
@@ -93,20 +97,60 @@ def _run(args, **kw):
     )
 
 
+def test_subprocess_env_includes_an_installed_library_tree(monkeypatch, tmp_path):
+    installed = tmp_path / "tests" / "library"
+    (installed / "kernels").mkdir(parents=True)
+    monkeypatch.setattr(sys.modules[__name__], "_LIBRARY_ROOTS", (installed,))
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    assert str(installed) in _env()["PYTHONPATH"].split(os.pathsep)
+
+
+def test_replay_cli_resolution_does_not_require_a_shared_library(monkeypatch):
+    """Installed CLI consumers must not acquire the source-only library lane."""
+    from rocke.portable_ir.src import online
+
+    _replay_cli.cache_clear()
+    monkeypatch.setattr(online, "resolve_replay_cli_path", lambda: "installed-cli")
+    monkeypatch.setattr(
+        online,
+        "resolve_library_path",
+        lambda: pytest.fail("CLI-only resolution requested librocke"),
+    )
+    try:
+        assert _replay_cli() == "installed-cli"
+    finally:
+        _replay_cli.cache_clear()
+
+
 # ---------------------------------------------------------------------
-# Always-on lanes (pure Python, no engine binary)
+# Always-on unit/coverage lanes (never build a native artifact on demand)
 # ---------------------------------------------------------------------
-_UNIT_TEST_DIR = _PLATFORM / "python" / "rocke" / "portable_ir" / "tests"
-# Discovered rather than listed. A hardcoded list silently stops covering new
-# test modules -- test_roll_nd and test_roll_regimes were both missing from it --
-# and a test that never runs is worse than no test, because it reads as covered.
-_UNIT_MODULES = sorted(p.stem for p in _UNIT_TEST_DIR.glob("test_*.py"))
+# Discover through the importable package rather than a repository path. TheRock
+# relocates ``rocke`` beside the installed CTest metadata, where no
+# ``platform/python`` source layout exists.
+# ``test_hsaco_gate`` imports the HSACO parity driver, whose memory-capped
+# subprocess implementation uses Unix-only ``resource`` and ``os.fork``.
+# Keep the platform-independent portable-IR tests running on Windows, but do
+# not claim this Unix-specific HSACO gate is covered there until it has a
+# Windows-compatible subprocess implementation.
+_UNIT_MODULES = sorted(
+    module.name
+    for module in pkgutil.iter_modules(_unit_tests.__path__)
+    if module.name.startswith("test_")
+    and not (os.name == "nt" and module.name == "test_hsaco_gate")
+)
+if not _UNIT_MODULES:
+    raise RuntimeError("portable-IR unit package contains no test modules")
 
 
 @pytest.mark.parametrize("mod", _UNIT_MODULES)
 def test_unit(mod):
-    """The in-package unit tests, which pytest does not otherwise collect
-    (they live under python/rocke/, not under tests/)."""
+    """Run in-package units that pytest does not otherwise collect.
+
+    Most are pure Python. A few exercise a source-matched engine when the caller
+    already supplied one, but this lane never constructs native artifacts.
+    """
     r = _run([sys.executable, "-m", "unittest", "-v", f"rocke.portable_ir.tests.{mod}"])
     assert r.returncode == 0, r.stderr[-4000:] or r.stdout[-4000:]
 
@@ -125,6 +169,7 @@ def test_record_coverage():
 # ---------------------------------------------------------------------
 # Engine-binary lanes
 # ---------------------------------------------------------------------
+@pytest.mark.integration
 def test_parity_matrix():
     """Replayed .ll == Python .ll, byte for byte, for every kernel x arch.
 
@@ -134,12 +179,6 @@ def test_parity_matrix():
     reproduces Python's naming exactly.
     """
     lib = _online_lib()
-    if lib is None:
-        pytest.skip(
-            "no shared librocke; build one with "
-            "`python -c 'from rocke.portable_ir.src import online; online.build_lib()'` "
-            "or point ROCKE_ONLINE_LIB at it"
-        )
     env_lib = dict(ROCKE_ONLINE_LIB=lib)
     r = subprocess.run(
         [sys.executable, "-m", "rocke.portable_ir.drivers.parity_matrix"],
@@ -161,12 +200,6 @@ def test_standalone_cli_matches_python(tmp_path):
     Both artifact forms are checked: the concrete IR JSON and the CBOR recipe.
     """
     cli = _replay_cli()
-    if cli is None:
-        pytest.skip(
-            "replay CLI not built; "
-            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
-            "or point ROCKE_REPLAY_CLI at it"
-        )
 
     # Author the artifacts out-of-process so this test does not import the IR
     # stack into the pytest process (the recorder patches core.ir.IRBuilder).

@@ -830,7 +830,9 @@ class SizeMapping:
                  'DirectToLdsA',
                  'DirectToLdsB',
                  'ExpertSchedulingMode',
-                 'clusterDim'
+                 'clusterDim',
+                 'BufferLoad',
+                 'BufferStore'
                  ]
 
     @classmethod
@@ -930,7 +932,15 @@ class SizeMapping:
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim']
+                   clusterDim               = d['ClusterDim'],
+                   # BufferLoad/BufferStore were only added to SizeMapping's
+                   # serialized state by this change, so libraries built before
+                   # it won't have these keys; default to True (the prior,
+                   # implicit behavior) for backward compatibility, matching
+                   # the other newly-added-but-optional fields above (e.g.
+                   # PrefetchAcrossPersistent, TemporalHintA/B).
+                   BufferLoad               = bool(d.get('BufferLoad', True)),
+                   BufferStore              = bool(d.get('BufferStore', True))
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

@@ -636,10 +636,14 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
+    const int64_t seqLenQ = qTensor->dims()->Get(2);
+    const int64_t seqLenKv = kTensor->dims()->Get(2);
     MaskType maskType = MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            plan_utils::resolveDiagonalBand(attrs), seqLenQ, seqLenKv);
+        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -718,7 +722,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(!dqdkdvCfgOpt,
                                "Failed to resolve dqdkdv config for byte-stride validation");
     const bool useA32 = (dqdkdvTuple.atomic32 == static_cast<int>(AccumulatorMode::A32));
-    const int64_t seqLenQ = qTensor->dims()->Get(2);
     HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
                                                              *kTensor,
                                                              *vTensor,
@@ -965,7 +968,10 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    auto maskType = plan_utils::getMaskType(sdpaAttrs);
+    const auto maskBand = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), seqLenQ, seqLenKv);
+    const auto maskType
+        = plan_utils::getMaskType(maskBand.leftBound, maskBand.rightBound, maskBand.alignment);
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
@@ -1180,14 +1186,10 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.maskOrdinal = static_cast<int32_t>(maskType);
     if(maskType == MaskType::SLIDING_WINDOW)
     {
-        params.windowLeft = sdpaAttrs.left_bound().has_value()
-                                ? static_cast<int32_t>(sdpaAttrs.left_bound().value())
-                                : -1;
-        params.windowRight = sdpaAttrs.right_bound().has_value()
-                                 ? static_cast<int32_t>(sdpaAttrs.right_bound().value())
-                                 : -1;
+        params.windowLeft = static_cast<int32_t>(maskBand.leftBound);
+        params.windowRight = static_cast<int32_t>(maskBand.rightBound);
         params.topLeftAlignment
-            = sdpaAttrs.diagonal_alignment()
+            = maskBand.alignment
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 
