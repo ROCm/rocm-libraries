@@ -108,6 +108,7 @@ def _writer(hasSAtomic=True, pap=False, useBias=DataDirection.NONE):
                       "HasInvWbDevFences": False, "RequiresXCntForVolatileVMEM": False,
                       "EnableXnackReplay": False},
             version=(9, 5, 0),
+            laneSGPRCount=_KERNEL["WavefrontSize"] // 32,
             useBias=useBias,
             memTokenLdsBuffer0=0,
         ),
