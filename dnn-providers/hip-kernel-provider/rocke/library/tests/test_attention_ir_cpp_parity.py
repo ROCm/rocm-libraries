@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""C++/Python byte-identity gate for the dense + D256 attention kernels.
+"""C++/Python byte-identity gate for the library attention kernels.
 
 The IR-sha256 golden for these kernels lives in the platform parity harness
 (``platform/tests/instances/rocke_ir_parity_harness.py``, families
@@ -9,11 +9,19 @@ The IR-sha256 golden for these kernels lives in the platform parity harness
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
+The harness also pins representative ``emit_lse`` cases in that golden (gfx942 LSE
+cases live in ``tests/golden/attention_dense_gfx942_ir_sha256.json``); the extra
+LSE-enabled dense cases declared below widen only the cross-engine check.
 
-Cases are read back from the harness rather than redeclared, so the two gates can
-never drift apart. Importing the harness is the allowed ``library -> platform``
-direction (the reverse is forbidden); it is reached by path because the harness
-ships in the platform *test* tree, not inside the ``rocke`` package.
+The original cases are read back from the harness rather than redeclared.
+Importing the harness is the allowed ``library -> platform`` direction (the
+reverse is forbidden); it is reached by path because the harness ships in the
+platform *test* tree, not inside the ``rocke`` package.
+
+The gfx942 MLA prefill kernels get the same check over their own golden's case
+table (``test_mla_prefill_gfx942_golden._cases``), at every LLVM flavor that
+golden records: MLA is not a harness family, but the C++ lowerer is
+family-agnostic, so its IR must match the Python lowering byte for byte too.
 """
 
 from __future__ import annotations
@@ -25,7 +33,10 @@ from pathlib import Path
 _HARNESS_DIR = Path(__file__).resolve().parents[2] / "platform" / "tests" / "instances"
 
 # Families whose cases this gate covers (the ones built from library kernels).
-_FAMILIES = ("attention_dense", "attention_d256")
+# lightning_indexer is a Python-authored, generically-lowered family (no
+# hand-written C++ emitter), so this gate is what actually proves its Python and
+# C++ lowerings agree -- the representative golden only pins the Python side.
+_FAMILIES = ("attention_dense", "attention_d256", "lightning_indexer")
 
 
 def _harness():
@@ -73,6 +84,96 @@ def test_attention_ir_cpp_python_byte_identity():
     empty = set(_FAMILIES) - {c["family"] for c in cases}
     assert not empty, f"harness declares no cases for families {sorted(empty)}"
 
+    # Exercise both final-output stages, including the no-key/sink branches.
+    # Sq256/Skv64/window64 includes both nonempty and empty query rows.
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "empty_window_sinks",
+            {
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persistent_empty_window_sinks",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+            },
+        ),
+    ):
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx950_lse_{label}",
+                "arch": "gfx950",
+                "build": _harness().build_attention_dense(
+                    "gfx950",
+                    emit_lse=True,
+                    **overrides,
+                ),
+            }
+        )
+
+    # gfx942 has one shared epilogue for both grids; cover each grid with and
+    # without keyless rows (the harness has no gfx942 dense builder).
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        build_attention_dense as build_gfx942_dense,
+    )
+
+    gfx942_base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=8,
+        num_kv_heads=2,
+        head_size=128,
+        dtype="bf16",
+        emit_lse=True,
+    )
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True, "num_persistent": 304}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "num_persistent": 304,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+    ):
+        spec = Gfx942AttentionDenseSpec(**{**gfx942_base, **overrides})
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx942_lse_{label}",
+                "arch": "gfx942",
+                "build": lambda spec=spec: build_gfx942_dense(spec, arch="gfx942"),
+            }
+        )
+
     prev = os.environ.get("ROCKE_CPP_STRICT")
     os.environ["ROCKE_CPP_STRICT"] = "1"
     mism = []
@@ -103,6 +204,63 @@ def test_attention_ir_cpp_python_byte_identity():
         pytest.skip("CPP_UNPORTED_ARCHES cases not gated:\n  " + "\n  ".join(gaps))
 
 
+def test_mla_prefill_ir_cpp_python_byte_identity():
+    """Every MLA golden case, at every golden flavor, lowers to identical IR
+    through both engines. Same outcome classification as the test above. A
+    case the flavor's admission refuses (agpr_acc at llvm20) is the golden's
+    expected failure, so there is nothing to lower and it is not compared."""
+    import pytest
+
+    try:
+        from rocke.core.backend import BackendCoverageGap, BackendError
+        from rocke.core.ir_golden import GOLDEN_FLAVORS
+        from rocke.helpers.compile import _lower_llvm_via_backend
+    except ImportError as e:  # pragma: no cover
+        pytest.skip(f"backend lowering unavailable: {e}")
+    import test_mla_prefill_gfx942_golden as mla
+
+    prev = os.environ.get("ROCKE_CPP_STRICT")
+    os.environ["ROCKE_CPP_STRICT"] = "1"
+    mism = []
+    gaps = []
+    compared = 0
+    try:
+        for flavor in GOLDEN_FLAVORS:
+            # Both engines resolve the flavor from the environment, and the
+            # build's admission reads it too.
+            with mla._flavor_env(flavor):
+                for cid, build in mla._cases().items():
+                    try:
+                        kernel = build()
+                    except NotImplementedError:
+                        continue
+                    py = _lower_llvm_via_backend(
+                        kernel, arch=mla._ARCH, backend="python", spec=None
+                    )
+                    try:
+                        cpp = _lower_llvm_via_backend(
+                            kernel, arch=mla._ARCH, backend="cpp", spec=None
+                        )
+                    except BackendCoverageGap:
+                        gaps.append(f"{flavor}/{cid}")
+                        continue
+                    except BackendError as e:
+                        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                    compared += 1
+                    if py != cpp:
+                        mism.append(f"{flavor}/{cid}")
+    finally:
+        if prev is None:
+            os.environ.pop("ROCKE_CPP_STRICT", None)
+        else:
+            os.environ["ROCKE_CPP_STRICT"] = prev
+    assert not mism, "MLA cpp/python IR byte-mismatch:\n  " + "\n  ".join(mism)
+    assert compared, "no MLA case was compared"
+    if gaps:
+        pytest.skip("CPP_UNPORTED_ARCHES cases not gated:\n  " + "\n  ".join(gaps))
+
+
 if __name__ == "__main__":
     test_attention_ir_cpp_python_byte_identity()
+    test_mla_prefill_ir_cpp_python_byte_identity()
     print("PASS")

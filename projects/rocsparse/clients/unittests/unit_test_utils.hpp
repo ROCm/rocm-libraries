@@ -34,6 +34,8 @@
 
 #include "rocsparse.h"
 
+#include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <vector>
@@ -220,6 +222,38 @@ namespace rocsparse_ut
         if(hipGetDeviceProperties(&props, dev) != hipSuccess)
             return 0;
         return props.warpSize;
+    }
+
+    // True on gfx8 / gfx9, where the rocsparse::wfreduce_* routines are built on
+    // DPP row_shr / row_bcast steps (ROCSPARSE_USE_MOVE_DPP). Those leave the
+    // result only in the TOP lanes of the wavefront: lane wf-1 for
+    // wfreduce_sum / _max / _min, and the last SUB lanes for
+    // wfreduce_partial_sum<WFSIZE, SUB> (the lanes callers read). On every other
+    // architecture the shuffle-based variants return the result in every lane.
+    // ROCSPARSE_USE_MOVE_DPP only exists in the device pass, so the host tests
+    // select the architecture from the device name instead.
+    inline bool device_uses_dpp_wfreduce()
+    {
+        static const bool uses_dpp = [] {
+            int             dev   = 0;
+            hipDeviceProp_t props = {};
+            if(hipGetDevice(&dev) != hipSuccess
+               || hipGetDeviceProperties(&props, dev) != hipSuccess)
+                return false;
+            return std::strncmp(props.gcnArchName, "gfx8", 4) == 0
+                   || std::strncmp(props.gcnArchName, "gfx9", 4) == 0;
+        }();
+
+        return uses_dpp;
+    }
+
+    // First lane of a wavefront of `wf` lanes whose wfreduce_* result is
+    // specified for a reduction leaving `sub` result lanes (sub == 1 for
+    // sum / max / min): lane 0 (every lane) on the shuffle path, lane wf-sub on
+    // the DPP path. Check lanes [first, wf).
+    inline uint32_t wfreduce_first_valid_lane(uint32_t wf, uint32_t sub)
+    {
+        return device_uses_dpp_wfreduce() ? wf - sub : 0;
     }
 
 #ifdef __HIPCC__

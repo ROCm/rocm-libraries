@@ -413,9 +413,10 @@ std::string SignatureKernelDescriptor::toString() const {
     kStr += kdIndent + ".amdhsa_group_segment_fixed_size " + std::to_string(groupSegSize) +
             " // lds bytes\n";
 
-    // Check if architecture supports wave32
-    bool hasWave32 = (isaVersion[0] >= 10);  // GFX10+
-    if (hasWave32) {
+    // gfx12.5 is wave32-only; its descriptor wave-size selector is reserved.
+    bool hasWavefrontSize32Directive =
+        isaVersion[0] >= 10 && !(isaVersion[0] == 12 && isaVersion[1] == 5);
+    if (hasWavefrontSize32Directive) {
         if (wavefrontSize == 32) {
             kStr += kdIndent + ".amdhsa_wavefront_size32 1 // 32-thread wavefronts\n";
         } else {

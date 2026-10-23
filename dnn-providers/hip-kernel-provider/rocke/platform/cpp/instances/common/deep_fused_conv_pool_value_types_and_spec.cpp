@@ -16,7 +16,8 @@
  *   - make_deep_fused_conv_pool_spec (lines 207-283): the tile_m auto-derive.
  *   - is_valid_spec (lines 286-356): the deep-fusion constraint chain + the
  *     leading conv-gate delegation.
- *   - deep_fused_conv_pool_signature (lines 359-378): A/B/Y/W1 + *_bytes.
+ *   - deep_fused_conv_pool_signature: A/B/Y/W1 + *_bytes + conv0's AOT
+ *     problem block.
  *   - deep_fused_conv_pool_grid (lines 381-385).
  *
  * Python integer semantics: every // here operates on non-negative operands
@@ -41,6 +42,7 @@
  * deep_fused internal header only forward-uses it as an opaque pointer, so the
  * complete struct + rocke_implicit_gemm_conv_spec_default ctor come from the conv
  * peer's public header here. */
+#include "rocke/instance_conv_abi.h" /* rocke_conv_fwd_problem_block */
 #include "rocke/instance_conv_implicit_gemm.h"
 
 #include "rocke/ir_internal.h" /* rocke_i_set_err (sticky-error helper) */
@@ -714,9 +716,9 @@ rocke_status_t rocke_deep_fused_conv_pool_signature(rocke_arena_t* arena,
 {
     rocke_signature_builder_t sb;
     rocke_status_t st;
+    rocke_conv_arg_list_t block;
 
-    (void)spec; /* signature is shape-independent. */
-    if(arena == NULL || out_items == NULL || out_count == NULL)
+    if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -739,6 +741,15 @@ rocke_status_t rocke_deep_fused_conv_pool_signature(rocke_arena_t* arena,
     rocke_signature_builder_scalar(&sb, "A_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "B_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "Y_bytes", "i32");
+    /* conv0 is built by the AOT implicit-GEMM builder, which emits the
+     * runtime problem block right after the byte sizes; kernargs pack
+     * positionally, so the signature has to declare it too. */
+    rocke_conv_fwd_problem_block(spec->problem.conv.is_3d, &block);
+    for(int i = 0; i < block.count; ++i)
+    {
+        rocke_signature_builder_scalar(
+            &sb, block.items[i].name, rocke_conv_arg_kind_str(block.items[i].kind));
+    }
     return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 

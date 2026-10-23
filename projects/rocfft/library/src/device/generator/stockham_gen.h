@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,6 +109,7 @@ struct StockhamPartialPassParams
                               const std::vector<unsigned int>& pp_factors_curr,
                               const std::vector<unsigned int>& pp_factors_other)
         : parent_length(parent_length)
+        , node_length(parent_length)
         , pp_threads_per_transform(pp_threads_per_transform)
         , current_dim(current_dim)
         , off_dim(off_dim)
@@ -117,7 +118,13 @@ struct StockhamPartialPassParams
     {
     }
 
+    // Parent length in plan order.  The launcher path emits this as the
+    // function-pool key, so it has to stay in plan order there.
     std::vector<unsigned int> parent_length;
+    // The same lengths as the kernel's own node sees them: the SBRR's node is
+    // in plan order, the SBCC's is rotated so its transform dimension comes
+    // first.  Code generation indexes this one, never parent_length.
+    std::vector<unsigned int> node_length;
     unsigned int              pp_threads_per_transform;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;

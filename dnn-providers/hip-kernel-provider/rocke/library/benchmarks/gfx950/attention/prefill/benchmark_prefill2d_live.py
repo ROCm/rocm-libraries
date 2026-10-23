@@ -395,7 +395,9 @@ class CkVariantBench:
         self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
-    def _problem(self, shape, sliding_window: int, is_fp8: bool):
+    def _problem(
+        self, shape, sliding_window: int, is_fp8: bool, num_kv_blocks: int = 0
+    ):
         from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
@@ -416,9 +418,17 @@ class CkVariantBench:
             use_fp8=is_fp8,
             num_cus=self.num_cus,
             compile_backend=self.compile_backend,
+            num_kv_blocks=num_kv_blocks,
         )
 
-    def build(self, shape, variant: str, sliding_window: int, is_fp8: bool):
+    def build(
+        self,
+        shape,
+        variant: str,
+        sliding_window: int,
+        is_fp8: bool,
+        num_kv_blocks: int = 0,
+    ):
         from rocke import compile_kernel
         from kernels import (
             UnifiedAttention2DTiledSpec,
@@ -427,12 +437,13 @@ class CkVariantBench:
         )
         from kernels.common.attention_unified import (
             _attn_signature,
+            _enable_i64_kv_addr,
             _select_2d_compile_backend,
         )
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
-        problem = self._problem(shape, sliding_window, is_fp8)
+        problem = self._problem(shape, sliding_window, is_fp8, num_kv_blocks)
         flags = _variant_flags(
             variant, sliding_window=sliding_window, dtype=dtype, is_fp8=is_fp8
         )
@@ -484,12 +495,22 @@ class CkVariantBench:
             use_transposed_mask_limit=flags["use_transposed_mask_limit"],
             use_fast_paged_kv_desc=flags["use_fast_paged_kv_desc"],
             use_early_v_schedule=flags["use_early_v_schedule"],
-            use_i64_kv_addr=flags["use_i64_kv_addr"],
+            # A cache past the i32 buffer range needs i64 whatever the variant asks.
+            use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
         )
-        key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
+        # kernel_name() does not encode the KV addressing width, so key on it too.
+        key = (
+            shape.signature,
+            variant,
+            spec.kernel_name(),
+            spec.use_i64_kv_addr,
+            self.compile_backend,
+        )
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            backend = self.compile_backend or _select_2d_compile_backend(
+                problem, "gfx950"
+            )
             if backend == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -512,10 +533,16 @@ class CkVariantBench:
 
     def run(self, shape, data, variant, sliding_window, is_fp8, *, warmup, iters):
         import torch
-        from kernels.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values, _spec_kv_addr_limit
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
-        launcher, spec, problem = self.build(shape, variant, sliding_window, is_fp8)
+        launcher, spec, problem = self.build(
+            shape,
+            variant,
+            sliding_window,
+            is_fp8,
+            num_kv_blocks=int(data["key_cache"].shape[0]),
+        )
         hip_stream = _bench_stream_handle()
         out = torch.empty_like(data["query"])
         vals = _attn_values(
@@ -538,6 +565,7 @@ class CkVariantBench:
             include_qq_bias_stride=True,
             k_scale=1.0,
             v_scale=1.0,
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         cfg = LaunchConfig(
             grid=(
@@ -724,6 +752,39 @@ def main() -> int:
         "'sweep' times every engine the dispatcher registry offers for each "
         "problem (one entry per launched path).",
     )
+    ap.add_argument(
+        "--sweep-candidate-prefix",
+        default="",
+        help="restrict the 'sweep' lane to candidates whose name starts with this "
+        "(e.g. attention_gfx950_u2d_transposed32).",
+    )
+    ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated unified-tuning stacks in the 'sweep' "
+        "lane (unified specs only; dense runs in the combo / table sweeps). "
+        "full samples every kernel knob; see --sweep-tuning-sample",
+    )
+    ap.add_argument(
+        "--sweep-tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate "
+        "(0 = the full stream). Ignored for production",
+    )
+    ap.add_argument("--sweep-seed", type=int, default=0)
+    ap.add_argument(
+        "--sweep-tuning-id-prefix",
+        default="",
+        help="restrict the 'sweep' lane to tuning ids with this prefix",
+    )
+    ap.add_argument(
+        "--sweep-limit",
+        type=int,
+        default=0,
+        help="cap how many specs the 'sweep' lane times per shape (0 = no cap)",
+    )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
     ap.add_argument("--iterations", type=int, default=50)
@@ -886,6 +947,12 @@ def main() -> int:
                         stream_handle=_bench_stream_handle(),
                         warmup=args.warmup,
                         iters=args.iterations,
+                        candidate_prefix=args.sweep_candidate_prefix,
+                        tuning_id_prefix=args.sweep_tuning_id_prefix,
+                        limit=args.sweep_limit,
+                        tuning_sample=args.sweep_tuning_sample,
+                        seed=args.sweep_seed,
+                        sweep_level=args.sweep_level,
                     )
                     if not sweep_entries:
                         print(f"  [sweep] no eligible engines for {tag} sw={sw}")
@@ -1101,7 +1168,11 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     code path as the production provider.
     """
     import torch
-    from dispatch.attention import AttentionRequest, dispatch_attention
+    from dispatch.attention import (
+        AttentionMaskType,
+        AttentionRequest,
+        dispatch_attention,
+    )
     from kernels import run_unified_attention_torch
     from kernels.common.attention_unified import _resolve_attention_arch
     from rocke.runtime import synchronize_and_release, time_launches
@@ -1121,6 +1192,10 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         sliding_window=sw,
         kv_block_size=shape.block_size,
         num_cus=bench.num_cus,
+        # The paged unified kernels (and this harness' reference) are bottom-right
+        # causal; AttentionRequest defaults to NO_MASK, which now means full
+        # attention on gfx950 and rejects a sliding window.
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").
@@ -1136,7 +1211,9 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
 
     run_backend = "tiled" if dispatched_path == "2d" else dispatched_path
 
-    problem = bench._problem(shape, sw, is_fp8)
+    problem = bench._problem(
+        shape, sw, is_fp8, num_kv_blocks=int(data["key_cache"].shape[0])
+    )
     out = torch.empty_like(data["query"])
     hip_stream = _bench_stream_handle()
 
@@ -1146,14 +1223,16 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         from kernels import supports_native_unified_attention_tiled
         from kernels.common.attention_unified import _tiled_spec_from_problem
 
-        ok_t, _ = supports_native_unified_attention_tiled(problem)
+        ok_t, _ = supports_native_unified_attention_tiled(problem, "gfx950")
         instance_name = (
-            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
+            _tiled_spec_from_problem(problem, "gfx950").kernel_name()
+            if ok_t
+            else "scalar"
         )
     elif run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled
 
-        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem, "gfx950")
         instance_name = "3d" if ok_3d else "scalar"
     else:
         instance_name = "scalar"

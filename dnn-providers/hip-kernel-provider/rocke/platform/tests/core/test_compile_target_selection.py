@@ -41,6 +41,9 @@ def kernel() -> KernelDef:
         ("gfx1250", "gfx1250", "gfx1250"),
         ("gfx1250-strict", "gfx1250", "gfx1250"),
         ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-"),
+        ("gfx1101", "gfx11-generic", "gfx1101"),
+        ("gfx1101:unknown+", "gfx11-generic", "gfx1101:unknown+"),
+        ("gfx1101-strict", "gfx11-generic", "gfx1101"),
     ],
 )
 def test_compile_kernel_selects_targets(
@@ -74,6 +77,9 @@ def test_compile_kernel_selects_targets(
     [
         ("gfx1250-strict", "gfx1250", "gfx1250"),
         ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-"),
+        ("gfx1101", "gfx11-generic", "gfx1101"),
+        ("gfx1101:unknown+", "gfx11-generic", "gfx1101:unknown+"),
+        ("gfx1101-strict", "gfx11-generic", "gfx1101"),
     ],
 )
 def test_hipcc_selects_targets(

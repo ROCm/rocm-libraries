@@ -405,7 +405,9 @@ public:
                     std::ostringstream oss;
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
+#ifndef ROCFFT_BUILD_INTERNAL
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
+#endif
                     throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 

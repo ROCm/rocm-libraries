@@ -531,6 +531,17 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
                 )
             )
 
+    for op in ("copy", "neg", "abs", "relu", "add", "sub", "mul", "max", "min"):
+        cases.append(
+            Case(
+                f"elementwise.f64.{op}",
+                "small",
+                lambda op=op: build_elementwise(
+                    ElementwiseSpec(op=op, dtype="f64", vec=2)
+                ),
+            )
+        )
+
     for dtype in ("f16", "bf16"):
         cases.extend(
             [
@@ -601,6 +612,23 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
             ),
         )
     )
+    for op in ("sum", "max", "min", "mean", "prod"):
+        cases.append(
+            Case(
+                f"reduce.f64.{op}",
+                "small",
+                lambda op=op: build_reduce2d(
+                    Reduce2DSpec(
+                        n_per_block=2048,
+                        op=op,
+                        dtype="f64",
+                        block_size=256,
+                        vec=2,
+                        wave_size=red_wave,
+                    )
+                ),
+            )
+        )
 
     for op in ("avg", "sum"):
         cases.append(

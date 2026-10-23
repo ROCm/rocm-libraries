@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "id": "589bc6c6-d94e-4400-95d7-3e517f9b6b67",
+  "name": "Gfx950AttentionDense variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "causal",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "ragged",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "batch",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "seqlen_q",
+      "type": "int",
+      "default_value": 512
+    },
+    {
+      "name": "seqlen_kv",
+      "type": "int",
+      "default_value": 512
+    },
+    {
+      "name": "block_m",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 64
+    }
+  ]
+}

@@ -18,19 +18,25 @@ namespace hipdnn_integration_tests
 // The fill recipes for a graph's input tensors: one FillRecipe per tensor,
 // plus seed overrides. fillInputs() consults this to fill each input.
 //
-// Two maps for two independent concerns:
-//   _fills  — how to fill each tensor (kind + params)
-//   _seeds  — per-tensor seed overrides
+// Maps for independent concerns:
+//   _fills      — how to fill each tensor (kind + params)
+//   _typeFills  — data-type defaults, below everything in _fills
+//   _seeds      — per-tensor seed overrides
 //
 // One scalar:
 //   _globalSeed — seeds the RNG that generates per-tensor seeds
 //
 // Write modes:
-//   set(uid, f)        — operator[], always overwrites. Tests and metadata
-//                        use this to force a specific fill for a tensor.
-//   setDefault(uid, f) — try_emplace, no-op if uid already present.
-//                        Declaration functions use this to register
-//                        op-specific defaults without stomping overrides.
+//   set(uid, f)            — operator[], always overwrites. Tests and metadata
+//                            use this to force a specific fill for a tensor.
+//   setDefault(uid, f)     — try_emplace, no-op if uid already present.
+//                            Declaration functions use this to register
+//                            op-specific defaults without stomping overrides.
+//   setTypeDefault(uid, f) — data-type default, consulted only when _fills
+//                            has no entry. Kept in its own map so fill()
+//                            resolves the same whichever is written first: an
+//                            op default derived from fill(x) sees x's final
+//                            range.
 //
 // Seeds are independent of fills — setting a seed never creates a fill entry,
 // and setting a fill never touches the seed map.
@@ -83,17 +89,32 @@ public:
         return *this;
     }
 
+    // ── Write (data-type default) — fillInputs ──────────────────────────
+
+    InputFillRecipes& setTypeDefault(int64_t uid, FillRecipe f)
+    {
+        _typeFills[uid] = f;
+        return *this;
+    }
+
     // ── Read ────────────────────────────────────────────────────────────
 
-    const std::unordered_map<int64_t, FillRecipe>& fills() const
+    // Every tensor with a recipe, each resolved as fill() would.
+    std::unordered_map<int64_t, FillRecipe> fills() const
     {
-        return _fills;
+        auto resolved = _fills;
+        resolved.insert(_typeFills.begin(), _typeFills.end());
+        return resolved;
     }
 
     FillRecipe fill(int64_t uid) const
     {
-        auto it = _fills.find(uid);
-        return it != _fills.end() ? it->second : FillRecipe{};
+        if(auto it = _fills.find(uid); it != _fills.end())
+        {
+            return it->second;
+        }
+        auto it = _typeFills.find(uid);
+        return it != _typeFills.end() ? it->second : FillRecipe{};
     }
 
     // ── Seed config ─────────────────────────────────────────────────────
@@ -129,7 +150,7 @@ public:
     nlohmann::json toJson() const
     {
         nlohmann::json inputs;
-        for(const auto& [uid, fill] : _fills)
+        for(const auto& [uid, fill] : fills())
         {
             nlohmann::json j;
             j["kind"] = kindToString(fill.kind);
@@ -191,6 +212,7 @@ public:
 
 private:
     std::unordered_map<int64_t, FillRecipe> _fills;
+    std::unordered_map<int64_t, FillRecipe> _typeFills;
     std::unordered_map<int64_t, unsigned int> _seeds;
     unsigned int _globalSeed = K_DEFAULT_GLOBAL_SEED;
 

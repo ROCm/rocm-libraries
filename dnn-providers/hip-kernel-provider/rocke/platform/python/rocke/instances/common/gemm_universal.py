@@ -532,6 +532,23 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
 
+    # DirectToLDS: the emitter bakes a fixed per-lane chunk width into the
+    # kernel at build time (see build_universal_gemm), capped at the arch's
+    # own buffer_load_lds width (ArchTarget.async_lds_max_dwords). Asking for
+    # a wider one than the arch has is not a build-time error -- the AMDGPU
+    # backend aborts the whole process -- so an arch with too little width to
+    # satisfy tile_k, or none at all, must be rejected here.
+    if spec.trait.direct_to_lds:
+        if target.async_lds_max_dwords < 1:
+            return False, f"direct_to_lds: {arch} has no DRAM->LDS DMA instruction"
+        _dtl_halves = min(4, target.async_lds_max_dwords) * 2
+        if t.tile_k % _dtl_halves != 0:
+            return False, (
+                f"direct_to_lds requires tile_k % {_dtl_halves} == 0 (got "
+                f"{t.tile_k}) with {target.async_lds_max_dwords} dword(s)/lane "
+                f"on {arch}"
+            )
+
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
@@ -1228,10 +1245,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
     # remaining chunks_total / block_size iterations.
     if spec.trait.direct_to_lds:
+        from ...core.arch import ArchTarget
         from ...core.ir import I64 as _I64
 
-        _DTL_DWORDS = 4  # 16 bytes/lane
-        _DTL_HALVES = _DTL_DWORDS * 2  # 8 elements (bf16 halves) per lane chunk
+        # Capped at the arch's own buffer_load_lds width (is_valid_spec has
+        # already checked tile_k divides it): CDNA4 (gfx950) has the full
+        # dword=4 (16 bytes/lane) form, CDNA3 (gfx942) only dword=1.
+        _DTL_DWORDS = min(4, ArchTarget.from_gfx(arch).async_lds_max_dwords)
+        _DTL_HALVES = _DTL_DWORDS * 2  # dwords*2 halves (bf16 elements) per lane chunk
         _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
         if (block_k % _DTL_HALVES) != 0:
             raise ValueError(

@@ -17,6 +17,8 @@ bool GpuIntReferenceValidation<T>::allClose(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
+    detail::throwIfRagged(reference, implementation);
+
     if(reference.elementCount() != implementation.elementCount()
        || reference.dims() != implementation.dims())
     {

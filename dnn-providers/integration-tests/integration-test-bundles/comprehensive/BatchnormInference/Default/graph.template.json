@@ -1,0 +1,74 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormInferenceTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "bias_tensor_uid": 2,
+        "inv_variance_tensor_uid": 3,
+        "mean_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 1
+      },
+      "name": "BatchnormInference_0",
+      "outputs": {
+        "y_tensor_uid": 0
+      },
+      "type": "BatchnormInferenceAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormInference_0::Y",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "X",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "inv_variance",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "mean",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    }
+  ]
+}

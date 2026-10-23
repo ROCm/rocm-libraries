@@ -26,8 +26,6 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef HANDLE_H
-#define HANDLE_H
 
 #include "rocblaslt.h"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
@@ -113,9 +111,11 @@ struct _rocblaslt_handle
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
     int32_t uniform_summation_order = 0;
 
+    // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
+    //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
+    int useRocRoller = -1;
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
-    int   useRocRoller     = -1;
 #endif
 
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
@@ -135,6 +135,10 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
+    // check_synchronizer.hpp for the checker protocol.
+    bool check_synchronizer = false;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one
@@ -211,12 +215,19 @@ struct _rocblaslt_handle
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
-        // needs no such treatment: it really is one stream shared by all threads.
+        // is nullptr, which the loop below also uses to mean "block free", so it
+        // would reserve nothing and alias whichever stream claims that block
+        // next; hipStreamLegacy names that same stream and shares its key.
         const void* key = static_cast<const void*>(stream);
         if(stream == hipStreamPerThread)
         {
             static thread_local char perThreadKey;
             key = &perThreadKey;
+        }
+        else if(stream == nullptr || stream == hipStreamLegacy)
+        {
+            static char legacyNullKey;
+            key = &legacyNullKey;
         }
 
         for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
@@ -363,6 +374,9 @@ struct _rocblaslt_matmul_desc
     // See hipblaslt.h for the guarantee.
     int32_t uniform_summation_order = 0;
 
+    // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (hipblasLtInt4Encoding_t).
+    int32_t int4_encoding_a_ext = 0;
+
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
@@ -405,6 +419,7 @@ struct _rocblaslt_matmul_desc
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
+        this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
         this->bias_stride             = src.bias_stride;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
@@ -471,5 +486,3 @@ inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      h
         return 1;
     return 0;
 }
-
-#endif // HANDLE_H

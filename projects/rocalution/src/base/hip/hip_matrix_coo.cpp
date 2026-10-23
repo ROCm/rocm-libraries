@@ -818,6 +818,7 @@ namespace rocalution
             allocate_hip(this->nnz_, &perm);
             status = rocsparse_create_identity_permutation(
                 ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->nnz_, perm);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             status
                 = rocsparse_coosort_by_row(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),

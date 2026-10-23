@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@ namespace rocsparse
         {
             while(left < right)
             {
-                const J mid = (left + right) / 2;
+                const J mid = left + ((right - left) >> 1);
                 if(array[mid + 1] <= val)
                 {
                     left = mid + 1;

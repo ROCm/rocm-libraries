@@ -67,6 +67,7 @@ DEF_BATCH(.format = MUBUF_STORE,
         .operand_fields = { {S0, .size=128} },
     BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8", .logical = "BufferStoreD16HIU8",
     BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16", .logical = "BufferStoreD16HIB16",
+    BufferAtomicPkAddBf16Inst, "buffer_atomic_pk_add_bf16", .logical = "BufferAtomicPkAddBF16",
 )
 // Control Flow — Branches (inherit {S, simm16, label, 16} from SOPP_BRANCH)
 DEF_BATCH(.format = SOPP_BRANCH,
@@ -361,28 +362,9 @@ DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA
     .coissue = 0x00C8, .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
 
-// === gfx12-only WMMA/SWMMA (not available on gfx1250) ===
+// === gfx12-only WMMA (not available on gfx1250) ===
 // FIXME: These instructions exist in gfx12 but NOT in gfx1250.
 //        Verify operand sizes and remove this warning once confirmed.
-
-// SWMMA 16x16x32
-DEF_BATCH(.format = SWMMA,
-    VSwmmacBf1616x16x32Bf16Inst, "v_swmmac_bf16_16x16x32_bf16",
-    VSwmmacF1616x16x32F16Inst, "v_swmmac_f16_16x16x32_f16",
-    VSwmmacF3216x16x32Bf16Inst, "v_swmmac_f32_16x16x32_bf16",
-    VSwmmacF3216x16x32F16Inst, "v_swmmac_f32_16x16x32_f16",
-    VSwmmacF3216x16x32Bf8Bf8Inst, "v_swmmac_f32_16x16x32_bf8_bf8",
-    VSwmmacF3216x16x32Bf8Fp8Inst, "v_swmmac_f32_16x16x32_bf8_fp8",
-    VSwmmacF3216x16x32Fp8Bf8Inst, "v_swmmac_f32_16x16x32_fp8_bf8",
-    VSwmmacF3216x16x32Fp8Fp8Inst, "v_swmmac_f32_16x16x32_fp8_fp8",
-    VSwmmacI3216x16x32Iu4Inst, "v_swmmac_i32_16x16x32_iu4",
-)
-DEF_T(VSwmmacI3216x16x32Iu8Inst, "v_swmmac_i32_16x16x32_iu8", .format = SWMMA_INT8)
-
-// SWMMA 16x16x64
-DEF_BATCH(.format = SWMMA,
-    VSwmmacI3216x16x64Iu4Inst, "v_swmmac_i32_16x16x64_iu4",
-)
 
 // WMMA 16x16x16
 DEF_BATCH(.format = WMMA,
@@ -409,6 +391,7 @@ DEF_BATCH(.format = SOP1,
     SCvtF32U32Inst, "s_cvt_f32_u32", .logical = "SCvtF32U32",
     SCvtU32F32Inst, "s_cvt_u32_f32", .logical = "SCvtU32F32",
     SFf1I32B32Inst, "s_ff1_i32_b32", .flags = {HasSideEffect}, .logical = "SFf1B32",
+    SSendmsgRtnB32Inst, "s_sendmsg_rtn_b32", .flags = {HasSideEffect}, .logical = "SSendMsgRtnB32",
     SAndSaveexecB64Inst, "s_and_saveexec_b64", .flags = {Branch, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
@@ -473,6 +456,12 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
     .logical = "GlobalPrefetchB8",
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+
+// FLAT-addressed form of the same prefetch: identical operands and semantics, including
+// both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
+// Only the spelling of a null saddr differs: GLOBAL writes "off", FLAT omits it.
+DEF_T(FlatPrefetchB8Inst, "flat_prefetch_b8", .format = FLAT, .flags = {FLATPrefetch},
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
 // Global load with transpose-read (TR) — gfx1250 only.
@@ -937,6 +926,7 @@ DEF_T(VSubI32Inst, "v_sub_i32", .format = VOP3, .logical = "VSubI32",
 // Vector ALU — VOP3 only (non-commutative)
 DEF_BATCH(.format = VOP3,
     VMed3F32Inst, "v_med3_f32", .logical = "VMed3F32",
+    VMaximumMinimumF32Inst, "v_maximumminimum_f32", .logical = "VMaximumMinimumF32",
     VMed3I32Inst, "v_med3_i32", .logical = "VMed3I32",
     VPackB32F16Inst, "v_pack_b32_f16", .logical = "VPackF16toB32",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },

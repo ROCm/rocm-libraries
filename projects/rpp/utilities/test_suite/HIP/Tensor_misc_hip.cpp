@@ -649,7 +649,7 @@ int main(int argc, char** argv) {
         }
         if (errorCodeCapture != RPP_SUCCESS) {
             cout << "\nThe functionality " << func << " returned an error status "
-                 << rppStatusToString[errorCodeCapture] << " on run number " << perfCount + 1
+                 << rppGetStatusString(errorCodeCapture) << " on run number " << perfCount + 1
                  << " of " << numRuns << " runs.\n";
             return errorCodeCapture;
         }
@@ -688,6 +688,7 @@ int main(int argc, char** argv) {
     }
 
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
 
     // Free device memory
     CHECK_RETURN_STATUS(hipFree(d_input));

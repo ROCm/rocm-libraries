@@ -32,6 +32,18 @@ std::vector<std::string> buildValidatorDefines(const char* dataType, const char*
 void launchValidatorKernel(hipFunction_t function, int64_t totalElements, ValidatorArgs& args);
 void launchValidatorKernel(hipFunction_t function, int64_t totalElements, RmsValidatorArgs& args);
 
+// The kernels index every logical position of the padded dims, which for a ragged
+// tensor aliases other batches' rows or runs past the end of its buffer.
+inline void throwIfRagged(const hipdnn_data_sdk::utilities::ITensor& reference,
+                          const hipdnn_data_sdk::utilities::ITensor& implementation)
+{
+    if(reference.raggedIterationInfo().has_value()
+       || implementation.raggedIterationInfo().has_value())
+    {
+        throw std::invalid_argument("ragged tensors are not supported by the device validator");
+    }
+}
+
 // Fills the strided-layout fields of a validator's args. Leaves ndim at 0 — the linear
 // fast path — only when both tensors are packed in the same stride order. Packed alone
 // is not enough: an NCHW-packed and an NHWC-packed tensor are both packed, and indexing
@@ -41,6 +53,8 @@ void setStridedLayout(Args& args,
                       const hipdnn_data_sdk::utilities::ITensor& reference,
                       const hipdnn_data_sdk::utilities::ITensor& implementation)
 {
+    throwIfRagged(reference, implementation);
+
     const auto& refStrides = reference.strides();
     const auto& implStrides = implementation.strides();
     if(reference.isPacked() && implementation.isPacked() && refStrides == implStrides)

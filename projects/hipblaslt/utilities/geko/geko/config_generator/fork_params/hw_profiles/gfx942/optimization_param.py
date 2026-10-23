@@ -266,16 +266,22 @@ class GFX942Params(BaseOptimizationParams):
         return self._make_param("1LDSBuffer", [1])
 
     @param
-    def stream_k(self, ctx: SizeContext) -> ForkParameter:
+    def tile_processing_strategy(self, ctx: SizeContext) -> ForkParameter:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamK", [3])
-        return self._make_param("StreamK", [0])
+            return self._make_param("TileProcessingStrategy", ["StreamK"])
+        return self._make_param("TileProcessingStrategy", ["None"])
 
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamKXCCMapping", [0, 8])
-        return self._make_param("StreamKXCCMapping", [0])
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
+
+    @param
+    def persistent_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+        if self.config.get("StreamK", False):
+            return self._make_param("PersistentXCCMapping", [0, 8])
+        return self._make_param("PersistentXCCMapping", [0])
 
     @param
     def use_sgpr_for_gro(self, ctx: SizeContext) -> ForkParameter:
@@ -422,6 +428,10 @@ class GFX942GAParams(BaseOptimizationParams):
         return self._make_param("StoreSyncOpt", [0, 1, 4])
 
     @param
+    def store_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StoreVectorWidth", [-1, 1, 2, 4, 8])
+
+    @param
     def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param(
             "WorkGroupMapping",
@@ -443,10 +453,6 @@ class GFX942GAParams(BaseOptimizationParams):
     @param
     def transpose_lds(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("TransposeLDS", [-1, 0, 1, 2])
-
-    @param
-    def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("AdaptiveGemm", [0, 1])
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:
@@ -495,15 +501,21 @@ class GFX942GAParams(BaseOptimizationParams):
         return None
 
     @param
-    def stream_k(self, ctx: SizeContext) -> Optional[ForkParameter]:
+    def tile_processing_strategy(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamK", [3])
+            return self._make_param("TileProcessingStrategy", ["StreamK"])
         return None
 
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> Optional[ForkParameter]:
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self.config.get("StreamK", False):
-            return self._make_param("StreamKXCCMapping", [0, 4, 8])
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
+
+    @param
+    def persistent_xcc_mapping(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        if self.config.get("StreamK", False):
+            return self._make_param("PersistentXCCMapping", [0, 4, 8])
         return None
 
     @param

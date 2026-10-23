@@ -49,6 +49,7 @@
 using rocsparse_ut::device_vector;
 using rocsparse_ut::launch_warp_by_size;
 using rocsparse_ut::to_host;
+using rocsparse_ut::wfreduce_first_valid_lane;
 
 using namespace rocsparse_ut_collectives;
 
@@ -83,10 +84,11 @@ namespace
         const int lane = threadIdx.x;
         out[lane]      = rocsparse::wfreduce_partial_sum<WFSIZE, SUB>(in[lane]);
     }
-    // wfreduce_sum<WFSIZE>(x): all-reduce sum across one wavefront; every lane
-    // returns the total. Runs on the device's own wavefront width (32 or 64) by
-    // dispatching to the matching instantiation; the host reference is the exact
-    // sum of the wf lane values produced by `gen`.
+    // wfreduce_sum<WFSIZE>(x): sum across one wavefront; the total is returned in
+    // every lane (in lane wf-1 only on the gfx8/gfx9 DPP path). Runs on the
+    // device's own wavefront width (32 or 64) by dispatching to the matching
+    // instantiation; the host reference is the exact sum of the wf lane values
+    // produced by `gen`.
     template <typename T, typename Gen>
     void run_wfreduce_sum(Gen gen)
     {
@@ -104,12 +106,12 @@ namespace
             launch_warp_by_size(k_wfreduce_sum<32, T>, k_wfreduce_sum<64, T>, d_in.ptr, d_out.ptr),
             hipSuccess);
         auto h = to_host(d_out);
-        for(uint32_t l = 0; l < wf; ++l)
+        for(uint32_t l = wfreduce_first_valid_lane(wf, 1); l < wf; ++l)
             expect_close(h[l], ref);
     }
-    // wfreduce_max<WFSIZE>(&v): all-reduce max across one wavefront; every lane
-    // ends holding the maximum. Host reference is std::max_element over the wf
-    // lane values from `gen`.
+    // wfreduce_max<WFSIZE>(&v): max across one wavefront; every lane ends holding
+    // the maximum (lane wf-1 only on the gfx8/gfx9 DPP path). Host reference is
+    // std::max_element over the wf lane values from `gen`.
     template <typename T, typename Gen>
     void run_wfreduce_max(Gen gen)
     {
@@ -125,10 +127,10 @@ namespace
             launch_warp_by_size(k_wfreduce_max<32, T>, k_wfreduce_max<64, T>, d_in.ptr, d_out.ptr),
             hipSuccess);
         auto h = to_host(d_out);
-        for(uint32_t l = 0; l < wf; ++l)
+        for(uint32_t l = wfreduce_first_valid_lane(wf, 1); l < wf; ++l)
             expect_close(h[l], ref);
     }
-    // wfreduce_min<WFSIZE>(&v): all-reduce min across one wavefront.
+    // wfreduce_min<WFSIZE>(&v): min across one wavefront (same lane contract as max).
     template <typename T, typename Gen>
     void run_wfreduce_min(Gen gen)
     {
@@ -144,7 +146,7 @@ namespace
             launch_warp_by_size(k_wfreduce_min<32, T>, k_wfreduce_min<64, T>, d_in.ptr, d_out.ptr),
             hipSuccess);
         auto h = to_host(d_out);
-        for(uint32_t l = 0; l < wf; ++l)
+        for(uint32_t l = wfreduce_first_valid_lane(wf, 1); l < wf; ++l)
             expect_close(h[l], ref);
     }
     // Distinct, non-monotone exact values across the wavefront so max/min land on
@@ -165,7 +167,8 @@ namespace
     }
     // wfreduce_partial_sum<WFSIZE, SUB>(x): xor-butterfly that sums within each
     // SUB-lane sub-group. Host reference mirrors the exact butterfly (halving the
-    // stride from wf/2 down to SUB), so every lane is checked, not just one.
+    // stride from wf/2 down to SUB); every lane is checked on the shuffle path and
+    // the last SUB lanes on the gfx8/gfx9 DPP path (see wfreduce_first_valid_lane).
     template <uint32_t SUB, typename T, typename Gen>
     void run_wfreduce_partial_sum(Gen gen)
     {
@@ -191,13 +194,14 @@ namespace
                                       d_out.ptr),
                   hipSuccess);
         auto h = to_host(d_out);
-        for(uint32_t l = 0; l < wf; ++l)
+        for(uint32_t l = wfreduce_first_valid_lane(wf, SUB); l < wf; ++l)
             expect_close(h[l], cur[l]);
     }
 } // namespace
 
-// Input: exact small integers per lane. Expected: every lane == sum over the
-// wavefront. One case per element type the routine supports.
+// Input: exact small integers per lane. Expected: every lane (the last lane on
+// gfx8/gfx9) == sum over the wavefront. One case per element type the routine
+// supports.
 TEST(internal_collectives_wfreduce_sum, i32)
 {
     run_wfreduce_sum<int32_t>([](uint32_t l) { return static_cast<int32_t>((l % 7) + 1); });

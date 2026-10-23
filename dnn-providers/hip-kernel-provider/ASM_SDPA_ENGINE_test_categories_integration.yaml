@@ -11,9 +11,9 @@
 #
 # Tier pattern shape mirrors miopen-provider/test_categories_integration.yaml,
 # scoped to the SDPA surface this engine actually implements:
-#   - "quick_*Sdpa*"/"standard_*Sdpa*" match the bundle suites
-#     (integration-test-bundles/{quick,standard}/SdpaFwd*), whose names mirror
-#     the on-disk tier directory; bundles are the CI driver.
+#   - "quick_*Sdpa*"/"standard_*Sdpa*"/"comprehensive_*Sdpa*" match the bundle
+#     suites (integration-test-bundles/{quick,standard,comprehensive}/Sdpa*),
+#     whose names mirror the on-disk tier directory; bundles are the CI driver.
 #   - "Smoke/*Sdpa*" (slash) matches the C++ parameterised suites
 #     (Smoke/IntegrationGpuSdpaFwdBfp16 and the ported backward cases
 #     Smoke/IntegrationGpuSdpaBwd{Bfp16,Fp16}). These no longer build by
@@ -21,11 +21,13 @@
 #     dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt --
 #     but keep the pattern regardless so a graph-tests-enabled build still
 #     picks them up.
-#   - "*Sdpa*" (comprehensive/full) covers the whole SDPA surface in either
-#     authoring style, including any future full-tier SDPA bundle.
+#   - "*Sdpa*" (full) covers the whole SDPA surface in either authoring style,
+#     including the full-tier SDPA bundles no lower tier selects.
+# Tiers cascade: standard runs quick + standard, comprehensive runs quick +
+# standard + comprehensive; only "full" runs the full-tier bundles.
 # The harness's generic engine-support check (checkEngineSupportOrSkip /
 # verifyGraph) skips any case ASM_SDPA_ENGINE doesn't service, so pinning the
-# whole SDPA surface at the comprehensive/full tier is safe.
+# whole SDPA surface is safe.
 _common_excludes: &common_excludes
   - "*DISABLED*"
   # SdpaBackward bundles fail on two independent issues:
@@ -60,9 +62,15 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive ASM SDPA external integration coverage"
+    description: "Nightly comprehensive ASM SDPA external integration coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
-      - "*Sdpa*"
+      - "quick_*Sdpa*"
+      - "standard_*Sdpa*"
+      - "comprehensive_*Sdpa*"
+      - "Smoke/*Sdpa*"
+      # The always-built C++ tests that carry no tier prefix
+      # (IntegrationCpuSdpaFwdBwdChained).
+      - "Integration*Sdpa*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -92,12 +100,16 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
+# category_timeouts are CTest kill limits, set to 2x the tier's runtime budget
+# (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
+# quick+standard; full has no budget) so a budget overrun is a failure to
+# investigate while ordinary run-to-run variance does not trip the timeout.
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
     quick: 1200
-    standard: 2700
-    comprehensive: 25200
+    standard: 3600
+    comprehensive: 7200
     full: 28800
     ffm-quick: 7200  # 2 hours

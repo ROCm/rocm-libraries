@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+{% if config.launch_names %}
+#include <set>
+{% endif %}
 #include <string>
 #include <string_view>
 
@@ -15,7 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Handle.hpp"
@@ -135,6 +138,21 @@ public:
 class {{ config.dispatch_handler_class }} : public IKernelDispatchHandler<Handle>
 {
 public:
+{% if config.launch_names %}
+    /// The launch names every kernel of this pack carries in its `sources` map. The state
+    /// manager drops a kernel whose launch names differ from this set, so a kernel that
+    /// reaches prepare() has exactly these launches. This handler owns their order,
+    /// workspace and hand-off.
+    std::set<std::string> launchNames() const override
+    {
+{% set literals = [] %}
+{% for name in config.launch_names %}
+{% set _ = literals.append('"' ~ (name | cpp_escape) ~ '"') %}
+{% endfor %}
+        return {{ '{' }}{{ literals | join(', ') }}{{ '}' }};
+    }
+
+{% endif %}
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -155,7 +173,24 @@ public:
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& /*kernel*/) const override
     {
+{% if config.launch_names %}
+        // TODO - FILL THIS OUT. This pack's kernels carry one `sources` entry per launch, so
+        // `kernel` is a multi-launch definition and buildIngestorKernelCode(kernel) refuses it.
+        // Build each launch through launchKernelDefinition(kernel, "<name>") first (the names
+        // are the ones launchNames() declares above), then pass that single-launch definition
+        // to the buildIngestorKernelCode overload that takes no compiler and no compile
+        // options: hkp_pack compiled this dialect's rocke kernels to KPACK. launch() runs
+        // the launches in the order this handler chooses.
+{% elif config.is_packaged %}
+        // TODO - FILL THIS OUT. hkp_pack compiles this dialect's hip/rocke kernels to KPACK,
+        // so load them with the buildIngestorKernelCode overload that takes no compiler and
+        // no compile options. It refuses an embedded_source kernel, which a packaged tree can
+        // still carry: hkp_pack ships that kind as authored. packs/Gfx950AttentionDenseNative.cpp
+        // does this. Do not copy prepare() from packs/PointwiseNative.cpp: that pack also
+        // compiles from source, so it supplies both.
+{% else %}
         // TODO - FILL THIS OUT
+{% endif %}
         return std::make_unique<Prepared{{ config.native_class_name }}>();
     }
 

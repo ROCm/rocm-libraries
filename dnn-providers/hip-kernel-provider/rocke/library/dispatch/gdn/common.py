@@ -50,10 +50,19 @@ def normalize_dtype(dtype: str) -> str:
 class GdnDecodeRequest(OperatorRequest):
     """One gated-delta-rule single-token decode step.
 
-    ``batch`` is the number of *active* sequences this step, which is the only
-    dimension the tuned tile selection depends on: it sets how much natural
-    parallelism the launch already has, and therefore whether the kernel needs
-    to manufacture more by splitting each head's V dimension across workgroups.
+    ``batch`` is the number of *active* sequences this step. It always
+    contributes to the launch grid.
+
+    For ``gate_kind="gdn"``, ``auto`` uses the static ``DEFAULT_TILE`` whenever
+    it is legal; otherwise dispatch chooses a validator-admitted fallback.
+    Neither ``batch`` nor ``num_v_heads`` chooses GDN's auto tile.
+
+    For ``gate_kind="kda"``, ``auto`` is keyed on ``batch * num_v_heads`` -- the
+    "work" -- so tensor parallelism selects the tile for heads local to a rank.
+
+    ``gate_kind`` selects the forget-gate granularity: ``"gdn"`` (one scalar
+    decay per head) or ``"kda"`` (a per-channel decay). It reaches the spec and
+    therefore the kernel name, so the two never share a compile-cache entry.
 
     ``seq_len`` is not a field. This family is decode-only -- one token per
     sequence -- and a request carrying any other sequence length would be a
@@ -71,6 +80,7 @@ class GdnDecodeRequest(OperatorRequest):
     state_dtype: str = "bf16"
     use_qk_l2norm: bool = True
     algorithm: str = "auto"
+    gate_kind: str = "gdn"
     spec_id: str = "auto"
 
     def normalized(self) -> dict:
@@ -118,6 +128,15 @@ def request_errors(req: OperatorRequest) -> list:
         errors.append(f"unsupported dtype {req.dtype!r}")
     if normalize_dtype(req.state_dtype) not in GDN_DTYPES:
         errors.append(f"unsupported state_dtype {req.state_dtype!r}")
+    if req.gate_kind not in ("gdn", "kda"):
+        errors.append(
+            f"unsupported gate_kind {req.gate_kind!r} (expected 'gdn' or 'kda')"
+        )
+    if req.gate_kind == "kda" and (req.head_k_dim != 128 or req.head_v_dim != 128):
+        errors.append(
+            "NOT_YET_IMPLEMENTED: KDA decode currently requires "
+            "head_k_dim == head_v_dim == 128"
+        )
     return errors
 
 

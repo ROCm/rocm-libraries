@@ -172,4 +172,11 @@ typedef hipblasSideMode_t hipsolverSideMode_t;
 #define HIPSOLVER_SIDE_LEFT HIPBLAS_SIDE_LEFT
 #define HIPSOLVER_SIDE_RIGHT HIPBLAS_SIDE_RIGHT
 
+/*! \brief Alias of hipblasDiagType_t. HIPSOLVER_DIAG_NON_UNIT and HIPSOLVER_DIAG_UNIT
+ *  are provided as equivalents to HIPBLAS_DIAG_NON_UNIT and HIPBLAS_DIAG_UNIT.
+ ********************************************************************************/
+typedef hipblasDiagType_t hipsolverDiagType_t;
+#define HIPSOLVER_DIAG_NON_UNIT HIPBLAS_DIAG_NON_UNIT
+#define HIPSOLVER_DIAG_UNIT HIPBLAS_DIAG_UNIT
+
 #endif // HIPSOLVER_TYPES_H

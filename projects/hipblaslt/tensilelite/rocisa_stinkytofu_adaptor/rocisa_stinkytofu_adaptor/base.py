@@ -171,6 +171,12 @@ matches the C++ ``int()`` default-construct of a missing map entry.
 ``setVgprMsb`` is wired in for Commit Y (``Label.toString`` side
 effect, code.hpp:122-125) — no consumer reads it today."""
 
+_force_scaled_wmma: bool = False
+"""gfx1250 low-precision scaled-WMMA workaround toggle. Mirror of
+``rocisa::rocIsa::m_forceScaledWMMA[id]``. Default ``False`` (base
+gfx1250 → plain ``v_wmma_*``); set ``True`` only for
+gfx1250-strict / gfx1250v0. Not reset by ``setKernel``."""
+
 
 # ---------------------------------------------------------------------------
 # OutputOptions accessors (unchanged from the prior commit).
@@ -506,6 +512,26 @@ def setVgprMsb(msb: int) -> None:
     """
     global _vgpr_msb
     _vgpr_msb = int(msb)
+
+
+def getForceScaledWMMA() -> bool:
+    """Mirror of ``rocisa::rocIsa::getForceScaledWMMA`` (base.hpp).
+
+    The gfx1250 low-precision scaled-WMMA workaround toggle; default
+    ``False`` matches the C++ absent-entry default. Deliberately not
+    reset by ``setKernel``.
+    """
+    return _force_scaled_wmma
+
+
+def setForceScaledWMMA(v: bool) -> None:
+    """Mirror of ``rocisa::rocIsa::setForceScaledWMMA`` (base.hpp).
+
+    Set true only for gfx1250-strict / gfx1250v0 so low-precision WMMA
+    emits ``v_wmma_scale_*`` with scale=0; base gfx1250 stays plain.
+    """
+    global _force_scaled_wmma
+    _force_scaled_wmma = bool(v)
 
 
 # ---------------------------------------------------------------------------

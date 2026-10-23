@@ -71,6 +71,7 @@ private:
     rocsparse_int b_spmm_alg{};
     rocsparse_int b_sddmm_alg{};
     rocsparse_int b_gtsv_interleaved_alg{};
+    rocsparse_int b_spsort_alg{};
 #ifdef ROCSPARSE_WITH_MEMSTAT
     std::string b_memory_report_filename{};
 #endif

@@ -7,8 +7,10 @@ installed trees. Producer selection is per-UKD on `kernel_source.kind`, never
 per-folder.
 
 The invariants this file holds: whole-set id validation, descriptor-relative
-hip source resolution, hip+rocKE coexistence in one kpack, and the comgr
-diagnostic.
+hip source resolution, path-preserving output, per-arch atomicity, toolchain
+provenance, and the refusal of rocKE descriptors by a build without rocKE. The
+rocKE producer's half of the layout (hip+rocKE coexistence in one kpack, the
+example tree's rocKE subtree) is held in `tests/rocke/test_hkp_pack_layout_rocke.py`.
 """
 
 import hashlib
@@ -16,49 +18,40 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
-from hkp_pack.pipeline import _agreement_inputs, compile_intermediate, run_pipeline
-
-ARCH = "gfx942"
-ROCKE_ARCH = "gfx950"
-
-
-def _read(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _load_kpack(rocm_kpack_dir):
-    from hkp_pack.kpack_resolver import load_kpack
-
-    kpack, _comp = load_kpack(rocm_kpack_dir)
-    return kpack
-
-
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
-    """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
-    return run_pipeline(
-        source_root=source_root,
-        arches=list(arches),
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-        source_label=source_label,
-    )
-
-
-def _nest(root, sub, fixture):
-    """Copy a flat fixture into `root/sub`, returning the child folder."""
-    dest = root / sub
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(fixture, dest)
-    return dest
+from hkp_pack import pipeline
+from hkp_pack.pipeline import (
+    ArchResult,
+    _agreement_inputs,
+    compile_intermediate,
+    offered_engines,
+    shipped_engines,
+)
+from hkp_pack.provenance_sidecar import PACKED_MARKER
+from pack_helpers import (
+    ARCH,
+    EXAMPLE_ROOT,
+    GENERIC_TARGETS,
+    GENERIC_TARGETS_JSON,
+    PACKAGING,
+    ROCKE_ARCH,
+    _load_kpack,
+    _nest,
+    _read,
+    _run,
+    _silent,
+    read_shipped,
+    run_pipeline,
+)
 
 
 def _rename_ids(folder, stem, new_stem):
@@ -70,6 +63,7 @@ def _rename_ids(folder, stem, new_stem):
             encoding="utf-8",
         )
         src.unlink()
+    _restem_uuid_ids(folder, new_stem)
 
 
 # --- A. Recursive discovery and rel_dir (quick, compile-free) ---------------
@@ -79,7 +73,7 @@ def test_discovery_is_recursive(tmp_path, main_fixture):
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", main_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     assert flat.descriptors, "nested descriptors must be discovered"
     for d in flat.descriptors:
         assert d.rel_dir.as_posix() == "hip/pointwise"
@@ -91,7 +85,7 @@ def test_rel_dir_is_root_relative_parent(tmp_path, main_fixture, empty_arch_fixt
     _nest(root, "hip/a", main_fixture)
     _nest(root, "rocKE/b", empty_arch_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     by_rel = {}
     for d in flat.descriptors:
         by_rel.setdefault(d.rel_dir.as_posix(), set()).add(d.path.name)
@@ -121,7 +115,7 @@ def test_same_filename_in_two_folders_both_survive(
         src.rename(b / src.name.replace("solob.", "solo.", 1))
     assert {p.name for p in a.glob("solo.*")} == {p.name for p in b.glob("solo.*")}
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     kdp_paths = {(d.rel_dir.as_posix(), d.path.name) for d in flat.kdps()}
     assert ("hip/a", "solo.kdp.json") in kdp_paths
     assert ("hip/b", "solo.kdp.json") in kdp_paths
@@ -136,7 +130,7 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
     _nest(root, "hip/b", empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -153,7 +147,7 @@ def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     _rename_ids(hidden, "solo", "vendor")
     logs = []
 
-    flat = load_flat_input(root, log=logs.append)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
 
     assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
     assert not [d for d in flat.descriptors if d.path.name.startswith("vendor.")]
@@ -161,6 +155,32 @@ def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     skipped = [m for m in logs if m.startswith("skipping hidden path")]
     assert any("vendor.kdp.json" in m for m in skipped), logs
     assert all(".vendor" in m for m in skipped), logs
+
+
+@pytest.mark.quick
+def test_a_non_descriptor_json_is_skipped_and_logged(tmp_path, empty_arch_fixture):
+    """A `.json` carrying no type token is passed over, and it is named in the log.
+
+    The source root is user-supplied, so an incidental file like a
+    `compile_commands.json` must be tolerated rather than abort the pack. The
+    log line is half the behaviour: skipping silently would be the same
+    invisible omission the hidden-path case above is logged to prevent.
+
+    Removing either the log call or the skip in `load_flat_input` fails this.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/a", empty_arch_fixture)
+    incidental = root / "hip" / "a" / "compile_commands.json"
+    incidental.write_text("[]", encoding="utf-8")
+    logs = []
+
+    flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
+
+    assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
+    assert not [d for d in flat.descriptors if d.path.name == incidental.name]
+
+    skipped = [m for m in logs if m.startswith("skipping non-descriptor file")]
+    assert any(incidental.name in m for m in skipped), logs
 
 
 # --- B. Path-preserving output (real compile) -------------------------------
@@ -327,56 +347,29 @@ def test_flat_layout_keys_on_source_alone(empty_arch_fixture):
     )
 
 
-# --- C. Mixed hip+rocke integration (comgr-gated) ---------------------------
-def test_mixed_hip_rocke_one_kpack_per_arch(
-    tmp_path, main_fixture, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+# --- C. Child folders sharing one arch's output (real compile) --------------
+def test_same_filename_in_two_folders_both_ship(
+    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
 ):
-    # Two child folders under ONE root -> one kpack per arch holding BOTH kinds.
-    # Producer selection is per-UKD on kernel_source.kind.
+    """The packed half of the same-filename case: loading keeps both, and so must
+    writing the shard. An output keyed on filename alone writes one folder's
+    descriptors over the other's and ships a single set without error.
+    """
     root = tmp_path / "root"
-    _nest(root, "hip/pointwise", main_fixture)
-    _nest(root, "rocKE/attention", rocke_fixture)
+    _nest(root, "hip/a", empty_arch_fixture)
+    b = _nest(root, "hip/b", empty_arch_fixture)
+    _rename_ids(b, "solo", "solob")
+    for src in sorted(b.glob("solob.*")):
+        src.rename(b / src.name.replace("solob.", "solo.", 1))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ROCKE_ARCH])
-    out = tmp_path / "out" / ROCKE_ARCH
-    kpack_path = out / "kpack" / f"hip_kernel_provider_{ROCKE_ARCH}.kpack"
-    assert kpack_path.exists()
-    kpack = _load_kpack(rocm_kpack_dir)
-    archive = kpack.PackedKernelArchive.read(kpack_path)
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
 
-    # Gather every shipped UKD across both producers' descriptors, anywhere in
-    # the nested output tree.
-    kinds = {}
-    for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            ks = ukd["kernel_source"]
-            if ks["kind"] != "kpack":
-                continue
-            prov = ukd["provenance"]
-            kinds.setdefault(prov["origin_kind"], []).append((ks, prov))
-
-    # Kind is asserted via provenance.origin_kind, NOT the filename (the kpack
-    # name is a fixed group constant regardless of content).
-    assert "hip" in kinds and "rocke" in kinds
-
-    # Per-kind provenance isolation: hip carries {source,entry,build}; rocke
-    # carries {source,builder,spec} side by side.
-    for ks, prov in kinds["hip"]:
-        assert set(("source", "entry", "build")).issubset(prov)
-        assert "builder" not in prov and "spec" not in prov
-    for ks, prov in kinds["rocke"]:
-        assert set(("source", "builder", "spec")).issubset(prov)
-        assert "entry" not in prov and "build" not in prov
-
-    # Symbol-in-bytes + sha256 for each shipped UKD's own blob.
-    for kind_ukds in kinds.values():
-        for ks, _prov in kind_ukds:
-            blob = archive.get_kernel(ks["toc_key"], ROCKE_ARCH)
-            assert blob is not None
-            assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
-            assert ks["symbol"].encode("ascii") in blob
+    out = tmp_path / "out" / ARCH
+    authored = sorted(p.name for p in empty_arch_fixture.glob("solo.*.json"))
+    for name in authored:
+        shipped = [out / "hip" / sub / name for sub in ("a", "b")]
+        assert all(p.is_file() for p in shipped), name
+        assert len({_read(p)["id"] for p in shipped}) == 2, name
 
 
 def test_non_hkp_failure_still_leaves_no_partial_tree(
@@ -406,7 +399,7 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
 
     out_root = tmp_path / "out"
     with pytest.raises(RuntimeError, match="uncaught failure"):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=[ARCH],
             out_root=out_root,
@@ -455,7 +448,7 @@ def test_failed_arch_leaves_no_partial_tree(
 
     out_root = tmp_path / "out"
     with pytest.raises(HkpPackError, match="gfx950"):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=out_root,
@@ -473,6 +466,58 @@ def test_failed_arch_leaves_no_partial_tree(
     assert not list(out_root.glob(".*staging"))
 
 
+def test_failed_arch_removes_its_previous_good_output(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """A re-pack that fails must delete the shard its last good run wrote.
+
+    The partial-tree case above starts from an empty output root, so it holds
+    only the staging cleanup: it passes whether or not the failure path removes
+    a PRE-EXISTING <out>/<arch>. Pack once to create that shard, then re-pack
+    the same arch into the same root with the arch failing. A surviving shard
+    would be stale -- built from the previous sources, installed by
+    install(DIRECTORY ... OPTIONAL) as though current, and wrong at dispatch.
+
+    Removing the `out_arch_dir` rmtree from run_pipeline's failure path fails
+    this and nothing else in the suite.
+    """
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    out_root = tmp_path / "out"
+
+    run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=out_root,
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    good_shard = out_root / ARCH
+    assert good_shard.is_dir() and any(good_shard.rglob("*.kpack"))
+
+    def always_fail(flat, inter, out_arch_dir, *a, **kw):
+        raise HkpPackError(f"induced {inter.arch}")
+
+    monkeypatch.setattr(pipeline, "pack_arch", always_fail)
+
+    with pytest.raises(HkpPackError, match=ARCH):
+        run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=out_root,
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    assert (
+        not good_shard.exists()
+    ), "a failed re-pack left the previous run's shard, which install() would ship as current"
+
+
 def test_failure_names_every_failed_arch(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
 ):
@@ -488,7 +533,7 @@ def test_failure_names_every_failed_arch(
     monkeypatch.setattr(pipeline, "pack_arch", always_fail)
 
     with pytest.raises(HkpPackError) as exc:
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=tmp_path / "out",
@@ -499,31 +544,41 @@ def test_failure_names_every_failed_arch(
 
     message = str(exc.value)
     assert "gfx942" in message and "gfx950" in message
-    assert "2 of 2" in message
 
 
 # --- E. The shipped example tree -------------------------------------------
-EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "examples" / "descriptors"
+@pytest.mark.quick
+def test_example_tree_is_self_consistent():
+    """Load-time validation of the committed tree, no toolchain required.
 
-
-def test_example_tree_packs_both_producers(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
-):
-    """The in-repo example tree must actually drive both producers end to end.
-
-    This is the only thing in the repository that exercises the production path,
-    which is how a silent-empty install and a silent descriptor drop both
-    survived unnoticed. Packing the real committed tree -- not a fixture -- is
-    what keeps it honest: if the example rots, this fails.
+    Catches a broken example on any box, including one with no toolchain, so
+    the tree cannot rot silently between full runs.
     """
-    results = run_pipeline(
-        source_root=EXAMPLE_ROOT,
-        arches=[ARCH],
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-    )
+    flat = load_flat_input(EXAMPLE_ROOT, GENERIC_TARGETS)
+
+    ids = [d.id for d in flat.descriptors]
+    assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
+    # Every KDP committed to the tree loads, from the folder it was authored in.
+    rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
+    on_disk = {
+        p.parent.relative_to(EXAMPLE_ROOT).as_posix()
+        for p in EXAMPLE_ROOT.rglob("*.kdp.json")
+    }
+    assert rel_dirs == on_disk
+    assert "hip/pointwise_add" in rel_dirs
+
+
+def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
+    """The example tree's hip subtree must drive the hip producer end to end.
+
+    Packing the real committed tree -- not a fixture -- is what keeps it honest:
+    if the example rots, this fails. The subtree is packed from a copy nested at
+    its authored subpath, since the whole tree also holds rocKE descriptors.
+    """
+    root = tmp_path / "root"
+    shutil.copytree(EXAMPLE_ROOT / "hip", root / "hip")
+
+    results = _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
     assert not results[ARCH].skipped
 
     out = tmp_path / "out" / ARCH
@@ -531,73 +586,43 @@ def test_example_tree_packs_both_producers(
     assert kpack.is_file()
     assert kpack.stat().st_size > 0, "an empty kpack is finding 3.9 reappearing"
 
-    # Authored subpaths are preserved verbatim into the shipped tree.
-    assert (out / "hip" / "pointwise_add" / "pointwise_add.kdp.json").is_file()
-    assert (
-        out / "rocKE" / "gfx942_tiled_attention" / "tiled_attention.kdp.json"
-    ).is_file()
+    # Every authored descriptor ships at its authored subpath, the two UMDs the
+    # folder carries included.
+    authored = {
+        p.relative_to(EXAMPLE_ROOT).as_posix()
+        for p in (EXAMPLE_ROOT / "hip").rglob("*.json")
+    }
+    shipped = {p.relative_to(out).as_posix() for p in out.rglob("*.json")}
+    assert authored <= shipped
 
-    # Both producers contributed, asserted via provenance rather than filename.
-    kinds = set()
-    for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            kinds.add(ukd["provenance"]["origin_kind"])
-    assert kinds == {"hip", "rocke"}
-
-
-def test_example_tree_keeps_both_shared_filenames(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
-):
-    """The example tree deliberately reuses `shared.umd.json` across its two
-    child folders. A flat packer drops one silently; path preservation keeps
-    both.
-    """
-    run_pipeline(
-        source_root=EXAMPLE_ROOT,
-        arches=[ARCH],
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-    )
-
-    shared = sorted((tmp_path / "out" / ARCH).rglob("shared.umd.json"))
-    assert len(shared) == 2, "both same-named descriptors must survive"
-    assert len({_read(p)["id"] for p in shared}) == 2
-
-
-@pytest.mark.quick
-def test_example_tree_is_self_consistent():
-    """Load-time validation of the committed tree, no toolchain required.
-
-    Catches a broken example on any box, including one with neither hipcc nor
-    comgr, so the tree cannot rot silently between full runs.
-    """
-    flat = load_flat_input(EXAMPLE_ROOT)
-
-    ids = [d.id for d in flat.descriptors]
-    assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
-    rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
-    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
+    kinds = {
+        ukd["provenance"]["origin_kind"]
+        for kdp in out.rglob("*.kdp.json")
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
+        if not isinstance(ukd, str)
+    }
+    assert kinds == {"hip"}
 
 
 # --- F. Toolchain provenance ------------------------------------------------
-def test_provenance_records_the_toolchain_that_built_each_kernel(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+def test_provenance_records_the_hipcc_that_built_each_kernel(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """Authored fields say what was asked for; these say what answered.
+    """Authored fields say what was asked for; this says what answered.
 
-    Without them two builds of byte-identical descriptors are indistinguishable
-    after the fact, even though a hipcc, comgr, or rocKE wheel change may be the
-    whole difference between them.
+    Without it two builds of byte-identical descriptors are indistinguishable
+    after the fact, even though a hipcc change may be the whole difference
+    between them. The wheel stamp is supplied so a rocKE field could appear: a
+    hip kernel must carry the hipcc record and nothing from the rocKE toolchain
+    or the rocKE provenance shape.
     """
+    from hkp_pack import toolchain
+
     stamp = tmp_path / "wheels.sha256"
     stamp.write_text("deadbeefcafe\n", encoding="utf-8")
 
     run_pipeline(
-        source_root=EXAMPLE_ROOT,
+        source_root=main_fixture,
         arches=[ARCH],
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -606,24 +631,28 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
         rocke_wheel_stamp=stamp,
     )
 
-    by_kind = {}
-    for kdp in (tmp_path / "out" / ARCH).rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]
-
-    # hip records the compiler that ran.
-    assert "hipcc_version" in by_kind["hip"]
-    # rocke records the comgr that was actually LOADED (not merely requested --
-    # rocke falls through an unloadable override silently) and the wheel digest
-    # the build keyed its staleness on.
-    assert by_kind["rocke"]["rocke_wheel_sha256"] == "deadbeefcafe"
-    assert by_kind["rocke"]["comgr_path"]
-
-    # Producer-specific fields must not bleed across.
-    assert "hipcc_version" not in by_kind["rocke"]
-    assert "comgr_path" not in by_kind["hip"]
+    expected = toolchain.hipcc_version(hipcc)
+    assert expected, "the hipcc under test reports no version to record"
+    out = tmp_path / "out" / ARCH
+    shipped = [
+        ukd
+        for kdp in out.rglob("*.kdp.json")
+        for ukd in read_shipped(kdp)["kernelDescriptors"]
+        if not isinstance(ukd, str)
+    ] + [read_shipped(p) for p in out.rglob("*.ukd.json")]
+    assert shipped
+    for ukd in shipped:
+        prov = ukd["provenance"]
+        assert prov["origin_kind"] == "hip"
+        assert prov["hipcc_version"] == expected, ukd["id"]
+        leaked = {
+            "comgr_path",
+            "comgr_rocm_version",
+            "rocke_wheel_sha256",
+            "builder",
+            "spec",
+        } & set(prov)
+        assert not leaked, f"{ukd['id']} carries rocKE provenance {sorted(leaked)}"
 
 
 @pytest.mark.quick
@@ -764,7 +793,7 @@ def test_authored_kpack_folder_is_rejected(tmp_path, empty_arch_fixture):
     _nest(root, "kpack", empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="reserved"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -774,7 +803,7 @@ def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixtur
     root = tmp_path / "root"
     _nest(root, "hip/kpack", empty_arch_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     assert {d.rel_dir.as_posix() for d in flat.kdps()} == {"hip/kpack"}
 
 
@@ -980,7 +1009,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         # cleanly and is rejected at load, dropping the matcher, then the pack
         # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
-        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
+        ("shared.uhd.json", {"adapter": "Native"}, "invalid adapter"),
         (
             "pointwise.kmd.json",
             {"fields": [{"name": "block_size", "type": "integer"}]},
@@ -1010,7 +1039,7 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
     target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
     with pytest.raises(HkpPackError, match=expected):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1030,7 +1059,7 @@ def test_reserved_kpack_folder_is_case_insensitive(
     _nest(root, spelling, empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="reserved"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1065,7 +1094,15 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
     ueds = 0
     for path in EXAMPLE_ROOT.rglob("*.ued.json"):
         doc = _read(path)
-        expect(doc["heuristic"], "uhd", f"{path.name} heuristic")
+        for role in (
+            "sort_kernel_catalog",
+            "predict_engine",
+            "predict_applicable_kernels",
+        ):
+            for value in doc.get(role, {}).values():
+                # The scoring roles take one id or a list of them, one per metric.
+                for ref in [value] if isinstance(value, str) else value:
+                    expect(ref, "uhd", f"{path.name} {role}")
         expect(doc["metadata"], "kmd", f"{path.name} metadata")
         ueds += 1
 
@@ -1156,6 +1193,54 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         )
 
 
+def test_a_model_uhds_artifact_reaches_the_shipped_tree(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """The model a UHD names ships in the arch output, not only the intermediate."""
+    root = tmp_path / "root"
+    dest = _nest(root, "hip/pointwise", main_fixture)
+
+    # Make the shared UHD a trained one; both UEDs reference it, so it and its
+    # sidecar survive pruning.
+    (dest / "shared.uhd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
+                "name": "Shared trained heuristic",
+                "adapter": "tree_data",
+                "features_signature": ["$kernel.block_size"],
+                "features_hash": "sha256:" + "0" * 16,
+                "trained_against": {
+                    "ued": {
+                        "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
+                    "kmd": {
+                        "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
+                    "umd": [],
+                },
+                "objective": "max",
+                "tree_data": {"artifact": "shared_model.bin"},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+
+    shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
+    assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
+    artifact = shipped / "shared_model.bin"
+    assert artifact.is_file(), "a shipped UHD must be shipped with the model it names"
+    assert artifact.read_bytes() == b"HGBM-arch"
+
+
 # --- I. The embedded_source kind (quick, compile-free) ----------------------
 _EMBEDDED_SOURCE = {
     "kind": "embedded_source",
@@ -1189,7 +1274,7 @@ def test_embedded_source_root_loads(tmp_path, empty_arch_fixture):
     """The walk accepts the kind and leaves the block unmodified."""
     root = _embedded_source_root(tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE))
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     kdps = list(flat.kdps())
     assert len(kdps) == 1
     ukd = kdps[0].doc["kernelDescriptors"][0]
@@ -1206,7 +1291,7 @@ def test_embedded_source_requires_source_file_and_entry_point(
     root = _embedded_source_root(tmp_path, empty_arch_fixture, kernel_source)
 
     with pytest.raises(HkpPackError, match=missing):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1224,7 +1309,7 @@ def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
     )
 
     with pytest.raises(HkpPackError) as excinfo:
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
     message = str(excinfo.value)
     assert "unsupported kind 'embedded_sources'" in message
@@ -1235,7 +1320,6 @@ def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
 # A kind the walk accepts but no producer compiles: structurally valid per
 # _validate_ukd_fields, and absent from the pass-through set.
 _UNPRODUCED_SOURCES = {
-    "hsaco": {"kind": "hsaco", "file": "PointwiseAdd.co", "symbol": "PointwiseAdd"},
     "kpack": {
         "kind": "kpack",
         "library": f"kpack/hip_kernel_provider_{ARCH}.kpack",
@@ -1261,7 +1345,7 @@ def test_a_kind_no_producer_handles_fails_the_compile(
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, _UNPRODUCED_SOURCES[kind]
     )
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError) as excinfo:
         compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
@@ -1293,7 +1377,7 @@ def test_a_passthrough_kind_carries_no_specialization_obligation(
     root = _inline_ukd_root(
         tmp_path, empty_arch_fixture, _embedded_source_without_contract
     )
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     assert _agreement_inputs(flat, ARCH) == ({}, {})
 
@@ -1314,7 +1398,7 @@ def test_a_compiling_kind_without_a_contract_is_still_refused(
     refused before a compiler is reached.
     """
     root = _inline_ukd_root(tmp_path, empty_arch_fixture, _drop_specialization_contract)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="missing/invalid specialization_contract"):
         compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
@@ -1338,7 +1422,7 @@ def test_embedded_source_rejects_a_parent_segment(
     )
 
     with pytest.raises(HkpPackError, match=re.escape(source_file)):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1358,7 +1442,7 @@ def test_embedded_source_rejects_an_absolute_path(
     )
 
     with pytest.raises(HkpPackError, match=re.escape(source_file)):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 # --- J. Emitting embedded_source through pass-through and pruning -----------
@@ -1423,19 +1507,18 @@ def _make_embedded(folder, arch=None):
     kdp["kernelDescriptors"] = [inline, _STANDALONE_ID]
     kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
 
+    standalone = {
+        "version": "0.1",
+        "id": _STANDALONE_ID,
+        "name": "PointwiseMul f32 block64 (solo)",
+        "kernel_source": dict(_STANDALONE_SOURCE),
+        "metadata": {"dtype": "FLOAT", "block_size": 64},
+        "priority": 0,
+    }
+    if arch:
+        standalone["arch"] = list(arch)
     (folder / _STANDALONE_FILE).write_text(
-        json.dumps(
-            {
-                "version": "0.1",
-                "id": _STANDALONE_ID,
-                "name": "PointwiseMul f32 block64 (solo)",
-                "kernel_source": dict(_STANDALONE_SOURCE),
-                "metadata": {"dtype": "FLOAT", "block_size": 64},
-                "priority": 0,
-            },
-            indent=2,
-        )
-        + "\n",
+        json.dumps(standalone, indent=2) + "\n",
         encoding="utf-8",
     )
     return folder
@@ -1509,7 +1592,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
     shard = tmp_path / "out" / ARCH / "pointwise"
-    kdp = _read(shard / "solo.kdp.json")
+    kdp = read_shipped(shard / "solo.kdp.json")
     assert kdp["arch"] == [ARCH]
     inline = kdp["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1518,7 +1601,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     assert "provenance" not in inline["kernel_source"]
     assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
 
-    standalone = _read(shard / _STANDALONE_FILE)
+    standalone = read_shipped(shard / _STANDALONE_FILE)
     assert standalone["arch"] == [ARCH]
     assert standalone["kernel_source"] == _STANDALONE_SOURCE
     assert standalone["provenance"] == _expected_provenance(
@@ -1551,7 +1634,7 @@ def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    emitted = _read(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
+    emitted = read_shipped(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
     assert emitted["arch"] == [ARCH]
     inline = emitted["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1688,11 +1771,33 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     assert hip_kdp["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
     embedded = out / "embedded" / "pointwise"
-    emb_kdp = _read(embedded / "solo.kdp.json")
+    emb_kdp = read_shipped(embedded / "solo.kdp.json")
     assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
     assert emb_kdp["kernelDescriptors"][0]["provenance"]["source_label"] == _LABEL
     assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
     assert not (embedded / "kpack").exists()
+
+
+def test_every_directory_holding_a_packed_descriptor_holds_the_marker(
+    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A reader takes a descriptor as packed only from the marker in its own
+    directory, so the compiled and the pass-through halves both need one, and
+    nothing else in the shard carries it."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
+
+    out = tmp_path / "out" / ARCH
+    holding = {
+        path.parent
+        for path in out.rglob("*.json")
+        if path.name.endswith((".kdp.json", ".ukd.json"))
+    }
+    assert {out / "hip" / "pointwise", out / "embedded" / "pointwise"} <= holding
+    assert {marker.parent for marker in out.rglob(PACKED_MARKER)} == holding
 
 
 def _embedded_copy(root, sub, fixture, suffix=""):
@@ -1712,6 +1817,7 @@ def _embedded_copy(root, sub, fixture, suffix=""):
             renamed.write_text(text, encoding="utf-8")
             if renamed != path:
                 path.unlink()
+        _restem_uuid_ids(dest, f"solo{suffix}")
     return dest
 
 
@@ -1732,7 +1838,8 @@ def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    inline = _read(tmp_path / "out" / ARCH / "solo.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo.kdp.json")
+    inline = shipped["kernelDescriptors"][0]
     assert inline["provenance"]["rewritten"] == []
 
 
@@ -1785,27 +1892,46 @@ def test_packing_without_a_source_label_is_refused(
     assert "pointwise/kernels/PointwiseAdd.cpp" in message
 
 
-# --- K. A pack that produced nothing ----------------------------------------
+# --- K. A pack with nothing to pack ------------------------------------------
 
 
 @pytest.mark.quick
-def test_a_root_that_prunes_for_every_arch_is_a_failure(
+def test_a_root_that_prunes_for_every_arch_packs_nothing_cleanly(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Every arch skipping is a pack that shipped nothing, not a clean skip."""
+    """Every arch skipping is a root with nothing to pack for this build: no
+    error, no shard, and no compile is attempted."""
     root = tmp_path / "root"
     # The fixture's only KDP names gfx942, so neither requested arch keeps it.
     _nest(root, "hip/pointwise", empty_arch_fixture)
 
-    with pytest.raises(HkpPackError) as excinfo:
-        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"])
+    results = _run(
+        root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"]
+    )
 
-    message = str(excinfo.value)
-    assert str(root) in message
-    assert "gfx90a" in message
-    assert "gfx1100" in message
-    # The reader must not take this failure for "every root owes an archive".
-    assert "not always required" in message
+    assert all(r.skipped for r in results.values())
+    assert not list((tmp_path / "out").glob("gfx*"))
+
+
+@pytest.mark.quick
+def test_a_shard_that_selected_a_compiling_ukd_but_wrote_no_archive_fails(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """A shipped shard whose compiling UKD produced no archive is an error, never a
+    silently empty package. The producer is stubbed to write nothing, which is the
+    only way to reach this state."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", empty_arch_fixture)
+
+    def pack_nothing(flat, inter, staging, *args, **kwargs):
+        staging.mkdir(parents=True)
+        return ArchResult(arch="gfx942", out_dir=staging, kpack_path=None)
+
+    monkeypatch.setattr(pipeline, "compile_intermediate", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "pack_arch", pack_nothing)
+
+    with pytest.raises(HkpPackError, match="wrote descriptors but no archive"):
+        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx942"])
 
 
 @pytest.mark.quick
@@ -1826,32 +1952,330 @@ def test_a_passthrough_only_root_passes_with_no_archive(
     assert not list((tmp_path / "out").rglob("*.kpack"))
 
 
+# --- L. The build's filters through the real command line --------------------
+def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
+    """`tools/hkp_pack.py` as the build launches it. The hipcc is a name nothing
+    can run: every root here compiles nothing."""
+    argv = [
+        sys.executable,
+        str(PACKAGING / "tools" / "hkp_pack.py"),
+        "--source-root",
+        str(root),
+        "--out-root",
+        str(tmp_path / "out"),
+        "--arches",
+        arch,
+        "--hipcc",
+        "hipcc-not-invoked",
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
+        "--inter-root",
+        str(tmp_path / "inter"),
+        "--source-label",
+        _LABEL,
+        *flags,
+    ]
+    if rocm_kpack_dir:
+        argv += ["--kpack-python-dir", rocm_kpack_dir]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
 @pytest.mark.quick
-def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
+def test_the_excluded_folder_flag_keeps_a_family_out_of_the_shipped_tree(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Descriptors alone are not enough once a compiling source is present.
-
-    A mixed root is the only shape that reaches this clause: the pass-through
-    half keeps a shard alive, so nothing is skipped and a descriptor count is
-    satisfied, while the hip half prunes out of the one arch packed and its
-    kernels ship nowhere.
-    """
+    """`--exclude-folder` is what a build without a family's producer passes: the
+    family's descriptors are not shipped, and the same root without the flag ships
+    them, so the flag is what kept them out."""
     root = tmp_path / "root"
-    _nest(root, "hip/pointwise", empty_arch_fixture)
-    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture, suffix="2")
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+    _embedded_copy(root, "rocKE/pointwise", empty_arch_fixture, suffix="2")
 
-    with pytest.raises(HkpPackError) as excinfo:
-        _run(
-            root,
-            tmp_path,
-            "hipcc-not-invoked",
-            rocm_kpack_dir,
-            [OTHER_ARCH],
-            source_label=_LABEL,
+    control = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+    assert control.returncode == 0, control.stdout + control.stderr
+    shipped = tmp_path / "out" / ARCH
+    assert (shipped / "embedded").is_dir()
+    assert (shipped / "rocKE").is_dir()
+
+    shutil.rmtree(tmp_path / "out")
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--exclude-folder", "rocKE"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (shipped / "embedded").is_dir()
+    assert not (shipped / "rocKE").exists()
+
+
+@pytest.mark.quick
+def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
+    tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """A build with no rocKE producer packs a rocKE-only root as nothing, and says
+    so; no hipcc or rocke is reached."""
+    root = tmp_path / "root"
+    _nest(root, "rocKE/attention", rocke_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ROCKE_ARCH, rocm_kpack_dir, "--disable-kind", "rocke"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing to pack" in result.stdout
+    assert not (tmp_path / "out" / ROCKE_ARCH).exists()
+
+
+@pytest.mark.quick
+def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = tmp_path / "root"
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--disable-kind", "rokce"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rokce" in result.stderr
+
+
+def _separate_kdps_root(tmp_path, fixture):
+    """A hip KDP pinned to ARCH beside a wildcard embedded KDP."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", fixture)
+    _embedded_copy(root, "embedded/pointwise", fixture, suffix="2")
+    return root
+
+
+def _one_kdp_root(tmp_path, fixture):
+    """One wildcard KDP holding embedded UKDs and a hip UKD pinned to ARCH."""
+    root = _embedded_root(tmp_path, fixture)
+    kdp_path = root / "pointwise" / "solo.kdp.json"
+    kdp = _read(kdp_path)
+    kdp["kernelDescriptors"].append(
+        {
+            "version": "0.1",
+            "id": "ukd-solo-hip-add-f32-b64",
+            "name": "PointwiseAdd f32 block64 (hip)",
+            "arch": [ARCH],
+            "kernel_source": {
+                "kind": "hip",
+                "source": "kernels/PointwiseAdd.cpp",
+                "entry": "PointwiseAdd",
+                "build": {"defines": {"HIP_PLUGIN_POINTWISE_ADD_TYPE": "float"}},
+            },
+            "metadata": {"dtype": "FLOAT", "block_size": 64},
+            "priority": 0,
+        }
+    )
+    kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "build_root",
+    [_separate_kdps_root, _one_kdp_root],
+    ids=["separate-kdps", "one-kdp"],
+)
+def test_an_arch_pruned_compiling_ukd_beside_a_passthrough_shard_packs_cleanly(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, build_root
+):
+    """A compiling UKD that prunes out of the one arch packed leaves that arch's
+    pass-through shard whole and archive-less: nothing selected there needs a
+    producer, so a missing archive is not an error."""
+    root = build_root(tmp_path, empty_arch_fixture)
+
+    results = _pack_embedded(root, tmp_path, rocm_kpack_dir, [OTHER_ARCH])
+
+    assert not results[OTHER_ARCH].skipped
+    assert results[OTHER_ARCH].kpack_path is None
+
+
+# --- L. Disabled families and producer kinds (quick, compile-free) -------------
+# The rocKE fixture's one UKD, scoped to ROCKE_ARCH, is read here as JSON only: the
+# filters have to work in the build without rocKE that they exist for.
+_ROCKE_UKD_ID = "ukd-attention-dense-gfx950"
+_ROCKE_UKD_FILE = "attention_dense.ukd.json"
+_AUTHORING_FORMS = ["inline", "standalone"]
+
+
+def _add_rocke_ukd(kdp_path, ukd, form):
+    """Append `ukd` to a KDP inline, or as a standalone `.ukd.json` beside it that
+    the KDP references by id."""
+    doc = _read(kdp_path)
+    if form == "inline":
+        doc["kernelDescriptors"].append(ukd)
+    else:
+        (kdp_path.parent / _ROCKE_UKD_FILE).write_text(
+            json.dumps(ukd, indent=2), encoding="utf-8"
+        )
+        doc["kernelDescriptors"].append(ukd["id"])
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+
+def _mixed_root(tmp_path, main_fixture, rocke_fixture, form):
+    """The hip pointwise KDP carrying the rocKE fixture's UKD, re-scoped to both of
+    the KDP's arches so that only the kind filter can remove it."""
+    root = tmp_path / "mixed"
+    kdp_path = _nest(root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
+    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
+    ukd["arch"] = [ARCH, ROCKE_ARCH]
+    _add_rocke_ukd(kdp_path, ukd, form)
+    return root, kdp_path
+
+
+def _entry_ids(kdp):
+    return [e if isinstance(e, str) else e["id"] for e in kdp.doc["kernelDescriptors"]]
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_a_disabled_kind_is_pruned_from_its_kdp_and_the_rest_ships(
+    tmp_path, main_fixture, rocke_fixture, form
+):
+    """A UKD of a kind the build has no producer for leaves its KDP, which keeps
+    its other entries and still survives every arch they cover."""
+    root, kdp_path = _mixed_root(tmp_path, main_fixture, rocke_fixture, form)
+
+    enabled = load_flat_input(root, GENERIC_TARGETS, log=_silent)
+    (kdp,) = [k for k in enabled.kdps() if k.path == kdp_path]
+    assert _ROCKE_UKD_ID in _entry_ids(kdp), "the premise: rocKE UKD selected"
+
+    logs = []
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=logs.append, disabled_kinds=("rocke",)
+    )
+    assert any("pointwise.kdp.json" in m and "rocke" in m for m in logs)
+    if form == "standalone":
+        assert any(_ROCKE_UKD_ID in m and "rocke" in m for m in logs)
+    (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
+    assert _ROCKE_UKD_ID not in _entry_ids(kdp)
+    assert _entry_ids(kdp), "the hip entries stay"
+    assert _ROCKE_UKD_ID not in flat.ukd_by_id()
+    arches = [ARCH, ROCKE_ARCH]
+    assert shipped_engines(flat, arches) == shipped_engines(enabled, arches)
+    assert all(
+        "test_fixture:pointwise" in e for e in shipped_engines(flat, arches).values()
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_a_kdp_left_with_no_enabled_kind_does_not_ship(
+    tmp_path, rocke_fixture, rocm_kpack_dir, form
+):
+    """A rocKE-only root has nothing to pack without rocKE: it ships no engine,
+    and a pack of it skips cleanly without reaching any producer."""
+    root = tmp_path / "root"
+    kdp_path = _nest(root, "attention", rocke_fixture) / "attention.kdp.json"
+    doc = _read(kdp_path)
+    (ukd,) = doc["kernelDescriptors"]
+    doc["kernelDescriptors"] = []
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    _add_rocke_ukd(kdp_path, ukd, form)
+
+    assert shipped_engines(
+        load_flat_input(root, GENERIC_TARGETS, log=_silent), [ROCKE_ARCH]
+    ) == {ROCKE_ARCH: ["test_fixture:attention"]}, "the premise: it ships with rocKE"
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rocke",)
+    )
+    assert shipped_engines(flat, [ROCKE_ARCH]) == {ROCKE_ARCH: []}
+
+    results = run_pipeline(
+        source_root=root,
+        arches=[ROCKE_ARCH],
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        disabled_kinds=("rocke",),
+    )
+    assert results[ROCKE_ARCH].skipped
+
+
+@pytest.mark.quick
+def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
+    """A disabled family's folder is not content: even a descriptor that would
+    fail validation there is not loaded. Only a top-level child is a family."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    for family in (root / "rocKE", root / "hip" / "rocKE"):
+        family.mkdir(parents=True)
+        (family / "broken.kdp.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(root, GENERIC_TARGETS, log=_silent)
+    with pytest.raises(HkpPackError, match="malformed"):
+        load_flat_input(root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",))
+    (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",)
+    )
+    assert not any("rocKE" in k.path.parts for k in flat.kdps())
+    assert flat.kdps()
+
+
+@pytest.mark.quick
+def test_disabling_an_unknown_kind_is_an_error(tmp_path, main_fixture):
+    """A misspelled kind in the build's filter must not silently disable nothing."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    with pytest.raises(HkpPackError, match="unknown kernel_source kind"):
+        load_flat_input(root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rokce",))
+
+
+def _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch):
+    """A copy of `empty_arch` whose KDP is a wildcard and whose inline entry is
+    scoped to `entry_arch` (a wildcard when None)."""
+    root = tmp_path / "wildcard"
+    shutil.copytree(empty_arch_fixture, root)
+    kdp_path = root / "solo.kdp.json"
+    doc = _read(kdp_path)
+    doc["arch"] = []
+    for entry in doc["kernelDescriptors"]:
+        entry.pop("arch", None)
+        if entry_arch is not None:
+            entry["arch"] = entry_arch
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "root_kind", ["rocke", "all-wildcard", "wildcard-kdp-pinned-ukd"]
+)
+def test_offered_engines_ignores_the_build_arches_but_honours_the_filters(
+    tmp_path, rocke_fixture, empty_arch_fixture, root_kind
+):
+    """What a root offers does not depend on the arches a build packs, so a
+    host-side gate reading it is the same for every `GPU_TARGETS`; the family and
+    kind filters still remove what they disable."""
+    if root_kind == "rocke":
+        root = tmp_path / "root"
+        shutil.copytree(rocke_fixture, root)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=_silent)
+        assert "test_fixture:attention" in offered_engines(flat)
+        assert (
+            "test_fixture:attention" not in shipped_engines(flat, ["gfx90a"])["gfx90a"]
         )
 
-    message = str(excinfo.value)
-    assert str(root) in message
-    assert "no archive" in message
-    assert OTHER_ARCH in message
+        flat = load_flat_input(
+            root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rocke",)
+        )
+        assert offered_engines(flat) == []
+
+        fam = tmp_path / "fam"
+        _nest(fam, "rocKE", rocke_fixture)
+        flat = load_flat_input(
+            fam, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",)
+        )
+        assert offered_engines(flat) == []
+        return
+
+    entry_arch = None if root_kind == "all-wildcard" else [ROCKE_ARCH]
+    root = _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch)
+    assert offered_engines(load_flat_input(root, GENERIC_TARGETS, log=_silent)) == [
+        "test_fixture:solo"
+    ]

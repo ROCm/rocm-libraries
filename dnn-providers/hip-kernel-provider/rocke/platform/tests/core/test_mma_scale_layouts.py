@@ -64,7 +64,7 @@ def _evaluate(value, *, lane=0, tile=(0, 0), loads=None):
     return operations[op.name](*(evaluate(v) for v in op.operands))
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8"])
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
 @pytest.mark.parametrize("block_k", [16, 32])
 @pytest.mark.parametrize("role", ["a_scale", "b_scale"])
 def test_scale_coordinates(dtype, block_k, role):
@@ -88,6 +88,29 @@ def test_scale_coordinates(dtype, block_k, role):
     for slot in (-1, count):
         with pytest.raises(ValueError, match="fragment slot"):
             layout.coord(b, lane, slot)
+
+
+def test_every_scaled_catalog_coordinates_match_independent_lane_oracle():
+    atoms = [
+        op
+        for op in ArchTarget.from_gfx("gfx1250").mma.ops
+        if op.family == "wmma_scaled"
+    ]
+    assert len(atoms) == 86
+    for atom in atoms:
+        for role in ("a_scale", "b_scale"):
+            layout = getattr(atom, f"{role}_layout")()
+            b = IRBuilder("all_scale_coordinates")
+            lane = b.thread_id_x()
+            count = 128 // atom.scale_block_k
+            assert layout.frag_len == count
+            for slot in range(count):
+                coords = layout.coord(b, lane, slot)
+                for l in range(32):
+                    actual = tuple(_evaluate(v, lane=l) for v in coords)
+                    assert actual == (
+                        (l % 16, slot) if role == "a_scale" else (slot, l % 16)
+                    )
 
 
 def test_scale_defaults_and_unavailable_maps():
@@ -128,7 +151,7 @@ def test_scale_metadata_rejects_inconsistent_maps(role):
             replace(atom, **{f"{role}_frag_len": count})
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8"])
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
 @pytest.mark.parametrize("block_k", [16, 32])
 def test_instance_scale_addresses_and_packed_words(dtype, block_k):
     spec = BlockScaledGemmSpec(

@@ -3,12 +3,18 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "16_3_8_14_14_fp16_ndhwc",
+          "16_3_8_14_14_fp32_ncdhw",
+          "16_3_8_14_14_fp32_ndhwc",
           "1_16_8_112_112_bfp16_ncdhw",
           "1_16_8_112_112_bfp16_ndhwc",
           "1_16_8_112_112_fp16_ncdhw",
           "1_16_8_112_112_fp16_ndhwc",
           "1_16_8_112_112_fp32_ncdhw",
           "1_16_8_112_112_fp32_ndhwc",
+          "32_1_14_14_bfp16_nchw",
+          "32_1_14_14_fp16_nhwc",
           "5_256_4_14_14_bfp16_ncdhw",
           "5_256_4_14_14_bfp16_ndhwc",
           "5_256_4_14_14_fp16_ncdhw",
@@ -17,13 +23,29 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
             "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
@@ -32,12 +54,22 @@
     "MIOPEN_ENGINE": [
       {
         "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "16_3_8_14_14_fp16_ndhwc",
+          "16_3_8_14_14_fp32_ncdhw",
+          "16_3_8_14_14_fp32_ndhwc",
           "1_16_8_112_112_bfp16_ncdhw",
           "1_16_8_112_112_bfp16_ndhwc",
           "1_16_8_112_112_fp16_ncdhw",
           "1_16_8_112_112_fp16_ndhwc",
           "1_16_8_112_112_fp32_ncdhw",
           "1_16_8_112_112_fp32_ndhwc",
+          "1_64_1024_bfp16_ncl",
+          "1_64_1024_fp16_nlc",
+          "1_64_1024_fp32_ncl",
+          "1_64_1024_fp32_nlc",
+          "32_1_14_14_bfp16_nchw",
+          "32_1_14_14_fp16_nhwc",
           "5_256_4_14_14_bfp16_ncdhw",
           "5_256_4_14_14_bfp16_ndhwc",
           "5_256_4_14_14_fp16_ncdhw",
@@ -46,13 +78,29 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1030": [
             "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

@@ -241,6 +241,9 @@ template <typename T>
 void cpu_getrf(int m, int n, T* A, int lda, int* ipiv, int* info);
 
 template <typename T>
+void cpu_getri(int n, T* A, int lda, int* ipiv, T* work, int lwork, int* info);
+
+template <typename T>
 void cpu_getrs(hipsolverOperation_t trans,
                int                  n,
                int                  nrhs,
@@ -365,3 +368,6 @@ void cpu_sytrf(
 template <typename T>
 void cpu_sytrs(
     hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);
+
+template <typename T>
+void cpu_trtri(hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, T* A, int lda, int* info);

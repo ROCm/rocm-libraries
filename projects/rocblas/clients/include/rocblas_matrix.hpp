@@ -290,6 +290,64 @@ inline void rocblas_init_matrix(host_matrix<T>&           hA,
 }
 
 //!
+//! @brief Largest absolute element value an initialization pattern can produce for type T.
+//! @details The rocblas_init_matrix overloads above fill from fixed, known ranges, so the
+//! bound is a constant per (init, type) pair. Complex entries take both components from the
+//! same range, so the magnitude bound is sqrt(2) * component bound.
+//! Keep this in sync with the generators (random_generator, random_hpl_generator,
+//! random_zero_one_generator in rocblas_random.hpp; trig sin/cos in rocblas_init.hpp) that
+//! rocblas_init_matrix dispatches to above.
+//!
+template <typename T>
+inline double init_abs_bound(rocblas_initialization init)
+{
+    double comp; // bound on a single (real) component
+    switch(init)
+    {
+    case rocblas_initialization::rand_int:
+        // float/double: [1,10]; half/bfloat16: [-2,2]; int8: [1,3]
+        if(std::is_same<T, rocblas_half>{} || std::is_same<T, rocblas_bfloat16>{})
+            comp = 2.0;
+        else if(std::is_same<T, int8_t>{})
+            comp = 3.0;
+        else
+            comp = 10.0;
+        break;
+    case rocblas_initialization::hpl:
+        comp = 0.5; // [-0.5, 0.5]
+        break;
+    case rocblas_initialization::trig_float:
+    case rocblas_initialization::rand_int_zero_one:
+        comp = 1.0; // sin/cos in [-1,1]; zero_one in [0,1]
+        break;
+    case rocblas_initialization::zero:
+        comp = 0.0;
+        break;
+    default:
+        // denorm and any future pattern: fall back to a safe unit bound.
+        comp = 1.0;
+        break;
+    }
+    return rocblas_is_complex<T> ? comp * 1.4142135623730951 : comp;
+}
+
+//!
+//! @brief Analytical bound on |D|_max for D = alpha*op(A)*op(B) + beta*C, derived from the
+//! init ranges of A, B and C.
+//! @details TODO: this is a worst-case bound (assumes every product hits max and all K terms
+//! add coherently). Real random sums grow ~sqrt(K), so it is generous; fine for a localized
+//! tolerance in the solutions test, but could be tightened if reused for tighter checks.
+//!
+template <typename Ti, typename To, typename Tc>
+inline double gemm_result_abs_bound(rocblas_initialization init, int64_t K, Tc alpha, Tc beta)
+{
+    const double a = init_abs_bound<Ti>(init);
+    const double b = init_abs_bound<Ti>(init);
+    const double c = init_abs_bound<To>(init);
+    return double(rocblas_abs(alpha)) * double(K) * a * b + double(rocblas_abs(beta)) * c;
+}
+
+//!
 //! @brief Initialize a device matrix.
 //! @param dA The device matrix.
 //! @param arg Specifies the argument class.

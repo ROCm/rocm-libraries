@@ -36,7 +36,7 @@ int make_autoshard(std::string const& target_dir,
         for(int cfg = shard; cfg < num_configs; cfg += num_shards)
         {
             file << "template void " << the_namespace << "::launch_impl<configs[" << cfg
-                 << "]>(const LaunchParams&, const Conv2dParams&, const void*, const void*, void*, "
+                 << "]>(const LaunchParams&, const ConvParams&, const void*, const void*, void*, "
                     "void*, hipStream_t);";
         }
         file << "}\n";
@@ -55,7 +55,7 @@ int make_autoshard(std::string const& target_dir,
         for(int cfg = 0; cfg < num_configs; ++cfg)
         {
             file << "extern template void " << the_namespace << "::launch_impl<configs[" << cfg
-                 << "]>(const LaunchParams&, const Conv2dParams&, const void*, const void*, void*, "
+                 << "]>(const LaunchParams&, const ConvParams&, const void*, const void*, void*, "
                     "void*, hipStream_t);";
         }
         file << "inline auto kernels=std::array<" << kernel_class << "," << num_configs << ">{";

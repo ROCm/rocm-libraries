@@ -23,7 +23,7 @@
 //    fp32 -> BF16 pair conversion in registers between HBM and LDS, so we
 //    split the transfer:
 //        load_*_global  -> __builtin_amdgcn_raw_buffer_load_b128 (HBM -> VGPR)
-//        commit_*_lds   -> fp32x4_to_bf16_pair + 2x ds_write_b64 (VGPR -> LDS)
+//        commit_*_lds   -> fp32xN_to_bf16_pair + 2x ds_write_b64 (VGPR -> LDS)
 //    issue still happens early in the iteration; commit waits on
 //    wait_vmcnt<0> before writing both LDS halves. This preserves the
 //    FP16/BF16 prefetch overlap pattern.
@@ -38,6 +38,8 @@
 // the 16x16 result tile in the epilogue.
 
 #include "conv_kernel_table.h"
+#include "kv_descriptor.h"
+#include "direction_field.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -390,7 +392,7 @@ __device__ void conv2d_grouped_8c_wgrad_tf32_cdna4_nhwc_impl(const float* __rest
             {
                 if(input_active[pass])
                 {
-                    auto pair = fp32x4_to_bf16_pair(input_pending[buf][pass]);
+                    auto pair = fp32xN_to_bf16_pair(input_pending[buf][pass]);
                     *(input_big_addrs[pass] + buf * INPUT_LDS_BUFFER_SIZE_U2)   = pair.big;
                     *(input_small_addrs[pass] + buf * INPUT_LDS_BUFFER_SIZE_U2) = pair.small;
                 }
@@ -402,7 +404,7 @@ __device__ void conv2d_grouped_8c_wgrad_tf32_cdna4_nhwc_impl(const float* __rest
             {
                 if(delta_active[pass])
                 {
-                    auto pair = fp32x4_to_bf16_pair(delta_pending[buf][pass]);
+                    auto pair = fp32xN_to_bf16_pair(delta_pending[buf][pass]);
                     *(delta_big_addrs[pass] + buf * DELTA_LDS_BUFFER_SIZE_U2)   = pair.big;
                     *(delta_small_addrs[pass] + buf * DELTA_LDS_BUFFER_SIZE_U2) = pair.small;
                 }
@@ -602,7 +604,7 @@ __global__ void conv2d_grouped_8c_wgrad_tf32_nhwc_cdna4(const float* __restrict_
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -643,7 +645,7 @@ public:
     }
 
     // This kernel is tf32-only: fp32 input/dY operands, fp32 dW result.
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(par.input_type != DataType::tf32)
             return false;
@@ -673,7 +675,7 @@ public:
             return false;
         // Buffer load uses 32-bit offsets. fp32 makes the byte counts 2x
         // the fp16/bf16 sibling so this check matters more here.
-        Conv2dSize sz(par);
+        ConvSize sz(par);
         if(sz.input_bytes() > INT32_MAX)
             return false;
         if(sz.output_grad_bytes() > INT32_MAX)
@@ -681,7 +683,7 @@ public:
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -692,7 +694,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         auto blocks_q = divup(par.q, cfg_.block_q());
         auto blocks_c = divup(par.groups, cfg_.waves_per_wg);
@@ -701,6 +703,18 @@ public:
         launch.grid       = dim3(blocks_c, blocks_q, par.n);
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", cfg_.group_size);
+        d.int_field("waves_per_wg", cfg_.waves_per_wg);
+        d.int_field("wave_q32", cfg_.wave_q32, /*default=*/1);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        direction_field(d, cfg_.direction, Direction::Wgrad);
+        return d;
     }
 
 protected:

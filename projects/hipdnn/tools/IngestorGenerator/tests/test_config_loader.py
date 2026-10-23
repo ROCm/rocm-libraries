@@ -2,8 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 """Unit tests for codegen/config_loader.py: the happy path over both worked-example
-configs, the five pre-mint loader-mirroring checks, deprecated-key rejection, and the
-kernel_source_kind rejections."""
+configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
+rejection, and the kernel_source_kind rejections."""
+
+import copy
+import sys
+from pathlib import Path
 
 import pytest
 import yaml
@@ -189,6 +193,77 @@ class TestKernelArchSubsetOfPackCheck:
         _check_kernel_arch_subset_of_pack(config)  # does not raise
 
 
+class TestGenericArchRules:
+    """Generic-target rules; ``gfx11-generic`` holds gfx1100..gfx1153, ``gfx12-generic`` gfx1200/gfx1201."""
+
+    @staticmethod
+    def _config(pack_arch, kernel_arch, kind=None):
+        extra = {"kernel_source": KernelSource(kind=kind)} if kind else {}
+        kernel = make_kernel(arch=kernel_arch, **extra)
+        return make_minimal_config(packs=[make_pack(arch=pack_arch, kernels=[kernel])])
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx11-generic"], ["gfx11-generic"]),
+            (["gfx942", "gfx11-generic"], ["gfx942", "gfx11-generic"]),
+        ],
+    )
+    def test_accepted_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx9-4-generic"], []),
+            ([], ["gfx9-4-generic"]),
+            (["gfx11-generic", "gfx1151"], []),
+            (["gfx1151", "gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], ["gfx1151", "gfx11-generic"]),
+            ([], ["gfx11-generic"]),
+            (["gfx942"], ["gfx11-generic"]),
+            (["gfx11-generic"], ["gfx1151"]),
+            (["gfx11-generic", "gfx12-generic"], ["gfx11-generic"]),
+        ],
+    )
+    def test_rejected_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], []),
+            ([], ["gfx11-generic"]),
+        ],
+    )
+    def test_rocke_under_a_generic_is_rejected(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch, kind="rocke"))
+
+    def test_known_generic_produces_no_unrecognised_arch_warning(self):
+        from codegen.config_loader import _check_arch_shape
+
+        assert _check_arch_shape(self._config(["gfx11-generic"], [])) == []
+
+    def test_an_expanded_subset_is_accepted_by_the_coverage_check(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        _check_kernel_arch_subset_of_pack(self._config(["gfx11-generic"], ["gfx1151"]))
+        with pytest.raises(ConfigError):
+            _check_kernel_arch_subset_of_pack(
+                self._config(["gfx11-generic"], ["gfx1250"])
+            )
+
+
 class TestArchShapeCheck:
     """Pre-mint check #5: arch entries are plausible gfx-prefixed base ids
     (error), and unrecognized-but-well-formed ids warn rather than error."""
@@ -215,10 +290,11 @@ class TestArchShapeCheck:
             warnings_out = _check_arch_shape(config)
         assert len(warnings_out) == 1
 
-    def test_recognized_arch_produces_no_warning(self):
+    @pytest.mark.parametrize("arch", ["gfx942", "gfx1250", "gfx1250-strict"])
+    def test_recognized_arch_produces_no_warning(self, arch):
         from codegen.config_loader import _check_arch_shape
 
-        pack = make_pack(arch=["gfx942"])
+        pack = make_pack(arch=[arch])
         config = make_minimal_config(packs=[pack])
         warnings_out = _check_arch_shape(config)
         assert warnings_out == []
@@ -261,6 +337,15 @@ class TestKernelSourceKindRejection:
         from codegen.config_loader import _check_kernel_source_kind_implemented
 
         config = make_minimal_config(kernel_source_kind="rocke")
+        with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_hsaco_under_direct_load_names_the_right_dialect(self):
+        """'hsaco' is a packaged kind: hkp_pack packs it, the direct-load reader never
+        sees it."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="hsaco")
         with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
             _check_kernel_source_kind_implemented(config)
 
@@ -421,6 +506,13 @@ class TestEmittedIdentifierShape:
             "attnV2",
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
+
+    def test_census_name_symbol_rejects_cpp_expressions(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(census_name_symbol="NAME();"))
+        with pytest.raises(ConfigError, match="census_name_symbol"):
+            _check_emitted_identifiers(config)
 
     def test_a_local_name_leading_with_a_hyphen_is_rejected(self):
         """`_to_pascal_case` drops the empty leading part, so `-foo` derives a good
@@ -1010,15 +1102,244 @@ class TestDeprecatedKeys:
             load_config(path)
 
 
+_AUTHORED_HEAD = (
+    "authored_subpath: unit\n"
+    "engine:\n"
+    '  name: "hipkernel:Test"\n'
+    "  knobs: [block_size]\n"
+    "kmd_fields:\n"
+    "  - {name: block_size, type: int, default_value: 64}\n"
+    "packs:\n"
+    "  - name: p\n"
+    "    kernels:\n"
+)
+
+_AUTHORED_KERNEL = (
+    "      - name: k\n"
+    "        kernel_source:\n"
+    "          kind: embedded_source\n"
+    "          source_file: K.cpp\n"
+    "          entry_point: K\n"
+    "        metadata:\n"
+    "          block_size: 64\n"
+)
+
+
+def _mark_of(text, needle, occurrence=0):
+    """0-based ``(line, column)`` of ``needle``'s ``occurrence``-th match, as a
+    PyYAML ``Mark`` reports it."""
+    index = -1
+    for _ in range(occurrence + 1):
+        index = text.index(needle, index + 1)
+    return text.count("\n", 0, index), index - (text.rfind("\n", 0, index) + 1)
+
+
+def _parse(text):
+    from codegen.config_loader import _DuplicateKeySafeLoader
+
+    return yaml.load(text, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+class TestRepeatedYamlKeys:
+    """Stock PyYAML keeps the last of two equal mapping keys and drops the other
+    silently, so the value an author reads first is not the one generated. Merge keys,
+    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them."""
+
+    def _load(self, tmp_path, text):
+        path = tmp_path / "c.yaml"
+        path.write_text(text)
+        return load_config(path)
+
+    def _assert_rejected(self, tmp_path, text, key, first, second):
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            self._load(tmp_path, text)
+        error = excinfo.value
+        assert repr(key) in str(error), str(error)
+        assert (error.context_mark.line, error.context_mark.column) == first
+        assert (error.problem_mark.line, error.problem_mark.column) == second
+
+    def test_a_top_level_key_declared_twice_is_rejected_at_both_marks(self, tmp_path):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + "authored_subpath: other\n"
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "authored_subpath",
+            _mark_of(text, "authored_subpath: unit"),
+            _mark_of(text, "authored_subpath: other"),
+        )
+
+    def test_a_nested_key_declared_twice_is_rejected_at_both_marks(self, tmp_path):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + "          block_size: 32\n"
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "block_size",
+            _mark_of(text, "block_size: 64"),
+            _mark_of(text, "block_size: 32"),
+        )
+
+    def test_a_key_repeated_inside_a_merge_source_is_rejected(self, tmp_path):
+        """The inline source is never constructed as a mapping of its own: only
+        flattening into its parent ever reads it."""
+        text = _AUTHORED_HEAD + (
+            "      - name: k\n"
+            "        kernel_source:\n"
+            "          <<: {kind: embedded_source, source_file: K.cpp, "
+            "source_file: J.cpp}\n"
+            "          entry_point: K\n"
+            "        metadata:\n"
+            "          block_size: 64\n"
+        )
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "source_file",
+            _mark_of(text, "source_file: K.cpp"),
+            _mark_of(text, "source_file: J.cpp"),
+        )
+
+    def test_a_repeated_merge_key_is_rejected(self, tmp_path):
+        text = _AUTHORED_HEAD + (
+            "      - name: k1\n"
+            "        kernel_source: &src\n"
+            "          kind: embedded_source\n"
+            "          source_file: K.cpp\n"
+            "          entry_point: K\n"
+            "        metadata:\n"
+            "          block_size: 64\n"
+            "      - name: k2\n"
+            "        kernel_source:\n"
+            "          <<: *src\n"
+            "          <<: *src\n"
+            "        metadata:\n"
+            "          block_size: 32\n"
+        )
+        self._assert_rejected(
+            tmp_path,
+            text,
+            "<<",
+            _mark_of(text, "<<: *src"),
+            _mark_of(text, "<<: *src", occurrence=1),
+        )
+
+    def test_merges_and_reused_aliases_load_as_stock_yaml(self, tmp_path):
+        """k2 overrides a merged key explicitly; k3 merges ``[*k2src, *src]``, where
+        the first source wins, and reuses k2src after it was flattened with both its
+        inherited and its own ``entry_point``."""
+        text = _AUTHORED_HEAD + (
+            "      - name: k1\n"
+            "        kernel_source: &src\n"
+            "          kind: embedded_source\n"
+            "          source_file: K.cpp\n"
+            "          entry_point: K\n"
+            "        metadata: &md\n"
+            "          block_size: 64\n"
+            "      - name: k2\n"
+            "        kernel_source: &k2src\n"
+            "          <<: *src\n"
+            "          entry_point: K2\n"
+            "        metadata:\n"
+            "          block_size: 128\n"
+            "      - name: k3\n"
+            "        kernel_source:\n"
+            "          <<: [*k2src, *src]\n"
+            "        metadata:\n"
+            "          <<: *md\n"
+            "          block_size: 32\n"
+        )
+        kernels = self._load(tmp_path, text).packs[0].kernels
+        assert [
+            (k.name, k.kernel_source.source_file, k.kernel_source.entry_point)
+            for k in kernels
+        ] == [("k1", "K.cpp", "K"), ("k2", "K.cpp", "K2"), ("k3", "K.cpp", "K2")]
+        assert [k.metadata["block_size"] for k in kernels] == [64, 128, 32]
+        assert _parse(text) == yaml.safe_load(text)
+
+    def test_quoted_and_unquoted_off_are_different_keys_and_values(self):
+        text = 'off: 1\n"off": 2\nflag: off\nname: "off"\n'
+        parsed = _parse(text)
+        assert parsed == {False: 1, "off": 2, "flag": False, "name": "off"}
+        assert parsed == yaml.safe_load(text)
+
+    def test_two_spellings_yaml_resolves_to_one_key_are_rejected(self):
+        """``off`` and ``no`` are both the boolean false, so stock YAML keeps one."""
+        text = "off: 1\nno: 2\n"
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            _parse(text)
+        error = excinfo.value
+        assert (error.context_mark.line, error.context_mark.column) == (0, 0)
+        assert (error.problem_mark.line, error.problem_mark.column) == (1, 0)
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "extra: !!python/object/apply:os.getcwd []\n",
+            "? !!python/object/apply:os.getcwd []\n: 1\n",
+        ],
+        ids=["value", "key"],
+    )
+    def test_an_unsafe_tag_is_still_rejected(self, tmp_path, entry):
+        text = _AUTHORED_HEAD + _AUTHORED_KERNEL + entry
+        with pytest.raises(yaml.constructor.ConstructorError) as excinfo:
+            self._load(tmp_path, text)
+        mark = excinfo.value.problem_mark
+        assert (mark.line, mark.column) == _mark_of(text, "!!python")
+
+
 class TestShippedExampleConfigsLoad:
     """Every config under `configs/` is a worked example a reader copies, so a retired
-    key they still set would make each copy a config the loader refuses."""
+    key they still set would make each copy a config the loader refuses.
 
-    def test_every_shipped_config_loads(self, configs_dir):
-        paths = sorted(configs_dir.glob("*.yaml"))
-        assert len(paths) == 5
+    `configs/` holds TWO schemas. `*.engine.yaml` is an engine manifest: it states the
+    engine's identity and the registry slice it ships, and `registry_enumerator.py`
+    expands it into a generator config. It carries no `packs`, so selecting it by
+    extension alone would feed the wrong schema into the generator loader; it is
+    selected out here and checked through the loader that owns it.
+    """
+
+    @staticmethod
+    def _generator_configs(configs_dir):
+        return sorted(
+            path
+            for path in configs_dir.glob("*.yaml")
+            if not path.name.endswith(".engine.yaml")
+            # A .profile.yaml describes an engine that has no manifest: no `packs`, no
+            # `enumerate:`. Neither loader takes it; tests/test_launch_surface.py
+            # checks its `launch_surface:` block.
+            and not path.name.endswith(".profile.yaml")
+        )
+
+    def test_every_shipped_generator_config_loads(self, configs_dir):
+        paths = self._generator_configs(configs_dir)
+        assert paths, f"no generator configs found under {configs_dir}"
         for path in paths:
             assert load_config(path).engine.name
+
+    def test_every_shipped_engine_manifest_loads_through_its_own_loader(
+        self, configs_dir
+    ):
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        import registry_enumerator
+
+        paths = sorted(configs_dir.glob("*.engine.yaml"))
+        assert paths, f"no engine manifests found under {configs_dir}"
+        for path in paths:
+            manifest = registry_enumerator.load_manifest(str(path))
+            assert manifest["engine"]["name"], path
+            assert manifest["enumerate"]["max_kernels"] > 0, path
+            assert manifest["provider_root"], path
+
+    def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
+        """The control: if `load_config` ever accepted a manifest, the split would be
+        silently unnecessary and the next reader would re-merge it."""
+        manifests = sorted(configs_dir.glob("*.engine.yaml"))
+        assert manifests
+        for path in manifests:
+            with pytest.raises(ConfigError):
+                load_config(path)
 
 
 class TestBehaviorNotesVocabulary:
@@ -2475,3 +2796,180 @@ class TestExpandedKernelsAreKeyChecked:
         raw = self._axes_raw()
         raw["packs"][0]["kernel_template"]["kernel_source"]["spec"] = {"seqlen_q": 256}
         assert self._load(tmp_path, raw) is not None
+
+
+class TestHsacoKernelSource:
+    """A packaged ``hsaco`` kernel names a prebuilt code object by ``file`` and
+    ``symbol``; hkp_pack packs it as-is, so no builder object exists to check."""
+
+    @staticmethod
+    def _raw(**kernel_source):
+        source = {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        }
+        source.update(kernel_source)
+        return {
+            "dialect": "packaged",
+            "kernel_source_kind": "hsaco",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "specialization": {
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size"],
+                "bindings": {},
+                "vocabulary": {},
+            },
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k1",
+                            "kernel_source": source,
+                            "arch": ["gfx942"],
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _load(tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_packaged_hsaco_config_carries_file_and_symbol(self, tmp_path):
+        config = self._load(tmp_path, self._raw())
+        ks = config.packs[0].kernels[0].kernel_source
+        assert (ks.kind, ks.file, ks.symbol) == (
+            "hsaco",
+            "HsacoFixture.co",
+            "HsacoFixtureAdd",
+        )
+
+    def test_a_kernel_and_pack_without_arch_is_refused(self, tmp_path):
+        from codegen.config_loader import _check_kernel_source_fields
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        config.packs[0].arch = []
+        with pytest.raises(ConfigError, match="neither the kernel nor its pack"):
+            _check_kernel_source_fields(config)
+
+    def test_a_kernel_inherits_its_packs_arch_into_the_descriptor(self, tmp_path):
+        from codegen.generator import build_kdp, mint_ids
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert kdp["kernelDescriptors"][0]["arch"] == ["gfx942"]
+
+    def test_a_missing_symbol_is_refused(self, tmp_path):
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["kernel_source"]["symbol"]
+        with pytest.raises(ConfigError, match="requires file, symbol"):
+            self._load(tmp_path, raw)
+
+    def test_another_kinds_key_is_refused_by_the_closed_key_set(self, tmp_path):
+        raw = self._raw(source="HsacoFixture.cpp")
+        with pytest.raises(ConfigError, match=r"\['source'\], which kind 'hsaco'"):
+            self._load(tmp_path, raw)
+
+    def test_specialized_metadata_fields_are_refused(self, tmp_path):
+        """A prebuilt object hydrates no builder, so a binding reads nothing back."""
+        raw = self._raw()
+        raw["specialization"] = {
+            "metadata_fields": ["block_size"],
+            "matcher_only_fields": [],
+            "bindings": {"block_size": {"field": "block_size"}},
+            "vocabulary": {},
+        }
+        with pytest.raises(ConfigError, match="compiled specialization"):
+            self._load(tmp_path, raw)
+
+
+class TestReductionBlockAndDefaultMarker:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": ["lds_k_row_pad"],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def _load(self, tmp_path, reduction=REDUCTION, marker=True):
+        raw = TestExpandedKernelsAreKeyChecked()._variants_raw()
+        raw["reduction"] = copy.deepcopy(reduction)
+        raw["kmd_fields"].append(
+            {"name": "seqlen_q", "type": "int", "default_value": 512}
+        )
+        raw["packs"][0]["variants"][0]["knob_sets"]["pinned"] = [
+            {"block_m": 256, "tag": "a", "default": marker},
+            {"block_m": 128, "tag": "b"},
+        ]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_both_are_carried_and_neither_reaches_the_spec(self, tmp_path):
+        config = self._load(tmp_path)
+        assert config.reduction == self.REDUCTION
+        kernels = config.packs[0].kernels
+        assert [k.default for k in kernels] == [True, False]
+        assert all("default" not in k.kernel_source.spec for k in kernels)
+
+    @pytest.mark.parametrize(
+        "reduction, marker, message",
+        [
+            (REDUCTION, "yes", "'default' must be true or false"),
+            ({**REDUCTION, "budget": 1}, True, r"'reduction' declares \['budget'\]"),
+            (
+                {"fields": {**REDUCTION["fields"], "ignored": ["block_m"]}},
+                True,
+                r"lists \['block_m'\] more than once",
+            ),
+            (
+                {
+                    "fields": {
+                        "performance": [{"name": "x", "unset_resolves_by": "a b"}]
+                    }
+                },
+                True,
+                "not an identifier",
+            ),
+            ({**REDUCTION, "aot_budget_per_arch": True}, True, "positive integer"),
+            (
+                {
+                    "fields": {
+                        **REDUCTION["fields"],
+                        "performance": [{"name": "block_m", "divides": "not_a_field"}],
+                    }
+                },
+                True,
+                "not_a_field",
+            ),
+        ],
+    )
+    def test_a_bad_marker_or_block_is_refused(
+        self, tmp_path, reduction, marker, message
+    ):
+        with pytest.raises(ConfigError, match=message):
+            self._load(tmp_path, reduction, marker)
+
+    @pytest.mark.parametrize("key", ["single_round_epsilon", "drift_multiplier"])
+    @pytest.mark.parametrize(
+        "value", [True, -0.1, float("nan"), float("inf"), "0.1"], ids=repr
+    )
+    def test_a_noise_policy_key_must_be_a_finite_non_negative_number(
+        self, tmp_path, key, value
+    ):
+        with pytest.raises(ConfigError, match=key):
+            self._load(tmp_path, {**self.REDUCTION, key: value})

@@ -161,10 +161,25 @@
     #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
         #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
     #endif
-    #define ROCPRIM_IS_CDNA5() __builtin_amdgcn_processor_is("gfx1250") || __builtin_amdgcn_processor_is("gfx1250-strict")
+    #if defined(ROCPRIM_TARGET_SPIRV)
+        // Preserve late target selection for AMDGPU SPIR-V.
+        #define ROCPRIM_IS_CDNA5()                                \
+            (__builtin_amdgcn_processor_is("gfx1250")             \
+             || __builtin_amdgcn_processor_is("gfx1250-strict"))
+    #else
+        // Concrete AMDGPU compilation already knows the target architecture
+        // from preprocessor macros (see ROCPRIM_TARGET_CDNA5 above), so use
+        // that instead of asking the builtin about a processor string that
+        // older compilers may not recognize (e.g. "gfx1250-strict").
+        #if defined(ROCPRIM_TARGET_CDNA5)
+            #define ROCPRIM_IS_CDNA5() 1
+        #else
+            #define ROCPRIM_IS_CDNA5() 0
+        #endif
+    #endif
     #define ROCPRIM_IS_CDNA4() __builtin_amdgcn_processor_is("gfx950")
-    #define ROCPRIM_IS_CDNA3()                                                              \
-        (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+    #define ROCPRIM_IS_CDNA3()                       \
+        (__builtin_amdgcn_processor_is("gfx942")     \
          || __builtin_amdgcn_processor_is("gfx9-4-generic"))
     #define ROCPRIM_IS_CDNA2() (__builtin_amdgcn_processor_is("gfx90a"))
     #define ROCPRIM_IS_CDNA1() (__builtin_amdgcn_processor_is("gfx908"))
@@ -181,6 +196,7 @@
          || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
          || __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") \
          || __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") \
+         || __builtin_amdgcn_processor_is("gfx1170") || __builtin_amdgcn_processor_is("gfx1171") \
          || __builtin_amdgcn_processor_is("gfx11-generic"))
     #define ROCPRIM_IS_RDNA2()                                                                   \
         (__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031")    \

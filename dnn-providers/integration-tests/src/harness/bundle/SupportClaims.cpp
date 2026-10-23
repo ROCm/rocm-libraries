@@ -133,21 +133,6 @@ bool SupportClaims::isClaimed(const std::string& engine,
     return archIt->second.count(platform) != 0;
 }
 
-std::set<std::string> SupportClaims::claimedEngineNames(const std::string& arch,
-                                                        const std::string& platform) const
-{
-    std::set<std::string> names;
-    for(const auto& [engine, archMap] : claims)
-    {
-        const auto archIt = archMap.find(arch);
-        if(archIt != archMap.end() && archIt->second.count(platform) != 0)
-        {
-            names.insert(engine);
-        }
-    }
-    return names;
-}
-
 bool SweepSupportClaims::isClaimed(const std::string& caseId,
                                    const std::string& engine,
                                    const std::string& arch,
@@ -175,29 +160,6 @@ bool SweepSupportClaims::isClaimed(const std::string& caseId,
     }
 
     return false;
-}
-
-std::set<std::string> SweepSupportClaims::claimedEngineNames(const std::string& caseId,
-                                                             const std::string& arch,
-                                                             const std::string& platform) const
-{
-    std::set<std::string> names;
-    for(const auto& [engine, groups] : claims)
-    {
-        for(const auto& group : groups)
-        {
-            if(std::find(group.cases.begin(), group.cases.end(), caseId) == group.cases.end())
-            {
-                continue;
-            }
-            const auto archIt = group.support.find(arch);
-            if(archIt != group.support.end() && archIt->second.count(platform) != 0)
-            {
-                names.insert(engine);
-            }
-        }
-    }
-    return names;
 }
 
 SupportClaims parseSupportClaimsJson(const nlohmann::json& json, std::string_view source)

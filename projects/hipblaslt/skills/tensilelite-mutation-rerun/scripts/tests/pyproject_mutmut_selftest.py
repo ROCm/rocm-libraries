@@ -22,9 +22,9 @@ ORIGINAL = (
     b"only_mutate = [\r\n"
     b'    "Tensile/Common/Utilities.py",\r\n'
     b"]\r\n"
-    b'do_not_mutate = ["Tensile/Tests/*"]\r\n'
+    b'do_not_mutate = ["tensilelite/Tests/*"]\r\n'
     b"pytest_add_cli_args_test_selection = [\r\n"
-    b'    "Tensile/Tests/unit/Common",\r\n'
+    b'    "tensilelite/Tests/unit/Common",\r\n'
     b"]\r\n"
     b"# unrelated comment must survive set\r\n"
     b"\r\n"
@@ -133,7 +133,7 @@ def test_transaction_records_identity_restores_exact_bytes_and_clears(tmp_path: 
         "--only-mutate",
         "Tensile/LibraryIO.py",
         "--test-selection",
-        "Tensile/Tests/unit/characterization/LibraryIO",
+        "tensilelite/Tests/unit/characterization/LibraryIO",
     )
     require_success(first_set)
     generated = source.read_bytes()
@@ -154,7 +154,7 @@ def test_transaction_records_identity_restores_exact_bytes_and_clears(tmp_path: 
             "--only-mutate",
             "Tensile/LibraryIO.py",
             "--test-selection",
-            "Tensile/Tests/unit/characterization/LibraryIO",
+            "tensilelite/Tests/unit/characterization/LibraryIO",
         )
     )
     assert source.read_bytes() == generated

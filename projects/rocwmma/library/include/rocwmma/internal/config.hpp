@@ -42,6 +42,8 @@
 /// ROCWMMA_ARCH_GFX1151
 /// ROCWMMA_ARCH_GFX1152
 /// ROCWMMA_ARCH_GFX1153
+/// ROCWMMA_ARCH_GFX1170
+/// ROCWMMA_ARCH_GFX1171
 /// ROCWMMA_ARCH_GFX1200
 /// ROCWMMA_ARCH_GFX1201
 /// ROCWMMA_ARCH_GFX1250
@@ -79,6 +81,10 @@
 #define ROCWMMA_ARCH_GFX1152 __gfx1152__
 #elif defined(__gfx1153__) && ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_GFX1153 __gfx1153__
+#elif defined(__gfx1170__) && ROCWMMA_DEVICE_COMPILE
+#define ROCWMMA_ARCH_GFX1170 __gfx1170__
+#elif defined(__gfx1171__) && ROCWMMA_DEVICE_COMPILE
+#define ROCWMMA_ARCH_GFX1171 __gfx1171__
 #elif defined(__gfx1200__) && ROCWMMA_DEVICE_COMPILE
 #define ROCWMMA_ARCH_GFX1200 __gfx1200__
 #elif defined(__gfx1201__) && ROCWMMA_DEVICE_COMPILE
@@ -129,6 +135,12 @@ static_assert(0, "Unsupported architecture");
 #if !defined(ROCWMMA_ARCH_GFX1153)
 #define ROCWMMA_ARCH_GFX1153 0
 #endif
+#if !defined(ROCWMMA_ARCH_GFX1170)
+#define ROCWMMA_ARCH_GFX1170 0
+#endif
+#if !defined(ROCWMMA_ARCH_GFX1171)
+#define ROCWMMA_ARCH_GFX1171 0
+#endif
 #if !defined(ROCWMMA_ARCH_GFX1200)
 #define ROCWMMA_ARCH_GFX1200 0
 #endif
@@ -148,6 +160,7 @@ static_assert(0, "Unsupported architecture");
 /// ROCWMMA_ARCH_GFX9
 /// ROCWMMA_ARCH_GFX11
 /// ROCWMMA_ARCH_GFX12
+/// ROCWMMA_ARCH_GFX117X
 /// ROCWMMA_WAVE64_MODE
 /// ROCWMMA_WAVE32_MODE
 /// ROCWMMA_BLOCK_DIM_16_SUPPORTED
@@ -166,7 +179,10 @@ static_assert(0, "Unsupported architecture");
 #define ROCWMMA_BLOCK_DIM_16_SUPPORTED 1
 #endif
 
-#if ROCWMMA_ARCH_GFX1200 || ROCWMMA_ARCH_GFX1201 || ROCWMMA_ARCH_GFX1250
+// gfx1170/1171 use the gfx12-compatible rocWMMA backend, including packed
+// WMMA register layouts, wave32 and 16x16 tiles. This grouping describes
+// backend compatibility, not hardware generation; individual target IDs remain distinct.
+#if ROCWMMA_ARCH_GFX1170 || ROCWMMA_ARCH_GFX1171 || ROCWMMA_ARCH_GFX1200 || ROCWMMA_ARCH_GFX1201 || ROCWMMA_ARCH_GFX1250
 #define ROCWMMA_ARCH_GFX12 1
 #define ROCWMMA_WAVE32_MODE 1
 #define ROCWMMA_BLOCK_DIM_16_SUPPORTED 1
@@ -198,6 +214,8 @@ static_assert(0, "Unsupported architecture");
 #if !defined(ROCWMMA_BLOCK_DIM_32_SUPPORTED)
 #define ROCWMMA_BLOCK_DIM_32_SUPPORTED 0
 #endif
+
+#define ROCWMMA_ARCH_GFX117X (ROCWMMA_ARCH_GFX1170 || ROCWMMA_ARCH_GFX1171)
 
 #if defined(NDEBUG)
 #define ROCWMMA_UNSUPPORTED_IMPL(MSG)

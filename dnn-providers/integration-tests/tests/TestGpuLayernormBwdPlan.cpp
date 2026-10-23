@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -18,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "LayernormBwdGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -28,6 +30,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
 {
@@ -178,6 +181,54 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
 
     EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
                                                batchnormGraphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuLayernormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    constexpr int64_t DY_UID = 10;
+    constexpr int64_t X_UID = 11;
+    constexpr int64_t SCALE_UID = 12;
+    constexpr int64_t DX_UID = 13;
+    constexpr int64_t DSCALE_UID = 14;
+    constexpr int64_t DBIAS_UID = 15;
+    constexpr int64_t EPSILON_UID = 16;
+    constexpr int64_t MEAN_UID = 17;
+    constexpr int64_t INV_VARIANCE_UID = 18;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+
+    auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                X_UID,
+                                                SCALE_UID,
+                                                DX_UID,
+                                                DSCALE_UID,
+                                                DBIAS_UID,
+                                                EPSILON_UID,
+                                                MEAN_UID,
+                                                INV_VARIANCE_UID,
+                                                {2, 3, 4, 5},
+                                                TensorLayout::NCHW,
+                                                epsilon,
+                                                2,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
+
+    const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto denseWrap = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap = GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuLayernormBwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
@@ -347,15 +398,19 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<ScaleBiasType> cpuDbias(normDims, normStrides);
 
     constexpr unsigned int SEED = 42;
-    dyTensor.fillWithRandomValues(static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
-    xTensor.fillWithRandomValues(static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
+    fillWithRandomValues(dyTensor, static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
+    fillWithRandomValues(xTensor, static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
-    meanTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 3);
-    rstdTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 4);
+    fillWithRandomValues(meanTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 3);
+    fillWithRandomValues(rstdTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 4);
 
     Tensor<DxType> gpuDx(ioDims, ioStrides);
     Tensor<ScaleBiasType> gpuDscale(normDims, normStrides);

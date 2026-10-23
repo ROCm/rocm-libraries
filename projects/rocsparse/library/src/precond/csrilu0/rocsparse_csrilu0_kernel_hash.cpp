@@ -131,8 +131,10 @@ namespace rocsparse
             // Column index currently being processes
             J local_col = csr_col_ind[j] - idx_base;
 
-            // Corresponding value
-            T local_val = csr_val[j];
+            // Corresponding value. With non-coherent XCD L2s it is read after the spin loop.
+            T local_val = rocsparse::has_noncoherent_xcd_l2
+                              ? static_cast<T>(0)
+                              : rocsparse::load_done_row_data(&csr_val[j]);
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -147,14 +149,23 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            while(!__hip_atomic_load(&done[local_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+            while(
+                !rocsparse::atomic_load(&done[local_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            // Make sure updated csr_val is visible
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
+
+            // Earlier columns may have updated entry j with device scope stores, which have to
+            // complete before it is read back.
+            if constexpr(rocsparse::has_noncoherent_xcd_l2)
+            {
+                rocsparse::wait_store_completion();
+                local_val = rocsparse::load_done_row_data(&csr_val[j]);
+            }
 
             // Load diagonal entry
-            T diag_val = csr_val[local_diag];
+            T diag_val = rocsparse::load_done_row_data(&csr_val[local_diag]);
 
             if(diag_val == static_cast<T>(0))
             {
@@ -162,7 +173,8 @@ namespace rocsparse
                 // Skip this row if it has a zero pivot
                 break;
             }
-            csr_val[j] = local_val = local_val / diag_val;
+            local_val = local_val / diag_val;
+            rocsparse::store_done_row_data(&csr_val[j], local_val);
 
             // Loop over the row the current column index depends on
             // Each lane processes one entry
@@ -187,8 +199,11 @@ namespace rocsparse
                     {
                         // Entry found, do ILU computation
                         I idx_data = data[hash];
-                        csr_val[idx_data]
-                            = rocsparse::fma(-local_val, csr_val[k], csr_val[idx_data]);
+                        rocsparse::store_done_row_data(
+                            &csr_val[idx_data],
+                            rocsparse::fma(-local_val,
+                                           rocsparse::load_done_row_data(&csr_val[k]),
+                                           rocsparse::load_done_row_data(&csr_val[idx_data])));
                         break;
                     }
                     else
@@ -203,10 +218,17 @@ namespace rocsparse
         // Make sure updated csr_val is written to global memory
         __threadfence_block();
 
+        // The updates of the diagonal entry are device scope stores, which have to complete
+        // before it is read back.
+        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        {
+            rocsparse::wait_store_completion();
+        }
+
         const bool is_diag = (row_diag >= 0);
         if(is_diag)
         {
-            const auto diag_val     = csr_val[row_diag];
+            const auto diag_val     = rocsparse::load_done_row_data(&csr_val[row_diag]);
             const auto abs_diag_val = rocsparse::abs(diag_val);
             if(boost)
             {
@@ -215,7 +237,9 @@ namespace rocsparse
                 {
                     if(lid == 0)
                     {
-                        csr_val[row_diag] = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
+                        rocsparse::store_done_row_data(
+                            &csr_val[row_diag],
+                            rocsparse::assign_ilu0_boost_value(diag_val, boost_val));
                     };
                 };
             }
@@ -242,13 +266,13 @@ namespace rocsparse
             }
         }
 
-        // Make sure updated csr_val is written to global memory
-        __threadfence();
+        // Complete the stores of the results before the done flag is set
+        rocsparse::release_done_row_data();
 
         if(lid == 0)
         {
             // First lane writes "we are done" flag
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 

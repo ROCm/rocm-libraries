@@ -55,6 +55,12 @@ static bool rocke_red_is_f32(const rocke_value_t* v)
            && strcmp(v->type->name, "f32") == 0;
 }
 
+static bool rocke_red_is_f64(const rocke_value_t* v)
+{
+    return v != NULL && v->type != NULL && v->type->name != NULL
+           && strcmp(v->type->name, "f64") == 0;
+}
+
 static bool rocke_red_is_i32(const rocke_value_t* v)
 {
     return v != NULL && v->type != NULL && v->type->name != NULL
@@ -381,13 +387,14 @@ rocke_value_t* rocke_block_lds_reduce_with_wave_prologue(rocke_ir_builder_t* b,
     rocke_value_t* warp;
     rocke_value_t** parts;
     int w;
+    bool is_f64;
 
-    if(!rocke_red_is_f32(val))
+    if(!rocke_red_is_f32(val) && !rocke_red_is_f64(val))
     {
         return (rocke_value_t*)rocke_red_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "block_lds_reduce_with_wave_prologue expects f32 input, got %s",
+            "block_lds_reduce_with_wave_prologue expects f32 or f64 input, got %s",
             (val && val->type) ? val->type->name : "<null>");
     }
 
@@ -402,13 +409,17 @@ rocke_value_t* rocke_block_lds_reduce_with_wave_prologue(rocke_ir_builder_t* b,
     c_wave = rocke_b_const_i32(b, wave_size);
     lane = rocke_b_mod(b, tid, c_wave);
     warp = rocke_b_div(b, tid, c_wave);
+    is_f64 = rocke_red_is_f64(val);
     {
         rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, lane, rocke_b_const_i32(b, 0)));
         rocke_b_region_enter(b, iff.then_region);
         {
             rocke_value_t* idx[1];
             idx[0] = warp;
-            rocke_b_smem_store_vN_f32(b, lds_buf, idx, 1, warp_partial, 1);
+            if(is_f64)
+                rocke_b_smem_store_vN(b, lds_buf, idx, 1, warp_partial, 1);
+            else
+                rocke_b_smem_store_vN_f32(b, lds_buf, idx, 1, warp_partial, 1);
         }
         rocke_b_region_leave(b);
     }
@@ -425,7 +436,10 @@ rocke_value_t* rocke_block_lds_reduce_with_wave_prologue(rocke_ir_builder_t* b,
         rocke_value_t* idx[1];
         rocke_value_t* v_vec;
         idx[0] = rocke_b_const_i32(b, w);
-        v_vec = rocke_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
+        if(is_f64)
+            v_vec = rocke_b_smem_load_vN(b, lds_buf, idx, 1, rocke_f64(), 1);
+        else
+            v_vec = rocke_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
         parts[w] = rocke_b_vec_extract(b, v_vec, 0);
     }
     return rocke_red_tree_reduce_scalars(b, combine, parts, num_warps);

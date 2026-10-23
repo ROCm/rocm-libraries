@@ -306,7 +306,14 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     ctx->dtl = spec->trait.direct_to_lds;
     if(ctx->dtl)
     {
-        ctx->dtl_dwords = 4; /* _DTL_DWORDS         */
+        /* _DTL_DWORDS: capped at the arch's own buffer_load_lds width
+         * (is_valid_spec has already checked tile_k divides it): CDNA4
+         * (gfx950) has the full dword=4 form, CDNA3 (gfx942) only dword=1. */
+        ctx->dtl_dwords = rocke_archtarget_async_lds_max_dwords(ctx->target);
+        if(ctx->dtl_dwords > 4)
+        {
+            ctx->dtl_dwords = 4;
+        }
         ctx->dtl_halves = ctx->dtl_dwords * 2; /* _DTL_HALVES         */
         ctx->dtl_bytes_per_lane = ctx->dtl_dwords * 4; /* _DTL_BYTES_PER_LANE */
         if((ctx->block_k % ctx->dtl_halves) != 0)

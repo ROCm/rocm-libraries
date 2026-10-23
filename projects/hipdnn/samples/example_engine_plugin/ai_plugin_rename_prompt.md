@@ -41,7 +41,7 @@ directory. Ask if either is missing.
 4. Scope rules -- common pitfalls to avoid:
    - Do NOT rename SDK identifiers (see "SDK Identifiers" table in README).
    - Do NOT rename files in `hip/` or `tests/mocks/` -- update namespace only.
-   - Do NOT rename kernel infrastructure: `templates/*.in`,
+   - Do NOT rename kernel infrastructure: `kernels/templates/*.in`,
      `EmbedKernelSources.cmake`, `KERNEL_GENERATED_SOURCES`.
    - DO rename the `HIPDNN_REGISTER_ENGINE` arguments
      (`EXAMPLE_PROVIDER_RELU_ENGINE`, `EXAMPLE_PROVIDER_CONV_FWD_ENGINE`) and

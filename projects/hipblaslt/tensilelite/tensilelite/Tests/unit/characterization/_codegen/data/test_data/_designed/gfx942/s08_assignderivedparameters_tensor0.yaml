@@ -1,0 +1,69 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Probe candidate for Solution.assignDerivedParameters sparse-B metadata cluster.
+# Target: Tensile/SolutionStructs/Solution.py, mode derive.
+#
+# Targets:
+#   2069        : Sparse==2 and DirectToVgprSparseMetadata -> reject (Sparse B does
+#                 not support DTVSM). Hit by the DTVSM:True fork permutation.
+#   2076-2085   : Sparse==2, not DirectToVgprSparseMetadata -> metadata copies from
+#                 the B side (ThreadTileMetadata=ThreadTileB, etc). Hit by the
+#                 DTVSM:False fork permutation.
+#
+# Base: gfx942 sparse_pack.yaml (HHS NT, SMFMA [16,16,32,1]), Sparse 1 -> 2.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (f16 in / f16 out / f32 compute) NT, Sparse=2 (2:4 sparse B)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Sparse: 2
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DirectToVgprSparseMetadata: [True, False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

@@ -18,7 +18,7 @@ ways to supply these tensors:
 
 - **Runtime pass-by-value**: The value is supplied as a host pointer in the variant pack at
   ``execute()`` time. The graph can be built once and executed repeatedly with different scalar
-  values without rebuilding. This requires plugin SDK ≥ 1.2.0.
+  values without rebuilding. This requires engine plugin API ≥ 1.2.0.
 
 When to use each
 ================
@@ -38,7 +38,7 @@ would be too expensive.
 
    Compile-time constants are compatible with all implementations that support runtime
    pass-by-value, because the baked value can be treated as a constant runtime input internally.
-   The reverse is not true: a runtime pass-by-value tensor requires plugin SDK ≥ 1.2.0 and will
+   The reverse is not true: a runtime pass-by-value tensor requires engine plugin API ≥ 1.2.0 and will
    not work with older plugins.
 
 Use compile-time constants

@@ -15,12 +15,7 @@
           "16_3_8_14_14_ndhwc_e77a7a",
           "4096_128_1_1_nchw_609aae",
           "4096_128_1_1_nchw_6640cf",
-          "4096_128_1_1_nchw_6c734a",
           "4096_128_1_1_nchw_c09557",
-          "4096_128_1_1_nchw_ff7bb0",
-          "4096_128_1_1_nhwc_02dc39",
-          "4096_128_1_1_nhwc_059ead",
-          "4096_128_1_1_nhwc_404125",
           "4096_128_1_1_nhwc_a7d754",
           "4096_128_1_1_nhwc_da0046",
           "5_256_14_14_nchw_0650c8",
@@ -42,6 +37,77 @@
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "2_16_8_8_nchw_006114",
+          "2_16_8_8_nchw_d4e5c0",
+          "2_16_8_8_nchw_e61f42",
+          "2_16_8_8_nchw_f2d066",
+          "2_16_8_8_nhwc_2d4ef4",
+          "2_16_8_8_nhwc_43584d",
+          "2_16_8_8_nhwc_5f6adb",
+          "2_16_8_8_nhwc_bd9533",
+          "2_16_8_8_nhwc_dbf702",
+          "2_16_8_8_nhwc_dcd0a0",
+          "2_3_4_8_8_ncdhw_3ecb42",
+          "2_3_4_8_8_ncdhw_5b8721",
+          "2_3_4_8_8_ncdhw_c56c49",
+          "2_3_4_8_8_ncdhw_d36cec",
+          "2_3_4_8_8_ndhwc_031714",
+          "2_3_4_8_8_ndhwc_06b433",
+          "2_3_4_8_8_ndhwc_0faf31",
+          "2_3_4_8_8_ndhwc_273df3",
+          "2_3_4_8_8_ndhwc_55d8a8",
+          "2_3_4_8_8_ndhwc_5f7677",
+          "2_3_4_8_8_ndhwc_77aca2",
+          "2_3_4_8_8_ndhwc_a9ff06",
+          "2_3_4_8_8_ndhwc_b59ad1",
+          "2_3_4_8_8_ndhwc_f13484",
+          "2_3_4_8_8_ndhwc_f87bcf",
+          "32_1_14_14_nchw_norlo_norslope_rhi6_bd8904",
+          "32_1_14_14_nchw_rlo0_norslope_norhi_4da7ef",
+          "32_1_14_14_nchw_rlo0p1_norslope_rhi0p5_5b17c4",
+          "32_1_14_14_nhwc_norlo_norslope_rhi6_f4285e",
+          "32_1_14_14_nhwc_rlo0_norslope_norhi_7ce53d",
+          "32_3_14_1_nchw_rlo0_norslope_norhi_604246",
+          "32_3_14_1_nchw_rlo0p1_norslope_rhi0p5_6efa2d",
+          "32_3_14_1_nhwc_norlo_norslope_rhi6_c5582f",
+          "32_3_14_1_nhwc_rlo0_norslope_norhi_20c8b4",
+          "32_3_14_1_nhwc_rlo0p1_norslope_rhi0p5_32ae87",
+          "32_3_1_14_nchw_norlo_norslope_rhi6_4fc7b6",
+          "32_3_1_14_nchw_rlo0_norslope_norhi_4444ee",
+          "32_3_1_14_nchw_rlo0p1_norslope_rhi0p5_79473f",
+          "32_3_1_14_nhwc_norlo_norslope_rhi6_c9cd03",
+          "32_3_1_14_nhwc_rlo0p1_norslope_rhi0p5_fcde9c"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

@@ -153,12 +153,27 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     bool has_tile_size_override; /* Optional[int] None */
     int tile_size_override;
 
-    bool use_invariant_hoist; /* False */
+    bool use_invariant_hoist; /* False; inert, kept so saved specs still load */
     bool use_wide_kv_load; /* False */
     /* 64-bit paged-KV addressing for caches > 2 GiB (gfx950 segment kernel folds
      * the per-block byte base into a 64-bit buffer base). Kept byte-identical
      * with the gfx950 header (the two share this struct). */
     bool use_i64_kv_addr; /* False */
+    /* All-decode launch grid: seq_idx = block_id_x, one query block per
+     * sequence, no binary search (legal only when every sequence has one query
+     * token; the launcher sizes grid x to num_seqs). */
+    bool use_decode_grid; /* False */
+    /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
+     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
+     * "stream"; fp8 K/V keeps "all". */
+    const char* kv_cache_policy; /* "all" */
+    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
+     * Implemented for fp16/bf16 K/V, which can be extended. */
+    bool use_kv_lds_swizzle; /* False */
+    /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
+     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
+     * can be extended. */
+    bool use_wave_page_id_load; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the
@@ -232,6 +247,11 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
 
 /* Segment kernel (narrow 16x16x16 MFMA). Call with a spec validated by
  * rocke_unified_attention_3d_tiled_spec_validate. */
+/* Direct [B,H,S,D] KV input with runtime byte strides. Keeps the existing
+ * caller-owned spec layout and paged entry point ABI unchanged. */
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
+
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
 

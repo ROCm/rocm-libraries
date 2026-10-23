@@ -37,7 +37,7 @@
  * This TU calls them through that header but does not implement them.
  *
  * GFX950 vs GFX942 deltas reproduced here: arch default "gfx950"; wide-K config
- * (QK_K_STEP=32, PV_K_STEP=32-or-16, ASYNC_LDS_DWORDS=4, HALVES_PER_LANE=8); no
+ * (QK_K_STEP=32, transposed QK + PV, ASYNC_LDS_DWORDS=4, HALVES_PER_LANE=8); no
  * wide-sync / invariant-hoist / wide-KV knobs; tile_size ignores the override;
  * the kernel_name carries no gfx942 suffix nor hoist/wkv parts; the segment
  * driver also calls emit_q_to_lds and emit_async_infra phases in Python order.
@@ -79,6 +79,13 @@
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define ROCKE_ATTN3D950_MFMA_M 16
 #define ROCKE_ATTN3D950_MFMA_N 16
+/* Async K/V feed: one wave64 CTA, 4 DWORDs (8 halves) per lane per async call;
+ * every call is one vmcnt event, and the gfx950 vmcnt field is 6 bits. */
+#define ROCKE_ATTN3D950_SEGMENT_THREADS 64
+#define ROCKE_ATTN3D950_KV_HALVES_PER_LANE 8
+#define ROCKE_ATTN3D950_KV_HALVES_PER_CALL \
+    (ROCKE_ATTN3D950_SEGMENT_THREADS * ROCKE_ATTN3D950_KV_HALVES_PER_LANE)
+#define ROCKE_ATTN3D950_MAX_VMCNT ((1 << 6) - 1)
 
 /* ===================================================================== *
  *  small helpers
@@ -201,6 +208,10 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_invariant_hoist = false;
     s.use_wide_kv_load = false;
     s.use_i64_kv_addr = false;
+    s.use_decode_grid = false;
+    s.kv_cache_policy = "all";
+    s.use_kv_lds_swizzle = false;
+    s.use_wave_page_id_load = false;
     return s;
 }
 
@@ -236,6 +247,63 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
                         s->kv_storage_dtype);
         return false;
     }
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(s->kv_cache_policy, &kv_cache_bits))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "kv_cache_policy must be one of all, global, stream, nt (got '%s')",
+                        s->kv_cache_policy ? s->kv_cache_policy : "(null)");
+        return false;
+    }
+    if(kv_cache_bits != ROCKE_CACHE_ALL && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_cache_policy applies to fp16/bf16 KV storage only");
+        return false;
+    }
+    if(s->use_kv_lds_swizzle && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
+        return false;
+    }
+    if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+        return false;
+    }
+    if(s->has_tile_size_override)
+    {
+        const int t = s->tile_size_override;
+        if(t < s->block_size || s->block_size <= 0 || t % s->block_size != 0 || t > 128)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "tile_size_override must be a multiple of block_size in "
+                            "[block_size, 128] (got %d, block_size=%d)",
+                            t,
+                            s->block_size);
+            return false;
+        }
+        /* Multi-page tiles rely on the async page-id loader; the fp8 KV path
+         * loads synchronously, so it keeps page-sized tiles. */
+        if(t != s->block_size && s->kv_storage_dtype != NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "multi-page tiles require fp16/bf16 KV storage");
+            return false;
+        }
+        /* The loop waits on a tile's async calls with s_waitcnt vmcnt, which
+         * counts at most ROCKE_ATTN3D950_MAX_VMCNT outstanding calls. */
+        if((t * s->head_size) / ROCKE_ATTN3D950_KV_HALVES_PER_CALL > ROCKE_ATTN3D950_MAX_VMCNT)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "tile_size_override=%d x head_size=%d needs more async calls per "
+                            "tile than s_waitcnt can count",
+                            t,
+                            s->head_size);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -270,13 +338,13 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_block_q(
 int rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(
     const rocke_unified_attention_3d_tiled_spec_t* s)
 {
-    /* gfx950 @property: tile_size == block_size (tile_size_override is ignored;
-     * the gfx950 spec accepts the knob only for signature parity). */
+    /* gfx950 @property: tile_size_override (a multiple of block_size: multi-page
+     * tile) when set, else block_size. */
     if(s == NULL)
     {
         return -1;
     }
-    return s->block_size;
+    return s->has_tile_size_override ? s->tile_size_override : s->block_size;
 }
 
 const rocke_type_t* rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
@@ -314,7 +382,11 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     /* kernel_name_join("rocke_uattn3d_tiled", d.., b.., h..kv.., seg.., dtype,
      *   kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
-     *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "")
+     *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+     *   "dg" if use_decode_grid else "",
+     *   "kvcp<policy>" if kv_cache_policy != "all" else "",
+     *   "kvswz" if use_kv_lds_swizzle else "",
+     *   "wpid" if use_wave_page_id_load else "")
      *
      * Positional parts list (NOT flags=...): empty parts are skipped by
      * kernel_name_join. We materialise each part and feed the non-empty ones in
@@ -322,11 +394,13 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      * parts (those are gfx942-narrow-only knobs). */
     char d_part[32];
     char b_part[32];
+    char t_part[32];
     char h_part[64];
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
-    const char* parts[16];
+    char kvcp_part[32];
+    const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
     rocke_status_t st;
@@ -344,6 +418,14 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     parts[np++] = "rocke_uattn3d_tiled";
     parts[np++] = d_part;
     parts[np++] = b_part;
+    if(rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(s) != s->block_size)
+    {
+        snprintf(t_part,
+                 sizeof(t_part),
+                 "t%d",
+                 rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(s));
+        parts[np++] = t_part;
+    }
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
@@ -376,6 +458,23 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+    if(s->use_decode_grid)
+    {
+        parts[np++] = "dg";
+    }
+    if(s->kv_cache_policy != NULL && !rocke_attn3d950_streq(s->kv_cache_policy, "all"))
+    {
+        snprintf(kvcp_part, sizeof(kvcp_part), "kvcp%s", s->kv_cache_policy);
+        parts[np++] = kvcp_part;
+    }
+    if(s->use_kv_lds_swizzle)
+    {
+        parts[np++] = "kvswz";
+    }
+    if(s->use_wave_page_id_load)
+    {
+        parts[np++] = "wpid";
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
@@ -619,22 +718,30 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->KV_FP8 = (spec->kv_storage_dtype != NULL
                    && rocke_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
+    out->DECODE_GRID = spec->use_decode_grid;
+    out->KV_SWZ = spec->use_kv_lds_swizzle;
+    out->WAVE_PAGE_ID_LOAD = spec->use_wave_page_id_load;
+    {
+        /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
+        rocke_cache_policy_t bits = ROCKE_CACHE_ALL;
+        (void)rocke_cache_policy_from_name(spec->kv_cache_policy, &bits);
+        out->KV_CACHE_BITS = (int)bits;
+    }
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;
+    out->KV_CHUNKS_PER_ROW = out->HD / 8;
 
     nqk = out->NQK;
 
     out->dtype = rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(spec);
     out->kv_io_dtype = out->KV_FP8 ? rocke_fp8e4m3() : out->dtype;
 
-    /* wide-K loop trip counts (Python lines 293-298). */
+    /* loop trip counts (Python QK_K_STEP / QK_K_ITERS / QK_N_TILES / PV_N_TILES). */
     out->QK_K_STEP = 32;
-    out->PV_K_STEP = (out->T % 32 == 0) ? 32 : 16;
     out->QK_K_ITERS = out->QK_K_STEP > 0 ? out->HD / out->QK_K_STEP : 0;
     out->QK_N_TILES = out->T / ROCKE_ATTN3D950_MFMA_N;
-    out->PV_K_ITERS = out->PV_K_STEP > 0 ? out->T / out->PV_K_STEP : 0;
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D950_MFMA_N;
 
-    out->THREADS = 64;
+    out->THREADS = ROCKE_ATTN3D950_SEGMENT_THREADS;
     out->binary_search_iters
         = rocke_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
@@ -649,7 +756,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
      * delivers 4 DWORDS (8 halves) per lane; no wide-b128 sync path. ---- */
     out->ASYNC_LDS_DWORDS = 4;
     out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2; /* 8 */
-    out->KV_HALVES_PER_CALL = out->THREADS * 8; /* matches Python THREADS*8 */
+    out->KV_HALVES_PER_CALL = out->THREADS * ROCKE_ATTN3D950_KV_HALVES_PER_LANE;
 
     /* assert (T * HD) % KV_HALVES_PER_CALL == 0 (Python line 570). */
     if(out->KV_HALVES_PER_CALL == 0 || (out->T * out->HD) % out->KV_HALVES_PER_CALL != 0)
@@ -667,6 +774,29 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->kv_stride_tok_b = out->NUM_KV * out->HD * out->KV_BYTES;
     out->kv_stride_h_b = out->HD * out->KV_BYTES;
     out->bytes_per_buf = out->T * out->HD * 2;
+    out->N_BLOCKS_PER_TILE = out->BS > 0 ? out->T / out->BS : 0;
+    if(out->N_BLOCKS_PER_TILE < 1 || out->N_BLOCKS_PER_TILE > 8)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "attn_tiled_3d: T/BS=%d outside [1,8]", out->N_BLOCKS_PER_TILE);
+        return false;
+    }
+    out->PAGE_IDS = !out->KV_FP8;
+    out->tokens_per_call = out->KV_HALVES_PER_CALL / out->HD;
+    out->calls_per_block = 0;
+    if(out->PAGE_IDS)
+    {
+        if(out->tokens_per_call <= 0 || out->BS % out->tokens_per_call != 0)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "page-id loader needs whole calls per page (BS=%d, HD=%d)",
+                            out->BS,
+                            out->HD);
+            return false;
+        }
+        out->calls_per_block = out->BS / out->tokens_per_call;
+    }
 
     out->fp8_elems_per_chunk = 8;
     out->fp8_total_chunks = (out->T * out->HD) / out->fp8_elems_per_chunk;
@@ -848,8 +978,10 @@ bool rocke_gfx950_attention_tiled_3d_ctx_init(
  *  max_workgroup_size / waves_per_eu kernel attrs are set here (Python lines
  *  303-305) before the param declarations.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
+                                                const rocke_unified_attention_3d_tiled_spec_t* spec,
+                                                const char* arch,
+                                                bool strided_kv)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx950_attention_tiled_3d_build_ctx_t ctx;
@@ -869,6 +1001,21 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
             return NULL;
         }
 
+        if(strided_kv
+           && (spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr || spec->use_wide_kv_load))
+        {
+            rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+            return NULL;
+        }
+        if(strided_kv && spec->use_wave_page_id_load)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+            return NULL;
+        }
+
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
@@ -883,6 +1030,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
                     "build_unified_attention_3d_tiled_gfx950: kernel_name encode failed");
                 return NULL;
             }
+            if(strided_kv)
+            {
+                const size_t len = strlen(name);
+                if(len + sizeof("_stridedkv") > sizeof(name))
+                {
+                    rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV kernel name too long");
+                    return NULL;
+                }
+                memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
+            }
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
             {
@@ -895,6 +1052,14 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
                &ctx, b, ROCKE_GFX950_ATTN_TILED_3D_SEGMENT, spec, NULL, arch))
         {
             return NULL;
+        }
+
+        ctx.strided_kv = strided_kv;
+        /* Strided KV has no page table: it keeps the per-call strided offsets
+         * (Python: PAGE_IDS = not KV_FP8 and kv_layout == "paged"). */
+        if(strided_kv)
+        {
+            ctx.cfg.PAGE_IDS = false;
         }
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
@@ -927,6 +1092,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
         }
         return b->kernel; /* return b.kernel (line 950) */
     });
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx950(b, spec, arch, false);
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx950(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx950(b, spec, arch, true);
 }
 
 /* ===================================================================== *

@@ -13,11 +13,13 @@
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 using hipdnn_integration_tests::BundleMetadata;
+using hipdnn_integration_tests::BundleMetadataError;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
+using hipdnn_integration_tests::parseBundleMetadataJson;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
 
@@ -178,25 +180,22 @@ TEST(TestLoadBundleMetadata, ReturnsNulloptWhenFileNotFound)
     EXPECT_FALSE(meta.has_value());
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnMalformedJson)
+TEST(TestLoadBundleMetadata, ThrowsOnMalformedJson)
 {
     const TempBundle bundle("{not valid json");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnMissingFormatVersion)
+TEST(TestLoadBundleMetadata, ThrowsOnMissingFormatVersion)
 {
     const TempBundle bundle(R"({"operation": "conv_fwd"})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnWrongFormatVersion)
+TEST(TestLoadBundleMetadata, ThrowsOnWrongFormatVersion)
 {
     const TempBundle bundle(R"({"format_version": 99})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
 TEST(TestLoadBundleMetadata, IgnoresUnknownFields)
@@ -269,19 +268,17 @@ TEST(TestLoadBundleMetadata, IgnoresFloatWhereIntegerExpected)
     EXPECT_FALSE(meta->seed.has_value());
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnStringFormatVersion)
+TEST(TestLoadBundleMetadata, ThrowsOnStringFormatVersion)
 {
     const TempBundle bundle(R"({"format_version": "1"})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnFloatFormatVersion)
+TEST(TestLoadBundleMetadata, ThrowsOnFloatFormatVersion)
 {
     // 1.0 is a float, not an integer — is_number_integer() returns false
     const TempBundle bundle(R"({"format_version": 1.0})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
 TEST(TestLoadBundleMetadata, HandlesEmptyStringFields)
@@ -496,26 +493,30 @@ TEST(TestLoadBundleMetadata, IgnoresNullFieldValues)
     EXPECT_FALSE(meta->gpuArchitecture.has_value());
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnEmptyFile)
+TEST(TestLoadBundleMetadata, ThrowsOnEmptyFile)
 {
     const TempBundle bundle(" ");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, ReturnsNulloptOnJsonArray)
+TEST(TestLoadBundleMetadata, ThrowsOnJsonArray)
 {
-    // Valid JSON but not an object — format_version check fails
+    // Valid JSON but not an object
     const TempBundle bundle("[1, 2, 3]");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, RejectsFormatVersionZero)
+TEST(TestLoadBundleMetadata, ThrowsOnFormatVersionZero)
 {
     const TempBundle bundle(R"({"format_version": 0})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, ThrowsOnFormatVersionThatTruncatesToOne)
+{
+    // 2^32 + 1 narrows to 1 as a 32-bit int; it must not be read as version 1.
+    const TempBundle bundle(R"({"format_version": 4294967297})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,18 +555,107 @@ TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
     EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
 }
 
-TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenRejectsMetadata)
+TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenThrows)
 {
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildible"})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestLoadBundleMetadata, EnforcementLevelNonStringRejectsMetadata)
+TEST(TestLoadBundleMetadata, EnforcementLevelNonStringThrows)
 {
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": 1})");
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
-    EXPECT_FALSE(meta.has_value());
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)
+{
+    const TempBundle bundle(R"({"format_version": 2})");
+    try
+    {
+        loadBundleMetadata(bundle.bundleJsonPath());
+        FAIL() << "expected BundleMetadataError";
+    }
+    catch(const BundleMetadataError& e)
+    {
+        EXPECT_NE(std::string(e.what()).find(metaJsonPath(bundle.bundleJsonPath()).string()),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// parseBundleMetadataJson — inline (sweep-case) metadata
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, ParsesValidObject)
+{
+    auto meta = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "enforcement_level": "buildable"})"),
+        "case_0");
+    EXPECT_EQ(meta.enforcementLevel, EnforcementLevel::BUILDABLE);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedObjects)
+{
+    for(const auto* text : {R"([])",
+                            R"("metadata")",
+                            R"({})",
+                            R"({"format_version": "1"})",
+                            R"({"format_version": 2})",
+                            R"({"format_version": 1, "enforcement_level": "FULL"})",
+                            R"({"format_version": 1, "enforcement_level": null})"})
+    {
+        EXPECT_THROW(parseBundleMetadataJson(nlohmann::json::parse(text), "case_0"),
+                     BundleMetadataError)
+            << text;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ErrorNamesTheSource)
+{
+    try
+    {
+        parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 7})"),
+                                "sweep.json#case_3");
+        FAIL() << "expected BundleMetadataError";
+    }
+    catch(const BundleMetadataError& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("sweep.json#case_3"), std::string::npos) << e.what();
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ParsesNumericInputsKeys)
+{
+    auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1,
+            "inputs": {"0": {"fill": "zeros"}, "12": {"fill": "ones"}}})"),
+                                        "case_0");
+    ASSERT_TRUE(meta.inputs.has_value());
+    ASSERT_EQ(meta.inputs->size(), 2u);
+    EXPECT_EQ(meta.inputs->at(0)["fill"], "zeros");
+    EXPECT_EQ(meta.inputs->at(12)["fill"], "ones");
+}
+
+// inputs keys are tensor UIDs. A key that is not entirely an integer used to be
+// dropped with a warning, silently losing that tensor's input spec. A numeric
+// prefix ("12abc") is rejected too, rather than read as uid 12.
+TEST(TestParseBundleMetadataJson, ThrowsOnNonNumericInputsKey)
+{
+    for(const auto* key : {"x", "", "12abc", "1.5"})
+    {
+        const nlohmann::json json
+            = {{"format_version", 1}, {"inputs", {{key, nlohmann::json::object()}}}};
+        try
+        {
+            parseBundleMetadataJson(json, "case_0");
+            FAIL() << "expected BundleMetadataError for inputs key \"" << key << "\"";
+        }
+        catch(const BundleMetadataError& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("non-numeric inputs key"), std::string::npos)
+                << e.what();
+        }
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

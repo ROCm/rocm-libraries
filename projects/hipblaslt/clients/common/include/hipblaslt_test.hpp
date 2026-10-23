@@ -178,23 +178,38 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 #ifdef GOOGLE_TEST
 
 /* ============================================================================================ */
-// Function which matches Arguments with a category, accounting for arg.known_bug_platforms
-bool match_test_category(const Arguments& arg, const char* category);
+// Returns true when a parameter is a known bug that must not run on the current
+// GPU platform: either it was tagged unconditionally at gentest time
+// (category == "known_bug" from known_bugs.yaml) or the current arch is listed in
+// the entry's known_bug_platforms. INSTANTIATE_TEST_CATEGORY (below) uses this to
+// drop such parameters before they register as tests.
+bool is_known_bug_for_platform(const Arguments& arg);
 
-// Skip the current TEST_P body when the parameter has been flagged as a known bug
-// for this GPU platform. Used as the first statement in TEST_P bodies. The category
-// field is set to "known_bug" either at gentest time (unconditional matches in
-// known_bugs.yaml) or at registration time by match_test_category() when the current
-// GPU arch matches an entry's known_bug_platforms list.
-#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                            \
-    do                                                                              \
-    {                                                                               \
-        const auto& _kb_arg = GetParam();                                           \
-        if(!strcmp(_kb_arg.category, "known_bug"))                                  \
-        {                                                                           \
-            GTEST_SKIP() << KNOWN_BUG_STRING                                        \
-                         << " (platforms=" << _kb_arg.known_bug_platforms << ")";   \
-        }                                                                           \
+// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
+// filter that selects them, such as the ctest tier patterns, runs them.
+inline bool hipblaslt_category_needs_a_filter(const char* category)
+{
+    return !strcmp(category, "stress") || !strcmp(category, "sdc_hunt");
+}
+
+inline bool hipblaslt_gtest_filter_given()
+{
+    const std::string filter   = ::testing::GTEST_FLAG(filter);
+    const std::string positive = filter.substr(0, filter.find('-'));
+    return !positive.empty() && positive != "*";
+}
+
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
+    do                                                                                      \
+    {                                                                                       \
+        const auto& _sf_arg = GetParam();                                                   \
+        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
+           && !hipblaslt_gtest_filter_given())                                              \
+            GTEST_SKIP() << "the " << _sf_arg.category                                      \
+                         << " fast_check cases run only when a gtest filter selects them, " \
+                            "for example --gtest_filter=*"                                  \
+                         << _sf_arg.category << "*";                                        \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
@@ -205,14 +220,14 @@ bool match_test_category(const Arguments& arg, const char* category);
         category,                                                              \
         testclass,                                                             \
         testing::ValuesIn(HipBlasLt_TestData::begin([](const Arguments& arg) { \
-                              return match_test_category(arg, #category)       \
+                              return !is_known_bug_for_platform(arg)           \
                                      && testclass::function_filter(arg)        \
                                      && testclass::type_filter(arg);           \
                           }),                                                  \
                           HipBlasLt_TestData::end()),                          \
         testclass::PrintToStringParamName());
 
-#if !defined(WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
+#if !defined(_WIN32) && defined(GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST)
 #define HIPBLASLT_ALLOW_UNINSTANTIATED_GTEST(testclass) \
     GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(testclass);
 #else

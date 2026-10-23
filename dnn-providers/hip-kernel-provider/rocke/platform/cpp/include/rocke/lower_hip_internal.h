@@ -43,9 +43,8 @@ namespace ckc
  * at the end exactly like Python's self.lines / self.smem_decls lists.
  *
  * `arena` (borrowed from the builder) backs the per-handler temporaries and the
- * two strbuf-vectors. `err`/`status` are the sticky error channel; the first
- * failing handler sets them and every later handler/_emit becomes a no-op, so
- * handlers can be written straight-line and checked once by the driver. */
+ * two strbuf-vectors. Failures throw a ckc::Error to the public lowerer boundary;
+ * `err`/`status` remain initialized compatibility fields, not an error latch. */
 typedef struct rocke_h_lowerer
 {
     const rocke_kernel_def_t* kernel;
@@ -57,7 +56,7 @@ typedef struct rocke_h_lowerer
     int indent; /* current indent depth (starts at 1)  */
     int smem_counter; /* mirrors Python self._smem_counter   */
 
-    rocke_status_t status; /* sticky; ROCKE_OK until first failure   */
+    rocke_status_t status; /* ROCKE_OK; failures unwind via exceptions */
     char err[ROCKE_ERR_MSG_CAP];
 } rocke_h_lowerer_t;
 
@@ -147,15 +146,28 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v);
  *   vec<elem x n> -> "f16xN"/"bf16xN"/"f32xN"/"i32xN"/"i16xN"/"i8xN"
  *                    (fp8e4m3/bf8e5m2 -> "i8xN"; i1 -> "boolxN")
  *   smem<elem,...> -> "<elem>*"
- * Returns an arena-owned string. Sets the sticky error and returns "" for an
- * unmappable type (Python KeyError parity). */
+ * Returns an arena-owned string. A type it does not compose itself goes to
+ * rocke_h_require_hip_scalar, which refuses an unmappable one (logical types
+ * without direct HIP lowering included). */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t);
 
 /* Map a scalar IR type *name* ("i32","f16",...) to its HIP scalar spelling
- * (the raw _HIP_TYPE dict). Returns NULL on an unknown name (caller decides
- * whether that is an error). Used where Python indexes _HIP_TYPE[name] directly
- * (e.g. constants, vector.sum element type). */
+ * (the raw _HIP_TYPE dict). Returns NULL on an unknown name. Only a caller with
+ * a fallback for a miss (scf.for iter-arg types use "auto") calls this
+ * directly; every other caller uses rocke_h_require_hip_scalar. */
 const char* rocke_h_hip_scalar(const char* ir_scalar_name);
+
+/* Python _hip_scalar_type: rocke_h_hip_scalar, or refuse the type with
+ * ROCKE_ERR_NOTIMPL "no HIP mapping for type <name>" -- the HIP twin of the
+ * LLVM lowering's "no LLVM mapping for type <name>", so a type with no HIP
+ * spelling (a logical sub-byte type such as i4, or a vector of an unmapped
+ * element) is refused with one message wherever it is met. */
+const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_type_name);
+
+/* The unsigned HIP spelling of a scalar integer type (Python
+ * _HIP_UNSIGNED_INT_TYPE): "bool" / "uint8_t" / "uint16_t" / "uint32_t" /
+ * "uint64_t" for i1 / i8 and u8 / i16 / i32 / i64. Returns NULL for any other type. */
+const char* rocke_h_unsigned_int_type(const rocke_type_t* t);
 
 /* The "f16x"/"bf16x"/"f32x"/"i32x"/"i16x"/"i8x" vector-name prefix for an IR
  * scalar element name, used by the smem/global vN load/store handlers. Returns
@@ -173,6 +185,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                                        bool full_map,
                                        const char* op_desc);
 
+/* Python _reject_f64(op, tname): raises ROCKE_ERR_NOTIMPL "<op> does not support
+ * f64" when `tname` is "f64", for an op that has no f64 lowering. */
+void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* tname);
+
 /* --------------------------------------------------------- literals / encode */
 
 /* Python _f32_literal(val): C++ float-literal text for a double, special-casing
@@ -181,6 +197,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
  * byte-for-byte is a known port hazard (see notes / unported). Returns an
  * arena-owned string. */
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
+
+/* Python _f64_literal(val): C++ double-literal text for a double, special-casing
+ * nan / +/-inf like rocke_h_f32_literal. Returns an arena-owned string. */
+const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
@@ -195,8 +215,8 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 /* --------------------------------------------------------- arch gates */
 
 /* Python _require_wmma_arch: error out if WMMA is requested on a target with no
- * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, else sets the sticky
- * error (ROCKE_ERR_NOTIMPL) and returns it. `op_id` is the atom id for the message.
+ * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, otherwise throws
+ * ROCKE_ERR_NOTIMPL. `op_id` is the atom id for the message.
  * NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id); that
  * catalog is not ported, so this uses lw->arch.has_wmma instead. */
 rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id);

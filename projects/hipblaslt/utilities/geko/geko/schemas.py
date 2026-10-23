@@ -215,25 +215,27 @@ class GemmType:
             return "f32_r", "f32_r", "f32_r", "xf32_r"
 
         if dt in m:
-            try:
-                a_type = b_type = m[dt]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
-        elif len(dt) == 1:
-            try:
-                a_type = b_type = m[dt]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
-        elif len(dt) == 2:
-            try:
-                a_type = m[dt[0]]
-                b_type = m[dt[1]]
-            except KeyError as e:
-                raise ValueError(f"Unknown Tensile DataType code {dt!r}") from e
+            a_type = b_type = m[dt]
         else:
-            raise ValueError(
-                f"Tensile DataType must be 1 or 2 letters for this mapper, got {dt!r}"
-            )
+            # Collect every split point that yields an ordered pair of known
+            # type keys; more than one candidate means the split is
+            # ambiguous and must not be silently resolved.
+            candidates = [
+                (m[dt[:i]], m[dt[i:]])
+                for i in range(1, len(dt))
+                if dt[:i] in m and dt[i:] in m
+            ]
+            if not candidates:
+                raise ValueError(
+                    f"Cannot resolve Tensile DataType {dt!r}: not a known type "
+                    f"or a valid ordered pair of types."
+                )
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"Ambiguous Tensile DataType {dt!r}: multiple valid ordered-pair "
+                    f"splits found ({candidates}). Cannot resolve unambiguously."
+                )
+            a_type, b_type = candidates[0]
 
         try:
             c_type = m[dd]
@@ -325,22 +327,38 @@ class GemmType:
         }
 
 
+_MX_ONLY_DATA_TYPES = frozenset({"F4"})
+_MX_COMPATIBLE_DATA_TYPES = frozenset({"F4", "F8"})
+_MX_BLOCKS = (16, 32)
+_MX_SCALE_TYPES = ("E8", "F8", "E5M3")
+
+
 @dataclass(frozen=True)
 class GemmConfig:
     """Full GEMM optimization configuration.
 
     Bundles a GEMM logical type (GemmType) with the concrete set of
-    problem sizes.
+    problem sizes and an optional MX (Microscaling) format.
 
     Attributes:
         gemm_type (GemmType): Logical GEMM description
             (transpose flags, data types).
         sizes (List[List[int]]): List of GEMM sizes, each formatted as
             [M, N, batch_count, K].
+        mx (bool): Whether Microscaling mode is enabled. Auto-set to True
+            for MX-only data types (F4) and by a non-zero mx_block. Only
+            compatible with FP4 and FP8 data types (F4, F8).
+        mx_block (int | None): MX block size, 16 or 32; None takes the
+            arch's default (``mx_block_size``). 0 asks for no MX.
+        mx_scale_type (str | None): MX scale DataType, "F8" or "E5M3";
+            None (or "E8") is E8.
     """
 
     gemm_type: GemmType
     sizes: List[List[int]]
+    mx: bool = False
+    mx_block: int | None = None
+    mx_scale_type: str | None = None
 
     def __post_init__(self):
         # Validate that sizes is a list of lists of length 4
@@ -351,9 +369,63 @@ class GemmConfig:
             if not isinstance(s, list) or len(s) != 4 or not all(isinstance(x, int) and x > 0 for x in s):
                 raise ValueError(f"Each size must be a list of four positive integers [M, N, batch_count, K], got: {s}")
 
-    def workload_log_rows(self) -> List[dict]:
-        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS)."""
+        dt = self.gemm_type.data_type
+        if self.mx_block is not None:
+            block = int(self.mx_block)
+            if block == 0:
+                if dt in _MX_ONLY_DATA_TYPES:
+                    raise ValueError(f"'{dt}' is always MX block scaled; MX_BLOCK 0 cannot turn it off")
+                if self.mx:
+                    raise ValueError("MX: True conflicts with MX_BLOCK 0")
+                block = None
+            elif block not in _MX_BLOCKS:
+                raise ValueError(f"MX_BLOCK must be one of {_MX_BLOCKS} (or 0 for no MX), got {self.mx_block}")
+            else:
+                object.__setattr__(self, "mx", True)
+            object.__setattr__(self, "mx_block", block)
+        if dt in _MX_ONLY_DATA_TYPES:
+            object.__setattr__(self, "mx", True)
+        elif self.mx and dt not in _MX_COMPATIBLE_DATA_TYPES:
+            raise ValueError(
+                f"MX mode is not compatible with data type '{dt}'. "
+                f"MX is only supported for {sorted(_MX_COMPATIBLE_DATA_TYPES)}."
+            )
+        if self.mx_scale_type is not None:
+            scale_type = str(self.mx_scale_type).upper()
+            if scale_type not in _MX_SCALE_TYPES:
+                raise ValueError(f"MX_SCALE_TYPE must be one of {_MX_SCALE_TYPES}, got {self.mx_scale_type!r}")
+            if not self.mx:
+                raise ValueError(f"MX_SCALE_TYPE {self.mx_scale_type!r} needs MX: set MX_BLOCK or MX: True")
+            object.__setattr__(self, "mx_scale_type", None if scale_type == "E8" else scale_type)
+
+    @property
+    def name(self) -> str:
+        """``gemm_type.gemm_name``, tagged with the MX format where the data type does not imply it.
+
+        F4 with E8 scales on 32-element blocks (MXFP4) and non-MX GEMMs keep the
+        plain name. Other MX formats become e.g. ``F8BS_MXE8B32_TN`` (MXFP8) or
+        ``F4BS_MXF8B16_TN`` (NVFP4), so they do not share output files with the
+        plain GEMM of the same types.
+        """
+        gt = self.gemm_type
+        if not self.mx or (
+            gt.data_type in _MX_ONLY_DATA_TYPES and self.mx_block in (None, 32) and self.mx_scale_type is None
+        ):
+            return gt.gemm_name
+        tag = f"MX{self.mx_scale_type or 'E8'}" + (f"B{self.mx_block}" if self.mx_block else "")
+        types = f"{gt.data_type}{gt.dest_data_type}{gt.compute_data_type}"
+        return f"{types}_{tag}_{gt.transA}{gt.transB}"
+
+    def workload_log_rows(self, mx_scale: int = 3) -> List[dict]:
+        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS).
+
+        Args:
+            mx_scale: hipblaslt scaleA/scaleB value of this GEMM's MX format
+                (config_generator.constants.mx_scale_code).
+                Only used when self.mx is True; non-MX always uses 0 (no scaling).
+        """
         base = self.gemm_type.workload_log_type_fields()
+        scale_val = mx_scale if self.mx else 0
         rows: List[dict] = []
         for m, n, b, kk in self.sizes:
             row = {
@@ -362,6 +434,8 @@ class GemmConfig:
                 "M": int(m),
                 "N": int(n),
                 "K": int(kk),
+                "scaleA": scale_val,
+                "scaleB": scale_val,
             }
             if set(row) != set(GEMM_LOG_FIELDS) or len(row) != len(GEMM_LOG_FIELDS):
                 raise ValueError("row keys must match GEMM_LOG_FIELDS exactly")

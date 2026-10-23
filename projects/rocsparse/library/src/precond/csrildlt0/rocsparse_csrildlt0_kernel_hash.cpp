@@ -140,7 +140,7 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding L value (updated below)
-            T local_val = csr_val[j];
+            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
 
             I local_begin = csr_row_ptr[local_col] - idx_base;
 
@@ -156,15 +156,17 @@ namespace rocsparse
             }
 
             // Spin until row local_col is done
-            while(!__hip_atomic_load(&done[local_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+            while(
+                !rocsparse::atomic_load(&done[local_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Load D_{local_col} (real scalar); a missing diagonal entry means a zero pivot.
-            floating_data_t<T> d_j = (local_diag_pos >= 0)
-                                         ? rocsparse::real(csr_val[local_diag_pos])
-                                         : static_cast<floating_data_t<T>>(0);
+            floating_data_t<T> d_j
+                = (local_diag_pos >= 0)
+                      ? rocsparse::real(rocsparse::load_done_row_data(&csr_val[local_diag_pos]))
+                      : static_cast<floating_data_t<T>>(0);
 
             if(d_j == static_cast<floating_data_t<T>>(0))
             {
@@ -191,12 +193,15 @@ namespace rocsparse
                         // Update: L_{row,k} * D_k * conj(L_{j,k})
                         I                  idx_row_k = data[hash];
                         const I            dk_pos    = csr_diag_ind[key - idx_base];
-                        floating_data_t<T> d_k = (dk_pos >= 0) ? rocsparse::real(csr_val[dk_pos])
-                                                               : static_cast<floating_data_t<T>>(0);
-                        local_sum
-                            = rocsparse::fma(csr_val[idx_row_k],
-                                             static_cast<T>(d_k) * rocsparse::conj(csr_val[k]),
-                                             local_sum);
+                        floating_data_t<T> d_k
+                            = (dk_pos >= 0)
+                                  ? rocsparse::real(rocsparse::load_done_row_data(&csr_val[dk_pos]))
+                                  : static_cast<floating_data_t<T>>(0);
+                        local_sum = rocsparse::fma(
+                            rocsparse::load_done_row_data(&csr_val[idx_row_k]),
+                            static_cast<T>(d_k)
+                                * rocsparse::conj(rocsparse::load_done_row_data(&csr_val[k])),
+                            local_sum);
                         break;
                     }
                     else
@@ -210,8 +215,8 @@ namespace rocsparse
 
             if(lid == WFSIZE - 1)
             {
-                local_val  = (local_val - local_sum) * inv_d_j;
-                csr_val[j] = local_val;
+                local_val = (local_val - local_sum) * inv_d_j;
+                rocsparse::store_done_row_data(&csr_val[j], local_val);
                 // |L_{row,j}|^2 * D_j accumulated into the (real) diagonal update
                 const floating_data_t<T> re_l = rocsparse::real(local_val);
                 const floating_data_t<T> im_l = rocsparse::imag(local_val);
@@ -225,7 +230,8 @@ namespace rocsparse
             if(row_diag >= 0)
             {
                 // D_i = real(A_{ii}) - diag_sum; A is Hermitian so the diagonal is taken real.
-                floating_data_t<T> d_i = rocsparse::real(csr_val[row_diag]) - diag_sum;
+                floating_data_t<T> d_i
+                    = rocsparse::real(rocsparse::load_done_row_data(&csr_val[row_diag])) - diag_sum;
 
                 if(rocsparse::abs(d_i) <= tol)
                 {
@@ -237,8 +243,8 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Publish D_i before the done[] release store below so dependent rows can read it.
-                csr_val[row_diag] = static_cast<T>(d_i);
+                // Publish D_i before the done flag below so dependent rows can read it.
+                rocsparse::store_done_row_data(&csr_val[row_diag], static_cast<T>(d_i));
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
                 {
@@ -249,7 +255,7 @@ namespace rocsparse
 
         if(lid == WFSIZE - 1)
         {
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 

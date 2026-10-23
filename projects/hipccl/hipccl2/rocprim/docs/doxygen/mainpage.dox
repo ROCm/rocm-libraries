@@ -1,0 +1,15 @@
+/**
+@brief The rocPRIM project main page.
+@author
+@file
+*/
+
+/**
+@mainpage rocPRIM Documentation
+
+@section overview Overview
+
+The rocPRIM is a header-only library providing HIP parallel primitives for developing
+performant GPU-accelerated code on AMD ROCm platform.
+
+*/

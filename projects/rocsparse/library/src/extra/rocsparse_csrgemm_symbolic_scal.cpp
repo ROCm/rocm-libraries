@@ -28,6 +28,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -41,14 +42,12 @@ namespace rocsparse
                                rocsparse_index_base idx_base_in,
                                rocsparse_index_base idx_base_out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            idx < size;
+            idx += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = in[idx] - idx_base_in + idx_base_out;
         }
-
-        out[idx] = in[idx] - idx_base_in + idx_base_out;
     }
 }
 
@@ -110,7 +109,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_scal_core(rocsparse_handle         
     {
 #define CSRGEMM_DIM 1024
 
-        dim3 csrgemm_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
+        dim3 csrgemm_blocks(rocsparse::get_grid_size_x(
+            handle, (static_cast<int64_t>(nnz_D) - 1) / CSRGEMM_DIM + 1, CSRGEMM_DIM));
         dim3 csrgemm_threads(CSRGEMM_DIM);
 
         // Copy column entries, if D != C

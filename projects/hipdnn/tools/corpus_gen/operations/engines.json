@@ -1,0 +1,4 @@
+{
+  "// engines": "What shape generation knows about an engine's coverage that the engine cannot yet state (see EngineCoverage.hpp). coverage \"pack\": the engine serves exactly its pack's shapes, so --kdp-root is required and no search is run. An engine not listed here is searched.",
+  "engines": {}
+}
