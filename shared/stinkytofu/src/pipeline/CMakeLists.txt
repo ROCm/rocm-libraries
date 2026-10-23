@@ -3,6 +3,7 @@
 
 target_sources(stinkytofu_objs PRIVATE
     PassBuilder.cpp
+    PassCatalog.cpp
     RegisterAllocationPipeline.cpp
 )
 

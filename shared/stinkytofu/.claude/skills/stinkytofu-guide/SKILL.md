@@ -150,8 +150,8 @@ Paths are relative to this `shared/stinkytofu/` directory.
   - Asm IR (arch-specific: `StinkyInstruction`, `Function`, `BasicBlock`):
     `include/stinkytofu/ir/asm/`, `src/ir/asm/`
 - **Passes** — Asm: `src/transforms/asm/`; Logical: `src/transforms/logical/`.
-  Registry of names usable from `stinkytofu-opt`: `availablePasses` in
-  `tools/stinkytofu-opt/stinkytofu-opt.hpp`.
+  Registry of names usable from `stinkytofu-opt`: `passCatalog` in
+  `src/pipeline/PassCatalog.cpp`.
 - **Hardware / architectures** — `hardware/GfxXXX/` `.def` files feed TableGen; a new
   arch needs no C++. See `docs/developer/adding-architecture.md` (verify against tree).
 - **Peephole / intrinsic patterns** — `src/transforms/asm/PeepholePatterns.pattern`,
@@ -186,8 +186,8 @@ Load-bearing invariants. Advice that violates one is wrong.
 - **New architecture ⇒ no C++.** Add a `hardware/GfxXXX/` `.def` set; TableGen generates
   instruction tables, latencies, opcode enums. Don't steer toward editing generated
   `.inc` or per-arch C++ when a `.def` suffices.
-- **New pass ⇒ register it** in `availablePasses`
-  (`tools/stinkytofu-opt/stinkytofu-opt.hpp`), else it can't be FileCheck-tested.
+- **New pass ⇒ register it** in `passCatalog`
+  (`src/pipeline/PassCatalog.cpp`), else it can't be FileCheck-tested.
 - **A new switch/option must be reachable from BOTH entry points.** A feature gated by a
   flag/option is only usable if it is plumbed through:
   1. the **Python API** — so TensileLite can turn it on. Module-level options live in the

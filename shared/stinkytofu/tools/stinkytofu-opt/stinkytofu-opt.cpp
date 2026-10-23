@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <fstream>
@@ -41,12 +42,15 @@
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 
 using namespace stinkytofu;
 
@@ -108,7 +112,7 @@ char DeserializeStinkytofuIRPass::ID = 0;
 void printAvailablePasses() {
     std::cout << "Available passes:\n";
     std::cout << "=================\n";
-    for (const auto& passInfo : availablePasses) {
+    for (const auto& passInfo : passCatalog()) {
         std::cout << "  --" << passInfo.name << "\n";
     }
 }
@@ -119,17 +123,6 @@ struct RequestedPass {
     std::string name;
     std::vector<std::string> args;
 };
-
-// Function to find and create a pass by name (with optional arguments)
-std::unique_ptr<Pass> createPassByName(const std::string& passName,
-                                       const std::vector<std::string>& args = {}) {
-    for (const auto& passInfo : availablePasses) {
-        if (passName == passInfo.name) {
-            return passInfo.creator(args);
-        }
-    }
-    return nullptr;
-}
 
 // Flags of the removed cap / throttle ds_load pacing and hide-budget prescan. Still accepted,
 // no longer read.
@@ -621,18 +614,21 @@ int main(int argc, char** argv) {
     if (!requestedPasses.empty()) {
         std::cerr << "\n=== Adding Passes ===\n";
         for (const auto& rp : requestedPasses) {
-            if (createPassByName(rp.name, rp.args)) {
-                std::cerr << "Adding pass: " << rp.name;
-                if (!rp.args.empty()) {
-                    std::cerr << " (args:";
-                    for (const auto& a : rp.args) std::cerr << " " << a;
-                    std::cerr << ")";
-                }
-                std::cerr << "\n";
-            } else {
+            // Name check only. Building the pass here would run the creator's
+            // side effects (a dump directory, an error on bad arguments) and
+            // then throw that instance away.
+            if (findCatalogPass(rp.name) == nullptr) {
                 std::cerr << "Warning: Unknown pass '" << rp.name << "' - skipping\n";
                 std::cerr << "Use --list-passes to see available passes\n";
+                continue;
             }
+            std::cerr << "Adding pass: " << rp.name;
+            if (!rp.args.empty()) {
+                std::cerr << " (args:";
+                for (const auto& a : rp.args) std::cerr << " " << a;
+                std::cerr << ")";
+            }
+            std::cerr << "\n";
         }
         std::cerr << "\n";
     } else {
@@ -862,6 +858,9 @@ int main(int argc, char** argv) {
     // Set to true if any analysis/verification pass reports a failure; surfaced as a
     // non-zero exit code after all functions and output have been processed.
     bool analysisFailed = false;
+    // A creator that rejects its arguments is told once. Later functions skip
+    // the name instead of constructing the pass again.
+    std::vector<std::string> rejectedPassNames;
 
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
@@ -935,8 +934,19 @@ int main(int argc, char** argv) {
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& rp : requestedPasses) {
-                auto pass = createPassByName(rp.name, rp.args);
-                if (pass) passManager.addPass(std::move(pass));
+                if (std::find(rejectedPassNames.begin(), rejectedPassNames.end(), rp.name) !=
+                    rejectedPassNames.end())
+                    continue;
+                // Unknown names were reported before any function ran.
+                if (findCatalogPass(rp.name) == nullptr) continue;
+                auto pass = createCatalogPass(rp.name, rp.args);
+                if (!pass) {
+                    rejectedPassNames.push_back(rp.name);
+                    std::cerr << "Warning: pass '" << rp.name
+                              << "' rejected its arguments - skipping\n";
+                    continue;
+                }
+                passManager.addPass(std::move(pass));
             }
 
             stinkytofu::Function func(parsedFunc->funcName);

@@ -75,4 +75,4 @@ Pre-defined high-level operations (e.g., ReLU, Clamp) are defined in `src/ir/log
 
 ## stinkytofu-opt
 
-`tools/stinkytofu-opt/` is the standalone IR driver for testing passes. Pass registry is in `stinkytofu-opt.hpp::availablePasses`. FileCheck tests use `stinkytofu-check` to run a `RUN:` command and verify stdout against `CHECK:` directives. See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
+`tools/stinkytofu-opt/` is the standalone IR driver for testing passes. The pass registry is `passCatalog` in `src/pipeline/PassCatalog.cpp`. FileCheck tests use `stinkytofu-check` to run a `RUN:` command and verify stdout against `CHECK:` directives. See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).

@@ -161,7 +161,7 @@ Defensive properties:
 - **No instruction rewriting**: only attaches a `LabelData` modifier; the emitted assembly is byte-identical.
 - **Preserves CFG analyses** (`return preserveCFGAnalyses();`): subsequent CFG construction picks up the new modifier automatically.
 
-The pass is registered with `stinkytofu-opt` as `LongBranchLoweringPass` (see `tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`) so it can be invoked standalone, e.g.:
+The pass is registered with `stinkytofu-opt` as `LongBranchLoweringPass` (see `passCatalog` in `src/pipeline/PassCatalog.cpp`) so it can be invoked standalone, e.g.:
 
 ```bash
 stinkytofu-opt --arch gfx1250 input.s --LongBranchLoweringPass --emit-asm
