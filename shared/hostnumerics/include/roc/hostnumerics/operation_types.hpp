@@ -130,7 +130,7 @@ inline bool isPrime(size_t value) {
     return true;
 }
 
-inline std::optional<size_t> tryNextPrimeStride(size_t value) {
+inline std::optional<size_t> getNextPrimeStride(size_t value) {
     if (value <= 2) return 2;
     size_t candidate = value % 2 == 0 ? value + 1 : value;
     while (!isPrime(candidate)) {
@@ -141,7 +141,7 @@ inline std::optional<size_t> tryNextPrimeStride(size_t value) {
 }
 
 inline size_t nextPrimeStride(size_t value) {
-    const auto stride = tryNextPrimeStride(value);
+    const auto stride = getNextPrimeStride(value);
     if (!stride) throw std::runtime_error("Prime-stride output selection overflow.");
     return *stride;
 }

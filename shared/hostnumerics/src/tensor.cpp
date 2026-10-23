@@ -38,12 +38,12 @@ bool detail::byteRangesOverlap(std::span<const std::byte> left, std::span<const 
            less(right.data(), left.data() + left.size());
 }
 
-detail::Expected<size_t, detail::StorageFailure> detail::tryStorageBytesForLayout(
+detail::Expected<size_t, detail::StorageFailure> detail::getStorageBytesForLayout(
     ScalarType type, const Layout& layout) noexcept {
     if (!isConcreteScalarType(type)) {
         return detail::Unexpected(detail::StorageFailure(detail::StorageError::InvalidScalarType));
     }
-    const auto bounds = detail::tryElementBounds(layout);
+    const auto bounds = detail::getElementBounds(layout);
     if (!bounds) return detail::Unexpected(detail::StorageFailure(bounds.error()));
     const auto [lower, upper] = *bounds;
     if (upper < lower) return 0;
@@ -64,7 +64,7 @@ detail::Expected<size_t, detail::StorageFailure> detail::tryStorageBytesForLayou
 }
 
 size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
-    const auto result = detail::tryStorageBytesForLayout(type, layout);
+    const auto result = detail::getStorageBytesForLayout(type, layout);
     if (!result) throw std::runtime_error(std::string(detail::message(result.error())));
     return *result;
 }

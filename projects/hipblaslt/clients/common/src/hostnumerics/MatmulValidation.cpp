@@ -59,10 +59,13 @@ namespace hipblaslt::hostnumerics
             if(tensor.shape().rank() != 3)
                 return tensor;
             const std::array<size_t, 3> origin{0, 0, batch};
+            const auto                  offset = tensor.layout().elementOffset(origin);
+            if(!offset)
+                throw std::runtime_error(roc::hostnumerics::detail::message(offset.error()));
             return tensor.shareStorageWithLayout(
                 Layout(Shape{tensor.shape()[0], tensor.shape()[1]},
                        {tensor.layout().stride(0), tensor.layout().stride(1)},
-                       tensor.layout().elementOffset(origin)));
+                       *offset));
         }
 
         ComparisonEvidence compareMatmulOutput(const MatmulValidationCase::TensorPair& tensors,
@@ -84,7 +87,7 @@ namespace hipblaslt::hostnumerics
                 if(validation.compareAllClose)
                     options = tolerance.absolute != 0.0 || tolerance.relative != 0.0
                                   ? allCloseComparisonOptions(
-                                      tolerance.absolute, tolerance.relative, true)
+                                        tolerance.absolute, tolerance.relative, true)
                                   : unitComparisonOptions(expected.type());
                 else
                     options.allClose = false;

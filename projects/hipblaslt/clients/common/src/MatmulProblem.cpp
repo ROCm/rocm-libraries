@@ -41,7 +41,10 @@ namespace hipblaslt::client
             const Layout batchAddressLayout(
                 Shape{1, 1, layout.shape().extent(2)}, {0, 0, layout.stride(2)}, layout.offset());
             const std::array<size_t, 3> batchCoordinates{0, 0, batch};
-            offset = batchAddressLayout.elementOffset(batchCoordinates);
+            const auto                  result = batchAddressLayout.elementOffset(batchCoordinates);
+            if(!result)
+                throw std::runtime_error(roc::hostnumerics::detail::message(result.error()));
+            offset = *result;
         }
 
         return Layout(Shape{rows, columns}, {rowStride, columnStride}, offset);

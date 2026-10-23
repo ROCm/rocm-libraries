@@ -51,7 +51,8 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
         }
         return combined;
     }
-    if (const auto fastRun = detail::tryTwoOfFourByteAligned(problem, plan, firstSlice, endSlice))
+    if (const auto fastRun =
+            detail::runTwoOfFourByteAlignedIfSupported(problem, plan, firstSlice, endSlice))
         return *fastRun;
     const size_t axis = problem.pattern.axis;
     const size_t groupSize = problem.pattern.groupSize;

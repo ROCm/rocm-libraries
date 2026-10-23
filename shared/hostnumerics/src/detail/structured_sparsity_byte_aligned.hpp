@@ -300,7 +300,7 @@ inline StructuredSparsityWorkCounts applyTwoOfFourByteAlignedBySelection(
                                 problem, plan, firstSlice, endSlice);
 }
 
-inline std::optional<StructuredSparsityWorkCounts> tryTwoOfFourByteAligned(
+inline std::optional<StructuredSparsityWorkCounts> runTwoOfFourByteAlignedIfSupported(
     const StructuredSparsityInvocation& problem, const StructuredSparsityPlan& plan,
     size_t firstSlice, size_t endSlice) {
     if (problem.pattern.groupSize != 4 || problem.pattern.retainedElements != 2 ||

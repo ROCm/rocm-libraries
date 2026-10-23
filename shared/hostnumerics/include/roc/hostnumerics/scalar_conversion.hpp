@@ -28,14 +28,14 @@ inline constexpr ScalarConversionOptions implicitStorageConversionOptions(Scalar
 template <typename Source>
 uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestination,
                               const ScalarConversionOptions& options) {
-    const auto result = tryConvertToIntegerBits(source, bits, signedDestination, options);
+    const auto result = getConvertToIntegerBits(source, bits, signedDestination, options);
     if (!result) throw std::runtime_error(std::string(message(result.error())));
     return *result;
 }
 
 template <typename Target, typename Source>
 Target convertScalarValue(Source source, const ScalarConversionOptions& options) {
-    auto result = tryConvertScalarValue<Target>(std::move(source), options);
+    auto result = getConvertScalarValue<Target>(std::move(source), options);
     if (!result) throw std::runtime_error(std::string(message(result.error())));
     return *std::move(result);
 }
