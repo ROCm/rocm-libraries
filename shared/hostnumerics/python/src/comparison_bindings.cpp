@@ -116,11 +116,10 @@ void registerComparisonBindings(nb::module_& module) {
         [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {
             return compare(observed, expected, options);
         },
-        "observed"_a, "expected"_a, "options"_a = ComparisonOptions{});
+        "observed"_a, "expected"_a, "options"_a);
     module.def("near_comparison_options", &nearComparisonOptions, "absolute_tolerance"_a);
-    module.def("allclose_comparison_options", &allCloseComparisonOptions,
-               "absolute_tolerance"_a = 1e-8, "relative_tolerance"_a = 1e-5,
-               "equal_nans"_a = false);
+    module.def("allclose_comparison_options", &allCloseComparisonOptions, "absolute_tolerance"_a,
+               "relative_tolerance"_a, "equal_nans"_a);
     module.def("ulp_mantissa_bits", &ulpMantissaBits, "type"_a);
     module.def("ulp_distance", &ulpDistance, "exact"_a, "approximation"_a, "mantissa_bits"_a);
     module.def("encoded_ulp_distance", &encodedUlpDistance, "exact"_a, "approximation"_a, "type"_a);
@@ -133,8 +132,7 @@ void registerComparisonBindings(nb::module_& module) {
                                          std::span<const double>(absoluteCandidates),
                                          std::span<const double>(relativeCandidates), options);
         },
-        "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a,
-        "options"_a = allCloseComparisonOptions());
+        "observed"_a, "expected"_a, "absolute_candidates"_a, "relative_candidates"_a, "options"_a);
     module.def(
         "check_unwritten_sentinel",
         [](const Tensor& tensor, SentinelRegion region, size_t maxReportedMismatches) {
@@ -142,7 +140,7 @@ void registerComparisonBindings(nb::module_& module) {
                                           tensor.shape().elementCount(), region,
                                           maxReportedMismatches);
         },
-        "tensor"_a, "region"_a = SentinelRegion::Unspecified, "max_reported_mismatches"_a = 10);
+        "tensor"_a, "region"_a, "max_reported_mismatches"_a);
     module.def(
         "check_unused_tensor_storage",
         [](const Tensor& tensor, size_t allocatedElements, SentinelRegion region,
@@ -150,7 +148,6 @@ void registerComparisonBindings(nb::module_& module) {
             return checkUnusedTensorStorage(tensor, allocatedElements, region,
                                             maxReportedMismatches);
         },
-        "tensor"_a, "allocated_elements"_a, "region"_a = SentinelRegion::Inside,
-        "max_reported_mismatches"_a = 10);
+        "tensor"_a, "allocated_elements"_a, "region"_a, "max_reported_mismatches"_a);
 }
 }  // namespace roc::hostnumerics::python_bindings

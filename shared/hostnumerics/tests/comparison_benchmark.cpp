@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(expected));
     const Tensor observedView =
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(observed));
-    ComparisonOptions options = allCloseComparisonOptions(0.0002, 0.0004);
+    ComparisonOptions options = allCloseComparisonOptions(0.0002, 0.0004, false);
     options.complexComparisonMode = ComplexComparisonMode::Componentwise;
     options.computeElementwiseStatistics = false;
     options.computeFrobenius = false;
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     });
     if (baselineMismatches != 0) return 1;
 
-    const double bytes = 2.0 * elements * sizeof(float);
+    const double bytes = 2.0 * static_cast<double>(elements) * sizeof(float);
     std::cout << "component_seconds=" << componentSeconds
               << " component_GBps=" << bytes / componentSeconds / 1e9
               << " baseline_seconds=" << baselineSeconds

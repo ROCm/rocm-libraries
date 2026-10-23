@@ -122,7 +122,7 @@ Options parseOptions(int argc, char** argv) {
     return options;
 }
 
-Tensor makeMatrix(ScalarType type, const Layout& layout, size_t stream, bool zero = false) {
+Tensor makeMatrix(ScalarType type, const Layout& layout, size_t stream, bool zero) {
     Tensor tensor(type, layout);
     for (size_t row = 0; row < layout.shape()[0]; ++row) {
         for (size_t column = 0; column < layout.shape()[1]; ++column) {
@@ -238,9 +238,9 @@ int main(int argc, char** argv) {
         const size_t outputElements = options.rows * options.columns;
         const OutputSelection selection =
             options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? OutputSelection::all()
+                ? OutputSelection::all({})
                 : OutputSelection::primeStride(outputElements, outputElements,
-                                               options.selectedOutputs);
+                                               options.selectedOutputs, {});
 
         const ptrdiff_t aLeadingDimension =
             static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));
@@ -256,8 +256,8 @@ int main(int argc, char** argv) {
                              inputOffset);
         const Layout outputLayout(Shape{options.rows, options.columns}, {1, outputLeadingDimension},
                                   outputOffset);
-        const Tensor a = makeMatrix(profile.inputType, aLayout, 1);
-        const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
+        const Tensor a = makeMatrix(profile.inputType, aLayout, 1, false);
+        const Tensor b = makeMatrix(profile.inputType, bLayout, 2, false);
         const Tensor output(profile.outputType, outputLayout);
         GemmTestOptions requestOptions(profile.accumulatorType);
         requestOptions.outputSelection = selection;
@@ -289,7 +289,7 @@ int main(int argc, char** argv) {
 
         const OutputSelection validationSelection =
             selection.selectsAll() && outputElements > 128
-                ? OutputSelection::primeStride(outputElements, outputElements, 128)
+                ? OutputSelection::primeStride(outputElements, outputElements, 128, {})
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;
@@ -299,7 +299,8 @@ int main(int argc, char** argv) {
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
         const double tolerance = comparisonTolerance(profile.outputType);
-        ComparisonOptions comparisonOptions = allCloseComparisonOptions(tolerance, 2.0 * tolerance);
+        ComparisonOptions comparisonOptions =
+            allCloseComparisonOptions(tolerance, 2.0 * tolerance, false);
         comparisonOptions.selection = validationSelection;
         if (!compare(output, expected, comparisonOptions).passed())
             throw std::runtime_error("Benchmark result differs from the scalar oracle.");

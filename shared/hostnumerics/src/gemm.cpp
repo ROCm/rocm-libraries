@@ -33,7 +33,7 @@ Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const Mat
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulInto(a, b, output, options, OutputSelection::all(), backend);
+    matmulInto(a, b, output, options, OutputSelection::all({}), backend);
     return output;
 }
 

@@ -446,7 +446,7 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
     std::vector<uint32_t> scaleIndexValues(logicalElementCount, 0);
     std::vector<float> referenceValues(logicalElementCount, 0.0f);
     const int threadCount =
-        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount));
+        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount), 4096, 8);
 
     if (problem.data.quantization() == MxDataQuantization::PreserveGeneratedEncoding)
         generateUnbounded(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,

@@ -217,8 +217,9 @@ PeriodicMatmulPreparation preparePeriodicMatmul(Shape outputShape, size_t reduct
             (mode == PeriodicMatmulMode::ExactInteger &&
              stats.absoluteProductSumBound >= exactLimit))
             return unsupported("Periodic partial sums exceed the certified F32 arithmetic range.");
-        data->products.push_back(
-            matmul(a, b, ScalarType::Float64, MatmulOptions(ScalarType::Float64)));
+        data->products.push_back(matmul(a, b, ScalarType::Float64,
+                                        MatmulOptions(ScalarType::Float64), std::nullopt,
+                                        GemmBackend::Automatic));
         data->segments.push_back(segment);
     }
     return PeriodicMatmulPlan(std::move(data));

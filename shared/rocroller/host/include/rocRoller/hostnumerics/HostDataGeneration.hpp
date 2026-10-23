@@ -78,8 +78,7 @@ namespace rocRoller::hostnumerics
     };
 
     roc::hostnumerics::ScalarType hostScalarType(DataType               type,
-                                                 DataTypeInterpretation interpretation
-                                                 = DataTypeInterpretation::Unscaled);
+                                                 DataTypeInterpretation interpretation);
 
     roc::hostnumerics::Layout hostTensorLayout(TensorDescriptor const& descriptor);
 
@@ -111,7 +110,7 @@ namespace rocRoller::hostnumerics
                                        float                               minimum,
                                        float                               maximum,
                                        uint32_t                            seed,
-                                       bool includeReference = false);
+                                       bool                                includeReference);
 
     /**
      * Generates C with seed, A with seed + 1, and B with seed + 2. These
@@ -154,8 +153,7 @@ namespace rocRoller::hostnumerics
     template <typename T>
     roc::hostnumerics::Tensor hostTensor(TensorDescriptor const& descriptor,
                                          std::span<const T>      values,
-                                         DataTypeInterpretation  interpretation
-                                         = DataTypeInterpretation::Unscaled)
+                                         DataTypeInterpretation  interpretation)
     {
         static_assert(std::is_trivially_copyable_v<T>);
 
@@ -179,8 +177,7 @@ namespace rocRoller::hostnumerics
     template <typename T, typename Allocator>
     roc::hostnumerics::Tensor hostTensor(TensorDescriptor const&          descriptor,
                                          std::vector<T, Allocator> const& values,
-                                         DataTypeInterpretation           interpretation
-                                         = DataTypeInterpretation::Unscaled)
+                                         DataTypeInterpretation           interpretation)
     {
         return hostTensor(descriptor, std::span<const T>(values), interpretation);
     }

@@ -5,18 +5,39 @@ import unittest
 
 import numpy as np
 
+import sys
+
 import hostnumerics as hv
 
 
 class GenerationRecipeApiTests(unittest.TestCase):
+    def test_selection_and_recipe_settings_require_explicit_choices(self):
+        with self.assertRaises(TypeError):
+            hv.GenerationRecipeSettings()
+        with self.assertRaises(TypeError):
+            hv.GenerationRecipeSettings(seed=37)
+        with self.assertRaises(TypeError):
+            hv.OutputSelection.all()
+        with self.assertRaises(TypeError):
+            hv.OutputSelection.strided(0, 2, index_order=[])
+        with self.assertRaises(TypeError):
+            hv.OutputSelection.explicit_indices([1])
+        with self.assertRaises(TypeError):
+            hv.OutputSelection.prime_stride(10, 10, 3)
+
     def test_recipes_and_selections_copy_order_sequences(self):
         for source in ([2, 1, 0], (2, 1, 0)):
-            settings = hv.GenerationRecipeSettings(index_order=source)
-            base = hv.GenerationRecipe.real_only(hv.GenerationRecipe.serial_index())
+            settings = hv.GenerationRecipeSettings(index_order=source, seed=0)
+            base = hv.GenerationRecipe.real_only(
+                hv.GenerationRecipe.serial_index(),
+                settings=hv.GenerationRecipeSettings(0, []),
+            )
             recipe = base.with_index_order(source)
             selections = (
                 hv.OutputSelection.all(source),
-                hv.OutputSelection.strided(0, 2, index_order=source),
+                hv.OutputSelection.strided(
+                    0, 2, index_order=source, max_elements=sys.maxsize * 2 + 1
+                ),
                 hv.OutputSelection.explicit_indices([1, 7], source),
                 hv.OutputSelection.prime_stride(24, 24, 5, source),
             )
@@ -34,7 +55,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
             self.assertEqual(recipe.index_order, [2, 1, 0])
             tensor = hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 4], recipe)
             np.testing.assert_array_equal(
-                hv.to_numpy(tensor),
+                hv.to_numpy(tensor, dtype=None),
                 np.arange(24, dtype=np.float32).reshape((2, 3, 4), order="F"),
             )
 
@@ -58,7 +79,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         recipe = hv.GenerationRecipe.real_only(component, settings)
 
         observed = hv.to_numpy(
-            hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe), dtype=None
         )
         np.testing.assert_array_equal(
             observed,
@@ -79,39 +100,48 @@ class GenerationRecipeApiTests(unittest.TestCase):
         real_only = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             hv.Shape([2]),
-            hv.GenerationRecipe.real_only(real),
+            hv.GenerationRecipe.real_only(
+                real, settings=hv.GenerationRecipeSettings(0, [])
+            ),
         )
         replicated = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             [2],
-            hv.GenerationRecipe.replicated(real),
+            hv.GenerationRecipe.replicated(
+                real, settings=hv.GenerationRecipeSettings(0, [])
+            ),
         )
         cartesian = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             [2],
-            hv.GenerationRecipe.cartesian(real, imaginary),
+            hv.GenerationRecipe.cartesian(
+                real, imaginary, settings=hv.GenerationRecipeSettings(0, [])
+            ),
         )
 
         np.testing.assert_array_equal(
-            hv.to_numpy(real_only),
+            hv.to_numpy(real_only, dtype=None),
             np.asarray([2.0 + 0.0j, 2.0 + 0.0j], dtype=np.complex64),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(replicated),
+            hv.to_numpy(replicated, dtype=None),
             np.asarray([2.0 + 2.0j, 2.0 + 2.0j], dtype=np.complex64),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(cartesian),
+            hv.to_numpy(cartesian, dtype=None),
             np.asarray([2.0 - 3.0j, 2.0 - 3.0j], dtype=np.complex64),
         )
 
     def test_layout_generation_and_generate_at_use_native_recipe_api(self):
         layout = hv.Layout(hv.Shape([2, 2]), [3, 1], 1)
-        recipe = hv.GenerationRecipe.real_only(hv.GenerationRecipe.serial_index())
+        recipe = hv.GenerationRecipe.real_only(
+            hv.GenerationRecipe.serial_index(),
+            settings=hv.GenerationRecipeSettings(0, []),
+        )
         tensor = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
 
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor),
+            hv.to_numpy(tensor, dtype=None),
             np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=np.float32),
         )
         storage = np.frombuffer(tensor.storage, dtype=np.float32)
@@ -121,11 +151,12 @@ class GenerationRecipeApiTests(unittest.TestCase):
         )
 
         replacement = hv.GenerationRecipe.real_only(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=9.0))
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=9.0)),
+            settings=hv.GenerationRecipeSettings(0, []),
         )
         self.assertIs(hv.generate_at(tensor, 1, replacement), tensor)
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor),
+            hv.to_numpy(tensor, dtype=None),
             np.asarray([[0.0, 9.0], [2.0, 3.0]], dtype=np.float32),
         )
 
@@ -140,7 +171,8 @@ class GenerationRecipeApiTests(unittest.TestCase):
             hv.GenerationRecipe.replicated(
                 hv.GenerationRecipe.raw_constant(
                     hv.RawConstantGenerationParameters(bits=1)
-                )
+                ),
+                settings=hv.GenerationRecipeSettings(0, []),
             )
 
     def test_all_named_parameter_factories_are_bound(self):
@@ -219,12 +251,10 @@ class GenerationRecipeApiTests(unittest.TestCase):
             np.dtype(np.float32),
         )
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.Float4E2M1,
-            [2],
-            bytes([0x21]),
+            hv.ScalarType.Float4E2M1, [2], bytes([0x21]), strides=None, offset=0
         )
         self.assertEqual(len(tensor.storage), 1)
-        self.assertEqual(hv.to_numpy(tensor).dtype, np.dtype(np.float32))
+        self.assertEqual(hv.to_numpy(tensor, dtype=None).dtype, np.dtype(np.float32))
 
     def test_only_canonical_index_order_name_is_exposed(self):
         self.assertFalse(hasattr(hv, "IndexOrder"))

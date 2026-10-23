@@ -5,6 +5,15 @@ from _hostnumerics_test_support import *  # noqa: F403
 
 
 class GemmApiTests(unittest.TestCase):  # noqa: F405
+    def test_matmul_requires_numerical_and_execution_policy(self):
+        operand = hv.from_numpy(np.ones((2, 2), dtype=np.float64))
+        with self.assertRaises(TypeError):
+            hv.matmul(operand, operand)
+        with self.assertRaises(TypeError):
+            hv.matmul(operand, operand, hv.ScalarType.Float64, hv.ScalarType.Float64)
+        with self.assertRaises(TypeError):
+            native._MatmulOptions()
+
     def test_gemm_accepts_owned_inputs_and_scaling_tensors(self):
         a_values = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         b_values = np.asarray([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
@@ -47,8 +56,17 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             bias=hv.from_numpy(bias[:, None]),
             output_scale=0.25,
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(result), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result, dtype=None), expected)
 
     def test_gemm_api_requires_explicit_c(self):
         self.assertFalse(hasattr(hv, "GemmOptions"))
@@ -69,13 +87,41 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                     hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 1])),
                     hv.ScalarType.Float32,
                     hv.ScalarType.Float32,
-                )
+                    alpha=1.0,
+                    beta=0.0,
+                    compute_type_a=None,
+                    compute_type_b=None,
+                    math_mode=hv.MathMode.Default,
+                    output_selection=hv.OutputSelection.all([]),
+                    backend=hv.GemmBackend.Automatic,
+                    output_conversion=hv.OutputConversion.Default,
+                    accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                    conjugate_a=False,
+                    conjugate_b=False,
+                    output_layout=None,
+                ),
+                dtype=None,
             ),
             a_values @ b_values,
         )
 
         with self.assertRaises(TypeError):
-            reference_gemm(operand_a, operand_b)
+            reference_gemm(
+                operand_a,
+                operand_b,
+                alpha=1.0,
+                beta=0.0,
+                compute_type_a=None,
+                compute_type_b=None,
+                math_mode=hv.MathMode.Default,
+                output_selection=hv.OutputSelection.all([]),
+                backend=hv.GemmBackend.Automatic,
+                output_conversion=hv.OutputConversion.Default,
+                accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                conjugate_a=False,
+                conjugate_b=False,
+                output_layout=None,
+            )
 
     def test_gemm_coefficients_accept_native_and_rank_zero_values(self):
         a = hv.from_numpy(np.asarray([[2.0]], dtype=np.float32))
@@ -91,9 +137,19 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             alpha=alpha,
             beta=2.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result), np.asarray([[34.0]], dtype=np.float32)
+            hv.to_numpy(result, dtype=None), np.asarray([[34.0]], dtype=np.float32)
         )
 
         with self.assertRaisesRegex(RuntimeError, "rank-zero"):
@@ -104,6 +160,17 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                 hv.ScalarType.Float32,
                 hv.ScalarType.Float32,
                 alpha=a,
+                beta=0.0,
+                compute_type_a=None,
+                compute_type_b=None,
+                math_mode=hv.MathMode.Default,
+                output_selection=hv.OutputSelection.all([]),
+                backend=hv.GemmBackend.Automatic,
+                output_conversion=hv.OutputConversion.Default,
+                accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                conjugate_a=False,
+                conjugate_b=False,
+                output_layout=None,
             )
 
     def test_gemm_options_apply_operand_quantization_and_block_scales(self):
@@ -127,9 +194,19 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             block_scale_b=hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)),
             block_size_a=4,
             block_size_b=4,
+            alpha=1.0,
+            beta=0.0,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result), np.asarray([[312.0]], dtype=np.float32)
+            hv.to_numpy(result, dtype=None), np.asarray([[312.0]], dtype=np.float32)
         )
 
     def test_gemm_options_conjugate_operands(self):
@@ -147,9 +224,20 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.ComplexFloat32,
             hv.ScalarType.ComplexFloat32,
             conjugate_a=True,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result),
+            hv.to_numpy(result, dtype=None),
             np.conjugate(a_values) @ b_values,
             rtol=1e-6,
             atol=1e-6,
@@ -170,9 +258,19 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             result,
             accumulator_type=hv.ScalarType.Float32,
             backend=hv.GemmBackend.Blocked,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
         expected = a_values @ b_values
-        np.testing.assert_array_equal(hv.to_numpy(result), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result, dtype=None), expected)
         self.assertEqual(result.strides, [9, 2])
         self.assertEqual(result.offset, 1)
 
@@ -184,8 +282,18 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             automatic,
             accumulator_type=hv.ScalarType.Float32,
             backend=hv.GemmBackend.Automatic,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
-        np.testing.assert_array_equal(hv.to_numpy(automatic), expected)
+        np.testing.assert_array_equal(hv.to_numpy(automatic, dtype=None), expected)
 
         storage = np.frombuffer(result.storage, dtype=np.float32)
         expected_storage = np.zeros(15, dtype=np.float32)
@@ -202,10 +310,23 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
-            output_selection=hv.OutputSelection.explicit_indices([0, 3]),
+            output_selection=hv.OutputSelection.explicit_indices(
+                [0, 3], index_order=[]
+            ),
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(observed),
+            hv.to_numpy(observed, dtype=None),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         blocked = reference_gemm(
@@ -214,14 +335,26 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
-            output_selection=hv.OutputSelection.explicit_indices([0, 3]),
+            output_selection=hv.OutputSelection.explicit_indices(
+                [0, 3], index_order=[]
+            ),
             backend=hv.GemmBackend.Blocked,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(blocked),
+            hv.to_numpy(blocked, dtype=None),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         self.assertEqual(
-            hv.OutputSelection.prime_stride(10, 10, 3).indices(10),
+            hv.OutputSelection.prime_stride(10, 10, 3, index_order=[]).indices(10),
             [0, 3, 6, 9],
         )

@@ -91,7 +91,7 @@ namespace hipblaslt::hostnumerics
         initializationRecipe(::roc::hostnumerics::ScalarType type,
                              hipblaslt_initialization        initialization,
                              uint64_t                        seed,
-                             TrigonometricComponent trigonometric = TrigonometricComponent::Cosine);
+                             TrigonometricComponent          trigonometric);
 
     // Preserves the grouped-GEMM client's historical operand patterns while
     // leaving tensor allocation and seed sequencing with the caller.
@@ -108,9 +108,9 @@ namespace hipblaslt::hostnumerics
                           MatrixRole                     role,
                           hipblaslt_initialization       initialization,
                           uint64_t                       seed,
-                          bool                           forceNaN        = false,
-                          std::optional<OneSpecialValue> oneSpecialValue = std::nullopt,
-                          bool                           positiveOnly    = false,
-                          IntegerExactOptions            integerExact    = {});
+                          bool                           forceNaN,
+                          std::optional<OneSpecialValue> oneSpecialValue,
+                          bool                           positiveOnly,
+                          IntegerExactOptions            integerExact);
 
 } // namespace hipblaslt::hostnumerics

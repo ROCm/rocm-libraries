@@ -118,28 +118,26 @@ void registerSelectionBindings(nb::module_& module) {
     nb::class_<OutputSelection>(module, "OutputSelection")
         .def_static(
             "all", [](const std::vector<size_t>& order) { return OutputSelection::all(order); },
-            "index_order"_a = std::vector<size_t>{})
+            "index_order"_a)
         .def_static(
             "strided",
             [](size_t first, size_t stride, size_t maxElements, const std::vector<size_t>& order) {
                 return OutputSelection::strided(first, stride, maxElements, order);
             },
-            "first"_a, "stride"_a, "max_elements"_a = std::numeric_limits<size_t>::max(),
-            "index_order"_a = std::vector<size_t>{})
+            "first"_a, "stride"_a, "max_elements"_a, "index_order"_a)
         .def_static(
             "explicit_indices",
             [](std::vector<size_t> indices, const std::vector<size_t>& order) {
                 return OutputSelection::explicitIndices(std::move(indices), order);
             },
-            "indices"_a, "index_order"_a = std::vector<size_t>{})
+            "indices"_a, "index_order"_a)
         .def_static(
             "prime_stride",
             [](size_t logical, size_t allocated, size_t requested,
                const std::vector<size_t>& order) {
                 return OutputSelection::primeStride(logical, allocated, requested, order);
             },
-            "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a,
-            "index_order"_a = std::vector<size_t>{})
+            "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a, "index_order"_a)
         .def_prop_ro("kind", &OutputSelection::kind)
         .def_prop_ro("selects_all", &OutputSelection::selectsAll)
         .def_prop_ro("first", &OutputSelection::first)

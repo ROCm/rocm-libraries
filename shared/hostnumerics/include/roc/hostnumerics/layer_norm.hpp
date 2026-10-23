@@ -33,12 +33,12 @@ struct LayerNormOutputs {
     std::optional<Tensor> inverseVariance;
 };
 
-LayerNormOutputs referenceLayerNorm(Tensor input, const LayerNormOutputTypes& outputTypes = {},
-                                    const LayerNormOptions& options = {});
+LayerNormOutputs referenceLayerNorm(Tensor input, const LayerNormOutputTypes& outputTypes,
+                                    const LayerNormOptions& options);
 
 // Writes caller-owned output tensors. output may exactly alias input with the
 // same mapping; every other overlapping input/output or output/output range is
 // rejected.
 void referenceLayerNormInto(Tensor input, LayerNormOutputs outputs,
-                            const LayerNormOptions& options = {});
+                            const LayerNormOptions& options);
 }  // namespace roc::hostnumerics

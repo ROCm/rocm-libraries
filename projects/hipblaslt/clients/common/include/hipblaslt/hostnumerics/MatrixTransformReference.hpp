@@ -53,10 +53,9 @@ namespace hipblaslt::hostnumerics
     inline ComparisonReport referenceMatrixTransform(const Tensor&                observed,
                                                      const std::optional<Tensor>& a,
                                                      const std::optional<Tensor>& b,
-                                                     std::complex<double>     alpha = {1.0, 0.0},
-                                                     std::complex<double>     beta  = {1.0, 0.0},
-                                                     const ComparisonOptions& comparisonOptions
-                                                     = {})
+                                                     std::complex<double>         alpha,
+                                                     std::complex<double>         beta,
+                                                     const ComparisonOptions&     comparisonOptions)
     {
         if(scalarTypeInfo(observed.type()).isPacked())
             throw std::runtime_error(
@@ -68,19 +67,31 @@ namespace hipblaslt::hostnumerics
             Tensor scaledA = multiply(*a,
                                       Tensor::scalar(ScalarType::Float32, alpha),
                                       ScalarType::Float32,
-                                      ScalarType::Float32);
+                                      ScalarType::Float32,
+                                      std::nullopt);
             Tensor scaledB = multiply(*b,
                                       Tensor::scalar(ScalarType::Float32, beta),
                                       ScalarType::Float32,
-                                      ScalarType::Float32);
-            addInto(scaledA, scaledB, expected, ScalarType::Float32);
+                                      ScalarType::Float32,
+                                      std::nullopt);
+            addInto(scaledA,
+                    scaledB,
+                    expected,
+                    ScalarType::Float32,
+                    roc::hostnumerics::OutputSelection::all({}));
         }
         else if(a)
-            multiplyInto(
-                *a, Tensor::scalar(ScalarType::Float32, alpha), expected, ScalarType::Float32);
+            multiplyInto(*a,
+                         Tensor::scalar(ScalarType::Float32, alpha),
+                         expected,
+                         ScalarType::Float32,
+                         roc::hostnumerics::OutputSelection::all({}));
         else if(b)
-            multiplyInto(
-                *b, Tensor::scalar(ScalarType::Float32, beta), expected, ScalarType::Float32);
+            multiplyInto(*b,
+                         Tensor::scalar(ScalarType::Float32, beta),
+                         expected,
+                         ScalarType::Float32,
+                         roc::hostnumerics::OutputSelection::all({}));
         else
             throw std::runtime_error("MatrixTransform reference requires A or B.");
 

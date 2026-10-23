@@ -43,11 +43,15 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.E8M0,
             list(scale_a_values.shape),
             bytes([126, 128, 127, 129, 127, 126, 129, 128]),
+            strides=None,
+            offset=0,
         )
         scale_b = hv.Tensor.from_storage(
             hv.ScalarType.E8M0,
             list(scale_b_values.shape),
             bytes([128, 127, 126, 127, 129, 128, 126, 128, 129]),
+            strides=None,
+            offset=0,
         )
         selected = [0, 4, 5]
 
@@ -63,8 +67,20 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             block_scale_b=scale_b,
             block_size_a=block_a,
             block_size_b=block_b,
-            output_selection=hv.OutputSelection.explicit_indices(selected),
+            output_selection=hv.OutputSelection.explicit_indices(
+                selected, index_order=[]
+            ),
             backend=hv.GemmBackend.Blocked,
+            accumulator_type=hv.ScalarType.Float32,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
 
         expected_complete = per_k_block_scaled_gemm(
@@ -72,7 +88,7 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
         self.assertIsNone(result)
 
     def test_mxfp4_scale_is_applied_after_the_complete_segment(self):
@@ -84,6 +100,8 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.E8M0,
             [1, 1],
             bytes([254]),  # 2**127: scaling either half separately overflows float32.
+            strides=None,
+            offset=0,
         )
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
 
@@ -96,11 +114,21 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             block_scale_a=scale_a,
             block_size_a=reductions,
             backend=hv.GemmBackend.Blocked,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
 
-        self.assertTrue(np.isfinite(hv.to_numpy(output)[0, 0]))
+        self.assertTrue(np.isfinite(hv.to_numpy(output, dtype=None)[0, 0]))
         np.testing.assert_array_equal(
-            hv.to_numpy(output), np.zeros((1, 1), dtype=np.float32)
+            hv.to_numpy(output, dtype=None), np.zeros((1, 1), dtype=np.float32)
         )
         self.assertIsNone(result)
 
@@ -119,9 +147,21 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             block_scale_a=hv.from_numpy(scale_a),
             block_size_a=2,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(only_a),
+            hv.to_numpy(only_a, dtype=None),
             np.asarray([[10.0, 10.0], [18.0, 18.0]], dtype=np.float32),
         )
 
@@ -133,9 +173,21 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             block_scale_b=hv.from_numpy(scale_b),
             block_size_b=2,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(only_b),
+            hv.to_numpy(only_b, dtype=None),
             np.asarray([[10.0, 18.0], [10.0, 18.0]], dtype=np.float32),
         )
 
@@ -149,4 +201,16 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
                 hv.ScalarType.Float32,
                 hv.ScalarType.Float32,
                 block_size_a=2,
+                alpha=1.0,
+                beta=0.0,
+                compute_type_a=None,
+                compute_type_b=None,
+                math_mode=hv.MathMode.Default,
+                output_selection=hv.OutputSelection.all([]),
+                backend=hv.GemmBackend.Automatic,
+                output_conversion=hv.OutputConversion.Default,
+                accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                conjugate_a=False,
+                conjugate_b=False,
+                output_layout=None,
             )

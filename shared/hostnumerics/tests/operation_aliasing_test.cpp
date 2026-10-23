@@ -11,8 +11,10 @@ void testReferenceOperationAliasing() {
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
     const Tensor arithmeticY =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{3.0f, 4.0f});
-    multiplyInto(arithmeticInPlace, Tensor(2.0f), arithmeticInPlace, ScalarType::Float32);
-    addInto(arithmeticInPlace, arithmeticY, arithmeticInPlace, ScalarType::Float32);
+    multiplyInto(arithmeticInPlace, Tensor(2.0f), arithmeticInPlace, ScalarType::Float32,
+                 OutputSelection::all({}));
+    addInto(arithmeticInPlace, arithmeticY, arithmeticInPlace, ScalarType::Float32,
+            OutputSelection::all({}));
     require(arithmeticInPlace.loadAs<float>({0}) == 5.0f &&
                 arithmeticInPlace.loadAs<float>({1}) == 8.0f,
             "Tensor arithmetic rejected or corrupted an exact in-place mapping.");
@@ -26,7 +28,7 @@ void testReferenceOperationAliasing() {
     requireError(
         [&] {
             multiplyInto(arithmeticOverlap, Tensor(1.0f), arithmeticReversedOutput,
-                         ScalarType::Float32);
+                         ScalarType::Float32, OutputSelection::all({}));
         },
         "Tensor multiplication accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
@@ -42,7 +44,8 @@ void testReferenceOperationAliasing() {
     requireError(
         [&] {
             multiplyInto(distinctLinearCombinationInput, Tensor(1.0f),
-                         selfCollidingLinearCombinationOutput, ScalarType::Float32);
+                         selfCollidingLinearCombinationOutput, ScalarType::Float32,
+                         OutputSelection::all({}));
         },
         "Tensor multiplication accepted a self-colliding destination.");
     requireRawEncodedBackingStorageEquals(
@@ -51,7 +54,7 @@ void testReferenceOperationAliasing() {
 
     Tensor softmaxInPlace =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{1.0f, 2.0f});
-    referenceSoftmaxInto(softmaxInPlace, softmaxInPlace, 0);
+    referenceSoftmaxInto(softmaxInPlace, softmaxInPlace, 0, ScalarType::Float32);
     require(std::abs(softmaxInPlace.loadAs<float>({0}) + softmaxInPlace.loadAs<float>({1}) - 1.0f) <
                     1e-6f &&
                 softmaxInPlace.loadAs<float>({0}) < softmaxInPlace.loadAs<float>({1}),
@@ -62,8 +65,11 @@ void testReferenceOperationAliasing() {
     Tensor softmaxReversedOutput = softmaxOverlap.shareStorageWithLayout(Layout(Shape{2}, {-1}, 1));
     const std::vector<std::byte> softmaxOverlapBefore =
         copyRawEncodedBackingStorage(softmaxOverlap);
-    requireError([&] { referenceSoftmaxInto(softmaxOverlap, softmaxReversedOutput, 0); },
-                 "Reference softmax accepted differently mapped overlapping storage.");
+    requireError(
+        [&] {
+            referenceSoftmaxInto(softmaxOverlap, softmaxReversedOutput, 0, ScalarType::Float32);
+        },
+        "Reference softmax accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
         softmaxOverlap, softmaxOverlapBefore,
         "Reference softmax modified destination storage before rejecting overlap.");
@@ -119,7 +125,7 @@ void testReferenceOperationAliasing() {
 
     Tensor epilogueInPlace =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{1.0f, -2.0f});
-    EpilogueOptions epilogueInPlaceOptions;
+    EpilogueOptions epilogueInPlaceOptions(ScalarType::Float32);
     epilogueInPlaceOptions.outputScale = 2.0;
     referenceEpilogueInto(epilogueInPlace, {.output = epilogueInPlace}, epilogueInPlaceOptions);
     require(epilogueInPlace.loadAs<float>({0, 0}) == 2.0f &&
@@ -133,7 +139,10 @@ void testReferenceOperationAliasing() {
     const std::vector<std::byte> epilogueOverlapBefore =
         copyRawEncodedBackingStorage(epilogueOverlap);
     requireError(
-        [&] { referenceEpilogueInto(epilogueOverlap, {.output = epilogueReversedOutput}); },
+        [&] {
+            referenceEpilogueInto(epilogueOverlap, {.output = epilogueReversedOutput},
+                                  EpilogueOptions{ScalarType::Float32});
+        },
         "Reference epilogue accepted differently mapped overlapping storage.");
     requireRawEncodedBackingStorageEquals(
         epilogueOverlap, epilogueOverlapBefore,
@@ -147,8 +156,10 @@ void testReferenceOperationAliasing() {
         copyRawEncodedBackingStorage(overlappingEpilogueOutputs);
     requireError(
         [&] {
-            referenceEpilogueInto(epilogueInput, {.output = overlappingEpilogueOutputs,
-                                                  .rawOutput = overlappingEpilogueOutputs});
+            referenceEpilogueInto(
+                epilogueInput,
+                {.output = overlappingEpilogueOutputs, .rawOutput = overlappingEpilogueOutputs},
+                EpilogueOptions{ScalarType::Float32});
         },
         "Reference epilogue accepted overlapping result tensors.");
     requireRawEncodedBackingStorageEquals(

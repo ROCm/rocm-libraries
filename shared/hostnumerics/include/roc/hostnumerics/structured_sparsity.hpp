@@ -68,14 +68,14 @@ struct StructuredSparsitySliceRange {
 };
 
 StructuredSparseTensor applyStructuredSparsity(Tensor input, StructuredSparsityPattern pattern,
-                                               StructuredSparsityOutputOptions outputOptions = {});
+                                               StructuredSparsityOutputOptions outputOptions);
 
 // Writes caller-owned destinations. pruned has input.shape(); compressed has
 // inputExtent / groupSize * retainedElements along pattern.axis. Input may
 // exactly alias pruned. A slice fixes every coordinate except pattern.axis.
 void applyStructuredSparsityInto(Tensor input, StructuredSparseTensor outputs,
                                  StructuredSparsityPattern pattern,
-                                 StructuredSparsitySliceRange sliceRange = {});
+                                 StructuredSparsitySliceRange sliceRange);
 
 // Converts two retained UInt8 positions per 2:4 group into packed metadata:
 // one nibble per group and two groups per output byte.

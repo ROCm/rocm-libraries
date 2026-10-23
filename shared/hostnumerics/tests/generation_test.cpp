@@ -10,14 +10,14 @@ void testIndexedGeneration() {
     using namespace roc::hostnumerics;
 
     Tensor serial(ScalarType::Float32, Shape{2, 3});
-    generate(serial, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));
+    generate(serial, GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), {}));
     require(serial.loadAs<float>({0, 0}) == 0 && serial.loadAs<float>({1, 0}) == 3 &&
                 serial.loadAs<float>({0, 1}) == 1 && serial.loadAs<float>({1, 2}) == 5,
             "First-dimension-fast serial generation mismatch.");
 
     Tensor complex(ScalarType::ComplexFloat32, Shape{2, 2});
     generate(complex,
-             GenerationRecipe::cartesian(GenerationRecipe::sine(), GenerationRecipe::cosine()));
+             GenerationRecipe::cartesian(GenerationRecipe::sine(), GenerationRecipe::cosine(), {}));
     const std::complex<float> value = complex.loadAs<std::complex<float>>({1, 0});
     require(std::abs(value.real() - std::sin(2.0f)) < 1e-6f &&
                 std::abs(value.imag() - std::cos(2.0f)) < 1e-6f,
@@ -36,7 +36,8 @@ void testIndexedGeneration() {
     }
 
     Tensor point(ScalarType::Float32, Shape{2, 3, 2});
-    generateAt(point, 3, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 9.0})));
+    generateAt(point, 3,
+               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 9.0}), {}));
     require(point.loadAs<float>({0, 1, 1}) == 9.0f && point.loadAs<float>({1, 1, 0}) == 0.0f,
             "First-dimension-fast point generation mismatch.");
 
@@ -157,7 +158,7 @@ void testIndexedGeneration() {
         ScalarType::Float6E2M3, Layout::contiguousLastDimensionFastest(Shape{5}),
         std::move(packedStorage));
     generate(packedConstant,
-             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0})));
+             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0}), {}));
     for (size_t index = 0; index < packedConstant.elementCount(); ++index)
         require(packedConstant.loadAs<float>({index}) == 1.0f,
                 "Packed constant generation produced an incorrect value.");
@@ -184,7 +185,8 @@ void testIndexedGeneration() {
              GenerationRecipe::realOnly(
                  GenerationRecipe::affineIndexRemainder(
                      {.dimensionCoefficients = {1, -1, 2}, .offset = -2, .positiveDivisor = 5})
-                     .withAffineValueMapping({.offset = 1.0})));
+                     .withAffineValueMapping({.offset = 1.0}),
+                 {}));
     require(affine.loadAs<float>({0, 0, 0}) == -1.0f && affine.loadAs<float>({1, 2, 1}) == 0.0f,
             "Affine-index remainder generation mismatch.");
 
@@ -226,7 +228,7 @@ void testIndexedGeneration() {
             "Packed generation changed with OpenMP thread count.");
 
     Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}, 0));
-    generate(aliased, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));
+    generate(aliased, GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), {}));
     require(aliased.loadAs<float>({0}) == 8191.0f,
             "Aliased generation did not preserve deterministic traversal order.");
 

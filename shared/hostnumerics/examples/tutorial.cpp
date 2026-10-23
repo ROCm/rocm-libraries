@@ -98,9 +98,12 @@ void matrixMultiplication() {
         Tensor::copyNativeValues<float>(Shape{2, 3}, std::array<float, 6>{1, 2, 3, 4, 5, 6});
     const Tensor b =
         Tensor::copyNativeValues<float>(Shape{3, 2}, std::array<float, 6>{7, 8, 9, 10, 11, 12});
-    const Tensor product = matmul(a, b, ScalarType::Float32);
-    check(compare(product, Tensor::copyNativeValues<float>(Shape{2, 2},
-                                                           std::array<float, 4>{58, 64, 139, 154}))
+    const Tensor product = matmul(a, b, ScalarType::Float32, MatmulOptions{ScalarType::Float32},
+                                  std::nullopt, GemmBackend::Automatic);
+    check(compare(
+              product,
+              Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{58, 64, 139, 154}),
+              {})
               .passed(),
           "Float32 matmul mismatch.");
 
@@ -108,7 +111,7 @@ void matrixMultiplication() {
     const Tensor integerProduct =
         matmul(Tensor::copyNativeValues<int8_t>(Shape{1, 2}, std::array<int8_t, 2>{2, 3}),
                Tensor::copyNativeValues<int8_t>(Shape{2, 1}, std::array<int8_t, 2>{4, 5}),
-               ScalarType::Int32, integerOptions);
+               ScalarType::Int32, integerOptions, std::nullopt, GemmBackend::Automatic);
     check(integerProduct.loadAs<int32_t>({0, 0}) == 23, "Int8-to-Int32 matmul mismatch.");
 
     MatmulOptions complexOptions(ScalarType::ComplexFloat32);
@@ -118,13 +121,14 @@ void matrixMultiplication() {
                    Shape{1, 2}, std::array{std::complex<float>{1, 1}, std::complex<float>{2, -1}}),
                Tensor::copyNativeValues<std::complex<float>>(
                    Shape{2, 1}, std::array{std::complex<float>{3, 0}, std::complex<float>{1, 2}}),
-               ScalarType::ComplexFloat32, complexOptions);
+               ScalarType::ComplexFloat32, complexOptions, std::nullopt, GemmBackend::Automatic);
     check(complexProduct.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(3, 2),
           "Conjugated complex matmul mismatch.");
 
     const Tensor emptyProduct =
         matmul(Tensor(ScalarType::Float32, Shape{2, 0}), Tensor(ScalarType::Float32, Shape{0, 3}),
-               ScalarType::Float32);
+               ScalarType::Float32, MatmulOptions{ScalarType::Float32}, std::nullopt,
+               GemmBackend::Automatic);
     check(emptyProduct.shape() == Shape{2, 3} && emptyProduct.loadAs<float>({1, 2}) == 0.0f,
           "Zero-reduction matmul is not the additive identity.");
 }
@@ -164,7 +168,7 @@ void higherLevelOperations() {
           "Softmax row does not sum to one.");
 
     const LayerNormOutputs normalized =
-        referenceLayerNorm(input, {.output = ScalarType::Float32, .mean = ScalarType::Float32});
+        referenceLayerNorm(input, {.output = ScalarType::Float32, .mean = ScalarType::Float32}, {});
     check(normalized.mean && normalized.mean->shape() == Shape{2},
           "LayerNorm statistics mismatch.");
 
@@ -185,7 +189,7 @@ void comparisonDiagnostics() {
         Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{1, 2, 3});
     const Tensor observed =
         Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{1, 9, 3});
-    const ComparisonReport report = compare(observed, expected);
+    const ComparisonReport report = compare(observed, expected, {});
     const std::string message = formatComparisonReport(report);
     check(!report.passed() &&
               message.starts_with("comparison failed: 1 of 3 compared elements mismatched") &&

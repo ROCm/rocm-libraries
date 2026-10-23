@@ -962,7 +962,8 @@ namespace GEMMTests
                                          gemm.scaleBMode == Operations::ScaleMode::Separate
                                              ? hostnumerics::DataTypeInterpretation::BlockScaled
                                              : hostnumerics::DataTypeInterpretation::Unscaled),
-                hostnumerics::hostTensor(descC, hostC),
+                hostnumerics::hostTensor(
+                    descC, hostC, hostnumerics::DataTypeInterpretation::Unscaled),
                 std::move(referenceScaleA),
                 std::move(referenceScaleB),
                 referenceScaleBlockSize,

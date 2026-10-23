@@ -15,8 +15,8 @@
 
 namespace roc::hostnumerics::amd_gpu_layout::detail {
 
-inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread = 4096,
-                                int defaultMaximumThreadCount = 8) {
+inline int operationThreadCount(size_t workItemCount, size_t minimumWorkItemsPerThread,
+                                int defaultMaximumThreadCount) {
 #ifdef _OPENMP
     if (workItemCount == 0 || omp_in_parallel()) return 1;
 
@@ -41,7 +41,7 @@ template <typename Function>
 void parallelForChunks(size_t iterationCount, size_t workItemCount, Function function) {
     if (iterationCount == 0) return;
 
-    const int threadCount = operationThreadCount(workItemCount);
+    const int threadCount = operationThreadCount(workItemCount, 4096, 8);
     if (threadCount <= 1) {
         function(0, iterationCount);
         return;

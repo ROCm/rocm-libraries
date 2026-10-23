@@ -42,7 +42,7 @@ inline Shape projectWithoutAxis(const Shape& shape, size_t excluded) {
 // preconditions come from the operation's validated loop bounds.
 class IndexIteration {
    public:
-    explicit IndexIteration(const Shape& shape, std::span<const size_t> order = {})
+    explicit IndexIteration(const Shape& shape, std::span<const size_t> order)
         : m_extents(shape.dimensions().begin(), shape.dimensions().end()),
           m_axes(resolvedIndexOrder(shape, order)),
           m_count(shape.elementCount()) {}

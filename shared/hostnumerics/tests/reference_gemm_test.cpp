@@ -31,7 +31,9 @@ void testRuntimeReferenceGemm() {
             .expandDims(1);
     const Tensor scaleBTensor = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleB));
-    Tensor product = matmul(operandA, operandB, ScalarType::Float32);
+    Tensor product =
+        matmul(operandA, operandB, ScalarType::Float32, MatmulOptions{ScalarType::Float32},
+               std::nullopt, GemmBackend::Automatic);
     product = product * scaleATensor * scaleBTensor;
     const Tensor combined = product + inputC * 2.0f;
     EpilogueOptions epilogue(ScalarType::Float32);
@@ -45,15 +47,17 @@ void testRuntimeReferenceGemm() {
         64 * 2 * 7 + 2 + 1,
         0,
     };
-    require(compare(d, Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}, 0),
-                                                        std::span<const float>(expected)))
+    require(compare(d,
+                    Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}, 0),
+                                                     std::span<const float>(expected)),
+                    {})
                 .passed(),
             "Runtime reference GEMM result mismatch.");
 
     const Layout owningLayout(Shape{2, 2}, {7, 2}, 1);
     Tensor owned(ScalarType::Float32, owningLayout);
     matmulInto(operandA, operandB, owned, MatmulOptions(ScalarType::Float32),
-               OutputSelection::explicitIndices({0, 1}), GemmBackend::Blocked);
+               OutputSelection::explicitIndices({0, 1}, {}), GemmBackend::Blocked);
     require(owned.layout() == owningLayout && owned.loadAs<float>({0, 0}) == 58.0f &&
                 owned.loadAs<float>({0, 1}) == 64.0f && owned.loadAs<float>({1, 0}) == 0 &&
                 owned.loadAs<float>({1, 1}) == 0,
@@ -69,7 +73,7 @@ void testRuntimeReferenceGemm() {
     bool rejectedBeforeAllocation = false;
     try {
         (void)matmul(operandA, operandB, ScalarType::Float32, MatmulOptions(ScalarType::Float32),
-                     Layout::contiguousLastDimensionFastest(Shape{1, 1}));
+                     Layout::contiguousLastDimensionFastest(Shape{1, 1}), GemmBackend::Automatic);
     } catch (const std::runtime_error&) {
         rejectedBeforeAllocation = true;
     }
@@ -77,9 +81,10 @@ void testRuntimeReferenceGemm() {
 
     const Tensor zeroReduction =
         matmul(Tensor(ScalarType::Float32, Shape{2, 0}), Tensor(ScalarType::Float32, Shape{0, 3}),
-               ScalarType::Float32);
+               ScalarType::Float32, MatmulOptions{ScalarType::Float32}, std::nullopt,
+               GemmBackend::Automatic);
     require(zeroReduction.shape() == Shape({2, 3}) &&
-                compare(zeroReduction, Tensor(ScalarType::Float32, Shape{2, 3})).passed(),
+                compare(zeroReduction, Tensor(ScalarType::Float32, Shape{2, 3}), {}).passed(),
             "Owning reference GEMM did not initialize an empty reduction to zero.");
 
     // An explicit empty layout need not have representable contiguous strides.
@@ -88,7 +93,8 @@ void testRuntimeReferenceGemm() {
     const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}, 0));
     const Layout emptyOutputLayout(Shape{0, huge}, {0, 0}, 0);
     const Tensor emptyProduct =
-        matmul(emptyA, broadcastB, ScalarType::Float32, MatmulOptions{}, emptyOutputLayout);
+        matmul(emptyA, broadcastB, ScalarType::Float32, MatmulOptions{ScalarType::Float32},
+               emptyOutputLayout, GemmBackend::Automatic);
     require(emptyProduct.layout() == emptyOutputLayout &&
                 emptyProduct.rawEncodedBackingStorage().empty(),
             "Empty matmul failed to use the supplied output layout.");
@@ -97,14 +103,32 @@ void testRuntimeReferenceGemm() {
     for (ScalarType type :
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
         const Tensor unsupported(type, Shape{1, 1});
-        requireError([&] { (void)matmul(unsupported, ordinary, ScalarType::Float32); },
-                     "GEMM accepted an unsupported unsigned floating-point A.");
-        requireError([&] { (void)matmul(ordinary, unsupported, ScalarType::Float32); },
-                     "GEMM accepted an unsupported unsigned floating-point B.");
-        requireError([&] { (void)matmul(ordinary, ordinary, type); },
-                     "GEMM accepted an unsupported unsigned floating-point output.");
         requireError(
-            [&] { (void)matmul(Tensor(type, Shape{0, 1}), ordinary, ScalarType::Float32); },
+            [&] {
+                (void)matmul(unsupported, ordinary, ScalarType::Float32,
+                             MatmulOptions{ScalarType::Float32}, std::nullopt,
+                             GemmBackend::Automatic);
+            },
+            "GEMM accepted an unsupported unsigned floating-point A.");
+        requireError(
+            [&] {
+                (void)matmul(ordinary, unsupported, ScalarType::Float32,
+                             MatmulOptions{ScalarType::Float32}, std::nullopt,
+                             GemmBackend::Automatic);
+            },
+            "GEMM accepted an unsupported unsigned floating-point B.");
+        requireError(
+            [&] {
+                (void)matmul(ordinary, ordinary, type, MatmulOptions{ScalarType::Float32},
+                             std::nullopt, GemmBackend::Automatic);
+            },
+            "GEMM accepted an unsupported unsigned floating-point output.");
+        requireError(
+            [&] {
+                (void)matmul(Tensor(type, Shape{0, 1}), ordinary, ScalarType::Float32,
+                             MatmulOptions{ScalarType::Float32}, std::nullopt,
+                             GemmBackend::Automatic);
+            },
             "Empty GEMM accepted an unsupported unsigned floating-point operand.");
     }
 }
@@ -123,8 +147,9 @@ void testRuntimeMixedAndBlockScaledGemm() {
                                                       std::span<const float>(cValues));
     MatmulOptions mixedOptions(ScalarType::Float32);
     mixedOptions.computeTypeA = ScalarType::Float4E2M1;
-    const Tensor product = matmul(a, b, ScalarType::Float32, mixedOptions);
-    const Tensor mixed = add(product, c, ScalarType::Float16, ScalarType::Float32);
+    const Tensor product =
+        matmul(a, b, ScalarType::Float32, mixedOptions, std::nullopt, GemmBackend::Automatic);
+    const Tensor mixed = add(product, c, ScalarType::Float16, ScalarType::Float32, std::nullopt);
     require(mixed.loadAs<float>({0, 0}) == 9.0f, "Runtime mixed-type GEMM result mismatch.");
 
     const std::array<float, 4> ones{1, 1, 1, 1};
@@ -172,11 +197,12 @@ void testBlockedUnalignedScaleSegments() {
 
     Tensor automaticOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    matmulInto(operandA, operandB, automaticOutput, options, OutputSelection::explicitIndices({1}));
+    matmulInto(operandA, operandB, automaticOutput, options,
+               OutputSelection::explicitIndices({1}, {}), GemmBackend::Automatic);
 
     const Tensor expected =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
-    require(compare(automaticOutput, expected).passed(),
+    require(compare(automaticOutput, expected, {}).passed(),
             "Blocked GEMM with unequal scale segments produced the wrong output.");
 }
 
@@ -195,9 +221,9 @@ void testExactIntegerGemm() {
     const Tensor product =
         matmul(operandA, operandB, ScalarType::Int32, MatmulOptions(ScalarType::Int32),
                std::nullopt, GemmBackend::Blocked);
-    const Tensor d =
-        add(product, multiply(inputC, int32_t{2}, ScalarType::Int32, ScalarType::Int32),
-            ScalarType::Int32, ScalarType::Int32);
+    const Tensor d = add(
+        product, multiply(inputC, int32_t{2}, ScalarType::Int32, ScalarType::Int32, std::nullopt),
+        ScalarType::Int32, ScalarType::Int32, std::nullopt);
 
     const auto wrapMultiply = [](int32_t left, int32_t right) {
         return std::bit_cast<int32_t>(static_cast<uint32_t>(left) * static_cast<uint32_t>(right));
@@ -237,14 +263,17 @@ void testRuntimeComplexAndExplicitAxisGemm() {
                                                 std::span<const float>(realA)),
                Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
                                                 std::span<const float>(realB)),
-               ScalarType::Float32);
+               ScalarType::Float32, MatmulOptions{ScalarType::Float32}, std::nullopt,
+               GemmBackend::Automatic);
     EpilogueOptions axisOptions(ScalarType::Float32);
     axisOptions.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(columnBias));
     const Tensor axisResult = referenceEpilogue(realProduct, {}, axisOptions).output;
-    require(compare(axisResult, Tensor::copyNativeStorage<float>(
-                                    Layout::contiguousLastDimensionFastest(Shape{1, 2}),
-                                    std::span<const float>(columnBias)))
+    require(compare(axisResult,
+                    Tensor::copyNativeStorage<float>(
+                        Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                        std::span<const float>(columnBias)),
+                    {})
                 .passed(),
             "Runtime GEMM explicit column-axis bias mismatch.");
 }

@@ -355,15 +355,19 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            auto h_result = hostnumerics::convertHostReference<T>(
-                hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, hostA),
-                                                   hostnumerics::hostTensor(descB, hostB),
-                                                   hostnumerics::hostTensor(descC, hostC),
-                                                   std::nullopt,
-                                                   std::nullopt,
-                                                   0,
-                                                   alpha,
-                                                   beta));
+            auto h_result
+                = hostnumerics::convertHostReference<T>(hostnumerics::computeHostReference(
+                    hostnumerics::hostTensor(
+                        descA, hostA, hostnumerics::DataTypeInterpretation::Unscaled),
+                    hostnumerics::hostTensor(
+                        descB, hostB, hostnumerics::DataTypeInterpretation::Unscaled),
+                    hostnumerics::hostTensor(
+                        descC, hostC, hostnumerics::DataTypeInterpretation::Unscaled),
+                    std::nullopt,
+                    std::nullopt,
+                    0,
+                    alpha,
+                    beta));
             // Host leaky relu
             for(size_t i = 0; i < M; i++)
             {

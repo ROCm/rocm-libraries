@@ -107,7 +107,7 @@ def from_numpy(array: np.ndarray, scalar_type=None):
     )
 
 
-def to_numpy(tensor, dtype=None) -> np.ndarray:
+def to_numpy(tensor, dtype) -> np.ndarray:
     """Decode tensor values into an owning NumPy array.
 
     dtype selects the decoded output container. It does not reinterpret the
@@ -175,22 +175,23 @@ def _matmul_options(
 def matmul(
     a,
     b,
-    output_type=ScalarType.Float32,  # noqa: F405
-    accumulator_type=ScalarType.Float32,  # noqa: F405
+    output_type,
+    accumulator_type,
     *,
-    compute_type_a=None,
-    compute_type_b=None,
-    math_mode=MathMode.Default,  # noqa: F405
+    compute_type_a,
+    compute_type_b,
+    math_mode,
     block_scale_a=None,
     block_scale_b=None,
     block_size_a=0,
     block_size_b=0,
     pre_quantization_scales_a=None,
     pre_quantization_scales_b=None,
-    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
-    conjugate_a=False,
-    conjugate_b=False,
-    output_layout=None,
+    accumulation_rounding,
+    conjugate_a,
+    conjugate_b,
+    output_layout,
+    backend,
 ):
     """Return the matrix product of two rank-two tensors."""
 
@@ -209,28 +210,29 @@ def matmul(
         conjugate_a,
         conjugate_b,
     )
-    return _native._matmul(a, b, output_type, options, output_layout)
+    return _native._matmul(a, b, output_type, options, output_layout, backend)
 
 
 def matmul_into(
     a,
     b,
     output,
-    accumulator_type=ScalarType.Float32,  # noqa: F405
+    accumulator_type,
     *,
-    compute_type_a=None,
-    compute_type_b=None,
-    math_mode=MathMode.Default,  # noqa: F405
-    output_selection=None,
+    compute_type_a,
+    compute_type_b,
+    math_mode,
+    output_selection,
+    backend,
     block_scale_a=None,
     block_scale_b=None,
     block_size_a=0,
     block_size_b=0,
     pre_quantization_scales_a=None,
     pre_quantization_scales_b=None,
-    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
-    conjugate_a=False,
-    conjugate_b=False,
+    accumulation_rounding,
+    conjugate_a,
+    conjugate_b,
 ):
     """Write the matrix product of two rank-two tensors into output."""
 
@@ -249,9 +251,4 @@ def matmul_into(
         conjugate_a,
         conjugate_b,
     )
-    selection = (
-        OutputSelection.all()  # noqa: F405
-        if output_selection is None
-        else output_selection
-    )
-    return _native._matmul_into(a, b, output, options, selection)
+    return _native._matmul_into(a, b, output, options, output_selection, backend)

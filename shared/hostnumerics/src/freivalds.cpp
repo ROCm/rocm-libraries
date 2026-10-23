@@ -132,7 +132,7 @@ std::optional<Tensor> exactOperand(const Tensor& input, const std::vector<Tensor
         if (broadcastShapes(scale.shape(), input.shape()) != input.shape())
             throw std::runtime_error("Freivalds operand scale does not broadcast to its input.");
         if (!validateIntegers(scale, accumulatorType)) return std::nullopt;
-        value = multiply(value, scale, ScalarType::Float64, ScalarType::Float64);
+        value = multiply(value, scale, ScalarType::Float64, ScalarType::Float64, std::nullopt);
         const detail::RuntimeTensorReader<double> reader(value);
         bool bounded = true;
         detail::forEachIndex(value.shape(), [&](std::span<const size_t> at, size_t) {
@@ -165,7 +165,7 @@ class BroadcastIntegerReader {
     bool m_row, m_column;
 };
 std::vector<uint64_t> project(const Tensor& tensor, std::span<const uint64_t> probe,
-                              bool transpose = false) {
+                              bool transpose) {
     const size_t rows = tensor.shape()[transpose ? 1 : 0];
     const size_t columns = tensor.shape()[transpose ? 0 : 1];
     const detail::RuntimeMatrixReader<int64_t> reader(tensor);
@@ -492,8 +492,8 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
         request.leftProbe[i] = probe(2 * probes.seed + 1, i);
         left[i] = multiplyResidues(request.leftProbe[i], freivaldsResidue(data->rowScale[i]));
     }
-    auto br = project(*data->b, right);
-    data->rows = project(*data->a, br);
+    auto br = project(*data->b, right, false);
+    data->rows = project(*data->a, br, false);
     auto ta = project(*data->a, left, true);
     data->columns = project(*data->b, ta, true);
     for (size_t i = 0; i < m; ++i)
@@ -508,7 +508,7 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
          {std::pair{&data->c, data->beta}, std::pair{&data->bias, data->outputScale}}) {
         if (!*t) continue;
         const auto broadcast = (*t)->broadcastTo(shape);
-        const auto r = project(broadcast, request.rightProbe);
+        const auto r = project(broadcast, request.rightProbe, false);
         const auto c = project(broadcast, request.leftProbe, true);
         for (size_t i = 0; i < m; ++i)
             data->rows[i] =

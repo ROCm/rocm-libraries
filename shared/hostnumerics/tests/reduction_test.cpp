@@ -20,10 +20,11 @@ void testReferenceReduction() {
 
     Tensor output(ScalarType::Float32, Layout(Shape{3}, {2}, 0));
     referenceSumInto(input, output, {0, 2}, ScalarType::Float32);
-    require(compare(output,
-                    Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))
-                .passed(),
-            "Reference reduction result mismatch.");
+    require(
+        compare(output,
+                Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}), {})
+            .passed(),
+        "Reference reduction result mismatch.");
 
     const std::array<int32_t, 2> wrappingInputValues{std::numeric_limits<int32_t>::max(), 1};
     const Tensor wrappingSum =
@@ -39,12 +40,14 @@ void testReferenceReduction() {
             "Reference maximum-absolute result mismatch.");
 
     const Tensor owned = referenceSum(input, {0, 2}, ScalarType::Float32, ScalarType::Float32);
-    require(owned.layout() == Layout::contiguousLastDimensionFastest(Shape{3}) &&
-                owned.type() == ScalarType::Float32 &&
-                compare(owned, Tensor::copyNativeValues<float>(Shape{3},
-                                                               std::array<float, 3>{412, 492, 572}))
-                    .passed(),
-            "Owning reference sum result contract mismatch.");
+    require(
+        owned.layout() == Layout::contiguousLastDimensionFastest(Shape{3}) &&
+            owned.type() == ScalarType::Float32 &&
+            compare(owned,
+                    Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}),
+                    {})
+                .passed(),
+        "Owning reference sum result contract mismatch.");
 
     bool rejectedBeforeAllocation = false;
     try {

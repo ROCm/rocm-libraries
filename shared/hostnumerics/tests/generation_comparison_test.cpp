@@ -13,7 +13,7 @@ void testGenerationAndComparison() {
     Tensor b(ScalarType::Float32, Shape{32});
     generate(a, binaryGeneration);
     generate(b, binaryGeneration);
-    require(compare(b, a).passed(), "Random generation is not repeatable for equal seeds.");
+    require(compare(b, a, {}).passed(), "Random generation is not repeatable for equal seeds.");
 
     b.storeFrom({7}, b.loadAs<float>({7}) + 1.0f);
     ComparisonOptions mismatchOptions;

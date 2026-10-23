@@ -62,8 +62,7 @@ namespace TensileLite::Client::hostnumerics
             return options;
         }
 
-        void runGemm(roc::hostnumerics::GemmBackend backend
-                     = roc::hostnumerics::GemmBackend::Automatic) const;
+        void runGemm(roc::hostnumerics::GemmBackend backend) const;
         void runPostGemmOperationsAndCopyOutputs() const;
 
     private:
@@ -174,8 +173,8 @@ namespace TensileLite::Client::hostnumerics
         // Reuses the numerical translation without allocating reference outputs.
         roc::hostnumerics::FreivaldsPreparation
                                   prepareFreivalds(size_t                                          batch,
-                                                   const roc::hostnumerics::FreivaldsProbeOptions& probes = {},
-                                                   const roc::hostnumerics::FreivaldsLimits&       limits = {}) const;
+                                                   const roc::hostnumerics::FreivaldsProbeOptions& probes,
+                                                   const roc::hostnumerics::FreivaldsLimits&       limits) const;
         roc::hostnumerics::Layout outputLayout(size_t batch) const;
 
     private:

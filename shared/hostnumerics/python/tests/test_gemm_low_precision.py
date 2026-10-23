@@ -15,9 +15,21 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(c),
             hv.ScalarType.Int32,
             hv.ScalarType.Int32,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        expected = gemm_int32_exact(a, b, c)
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        expected = gemm_int32_exact(a, b, c, alpha=1, beta=0, output_scale=1)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
     def test_int32_accumulator_gemm_wraps_without_float_proxy(self):
         reduction = 140_000
@@ -36,6 +48,16 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             alpha=alpha,
             beta=beta,
             output_scale=output_scale,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         expected = gemm_int32_exact(
             a,
@@ -45,7 +67,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=beta,
             output_scale=output_scale,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
     def test_float16_accumulator_rounds_each_step(self):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
@@ -55,6 +77,14 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(b),
             hv.ScalarType.Float16,
             hv.ScalarType.Float16,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hv.GemmBackend.Automatic,
         )
 
         expected = np.float16(0)
@@ -74,6 +104,14 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(b),
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hv.GemmBackend.Automatic,
         )
 
         expected = np.float32(0.0)
@@ -83,7 +121,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
 
         self.assertNotEqual(expected, matmul_float32(a, b)[0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(observed),
+            hv.to_numpy(observed, dtype=None),
             np.asarray([[expected]], dtype=np.float32),
         )
 
@@ -97,6 +135,13 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
             accumulation_rounding=hv.AccumulationRounding.AfterProductAndSum,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hv.GemmBackend.Automatic,
         )
         full_precision = hv.matmul(
             hv.from_numpy(a),
@@ -104,6 +149,13 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
             accumulation_rounding=hv.AccumulationRounding.FullPrecision,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
+            backend=hv.GemmBackend.Automatic,
         )
 
         expected_rounded = np.float32(0.0)
@@ -113,11 +165,11 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
         expected_full_precision = matmul_float32(a, b)
         self.assertNotEqual(expected_rounded, expected_full_precision[0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(rounded),
+            hv.to_numpy(rounded, dtype=None),
             np.asarray([[expected_rounded]], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(full_precision),
+            hv.to_numpy(full_precision, dtype=None),
             expected_full_precision,
         )
 
@@ -132,6 +184,17 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
             math_mode=hv.MathMode.XFloat32,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
 
         def xfloat32(values):
@@ -140,7 +203,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             return bits.view(np.float32)
 
         expected = xfloat32(a) @ xfloat32(b)
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
     def test_mixed_compute_input_quantization(self):
         a = hv.from_numpy(
@@ -160,6 +223,16 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             beta=1.0,
             compute_type_a=hv.ScalarType.Float4E2M1,
+            alpha=1.0,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
             hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
@@ -175,9 +248,20 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             pre_quantization_scales_a=[
                 hv.from_numpy(np.asarray([3.0], dtype=np.float32))
             ],
+            alpha=1.0,
+            beta=0.0,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
+            hv.to_numpy(pre_scaled, dtype=None), np.asarray([[3.25]], dtype=np.float32)
         )
 
         vector_pre_scaled = reference_gemm(
@@ -193,9 +277,20 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             pre_quantization_scales_a=[
                 hv.from_numpy(np.asarray([3.0, 4.0], dtype=np.float32))
             ],
+            alpha=1.0,
+            beta=0.0,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(vector_pre_scaled),
+            hv.to_numpy(vector_pre_scaled, dtype=None),
             np.asarray([[3.25], [4.5]], dtype=np.float32),
         )
 
@@ -210,9 +305,20 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
                 hv.from_numpy(np.asarray([0.7], dtype=np.float32)),
                 hv.from_numpy(np.asarray([0.6], dtype=np.float32)),
             ],
+            alpha=1.0,
+            beta=0.0,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(combined_pre_scaled),
+            hv.to_numpy(combined_pre_scaled, dtype=None),
             np.asarray([[0.125]], dtype=np.float32),
         )
 
@@ -262,8 +368,17 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             backend=hv.GemmBackend.Blocked,
             **arguments,
+            alpha=1.0,
+            beta=0.0,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
     def test_gemm_output_scale_and_saturating_conversion(self):
         scaled_half = reference_gemm(
@@ -273,9 +388,21 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float16,
             hv.ScalarType.Float32,
             output_scale=0.1,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(scaled_half),
+            hv.to_numpy(scaled_half, dtype=None),
             np.asarray([[np.float16(np.float32(0.3333 * 3.0 * 0.1))]]),
         )
 
@@ -286,9 +413,20 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Int8,
             hv.ScalarType.Float32,
             output_conversion=hv.OutputConversion.SaturatingInt8,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            backend=hv.GemmBackend.Automatic,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(saturated_int8), np.asarray([[127]], dtype=np.int8)
+            hv.to_numpy(saturated_int8, dtype=None), np.asarray([[127]], dtype=np.int8)
         )
 
     def test_saturating_int8_rounding_matches_numpy(self):
@@ -321,8 +459,18 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             backend=hv.GemmBackend.Blocked,
             output_conversion=hv.OutputConversion.SaturatingInt8,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
     def test_block_scaled_gemm_matches_numpy(self):
         a = np.ones((1, 16), dtype=np.float32)
@@ -351,5 +499,16 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             block_scale_b=hv.from_numpy(scale_b),
             block_size_a=8,
             block_size_b=8,
+            alpha=1.0,
+            beta=0.0,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)

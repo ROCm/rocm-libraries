@@ -49,7 +49,7 @@ void testTransformingBlockScaleFallsBack(roc::hostnumerics::ScalarType accumulat
     };
 
     GemmTestCase blockedProblem = makeProblem(blockedD);
-    referenceGemm(blockedProblem);
+    referenceGemm(blockedProblem, GemmBackend::Automatic);
 
     GemmTestCase transformingProblem = makeProblem(transformingD);
     const GemmSupportInfo support =
@@ -58,15 +58,17 @@ void testTransformingBlockScaleFallsBack(roc::hostnumerics::ScalarType accumulat
                 support.reason ==
                     "Transforming BLAS backend cannot preserve block-scale reduction boundaries.",
             "Transforming BLAS did not reject block scaling with a precise reason.");
-    const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(transformingProblem);
+    const GemmTestRunInfo runInfo =
+        referenceGemmWithBlasBackend(transformingProblem, GemmBackend::Automatic);
     require(runInfo.backendUsed == GemmBackend::Blocked && runInfo.fallbackReason.has_value(),
             "Transforming BLAS block scaling did not fall back to Blocked.");
 
     const std::array<T, 4> expected{20, 80, 80, 320};
     const Tensor expectedTensor =
         Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(expected));
-    require(compare(blockedD, expectedTensor).passed(), "Blocked block-scale reference mismatch.");
-    require(compare(transformingD, blockedD).passed(),
+    require(compare(blockedD, expectedTensor, {}).passed(),
+            "Blocked block-scale reference mismatch.");
+    require(compare(transformingD, blockedD, {}).passed(),
             "Transforming BLAS block-scale fallback differs from the built-in reference.");
 }
 
@@ -82,7 +84,7 @@ void testPartialOutputSelection() {
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
         d, ScalarType::Float32);
-    problem.outputSelection = OutputSelection::explicitIndices({0, 3});
+    problem.outputSelection = OutputSelection::explicitIndices({0, 3}, {});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
     require(!support.supported &&
@@ -97,11 +99,12 @@ void testPartialOutputSelection() {
     }
     require(rejectedRequiredBackend, "Required BLAS execution accepted partial output selection.");
     require(
-        compare(d, Tensor::copyNativeStorage<float>(d.layout(), std::span<const float>(untouched)))
+        compare(d, Tensor::copyNativeStorage<float>(d.layout(), std::span<const float>(untouched)),
+                {})
             .passed(),
         "Rejected BLAS execution modified output.");
 
-    const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem, GemmBackend::Automatic);
     require(fallback.backendUsed == GemmBackend::Blocked &&
                 fallback.fallbackReason == support.reason && fallback.outputElementsWritten == 2 &&
                 fallback.outputElementsCovered == 4,
@@ -160,11 +163,11 @@ void testZeroExtentsDoNotInvokeBlas() {
     require(output.loadAs<float>({0, 0}) == 0.0f,
             "BLAS strategy did not write zero for an empty reduction.");
 
-    const Tensor owned =
-        matmulWithBlasBackend(Tensor(ScalarType::Float32, Shape{2, 0}),
-                              Tensor(ScalarType::Float32, Shape{0, 3}), ScalarType::Float32);
+    const Tensor owned = matmulWithBlasBackend(
+        Tensor(ScalarType::Float32, Shape{2, 0}), Tensor(ScalarType::Float32, Shape{0, 3}),
+        ScalarType::Float32, MatmulOptions{ScalarType::Float32}, std::nullopt);
     require(owned.shape() == Shape({2, 3}) &&
-                compare(owned, Tensor(ScalarType::Float32, Shape{2, 3})).passed(),
+                compare(owned, Tensor(ScalarType::Float32, Shape{2, 3}), {}).passed(),
             "Owning BLAS GEMM did not initialize an empty reduction to zero.");
 }
 
@@ -221,7 +224,7 @@ void testPlainLowPrecisionMaterialization() {
                 Tensor blockedOutput(outputType, outputLayout);
                 GemmTestCase blockedProblem(a, b, blockedOutput, options);
                 referenceGemm(blockedProblem, GemmBackend::Blocked);
-                require(compare(output, blockedOutput).passed(),
+                require(compare(output, blockedOutput, {}).passed(),
                         "Identity compute-type handling differs between BLAS and Blocked.");
                 for (size_t row = 0; row < output.shape()[0]; ++row) {
                     for (size_t column = 0; column < output.shape()[1]; ++column) {
@@ -269,7 +272,8 @@ TEST(BlasBackend, Behavior) {
     d.copyLogicalElementsFrom(ones);
     problem.computeTypeA = ScalarType::Float32;
     problem.computeTypeB = ScalarType::Float32;
-    const GemmTestRunInfo explicitIdentity = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo explicitIdentity =
+        referenceGemmWithBlasBackend(problem, GemmBackend::Automatic);
     require(explicitIdentity.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 58 &&
                 d.loadAs<float>({1, 0}) == 139 && d.loadAs<float>({0, 1}) == 64 &&
                 d.loadAs<float>({1, 1}) == 154,
@@ -278,7 +282,7 @@ TEST(BlasBackend, Behavior) {
     d.copyLogicalElementsFrom(ones);
     problem.computeTypeA.reset();
     problem.computeTypeB.reset();
-    const GemmTestRunInfo automatic = referenceGemmWithBlasBackend(problem);
+    const GemmTestRunInfo automatic = referenceGemmWithBlasBackend(problem, GemmBackend::Automatic);
     require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 58 &&
                 d.loadAs<float>({1, 0}) == 139 && d.loadAs<float>({0, 1}) == 64 &&
                 d.loadAs<float>({1, 1}) == 154,
@@ -291,8 +295,9 @@ TEST(BlasBackend, Behavior) {
     const Tensor emptyA(ScalarType::Float32, Layout(Shape{0, 1}, {0, 0}, 0));
     const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}, 0));
     const Layout emptyOutputLayout(Shape{0, huge}, {0, 0}, 0);
-    const Tensor emptyProduct = matmulWithBlasBackend(emptyA, broadcastB, ScalarType::Float32,
-                                                      MatmulOptions{}, emptyOutputLayout);
+    const Tensor emptyProduct =
+        matmulWithBlasBackend(emptyA, broadcastB, ScalarType::Float32,
+                              MatmulOptions{ScalarType::Float32}, emptyOutputLayout);
     require(emptyProduct.layout() == emptyOutputLayout &&
                 emptyProduct.rawEncodedBackingStorage().empty(),
             "BLAS matmul failed to use the supplied empty output layout.");
@@ -340,7 +345,8 @@ TEST(BlasBackend, Behavior) {
     require(transformedD.loadAs<float>({0, 0}) == transformedBlasResult,
             "Transforming BLAS scalar A/B scales differ from Blocked.");
     transformedD.storeFrom({0, 0}, 0.0f);
-    const GemmTestRunInfo smallAutomatic = referenceGemmWithBlasBackend(transformedProblem);
+    const GemmTestRunInfo smallAutomatic =
+        referenceGemmWithBlasBackend(transformedProblem, GemmBackend::Automatic);
     require(smallAutomatic.backendUsed == GemmBackend::Blocked &&
                 transformedD.loadAs<float>({0, 0}) == transformedBlasResult,
             "Automatic GEMM did not avoid staging a tiny transformed request.");

@@ -112,10 +112,11 @@ detail::RuntimeGemmArithmetic<Accumulator> makeArithmetic(const GemmInvocation& 
         return detail::RuntimeGemmArithmetic<Accumulator>(
             problem, detail::gemmAccumulatorQuantizer<Accumulator>(problem));
     else
-        return detail::RuntimeGemmArithmetic<Accumulator>(problem);
+        return detail::RuntimeGemmArithmetic<Accumulator>(problem,
+                                                          detail::RuntimeQuantizer<Accumulator>{});
 }
 
-template <typename Accumulator, bool QuantizeAccumulator = false>
+template <typename Accumulator, bool QuantizeAccumulator>
 GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutput = nullptr) {
     using namespace detail;
     constexpr bool needsExplicitArithmetic =
@@ -429,10 +430,10 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         const size_t blockedWork = detail::saturatedProduct(outputElementsCovered, reductionWork);
         constexpr size_t minimumSelectedWorkPerThread = 16'384;
         const size_t selectedThreads = static_cast<size_t>(
-            detail::operationThreadCount(selectedWork, minimumSelectedWorkPerThread));
+            detail::operationThreadCount(selectedWork, minimumSelectedWorkPerThread, 8));
         const size_t blockedThreads =
             std::min(selectedPlan->blocks.size(),
-                     static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000)));
+                     static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000, 8)));
         constexpr long double blockedThroughputAdvantage = 20.0L;
         const long double selectedCost =
             static_cast<long double>(selectedWork) / static_cast<long double>(selectedThreads);

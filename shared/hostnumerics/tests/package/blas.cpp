@@ -16,7 +16,7 @@ TEST(Package, Blas) {
     Tensor output(ScalarType::Float32, layout);
     matmulIntoWithBlasBackend(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
                               Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)),
-                              output);
+                              output, MatmulOptions{ScalarType::Float32}, OutputSelection::all({}));
 
     EXPECT_EQ(output.loadAs<float>({0, 0}), 19);
     EXPECT_EQ(output.loadAs<float>({1, 0}), 43);

@@ -239,12 +239,7 @@ void testing_matmul_bad_arg(const Arguments& arg)
     hipblaslt_local_matrix_layout matB(K, N, ldb, arg.b_type);
     hipblaslt_local_matrix_layout matC(M, N, ldc, arg.c_type);
     hipblaslt_local_matrix_layout matD(M, N, ldc, arg.d_type);
-    hipblaslt_local_matmul_descr  matmul(transA,
-                                        transB,
-                                        arg.compute_type,
-                                        arg.scale_type,
-                                        arg.compute_input_typeA,
-                                        arg.compute_input_typeB);
+    hipblaslt_local_matmul_descr  matmul(transA, transB, arg.compute_type, arg.scale_type);
 
     size_t                     workspace_size = 0;
     hipblaslt_local_preference pref;
@@ -2281,7 +2276,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                      Talpha,
                                      roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                                      roc::hostnumerics::GenerationRecipe::realOnly(
-                                         roc::hostnumerics::GenerationRecipe::zero()));
+                                         roc::hostnumerics::GenerationRecipe::zero(), {}));
 
             if(arg.scaleE)
                 initializeHostTensor(
@@ -3754,7 +3749,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                                             && referenceD.type() != ScalarType::Int8;
                 if(productIsFinal)
                 {
-                    matmulIntoWithBlasBackend(referenceA, referenceB, referenceD, matmulOptions);
+                    matmulIntoWithBlasBackend(referenceA,
+                                              referenceB,
+                                              referenceD,
+                                              matmulOptions,
+                                              roc::hostnumerics::OutputSelection::all({}));
                 }
                 else
                 {
@@ -3770,15 +3769,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                     EpilogueOptions conversion(accumulatorType);
                     if(hasProduct)
                     {
-                        matmulIntoWithBlasBackend(
-                            referenceA, referenceB, referenceAccumulator, matmulOptions);
+                        matmulIntoWithBlasBackend(referenceA,
+                                                  referenceB,
+                                                  referenceAccumulator,
+                                                  matmulOptions,
+                                                  roc::hostnumerics::OutputSelection::all({}));
                         conversion.inputScale = alpha;
                     }
                     if(betaValue != std::complex<double>(0.0, 0.0))
                     {
-                        conversion.addend = referenceC;
-                        conversion.addendScale
-                            = multiply(beta, scaleC, accumulatorType, accumulatorType);
+                        conversion.addend      = referenceC;
+                        conversion.addendScale = multiply(
+                            beta, scaleC, accumulatorType, accumulatorType, std::nullopt);
                     }
 
                     conversion.outputScale = outputScale;
@@ -4171,7 +4173,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                         epilogue.addendScale = multiply(beta,
                                                         Tensor(scalarScale(hScaleC, i, arg.scaleC)),
                                                         operation.accumulatorType,
-                                                        operation.accumulatorType);
+                                                        operation.accumulatorType,
+                                                        std::nullopt);
                         if(beta.item<double>() != 0)
                             epilogue.addend = freivaldsC[i].at(batch);
                         epilogue.outputScale
@@ -4189,7 +4192,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                             operation,
                             epilogue,
                             hipblaslt::hostnumerics::scalarType(auxiliary ? Taux : To),
-                            {freivalds_seed(arg)});
+                            {freivalds_seed(arg)},
+                            {});
                         if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&result))
                             throw std::invalid_argument("Freivalds: " + failure->reason);
                         plans.push_back(std::get<FreivaldsPlan>(std::move(result)));

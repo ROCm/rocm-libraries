@@ -349,9 +349,9 @@ namespace MatrixMultiplyTest
                         = hostnumerics::BlockScaleGeneration{scaleTypeB, 0, scaleBlockSize};
 
                 auto generatedA = hostnumerics::generateHostTensor(
-                    descA, {}, scaleGenerationA, -rangeA, rangeA, seed);
+                    descA, {}, scaleGenerationA, -rangeA, rangeA, seed, false);
                 auto generatedB = hostnumerics::generateHostTensor(
-                    descB, {}, scaleGenerationB, -rangeB, rangeB, seed);
+                    descB, {}, scaleGenerationB, -rangeB, rangeB, seed, false);
                 using PackedTypeA = typename PackedTypeOf<TA>::type;
                 using PackedTypeB = typename PackedTypeOf<TB>::type;
                 auto A            = hostnumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
@@ -444,7 +444,8 @@ namespace MatrixMultiplyTest
                             B,
                             scaleB ? hostnumerics::DataTypeInterpretation::BlockScaled
                                    : hostnumerics::DataTypeInterpretation::Unscaled),
-                        hostnumerics::hostTensor(descD, c_C),
+                        hostnumerics::hostTensor(
+                            descD, c_C, hostnumerics::DataTypeInterpretation::Unscaled),
                         std::move(referenceScaleA),
                         std::move(referenceScaleB),
                         scaleA ? scaleBlockSize : 0,
@@ -604,11 +605,11 @@ namespace MatrixMultiplyTest
             TensorDescriptor descB(dataTypeB, {K, N}, transB ? "T" : "N");
             TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
-            auto const seed = 9861u;
-            auto       generatedA
-                = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
-            auto generatedB
-                = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
+            auto const seed       = 9861u;
+            auto       generatedA = hostnumerics::generateHostTensor(
+                descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1, false);
+            auto generatedB = hostnumerics::generateHostTensor(
+                descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2, false);
             using PackedTypeA = typename PackedTypeOf<TA>::type;
             using PackedTypeB = typename PackedTypeOf<TB>::type;
             auto A            = hostnumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
@@ -681,15 +682,19 @@ namespace MatrixMultiplyTest
 
                 std::vector<TD> c_C(M * N, TD{});
 
-                auto c_D = hostnumerics::convertHostReference<TD>(
-                    hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
-                                                       hostnumerics::hostTensor(descB, B),
-                                                       hostnumerics::hostTensor(descD, c_C),
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       0,
-                                                       1.0f,
-                                                       0.0f));
+                auto c_D
+                    = hostnumerics::convertHostReference<TD>(hostnumerics::computeHostReference(
+                        hostnumerics::hostTensor(
+                            descA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+                        hostnumerics::hostTensor(
+                            descB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+                        hostnumerics::hostTensor(
+                            descD, c_C, hostnumerics::DataTypeInterpretation::Unscaled),
+                        std::nullopt,
+                        std::nullopt,
+                        0,
+                        1.0f,
+                        0.0f));
 
                 auto tol
                     = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
@@ -748,12 +753,12 @@ namespace MatrixMultiplyTest
 
             auto const seed = 9861u;
 
-            auto generatedA
-                = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
-            auto generatedB
-                = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
-            auto generatedC
-                = hostnumerics::generateHostTensor(descC, {}, std::nullopt, -1.0f, 1.0f, seed + 3);
+            auto generatedA = hostnumerics::generateHostTensor(
+                descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1, false);
+            auto generatedB = hostnumerics::generateHostTensor(
+                descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2, false);
+            auto generatedC = hostnumerics::generateHostTensor(
+                descC, {}, std::nullopt, -1.0f, 1.0f, seed + 3, false);
             using PackedType = typename PackedTypeOf<T>::type;
             auto A           = hostnumerics::copyTensorStorage<PackedType>(generatedA.data);
             auto B           = hostnumerics::copyTensorStorage<PackedType>(generatedB.data);
@@ -834,15 +839,18 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                auto c_D = hostnumerics::convertHostReference<T>(
-                    hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
-                                                       hostnumerics::hostTensor(descB, B),
-                                                       hostnumerics::hostTensor(descC, C),
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       0,
-                                                       1.0f,
-                                                       1.0f));
+                auto c_D = hostnumerics::convertHostReference<T>(hostnumerics::computeHostReference(
+                    hostnumerics::hostTensor(
+                        descA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+                    hostnumerics::hostTensor(
+                        descB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+                    hostnumerics::hostTensor(
+                        descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
+                    std::nullopt,
+                    std::nullopt,
+                    0,
+                    1.0f,
+                    1.0f));
 
                 auto tol
                     = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());

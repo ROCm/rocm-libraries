@@ -101,7 +101,7 @@ void checkReference(const MxCase& problem, const MxTensor& result) {
     }
 }
 
-GenerationRecipe mxRecipe(GenerationRecipe::Component component, uint64_t seed = 12345) {
+GenerationRecipe mxRecipe(GenerationRecipe::Component component, uint64_t seed) {
     return GenerationRecipe::realOnly(std::move(component),
                                       {
                                           .seed = seed,
@@ -119,10 +119,9 @@ MxCase defaultMxCase(Shape shape) {
     return MxCase(std::move(shape), defaultMxDataGeneration());
 }
 
-MxCase stochasticCase(GenerationRecipe::Component component,
-                      MxDataQuantization quantization = MxDataQuantization::Nearest,
-                      std::optional<MxRepresentedValueRange> representedValueRange = std::nullopt,
-                      MxScaleGenerationMode scale = MxScaleGenerationMode::Derived) {
+MxCase stochasticCase(GenerationRecipe::Component component, MxDataQuantization quantization,
+                      std::optional<MxRepresentedValueRange> representedValueRange,
+                      MxScaleGenerationMode scale) {
     GenerationRecipe recipe = mxRecipe(std::move(component), 12345);
     MxDataGeneration data = [&] {
         if (quantization == MxDataQuantization::PreserveRange)
@@ -141,10 +140,11 @@ MxCase stochasticCase(GenerationRecipe::Component component,
     return problem;
 }
 
-MxCase boundedCase(double lower = -1.0, double upper = 1.0) {
+MxCase boundedCase(double lower, double upper) {
     return stochasticCase(GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
                           MxDataQuantization::PreserveRange,
-                          MxRepresentedValueRange{.lower = lower, .upper = upper});
+                          MxRepresentedValueRange{.lower = lower, .upper = upper},
+                          MxScaleGenerationMode::Derived);
 }
 
 MxCase unboundedCase() {
@@ -331,7 +331,9 @@ TEST(MxGeneration, Behavior) {
         GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
     };
     for (size_t recipeIndex = 0; recipeIndex < deterministicRecipes.size(); ++recipeIndex) {
-        MxCase problem = stochasticCase(deterministicRecipes[recipeIndex]);
+        MxCase problem =
+            stochasticCase(deterministicRecipes[recipeIndex], MxDataQuantization::Nearest,
+                           std::nullopt, MxScaleGenerationMode::Derived);
         const MxTensor result = generateMx(problem);
         checkReference(problem, result);
         if (recipeIndex == 13) {
@@ -349,7 +351,7 @@ TEST(MxGeneration, Behavior) {
     infinity.blockSize = 16;
     checkReference(infinity, generateMx(infinity));
 
-    MxCase explicitScale = boundedCase();
+    MxCase explicitScale = boundedCase(-1.0, 1.0);
     explicitScale.scale = MxScaleGenerationMode::One;
     const MxTensor explicitlyScaled = generateMx(explicitScale);
     const Tensor explicitlyScaledFlat = explicitlyScaled.scales.reshapeSharingStorage(
@@ -360,7 +362,7 @@ TEST(MxGeneration, Behavior) {
     checkReference(explicitScale, explicitlyScaled);
 
     MxCase zeroScale(Shape{8, 2}, MxDataGeneration::quantize(
-                                      GenerationRecipe::realOnly(GenerationRecipe::zero())));
+                                      GenerationRecipe::realOnly(GenerationRecipe::zero(), {})));
     zeroScale.dataType = ScalarType::Float4E2M1;
     zeroScale.scaleType = ScalarType::E8M0Zero;
     zeroScale.blockAxis = 0;
@@ -380,8 +382,10 @@ TEST(MxGeneration, Behavior) {
         std::pair{MxScaleGenerationMode::Two, uint8_t{128}},
     };
     for (const auto& [mode, expectedRaw] : constantScaleModes) {
-        MxCase constantScale = stochasticCase(GenerationRecipe::affineIndexRemainder(
-            {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}));
+        MxCase constantScale = stochasticCase(
+            GenerationRecipe::affineIndexRemainder(
+                {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}),
+            MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived);
         constantScale.scale = mode;
         const MxTensor result = generateMx(constantScale);
         for (size_t scaleIndex = 0; scaleIndex < result.scales.elementCount(); ++scaleIndex)
@@ -391,8 +395,10 @@ TEST(MxGeneration, Behavior) {
         checkReference(constantScale, result);
     }
 
-    MxCase maximumScale = stochasticCase(GenerationRecipe::affineIndexRemainder(
-        {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}));
+    MxCase maximumScale =
+        stochasticCase(GenerationRecipe::affineIndexRemainder(
+                           {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}),
+                       MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived);
     maximumScale.scale = MxScaleGenerationMode::Maximum;
     const MxTensor maximumScaled = generateMx(maximumScale);
     for (size_t scaleIndex = 0; scaleIndex < maximumScaled.scales.elementCount(); ++scaleIndex)
@@ -401,8 +407,10 @@ TEST(MxGeneration, Behavior) {
                 "MX explicit maximum-scale generation mismatch.");
     checkReference(maximumScale, maximumScaled);
 
-    MxCase nanScale = stochasticCase(GenerationRecipe::affineIndexRemainder(
-        {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}));
+    MxCase nanScale =
+        stochasticCase(GenerationRecipe::affineIndexRemainder(
+                           {.dimensionCoefficients = {67, 1}, .positiveDivisor = 256}),
+                       MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived);
     nanScale.scale = MxScaleGenerationMode::NaN;
     const MxTensor nanScaled = generateMx(nanScale);
     for (size_t scaleIndex = 0; scaleIndex < nanScaled.scales.elementCount(); ++scaleIndex)
@@ -415,7 +423,7 @@ TEST(MxGeneration, Behavior) {
     impossibleInterval.shape = Shape{8192, 1};
     impossibleInterval.leadingDimension = 8192;
     impossibleInterval.data = MxDataGeneration::preserveRange(
-        mxRecipe(GenerationRecipe::uniformReal({.lower = 0.1, .upper = 0.2})),
+        mxRecipe(GenerationRecipe::uniformReal({.lower = 0.1, .upper = 0.2}), 12345),
         {.lower = 0.1, .upper = 0.2});
     bool rejectedImpossibleInterval = false;
     try {
@@ -427,21 +435,24 @@ TEST(MxGeneration, Behavior) {
             "MX parallel generation did not reject an unrepresentable bounded interval.");
 
     std::vector<MxCase> stochasticCases;
-    stochasticCases.push_back(boundedCase());
+    stochasticCases.push_back(boundedCase(-1.0, 1.0));
     stochasticCases.push_back(stochasticCase(
         GenerationRecipe::uniformReal({.lower = 0.0, .upper = 1.0})
             .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = true}),
-        MxDataQuantization::PreserveRange, MxRepresentedValueRange{.lower = -1.0, .upper = 1.0}));
+        MxDataQuantization::PreserveRange, MxRepresentedValueRange{.lower = -1.0, .upper = 1.0},
+        MxScaleGenerationMode::Derived));
     stochasticCases.push_back(unboundedCase());
     stochasticCases.push_back(
         stochasticCase(GenerationRecipe::uniformReal(
                            {.lower = 0.0, .upper = 6.28318530717958647692528676655900576})
-                           .withCosineTransform()));
+                           .withCosineTransform(),
+                       MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived));
     stochasticCases.push_back(
         stochasticCase(GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.25}),
                        MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived));
     stochasticCases.push_back(
-        stochasticCase(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})));
+        stochasticCase(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
+                       MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived));
     for (MxCase problem : stochasticCases) {
 #ifdef _OPENMP
         omp_set_dynamic(0);
@@ -465,7 +476,7 @@ TEST(MxGeneration, Behavior) {
 
     auto refreshed = generateMx(stochasticCases.front());
     generate(refreshed.scales,
-             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 2.0})));
+             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 2.0}), {}));
     refreshed.refreshReference();
     detail::forEachIndex(refreshed.data.shape(), [&](std::span<const size_t> index, size_t) {
         require(

@@ -12,10 +12,16 @@ void testReferenceEpilogue() {
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
         const Tensor unsupported(type, ordinary.shape());
         requireError(
-            [&] { referenceEpilogueInto(unsupported, {.output = ordinary}, EpilogueOptions{}); },
+            [&] {
+                referenceEpilogueInto(unsupported, {.output = ordinary},
+                                      EpilogueOptions{ScalarType::Float32});
+            },
             "Epilogue accepted an unsupported unsigned floating-point input.");
         requireError(
-            [&] { referenceEpilogueInto(ordinary, {.output = unsupported}, EpilogueOptions{}); },
+            [&] {
+                referenceEpilogueInto(ordinary, {.output = unsupported},
+                                      EpilogueOptions{ScalarType::Float32});
+            },
             "Epilogue accepted an unsupported unsigned floating-point output.");
     }
 
@@ -46,10 +52,11 @@ void testReferenceEpilogue() {
     require(output.loadAs<float>({0, 0}) == 0 && output.loadAs<float>({0, 1}) == 4 &&
                 output.loadAs<float>({1, 0}) == 10 && output.loadAs<float>({1, 1}) == 0,
             "Reference epilogue output mismatch.");
-    require(compare(rawOutput,
-                    Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{0, 4, 10, 0}))
-                .passed(),
-            "Reference epilogue raw output mismatch.");
+    require(
+        compare(rawOutput,
+                Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{0, 4, 10, 0}), {})
+            .passed(),
+        "Reference epilogue raw output mismatch.");
     require(auxiliary.loadAs<float>({0, 0}) == -3 && auxiliary.loadAs<float>({0, 1}) == 6 &&
                 auxiliary.loadAs<float>({1, 0}) == 15 && auxiliary.loadAs<float>({1, 1}) == -6,
             "Reference epilogue auxiliary output mismatch.");
@@ -62,10 +69,12 @@ void testReferenceEpilogue() {
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{10, 20, 30, 40});
     affineOptions.addendScale = Tensor::scalar(ScalarType::Float32, 0.5f);
     referenceEpilogueInto(inputTensor, {.output = affineOutput}, affineOptions);
-    require(compare(affineOutput, Tensor::copyNativeValues<float>(
-                                      Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}))
-                .passed(),
-            "Reference epilogue fused input/addend scaling mismatch.");
+    require(
+        compare(affineOutput,
+                Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}),
+                {})
+            .passed(),
+        "Reference epilogue fused input/addend scaling mismatch.");
 
     constexpr size_t parallelRows = 128;
     constexpr size_t parallelColumns = 256;
@@ -101,10 +110,12 @@ void testReferenceEpilogue() {
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{10, 20, 30, 40});
     affineOptions.addend = aliasedAddend;
     referenceEpilogueInto(inputTensor, {.output = aliasedAddend}, affineOptions);
-    require(compare(aliasedAddend, Tensor::copyNativeValues<float>(
-                                       Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}))
-                .passed(),
-            "Reference epilogue rejected an identically mapped addend/output alias.");
+    require(
+        compare(aliasedAddend,
+                Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}),
+                {})
+            .passed(),
+        "Reference epilogue rejected an identically mapped addend/output alias.");
 
     const std::array<float, 4> gradientInput{10, 20, 30, 40};
     const std::array<float, 4> activationInput{-1, 1, 2, -2};
@@ -119,10 +130,12 @@ void testReferenceEpilogue() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(gradientInput)),
         {.output = gradientOutput}, gradientOptions);
-    require(compare(gradientOutput, Tensor::copyNativeValues<float>(
-                                        Shape{2, 2}, std::array<float, 4>{0, 20, 30, 0}))
-                .passed(),
-            "Reference gradient epilogue mismatch.");
+    require(
+        compare(gradientOutput,
+                Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{0, 20, 30, 0}),
+                {})
+            .passed(),
+        "Reference gradient epilogue mismatch.");
 
     const std::array<float, 4> gate{0.5f, 2.0f, -1.0f, 0.25f};
     Tensor gatedOutput(ScalarType::Float32, Shape{2, 2});
@@ -131,8 +144,10 @@ void testReferenceEpilogue() {
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(gate));
     gatedOptions.outputScale = 2.0;
     referenceEpilogueInto(inputTensor, {.output = gatedOutput}, gatedOptions);
-    require(compare(gatedOutput, Tensor::copyNativeValues<float>(
-                                     Shape{2, 2}, std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f}))
+    require(compare(gatedOutput,
+                    Tensor::copyNativeValues<float>(
+                        Shape{2, 2}, std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f}),
+                    {})
                 .passed(),
             "Reference gate-residual epilogue mismatch.");
 
@@ -144,8 +159,10 @@ void testReferenceEpilogue() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(int8Input)),
         {.output = int8Output}, int8Options);
-    require(compare(int8Output, Tensor::copyNativeValues<int8_t>(
-                                    Shape{2, 2}, std::array<int8_t, 4>{-128, -128, 126, 127}))
+    require(compare(int8Output,
+                    Tensor::copyNativeValues<int8_t>(Shape{2, 2},
+                                                     std::array<int8_t, 4>{-128, -128, 126, 127}),
+                    {})
                 .passed(),
             "Reference epilogue Int8 saturation mismatch.");
 
@@ -186,7 +203,7 @@ void testReferenceEpilogue() {
     const Tensor ownedInput = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
     EpilogueOptions ownedOptions = options;
-    ownedOptions.outputSelection = OutputSelection::explicitIndices({1, 2});
+    ownedOptions.outputSelection = OutputSelection::explicitIndices({1, 2}, {});
     const EpilogueOutputs owned = referenceEpilogue(ownedInput,
                                                     {.output = ScalarType::Float16,
                                                      .rawOutput = ScalarType::Float32,
@@ -207,7 +224,8 @@ void testReferenceEpilogue() {
             "Owning reference epilogue did not zero unselected values.");
 
     EpilogueOptions emptyOptions = ownedOptions;
-    emptyOptions.outputSelection = OutputSelection::strided(4, 1);
+    emptyOptions.outputSelection =
+        OutputSelection::strided(4, 1, std::numeric_limits<size_t>::max(), {});
     const EpilogueOutputs empty = referenceEpilogue(ownedInput,
                                                     {.output = ScalarType::Float16,
                                                      .rawOutput = ScalarType::Float32,
@@ -222,7 +240,8 @@ void testReferenceEpilogue() {
 
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceEpilogue(ownedInput, {.output = ScalarType::E8M0});
+        (void)referenceEpilogue(ownedInput, {.output = ScalarType::E8M0},
+                                EpilogueOptions{ScalarType::Float32});
     } catch (const std::runtime_error&) {
         rejectedBeforeAllocation = true;
     }
@@ -233,8 +252,8 @@ void testReferenceEpilogue() {
     Tensor preservedRaw = preservedOutput.deepCopy();
     Tensor preservedAuxiliary = preservedOutput.deepCopy();
     Tensor accumulatedAmax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{100});
-    EpilogueOptions preservedOptions;
-    preservedOptions.outputSelection = OutputSelection::explicitIndices({0, 3});
+    EpilogueOptions preservedOptions(ScalarType::Float32);
+    preservedOptions.outputSelection = OutputSelection::explicitIndices({0, 3}, {});
     preservedOptions.accumulateAmax = true;
     referenceEpilogueInto(ownedInput,
                           {.output = preservedOutput,

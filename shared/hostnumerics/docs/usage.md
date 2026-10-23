@@ -174,8 +174,8 @@ absolute, relative, and ULP comparisons; NaN and infinity behavior; norms;
 selected logical elements; and unwritten sentinel regions. Product code decides
 how to render the result and attach its own problem context.
 
-Default relative and absolute tolerances follow the component's documented
-type policy, while explicit tolerances use NumPy's `allclose` relationship:
+An explicitly passed `ComparisonOptions{}` uses zero absolute and relative
+tolerances. Caller-supplied tolerances use NumPy's `allclose` relationship:
 
 ```text
 absolute_difference <= absolute_tolerance
@@ -202,6 +202,20 @@ separate AMD GPU layout target. That boundary keeps GPU storage conventions out
 of the tensor and reference-operation layers.
 
 ## Python use
+
+Numerical operations require explicit arithmetic types, traversal axes,
+comparison tolerances, generation seeds, execution policies, and selection or
+reporting limits. C++ callers pass option objects; Python callers supply the
+corresponding arguments. Optional input tensors can be omitted, and NumPy
+imports infer the storage type from the array dtype.
+`to_numpy` requires a dtype argument; passing `None` selects the decoded mapping
+returned by `default_decoded_dtype`.
+
+OutputSelection factories require an order argument. As in Shape and Layout,
+axes run from slowest to fastest. An explicit empty order defers ascending axes
+(C order) until an operation knows the tensor rank. A nonempty order must be a
+permutation of that tensor's axes. Shape and Layout validate explicitly supplied
+orders immediately, including their length.
 
 The `hostnumerics` module mirrors the tensor, generation, operation, and
 comparison APIs shown in the Python tutorial above. Python operations accept

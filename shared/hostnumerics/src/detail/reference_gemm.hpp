@@ -210,9 +210,8 @@ RuntimeQuantizer<Accumulator> gemmAccumulatorQuantizer(const MatmulOptions& prob
 template <typename Accumulator>
 class RuntimeGemmArithmetic {
    public:
-    explicit RuntimeGemmArithmetic(
-        const MatmulOptions&,
-        RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
+    explicit RuntimeGemmArithmetic(const MatmulOptions&,
+                                   RuntimeQuantizer<Accumulator> quantizeAccumulator)
         : m_quantizeAccumulator(std::move(quantizeAccumulator)) {}
 
     Accumulator multiply(Accumulator left, Accumulator right) const {
