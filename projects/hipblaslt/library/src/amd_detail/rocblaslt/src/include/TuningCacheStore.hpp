@@ -651,7 +651,14 @@ namespace TensileLite
             for(auto it = range.first; it != range.second; ++it)
                 if(it->second.sameIdentity(entry))
                 {
-                    it->second = entry;
+                    if(&entries == &m_legacy)
+                        it->second = entry;
+                    else
+                    {
+                        auto refreshed     = entries.extract(it);
+                        refreshed.mapped() = entry;
+                        entries.insert(std::move(refreshed));
+                    }
                     m_generation.fetch_add(1, std::memory_order_release);
                     return false;
                 }

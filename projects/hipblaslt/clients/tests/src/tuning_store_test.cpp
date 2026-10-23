@@ -1006,7 +1006,42 @@ namespace
         EXPECT_FALSE(reopened.needsRetune(key, rankedSearch(16), 1000));
     }
 
-    // A repeated row refreshes its entry in place, which can mark a search
+    TEST_F(TuningStore, RefreshedWinnerIsNewestWithinItsGroup)
+    {
+        const ProblemOverride key = halfKey();
+        for(const bool complete : {false, true})
+        {
+            SCOPED_TRACE(complete);
+            const auto  first     = tunedEntry(1, "first", complete, 1000, rankedSearch(2));
+            const auto  second    = tunedEntry(2, "second", complete, 1000, rankedSearch(4));
+            const auto  refreshed = tunedEntry(1, "first", complete, 2000, rankedSearch(16));
+            OverrideMap live;
+            ASSERT_TRUE(live.addIfAbsent(key, first));
+            ASSERT_TRUE(live.addIfAbsent(key, second));
+            ASSERT_FALSE(live.addIfAbsent(key, refreshed));
+            EXPECT_EQ(indexesOf(live.find(key)), (std::vector<int32_t>{1, 2}));
+            ASSERT_TRUE(live.find(key).front().search.has_value());
+            EXPECT_EQ(live.find(key).front().search->maxCandidates, 16);
+
+            OverrideMap reopened;
+            EXPECT_EQ(
+                loadInto(
+                    reopened,
+                    fileOf({tunedRow(key, first), tunedRow(key, second), tunedRow(key, refreshed)}))
+                    .accepted,
+                2u);
+            EXPECT_EQ(indexesOf(reopened.find(key)), (std::vector<int32_t>{1, 2}));
+        }
+
+        OverrideMap legacy;
+        loadInto(legacy,
+                 fileOf({legacyRow(key, 1, "first"),
+                         legacyRow(key, 2, "second"),
+                         legacyRow(key, 1, "first")}));
+        EXPECT_EQ(indexesOf(legacy.findLegacy(key)), (std::vector<int32_t>{1, 2}));
+    }
+
+    // A repeated row refreshes its entry, which can mark a search
     // finished and so change which entry find returns first: the generation
     // moves for it as it does for an addition.
     TEST_F(TuningStore, RefreshingAnEntryMovesTheGeneration)
