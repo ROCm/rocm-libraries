@@ -423,6 +423,72 @@ dispatcher `run_unified_attention_torch(..., backend="auto")`
 overhead-dominated decode regime — can engage an internal CUDA-graph replay
 (Section 9).
 
+The segment kernel has the same structure as on gfx950: the transposed
+$S^{\top} = K\,Q^{\top}$ layout with one $(m, \ell)$ per lane, $P$ kept in registers
+as the B operand of $O^{\top} = V^{\top} P^{\top}$, $Q^{\top}$ read from LDS once, a
+single V LDS slot, and native `exp2` (see
+[gfx950 §5.1](../../gfx950/attention/ALGORITHM.md#51-inside-the-segment-kernel)). What
+differs is the ISA-level pieces and the K/V feed.
+
+### 8.1 What differs from gfx950
+
+- **Narrow atoms.** There is no wide-K `mfma_f32_16x16x32` f16/bf16 atom, so QK and
+  PV both run on `16x16x16` with a K-step of 16, and PV takes one 16-token block per
+  MFMA.
+- **V without a transpose read.** gfx942 has no `ds_read_*_tr_*`, so the
+  $V^{\top}$ operand of PV is built from strided LDS loads of the row-major V slot.
+- **Cross-lane steps.** A row's max and sum reduce over lanes $l$, $l \oplus 16$,
+  $l \oplus 32$, $l \oplus 48$ with `ds_swizzle` (xor 16) and then `ds_bpermute`
+  (xor 32); there is no `permlane32_swap`.
+- **Tile override.** `tile_size_override` is a divisor of the page size here
+  (sub-page tiles); on gfx950 it is a multiple (multi-page tiles).
+
+### 8.2 The K/V feed
+
+Two loaders fill the K/V LDS tiles (fp8 K/V has its own), and they produce
+bit-identical outputs:
+
+- **Wide feed** (`use_wide_kv_load`, the default for paged fp16/bf16 K/V up to head
+  size 128): each lane loads 16 bytes into registers and stores them to LDS at once.
+  That is four times fewer load instructions than the 4-byte async copies, so less VMEM
+  issue pressure on the memory-bound decode segment. Its copies overlap only if the
+  compiler schedules the loads ahead of the stores: LLVM 22 does, but at head size 256
+  (more chunks, high register pressure) LLVM 23 serializes them.
+- **Async DMA** (`buffer_load … lds`, one dword per lane): used above head size 128,
+  for strided K/V (which never takes the wide feed), and whenever the wide feed is
+  switched off. It does not depend on the compiler's schedule.
+
+The K/V LDS swizzle and the wave page-id window work with either loader (the wide
+loader stores the permuted chunks, the async copies fetch permuted source chunks, as
+on gfx950). Their default selectors, `_kv_lds_swizzle_3d` and `_wave_page_id_load_3d`
+(see the [Knob reference](../../common/README.md#knob-reference)), depend on the feed:
+at head size 64 and 128 the swizzle follows the wide-feed decision and the page-id
+window follows the swizzle, so `HIPDNN_GFX942_3D_WKV=0` turns all three off there; at
+head size 256 (async copies) the swizzle is on only together with the page-id window,
+because alone it is slower under some compilers.
+
+### 8.3 The decode split rule
+
+Same idea as on gfx950
+([§6.1 there](../../gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule)),
+different constants. It applies when every sequence has one query token, K/V is
+fp16/bf16 (paged or strided, with `block_size` 16), the head size is 64 or 128, there
+is no sliding window and no explicit `target_ctas`, and there are at least
+$\text{CUs}/16$ workgroups per segment or fewer than 8K KV tokens ("KV tokens" is the
+longest sequence in the batch, `max_seqlen_k`). With
+$w = \text{num\_seqs} \cdot \text{num\_kv\_heads}$ workgroups per segment:
+
+$$
+\text{segments} = \max\!\Big(2,\ \min\big(\lfloor k\,\text{CUs} / w \rfloor,\ \text{cap}\big)\Big),
+\qquad k = 4\ (k = 6 \text{ at head size } 64),
+$$
+
+with $\text{cap} = 64$ below 8K KV tokens and 128 from 8K. Few workgroups at long KV
+keep the previous counts here, which measured as good, and so does every problem
+outside the scope. `_num_segments`
+([`attention_unified.py`](../../../kernels/common/attention_unified.py)) is the source
+of truth for the constants.
+
 ---
 
 ## 9. Host overhead and the graph heuristic

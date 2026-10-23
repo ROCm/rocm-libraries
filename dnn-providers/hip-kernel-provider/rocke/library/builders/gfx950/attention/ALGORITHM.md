@@ -231,12 +231,13 @@ segment its own CTA, then reduces:
   `segm_output[total_q, num_qh, num_segments, head_size]` (plus `segm_max` and
   `segm_expsum`, all fp32).
 - **All-decode grid:** `total_num_q_blocks` is the prefill upper bound
-  `total_q // BLOCK_Q + num_seqs`, and each CTA binary-searches `query_start_len`
-  for its sequence. When every sequence has one query token (`all_decode`) the
-  dispatcher sets `use_decode_grid` instead: grid x is `num_seqs` and
-  `seq_idx = block_id_x`. That removes the empty early-exit CTAs and the search;
-  at `BLOCK_Q == 1` (16 query heads per KV head) the upper bound also put every
-  useful CTA on an even x, so on half of the XCDs.
+  `total_q // BLOCK_Q + num_seqs`, and each workgroup binary-searches
+  `query_start_len` for its sequence. When every sequence has one query token
+  (`all_decode`) the dispatcher sets `use_decode_grid` instead: grid x is
+  `num_seqs` and `seq_idx = block_id_x`. That removes the empty early-exit
+  workgroups and the search; at `BLOCK_Q == 1` (16 query heads per KV head) the
+  upper bound also put every useful workgroup on an even x, so on half of the
+  XCDs.
 - **`reduce_segments`** then combines the per-segment partials into the final
   output. Because flash-attention's $(m, \ell, \mathbf{o})$ merge is associative
   (re-base each segment's accumulator to the global max, sum the denominators),
@@ -245,6 +246,52 @@ segment its own CTA, then reduces:
 
 The 3D path turns a serial KV walk into parallel segments + a cheap reduction,
 which is the only way to saturate the device on long-context single-query decode.
+
+### 5.1 Inside the segment kernel
+
+Each segment workgroup runs the §2 recurrence on the **transposed** score matrix.
+The QK MFMA computes $S^{\top} = K\,Q^{\top}$ ($K$ is the A operand, $Q^{\top}$ the
+B operand), so lane $l$ owns one query row — a (query-position, query-head) pair,
+row $l \bmod 16$ — and holds tokens $4\lfloor l/16 \rfloor + 0..3$ of each
+16-token block. This is the 3D counterpart of the transposed 2D
+[combo variant](#the-transposed-combo-2d-variant-the-prefill-win), on 16-row atoms,
+and most of what follows comes from that layout:
+
+- **One $(m, \ell)$ per lane.** A row's max and sum reduce in registers over the
+  lane's own tokens, then over the three other lanes that hold the row's token
+  groups ($l \oplus 16$, $l \oplus 32$, $l \oplus 48$): two cross-lane steps,
+  `ds_swizzle` (xor 16) and `permlane32_swap`.
+- **$P$ never goes through LDS.** The scores already sit in the layout the PV MFMA
+  wants as its B operand, so the kernel computes $O^{\top} = V^{\top} P^{\top}$ with
+  $P^{\top}$ taken straight from registers. There is no $P$ tile and no LDS round
+  trip for it, and in the epilogue each lane stores its four consecutive
+  head-dimension values of its query row as one vector.
+- **$Q^{\top}$ is read once.** $Q$ is staged in LDS once (§3); the kernel loads
+  $Q^{\top}$ into registers before the KV loop, and every tile's QK MFMAs reuse it.
+- **One V slot.** K is double-buffered but V has a single LDS slot: $V(i)$ is loaded
+  after $QK(i)$ and consumed by $PV(i)$ in the same iteration, and the next
+  iteration's leading wait retires $PV(i)$ before $V(i{+}1)$ is issued, so a second
+  slot never held a live tile. The freed LDS raises occupancy where LDS bounds it.
+- **Wide-K PV.** PV runs on `mfma_f32_16x16x32` for tiles of 32 or more tokens: two
+  16-token blocks share one MFMA, with their $V^{\top}$ reads and $P^{\top}$ values
+  listed in the same token order (the MFMA only sums over $k$, so the pairing is all
+  that has to agree). An odd last block, and so any 16-token tile, uses `16x16x16`.
+- **Native `exp2`.** The segment softmax (`p` and `alpha`) and the reduce kernel's
+  rescale factors use `exp2_fast`: one native `v_exp_f32` in place of the `llvm.exp2`
+  lowering. It is the same lever the dense kernel carries
+  ([§8.1](#81-the-winning-levers-all-always-on)).
+- **Page ids a tile ahead** (paged fp16/bf16 K/V; not a consequence of the layout).
+  The next tile's page id is read during the current tile and passed as the copy's
+  `soffset` (or folded into a 64-bit buffer base for caches above 2 GiB), so no table
+  read sits in front of the K/V copies already in flight. `use_wave_page_id_load` goes
+  further and removes the per-tile table read altogether.
+
+The tunable parts — K/V cache policy, K/V LDS swizzle, wave page-id window and
+multi-page KV tiles — are fields of the segment spec; see the
+[Knob reference](../../common/README.md#knob-reference) and the runbook's
+[§12.1.K2](../../../../platform/dsl_docs/optimization/optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
+The always-on parts above have no field, which is why the runbook lists them there:
+a lever sweep should not rediscover them.
 
 ---
 
@@ -286,6 +333,34 @@ geometry* for it, driven entirely by the occupancy (WG/CU) the shape can sustain
 This is also why the parity harness reports **three tables** (`auto`/`2d`/`3d`):
 `auto` is what production launches, while forcing both backends to the *same*
 path (`2d`-vs-`2d`, `3d`-vs-`3d`) is the algorithmically-fair comparison.
+
+### 6.1 How many segments: the decode split rule
+
+Once a shape is on the 3D path, `_num_segments`
+([`attention_unified.py`](../../../kernels/common/attention_unified.py)) picks how
+many KV segments each sequence gets. For **decode** the count follows the work
+available — about four workgroups per CU — instead of the prefill formula's clamped
+result. Four is enough because, for paged K/V, the wave page-id window
+(`use_wave_page_id_load`, on in this scope) takes the page-table load off the KV loop,
+so fewer workgroups per CU hide the rest of the latency.
+
+The rule applies when every sequence has one query token, K/V is fp16/bf16 (paged or
+strided, with `block_size` 16), the head size is 128 (256 only with enough workgroups
+for page-sized tiles, $w \cdot 32 > \text{CUs}$), and there is no sliding window and no
+explicit `target_ctas`. With $w = \text{num\_seqs} \cdot \text{num\_kv\_heads}$
+workgroups per segment, and "KV tokens" meaning the longest sequence in the batch
+(`max_seqlen_k`):
+
+| grid | segments | KV tile |
+|---|---|---|
+| $w \cdot 32 > \text{CUs}$ | $\lfloor 4\,\text{CUs} / w \rfloor$, at least 2, at most 64 below 8K KV tokens and 128 from 8K | one page |
+| $w \cdot 32 \le \text{CUs}$ (64 segments would give at most two workgroups per CU) | 64; 128 from 64K KV tokens when 64 segments would give at most one workgroup per CU; at most one segment per 64-token tile ($\lfloor \text{kv} / 64 \rfloor$) | 64 tokens; paged K/V also turns the K/V LDS swizzle on (strided K/V does not) |
+
+In the second row each workgroup's KV loop is latency-bound, so the tile widens to 64
+tokens; the swizzle is neutral at page-sized tiles and pays at multi-page ones. Every
+other problem — fp8 K/V, sliding windows, an explicit `target_ctas`, non-decode —
+keeps the previous segment counts. The constants are tuning results: `_num_segments`
+is the source of truth and this table follows it.
 
 ---
 

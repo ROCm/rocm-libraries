@@ -145,6 +145,15 @@ prefill shapes are not included.
   graphs decode (`max_seqlen_q == 1`) and short prefill (`<= 768`) — where host
   launch overhead is a large fraction — and ungraphs long prefill (kernel-bound).
   Toggle with `HIPDNN_GFX942_2D_GRAPH` / `HIPDNN_GFX942_3D_GRAPH` (both default-on).
+- **The 3D decode kernel is transposed too.** The split-KV segment kernel
+  (`attention_tiled_3d`) computes $S^\top = K Q^\top$ on the narrow `16x16x16` atom
+  with $P^\top$ register-resident, as the flash path above does with `32x32x8`. It
+  feeds K/V with wide 128-bit loads by default up to `head_size = 128` and with async
+  DMA copies above that, because the wide feed's load/store overlap depends on the
+  compiler's schedule. `HIPDNN_GFX942_3D_WKV=0` turns the wide feed off (and, at head
+  size 64 and 128, the default K/V swizzle and page-id window that follow it); unlike
+  the variables in the table below, it is read by the dispatcher, not by the harness.
+  See [`ALGORITHM.md`](ALGORITHM.md) §8.
 
 ### Lever environment variables
 
