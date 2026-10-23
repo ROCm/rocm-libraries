@@ -143,8 +143,8 @@ struct FixedPointEmulationSettings
 {
     rocblaslt_status                         status;      /* invalid_value on bad env            */
     bool                                     apply;       /* true -> use emulation; false -> native path */
-    hipblasltEmulationSpecialValuesSupport_t sv_support;  /* resolved special-values handling    */
-    hipblasLtEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
+    hipEmulationSpecialValuesSupport_t sv_support;  /* resolved special-values handling    */
+    hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
     void*                                    workspace;   /* caller workspace ptr; nullptr until filled before GEMM dispatch */
     size_t                                   workspace_bytes; /* caller workspace size; ~size_t{0} = no budget constraint */
     /* ADP target precision in mantissa bits.

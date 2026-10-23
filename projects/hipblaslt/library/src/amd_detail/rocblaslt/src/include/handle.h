@@ -43,8 +43,8 @@
  *******************************************************************************/
 struct hipblasLtEmulationDescriptor
 {
-    hipblasLtEmulationStrategy_t             emulation_strategy   = HIPBLASLT_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
-    hipblasltEmulationSpecialValuesSupport_t emulation_sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
+    hipblasEmulationStrategy_t             emulation_strategy   = HIPBLAS_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
+    hipEmulationSpecialValuesSupport_t emulation_sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
     int emulation_fixedpoint_mantissa_control            = 0;   /**< Not used at the moment */
     int emulation_fixedpoint_max_mantissa_bits           = 0;   /**< 0=inherit, 1..52=explicit bit count */
     int emulation_fixedpoint_mantissa_bit_offset         = 0;   /**< Not used at the moment */

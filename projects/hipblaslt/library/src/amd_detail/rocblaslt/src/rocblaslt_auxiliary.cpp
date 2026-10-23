@@ -884,7 +884,7 @@ rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t
             memcpy(&v, buf, sizeof(int32_t));
             if(v < 0 || v > 2)
                 return rocblaslt_status_invalid_value;
-            desc->emulation_strategy = static_cast<hipblasLtEmulationStrategy_t>(v);
+            desc->emulation_strategy = static_cast<hipblasEmulationStrategy_t>(v);
         }
         break;
     case HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT:
@@ -895,7 +895,7 @@ rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t
             memcpy(&v, buf, sizeof(int32_t));
             if(v < 0 || v > 3)
                 return rocblaslt_status_invalid_value;
-            desc->emulation_sv_support = static_cast<hipblasltEmulationSpecialValuesSupport_t>(v);
+            desc->emulation_sv_support = static_cast<hipEmulationSpecialValuesSupport_t>(v);
         }
         break;
     case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:           /* not used at the moment */

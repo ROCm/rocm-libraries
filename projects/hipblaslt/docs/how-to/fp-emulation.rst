@@ -82,20 +82,21 @@ and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
      - Description
    * - ``HIPBLASLT_EMULATION_DESC_STRATEGY``
      - ``int32_t``
-     - ``HIPBLASLT_EMULATION_STRATEGY_DEFAULT`` (0) = inherit from env var;
-       ``HIPBLASLT_EMULATION_STRATEGY_PERFORMANT`` (1) = only when predicted faster;
-       ``HIPBLASLT_EMULATION_STRATEGY_EAGER`` (2) = always emulate.
+     - See ``hipblasEmulationStrategy_t``:
+       ``HIPBLAS_EMULATION_STRATEGY_DEFAULT`` (0) = inherit from env var;
+       ``HIPBLAS_EMULATION_STRATEGY_PERFORMANT`` (1) = only when predicted faster;
+       ``HIPBLAS_EMULATION_STRATEGY_EAGER`` (2) = always emulate.
    * - ``HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT``
      - ``int32_t``
      - ADP precision target in mantissa bits: ``1..52`` for FP64 (``1..23`` for FP32).
        ``0`` = inherit from env var (default = full precision).
    * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - ``int32_t``
-     - Inf/NaN detection support level.  See ``hipblasltEmulationSpecialValuesSupport_t``:
-       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT`` (0) = inherit from env var (default = Inf+NaN);
-       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE`` (1) = skip detection;
-       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY`` (2) = Inf only;
-       ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
+     - Inf/NaN detection support level.  See ``hipEmulationSpecialValuesSupport_t``:
+       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT`` (0) = inherit from env var (default = Inf+NaN);
+       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE`` (1) = skip detection;
+       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY`` (2) = Inf only;
+       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
 
 **Attaching to a matmul descriptor** — use the single matmul attribute
 ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``:
@@ -119,7 +120,7 @@ Example: enable FP64 emulation eagerly with reduced precision:
    hipblasLtEmulationDescCreate(&emul_desc);
 
    // Use eager strategy (always emulate, skip performance gate)
-   int32_t strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER;
+   int32_t strategy = HIPBLAS_EMULATION_STRATEGY_EAGER;
    hipblasLtEmulationDescSetAttribute(emul_desc,
        HIPBLASLT_EMULATION_DESC_STRATEGY,
        &strategy, sizeof(strategy));

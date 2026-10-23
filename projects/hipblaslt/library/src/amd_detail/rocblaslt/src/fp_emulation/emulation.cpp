@@ -1246,15 +1246,15 @@ namespace FixedPointEmulation
         const bool tA = (opA != HIPBLAS_OP_N);
         const bool tB = (opB != HIPBLAS_OP_N);
 
-        /* Translate hipblasltEmulationSpecialValuesSupport_t enum to bitmask:
+        /* Translate hipEmulationSpecialValuesSupport_t enum to bitmask:
          * DEFAULT(0)=both(0x3), NONE(1)=0x0, INFINITY(2)=0x1, NAN(3)=0x2 */
         uint32_t svmask;
         switch(decision.sv_support)
         {
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     svmask = 0x0u; break;
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: svmask = 0x1u; break;
-        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      svmask = 0x2u; break;
-        default: /* HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT */ svmask = 0x3u; break;
+        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     svmask = 0x0u; break;
+        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: svmask = 0x1u; break;
+        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      svmask = 0x2u; break;
+        default: /* HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT */ svmask = 0x3u; break;
         }
 
         if(svmask != 0u)
@@ -1767,7 +1767,7 @@ bool fixedPointEmulationIsEager()
         const auto parsed
             = fixedPointEmulationParseStrategyEnv(std::getenv("HIPBLASLT_EMULATION_STRATEGY"));
         return parsed.state == FIXED_POINT_EMULATION_ENV_VALID
-               && parsed.value == static_cast<unsigned>(HIPBLASLT_EMULATION_STRATEGY_EAGER);
+               && parsed.value == static_cast<unsigned>(HIPBLAS_EMULATION_STRATEGY_EAGER);
     }();
     return v;
 }
@@ -1801,10 +1801,10 @@ FixedPointEmulationEnvValue fixedPointEmulationParseStrategyEnv(const char* valu
         return {FIXED_POINT_EMULATION_ENV_UNSET, 0u};
     if(std::strcmp(value, "performant") == 0)
         return {FIXED_POINT_EMULATION_ENV_VALID,
-                static_cast<unsigned>(HIPBLASLT_EMULATION_STRATEGY_PERFORMANT)};
+                static_cast<unsigned>(HIPBLAS_EMULATION_STRATEGY_PERFORMANT)};
     if(std::strcmp(value, "eager") == 0)
         return {FIXED_POINT_EMULATION_ENV_VALID,
-                static_cast<unsigned>(HIPBLASLT_EMULATION_STRATEGY_EAGER)};
+                static_cast<unsigned>(HIPBLAS_EMULATION_STRATEGY_EAGER)};
     return {FIXED_POINT_EMULATION_ENV_INVALID, 0u};
 }
 
@@ -1862,10 +1862,10 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
         const uint32_t env_mask = fixedPointEmulationSpecialValuesMask();
         switch(env_mask)
         {
-        case 0x0u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
-        case 0x1u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
-        case 0x2u: result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
-        default:   result.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
+        case 0x0u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
+        case 0x1u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
+        case 0x2u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
+        default:   result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
         }
     }
 
@@ -1906,15 +1906,15 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
      * Priority: desc->emulation_strategy (non-DEFAULT) > env var.
      * force_off is already handled above; only DEFAULT/PERFORMANT/EAGER reach here. */
     {
-        const hipblasLtEmulationStrategy_t desc_strat
-            = ed ? ed->emulation_strategy : HIPBLASLT_EMULATION_STRATEGY_DEFAULT;
+        const hipblasEmulationStrategy_t desc_strat
+            = ed ? ed->emulation_strategy : HIPBLAS_EMULATION_STRATEGY_DEFAULT;
         result.strategy
-            = (desc_strat == HIPBLASLT_EMULATION_STRATEGY_EAGER
-               || (desc_strat == HIPBLASLT_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager()))
-                  ? HIPBLASLT_EMULATION_STRATEGY_EAGER
-                  : HIPBLASLT_EMULATION_STRATEGY_PERFORMANT;
+            = (desc_strat == HIPBLAS_EMULATION_STRATEGY_EAGER
+               || (desc_strat == HIPBLAS_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager()))
+                  ? HIPBLAS_EMULATION_STRATEGY_EAGER
+                  : HIPBLAS_EMULATION_STRATEGY_PERFORMANT;
         result.workspace_bytes = workspace_bytes;
-        if(result.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER
+        if(result.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER
            || fixedPointEmulationPerformanceCheck(
                h, desc, type_a, opA, opB, m, n, k, workspace_bytes))
         {
@@ -2066,7 +2066,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
 
         /* EAGER strategy means "always emulate, bypass the performance model".
          * Only apply the performance gate in PERFORMANT mode.                */
-        const bool is_eager_g = (decision.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        const bool is_eager_g = (decision.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER);
 
         /* ADP-aware performance model s. */
         const int      adp_bits_g = (decision.adp_mantissa_bits > 0)
@@ -2424,7 +2424,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
             W_var = W_var1;
         }
 
-        const bool is_eager_g = (decision.strategy == HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        const bool is_eager_g = (decision.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER);
 
         /* ADP-aware performance model s. */
         const int      adp_bits_g = (decision.adp_mantissa_bits > 0)

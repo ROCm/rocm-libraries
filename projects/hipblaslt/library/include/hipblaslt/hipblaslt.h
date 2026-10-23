@@ -79,35 +79,11 @@
     static_assert(false, "HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT is deprecated and not supported. Please set HIPBLASLT_MATMUL_DESC_B_SCALE_MODE as HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F instead.")
 
 /*! \ingroup types_module
- *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
- */
-/*! \ingroup types_module
- *  \brief Emulation strategy for FP64 GEMM via Ozaki Scheme II.
- */
-typedef enum {
-    HIPBLASLT_EMULATION_STRATEGY_DEFAULT    = 0, /**<Use the process-wide default (from HIPBLASLT_EMULATION_STRATEGY env var). */
-    HIPBLASLT_EMULATION_STRATEGY_PERFORMANT = 1, /**<Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
-    HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
-} hipblasLtEmulationStrategy_t;
-
-/*! \ingroup types_module
- *  \brief Controls which special floating-point values (Inf, NaN) are detected
- *  during FP64/FP32 emulation via Ozaki Scheme II.
- *
- *  \details
- *  Used as the data type for the ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
- *  emulation descriptor attribute.  ``DEFAULT`` detects both Inf and NaN (the built-in
- *  default); the other values restrict or disable detection.
- */
-typedef enum {
-    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT  = 0, /**<Detect both Inf and NaN values (default behavior). */
-    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE     = 1, /**<Skip Inf/NaN detection entirely (faster, but unsupported input values silently corrupt output). */
-    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 2, /**<Detect Inf values only. */
-    HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 3, /**<Detect NaN values only. */
-} hipblasltEmulationSpecialValuesSupport_t;
-
-/*! \ingroup types_module
  *  \brief Attributes of a ``hipblasLtEmulationDesc_t`` descriptor.
+ *
+ *  \note The emulation value enums ``hipblasEmulationStrategy_t`` and
+ *  ``hipEmulationSpecialValuesSupport_t`` are defined in ``hipblas-common``
+ *  (shared across the hipBLAS family) and are consumed by the attributes below.
  *
  *  \details
  *  Used with ``hipblasLtEmulationDescSetAttribute`` and
@@ -118,8 +94,8 @@ typedef enum {
  *  disable via the public API.
  */
 typedef enum {
-    HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate. Default: ``DEFAULT``. */
-    HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` (``hipblasltEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
+    HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate. Default: ``DEFAULT``. */
+    HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` (``hipEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL           = 2, /**<Not used at the moment. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT     = 3, /**<ADP precision target in mantissa bits. Data type: ``int32_t``. ``1``..``52`` for FP64 (``1``..``23`` for FP32); ``0`` = inherit from env var (default). Only affects ADP mode. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET        = 4, /**<Not used at the moment. */
