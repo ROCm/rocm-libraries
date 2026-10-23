@@ -5,662 +5,59 @@
  * dense attention spec contract (rocke/instance_attention_dense_spec.h).
  *
  * The validator and preflight reasons never reach the emitted IR, so the
- * byte-identity gate cannot see a C/Python divergence in them; the kernel name
- * does reach it, but only for the specs an emit pair builds. The vectors are
- * pinned here instead.
- *
- * Every expected value below was produced by the Python implementation
- * (kernels.common.attention_dense_spec: AttentionDenseSpec.__post_init__,
- * check_dense_spec_preflight, kernel_name, resolved_persist_decode) for the
- * same base-class specs, on CPython 3.14. Each reject reason is reached at
- * least once; regenerate them from there if the Python reference changes.
+ * byte-identity gate cannot see a C/Python divergence in them. Both engines are
+ * pinned to one file instead: library/tests/golden/attention_dense_spec_vectors.json,
+ * embedded into this binary at build time (attention_dense_spec_vectors.inc, generated
+ * by tests/CMakeLists.txt). The Python side,
+ * library/tests/test_attention_dense_spec_vectors.py, recomputes every case with
+ * the current Python and owns regenerating the file; this test requires the same
+ * answers from the C++ port. A Python change therefore fails there first, and the
+ * regenerated file then fails here until the C++ port is updated to match.
  */
 #include <cstdio>
 #include <cstring>
+#include <string>
 
+#include "rocke/arena.h"
 #include "rocke/instance_attention_dense_spec.h"
+#include "rocke/json_dom.h"
 
 namespace
 {
 
+const char k_vectors_json[] = {
+#include "attention_dense_spec_vectors.inc"
+    0};
+
 int g_failures = 0;
 
-#define CHECK_STR(got, want)                                                  \
-    do                                                                        \
-    {                                                                         \
-        if(std::strcmp((got), (want)) != 0)                                   \
-        {                                                                     \
-            std::fprintf(stderr,                                              \
-                         "FAIL vector %zu (%s:%d)\n  got:  %s\n  want: %s\n", \
-                         i,                                                   \
-                         __FILE__,                                            \
-                         __LINE__,                                            \
-                         (got),                                               \
-                         (want));                                             \
-            ++g_failures;                                                     \
-        }                                                                     \
+#define CHECK(cond)                                                                          \
+    do                                                                                       \
+    {                                                                                        \
+        if(!(cond))                                                                          \
+        {                                                                                    \
+            std::fprintf(stderr, "FAIL %s: %s (%s:%d)\n", where, #cond, __FILE__, __LINE__); \
+            ++g_failures;                                                                    \
+        }                                                                                    \
     } while(0)
 
-#define CHECK(cond)                                                                              \
-    do                                                                                           \
-    {                                                                                            \
-        if(!(cond))                                                                              \
-        {                                                                                        \
-            std::fprintf(stderr, "FAIL vector %zu: %s (%s:%d)\n", i, #cond, __FILE__, __LINE__); \
-            ++g_failures;                                                                        \
-        }                                                                                        \
+#define CHECK_STR(got, want)                                          \
+    do                                                                \
+    {                                                                 \
+        const char* got_ = (got);                                     \
+        const char* want_ = (want);                                   \
+        if(want_ == nullptr || std::strcmp(got_, want_) != 0)         \
+        {                                                             \
+            std::fprintf(stderr,                                      \
+                         "FAIL %s (%s:%d)\n  got:  %s\n  want: %s\n", \
+                         where,                                       \
+                         __FILE__,                                    \
+                         __LINE__,                                    \
+                         got_,                                        \
+                         want_ ? want_ : "(missing)");                \
+            ++g_failures;                                             \
+        }                                                             \
     } while(0)
-
-struct Vector
-{
-    rocke_attention_dense_spec_t spec;
-    bool valid;
-    const char* reason;
-    bool preflight_ok;
-    const char* preflight_reason;
-    const char* kernel_name; /* NULL when the spec is invalid */
-    const char* resolved_persist_decode;
-};
-
-/* Spec fields in AttentionDenseSpec declaration order. */
-const Vector k_vectors[] = {
-    {{0, 512, 500, 32,  8, 128,        1, "fp16", -64, 0,       0, 128, 64,
-      4, 16,  1,   256, 1, "gqa_pair", 1, 0,      16,  1048576, 0, 0},
-     0,
-     "seqlen_kv must be a multiple of block_n=64, got 500",
-     0,
-     "invalid AttentionDenseSpec: seqlen_kv must be a multiple of block_n=64, got 500",
-     NULL,
-     NULL},
-    {{1, 2,  0, 8,  3, 128,    0, "fp16", -64,   0,  1, 128, 0,
-      2, -8, 1, -1, 0, "auto", 1, 1,      65536, 64, 1, 0},
-     0,
-     "block_n must be a positive multiple of 32, got 0",
-     0,
-     "invalid AttentionDenseSpec: block_n must be a positive multiple of 32, got 0",
-     NULL,
-     NULL},
-    {{1048576, 16384, 16384, 1048576, 0, 96,     1, "fp32", -64, 1,  0, 256, -64,
-      9,       8,     0,     256,     0, "auto", 0, 0,      16,  -1, 1, 0},
-     0,
-     "dtype must be one of ['bf16', 'fp16'], got fp32",
-     0,
-     "invalid AttentionDenseSpec: dtype must be one of ['bf16', 'fp16'], got fp32",
-     NULL,
-     NULL},
-    {{-1, 2048, 2048, 16, 1, 64,   0, "bf16", 64, 1,  1, 256, 64,
-      1,  0,    0,    8,  1, NULL, 0, 0,      64, 64, 0, 0},
-     0,
-     "ragged is not supported with varlen",
-     0,
-     "invalid AttentionDenseSpec: ragged is not supported with varlen",
-     NULL,
-     NULL},
-    {{1, 256, 256, 4,   1048576, 256,    1, NULL, 128, 0,    0, 64, 128,
-      0, 8,   1,   256, 1,       "auto", 0, 0,    32,  1024, 0, 0},
-     0,
-     "dtype must be one of ['bf16', 'fp16'], got None",
-     0,
-     "invalid AttentionDenseSpec: dtype must be one of ['bf16', 'fp16'], got None",
-     NULL,
-     NULL},
-    {{2147483647, 500, 1024, 16,  8, 128,        1, "fp16", 64, 1, 0, 256, 64,
-      2,          0,   0,    256, 0, "qb_major", 1, 0,      16, 0, 1, 0},
-     0,
-     "ragged is not supported with sliding_window",
-     0,
-     "invalid AttentionDenseSpec: ragged is not supported with sliding_window",
-     NULL,
-     NULL},
-    {{2147483647, 1024, 1024, 8,   8, 128,  1, "fp16", 100, 0,    0, 128, 64,
-      1,          0,    1,    304, 1, NULL, 0, 0,      16,  1024, 1, 1},
-     0,
-     "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got None",
-     0,
-     "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], "
-     "got None",
-     NULL,
-     NULL},
-    {{2147483647, -256, 0, 4, 1048576, 128,        0, "fp16", -64, 1,       0, 0, 0,
-      9,          -8,   0, 0, 0,       "gqa_pair", 0, 0,      128, 1048576, 1, 0},
-     0,
-     "block_m must be positive, got 0",
-     0,
-     "invalid AttentionDenseSpec: block_m must be positive, got 0",
-     NULL,
-     NULL},
-    {{2147483647, 64, 512, 32, 8, 256,    1, "fp16", 100, 0,  0, 16, 256,
-      0,          4,  0,   1,  1, "auto", 0, 0,      48,  -1, 0, 0},
-     0,
-     "head_size must be 64 or 128, got 256",
-     0,
-     "invalid AttentionDenseSpec: head_size must be 64 or 128, got 256",
-     NULL,
-     NULL},
-    {{0, 500, 500, 16,  1, 128,    0, "fp16", 128, 0,    0, 128, 128,
-      2, 0,   0,   304, 0, "auto", 1, 0,      128, 1024, 0, 0},
-     0,
-     "seqlen_q must be a multiple of block_m=128, got 500",
-     0,
-     "invalid AttentionDenseSpec: seqlen_q must be a multiple of block_m=128, got 500",
-     NULL,
-     NULL},
-    {{-1, 512, 256, -8,  8, 64,         1, "fp16", 0,  0,  1, 16, 64,
-      8,  0,   1,   256, 0, "qb_major", 1, 0,      32, 64, 1, 0},
-     0,
-     "varlen is not supported with persistent=True",
-     0,
-     "invalid AttentionDenseSpec: varlen is not supported with persistent=True",
-     NULL,
-     NULL},
-    {{1, 500, 64, 32,  1, 64,     1, "fp16", -64, 1, 0, 96, 128,
-      8, 8,   0,  256, 0, "auto", 0, 0,      16,  0, 0, 0},
-     0,
-     "sliding_window must be >= 0, got -64",
-     0,
-     "invalid AttentionDenseSpec: sliding_window must be >= 0, got -64",
-     NULL,
-     NULL},
-    {{1048576, 2048, 512, 8, 1, 128,    1, "fp16", 128, 1, 1, 128, 64,
-      2,       8,    0,   4, 0, "it's", 1, 1,      0,   0, 0, 1},
-     0,
-     "causal_bottom_right requires seqlen_q <= seqlen_kv, got 2048 > 512",
-     0,
-     "invalid AttentionDenseSpec: causal_bottom_right requires seqlen_q <= seqlen_kv, got 2048 > "
-     "512",
-     NULL,
-     NULL},
-    {{2147483647, 300, 1024, 16,  8, 64,     0, "bf16", -64, 0,    1, 128, 32,
-      2,          0,   0,    304, 0, "x\"y", 1, 1,      32,  1024, 0, 1},
-     0,
-     "causal_bottom_right requires causal=True",
-     0,
-     "invalid AttentionDenseSpec: causal_bottom_right requires causal=True",
-     NULL,
-     NULL},
-    {{2147483647, 512, 1024, 16, 2, 64,     1, "fp16", 256,   0,    1, 128, 64,
-      1,          0,   0,    4,  0, "auto", 1, 0,      65536, 1024, 0, 1},
-     1,
-     "",
-     0,
-     "K/V extent is 562949953159168 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-     "rocke_attention_dense_d64_hq16_kv2_bn64_fp16_bm128_kpad0_sq512_sk1024_causal_br_swa256_"
-     "varlen_lazyrs",
-     "hkv_major"},
-    {{2147483647, 256, 256, 0, 2, 128,         1, "bf16", 128, 0,    1, 16, 64,
-      8,          16,  0,   1, 1, "hkv_major", 1, 0,      16,  1024, 0, 1},
-     1,
-     "",
-     0,
-     "num_query_heads must be positive, got 0",
-     "rocke_attention_dense_d128_hq0_kv2_bn64_bf16_bm16_sq256_sk256_causal_br_swa128_varlen_lazyrs",
-     "hkv_major"},
-    {{-1, 500, 512, 16, 2, 128,    1, "fp16", 0,   1,  0, 256, 64,
-      9,  4,   1,   1,  1, "auto", 0, 0,      128, 64, 1, 1},
-     0,
-     "lds_k_group_pad must be a non-negative multiple of 8 bf16 elements (16 bytes) so the K group "
-     "pitch stays ds_read_b128-aligned, got 4",
-     0,
-     "invalid AttentionDenseSpec: lds_k_group_pad must be a non-negative multiple of 8 bf16 "
-     "elements (16 bytes) so the K group pitch stays ds_read_b128-aligned, got 4",
-     NULL,
-     NULL},
-    {{4, 2048, 2048, 8,   8, 64,         0, "bf16", 0, 0,  0, 256, 64,
-      2, 8,    1,    304, 1, "gqa_pair", 0, 0,      8, 64, 0, 0},
-     0,
-     "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'gqa_pair'",
-     0,
-     "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], "
-     "got 'gqa_pair'",
-     NULL,
-     NULL},
-    {{1, 512, 2048, 8,  8, 64,          1, "bf16", 100, 0,  1, 128, 128,
-      2, 0,   0,    64, 1, "hkv_major", 1, 0,      64,  64, 1, 1},
-     0,
-     "sliding_window (100) must be a multiple of block_n=128",
-     0,
-     "invalid AttentionDenseSpec: sliding_window (100) must be a multiple of block_n=128",
-     NULL,
-     NULL},
-    {{1, 512, 2048, 16, 8, 64,         1, "fp16", 0, 1,    0, 256, 128,
-      2, 8,   0,    4,  0, "qb_major", 1, 1,      0, 1024, 0, 0},
-     0,
-     "paged=True requires block_size > 0",
-     0,
-     "invalid AttentionDenseSpec: paged=True requires block_size > 0",
-     NULL,
-     NULL},
-    {{1, 256, 1024, 8, 0, 128,        1, "fp16", 0,  0,       0, 256, 64,
-      1, 0,   0,    4, 1, "gqa_pair", 1, 0,      48, 1048576, 0, 1},
-     0,
-     "num_query_heads (8) must be a positive multiple of num_kv_heads (0)",
-     0,
-     "invalid AttentionDenseSpec: num_query_heads (8) must be a positive multiple of num_kv_heads "
-     "(0)",
-     NULL,
-     NULL},
-    {{2147483647, 2048, 1024, 16,  2, 128,         0, "fp16", 0,  0, 0, 256, 128,
-      8,          0,    0,    304, 0, "hkv_major", 1, 1,      48, 0, 0, 0},
-     0,
-     "paged block_size (48) must be a power of two",
-     0,
-     "invalid AttentionDenseSpec: paged block_size (48) must be a power of two",
-     NULL,
-     NULL},
-    {{1, -256, 64, 8, 3, 128,        1, "bf16", 64, 1,       0, 16, 128,
-      2, 8,    0,  0, 0, "gqa_pair", 0, 0,      8,  1048576, 0, 0},
-     0,
-     "ragged requires positive seqlen_q/seqlen_kv",
-     0,
-     "invalid AttentionDenseSpec: ragged requires positive seqlen_q/seqlen_kv",
-     NULL,
-     NULL},
-    {{1048576, 512, 512, 16, 8, 128,         1, "fp16", 0,  0,  0, 256, 64,
-      2,       8,   1,   8,  0, "hkv_major", 1, 1,      16, -1, 0, 0},
-     0,
-     "paged=True requires num_kv_blocks > 0",
-     0,
-     "invalid AttentionDenseSpec: paged=True requires num_kv_blocks > 0",
-     NULL,
-     NULL},
-    {{0, 256, 2048, 32, 2, 128,    1, "fp16", 0,   1,       0, 256, 64,
-      1, 8,   0,    64, 0, "auto", 0, 1,      128, 1048576, 0, 0},
-     0,
-     "block_n (64) must be a multiple of page block_size (128)",
-     0,
-     "invalid AttentionDenseSpec: block_n (64) must be a multiple of page block_size (128)",
-     NULL,
-     NULL},
-    {{1, 300, 500, 16, 1, 128,    1, "fp16", 0,  1,    0, 128, 32,
-      2, 16,  1,   4,  0, "auto", 1, 1,      16, 1024, 0, 0},
-     0,
-     "paged + persistent not yet implemented (persistent builder is contiguous-only)",
-     0,
-     "invalid AttentionDenseSpec: paged + persistent not yet implemented (persistent builder is "
-     "contiguous-only)",
-     NULL,
-     NULL},
-    {{2147483647, 2048, 500, 16,  2, 64,     0, "bf16", 0, 1,    1, 256, 32,
-      2,          16,   1,   256, 0, "x\"y", 1, 0,      8, 1024, 0, 0},
-     0,
-     "ragged is self-attention only (seqlen_q == seqlen_kv) unless causal (top-left or "
-     "bottom-right) is set, got 2048 != 500",
-     0,
-     "invalid AttentionDenseSpec: ragged is self-attention only (seqlen_q == seqlen_kv) unless "
-     "causal (top-left or bottom-right) is set, got 2048 != 500",
-     NULL,
-     NULL},
-    {{0, 2048, 512, 8,   1, 64,         1, "bf16", 0, 0,  0, 128, 128,
-      4, 0,    0,   304, 1, "qb_major", 1, 0,      8, -1, 0, 0},
-     1,
-     "",
-     0,
-     "batch must be positive, got 0",
-     "rocke_attention_dense_d64_hq8_kv1_bn128_bf16_bm128_kpad0_sq2048_sk512_causal_lazyrs",
-     "qb_major"},
-    {{0, 1024, 1024, 8,   8, 128,         0, "fp16", 256, 0,  1, 128, 64,
-      4, 0,    1,    304, 0, "hkv_major", 1, 1,      128, 64, 0, 0},
-     0,
-     "sliding_window>0 requires causal=True",
-     0,
-     "invalid AttentionDenseSpec: sliding_window>0 requires causal=True",
-     NULL,
-     NULL},
-    {{0, 256, 2048, 16, 8, 64,     1, "bf16", 0,     0,       0, 256, 256,
-      9, 8,   1,    1,  1, "auto", 0, 1,      65536, 1048576, 1, 1},
-     0,
-     "waves_per_eu must be in [1, 8], got 9",
-     0,
-     "invalid AttentionDenseSpec: waves_per_eu must be in [1, 8], got 9",
-     NULL,
-     NULL},
-    {{2, 512, 1024, 16, 8, 128,        1, "bf16", 256, 0,  0, 256, 128,
-      4, 16,  1,    4,  1, "qb_major", 1, 1,      64,  64, 1, 0},
-     0,
-     "paged multi-sequence (batch>1) not yet implemented",
-     0,
-     "invalid AttentionDenseSpec: paged multi-sequence (batch>1) not yet implemented",
-     NULL,
-     NULL},
-    {{0, 2048, 1024, 8, 1, 64,     1, "bf16", 0,  0,    1, 256, 64,
-      1, 0,    0,    4, 0, "auto", 1, 0,      64, 1024, 1, 0},
-     0,
-     "use_sinks is not yet supported with varlen",
-     0,
-     "invalid AttentionDenseSpec: use_sinks is not yet supported with varlen",
-     NULL,
-     NULL},
-    {{1, 4096, 64, 0,  2, 128,        0, "fp16", 0,  0,       1, 16, 64,
-      0, 0,    0,  -1, 0, "qb_major", 0, 1,      48, 1048576, 0, 0},
-     0,
-     "varlen requires causal=True",
-     0,
-     "invalid AttentionDenseSpec: varlen requires causal=True",
-     NULL,
-     NULL},
-    {{4, 1024, 2048, 8, -2, 64,     1, "fp16", 0, 0, 0, 256, 32,
-      1, 8,    1,    0, 0,  "it's", 1, 1,      8, 0, 0, 0},
-     0,
-     "num_persistent must be positive, got 0",
-     0,
-     "invalid AttentionDenseSpec: num_persistent must be positive, got 0",
-     NULL,
-     NULL},
-    {{1, 256, 1024, 16, 2, 64,     1, "fp16", 0, 0,    0, 256, 128,
-      2, 16,  1,    4,  0, "auto", 1, 1,      8, 1024, 0, 0},
-     0,
-     "paged block_size (8) must be >= and a multiple of ROWS_PER_WAVE (16)",
-     0,
-     "invalid AttentionDenseSpec: paged block_size (8) must be >= and a multiple of ROWS_PER_WAVE "
-     "(16)",
-     NULL,
-     NULL},
-    {{1, 1024, 1024, 16, 1, 128,        1, "fp16", 0,  0,       0, 128, 64,
-      1, 16,   1,    64, 0, "qb_major", 1, 1,      64, 1048576, 1, 1},
-     0,
-     "paged cache 17179869184 B exceeds i32 addressing (2 GiB)",
-     0,
-     "invalid AttentionDenseSpec: paged cache 17179869184 B exceeds i32 addressing (2 GiB)",
-     NULL,
-     NULL},
-    {{1, 1024, 1024, 32,  1, 64,         1, "fp16", 0,  1,    0, 256, 32,
-      1, 0,    0,    304, 1, "qb_major", 0, 1,      32, 1024, 0, 0},
-     0,
-     "paged not yet implemented for head_size != 128",
-     0,
-     "invalid AttentionDenseSpec: paged not yet implemented for head_size != 128",
-     NULL,
-     NULL},
-    {{2, 64, 64, 32, 8, 128,         1, "fp16", 64, 0,    0, 16, 64,
-      1, 16, 1,  1,  1, "hkv_major", 1, 0,      32, 1024, 0, 1},
-     1,
-     "",
-     0,
-     "block_n must divide the 16-row query tile (got block_n=64; the spec also requires block_n % "
-     "32 == 0, so use 32, 64, 128 or 256). Load-bearing for causal=True, where n_per = 16 // "
-     "block_n floors and drops keys",
-     "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_bm16_sq64_sk64_causal_br_swa64_lazyrs_persist1_"
-     "hkvmaj_intl",
-     "hkv_major"},
-    {{1, 256, 1024, 16,  8, 128,    1, "bf16", 0,  1,    0, 128, 32,
-      1, 16,  0,    304, 1, "auto", 1, 1,      32, 1024, 0, 0},
-     0,
-     "paged not yet implemented for plain-causal (sliding_window>0 only)",
-     0,
-     "invalid AttentionDenseSpec: paged not yet implemented for plain-causal (sliding_window>0 "
-     "only)",
-     NULL,
-     NULL},
-    {{2147483647, 1048576, 512, 0, 2, 128,    1, "fp16", 0,   1,  0, 16, 256,
-      1,          8,       0,   8, 1, "auto", 0, 1,      128, -1, 1, 0},
-     0,
-     "division by zero",
-     0,
-     "invalid AttentionDenseSpec: division by zero",
-     NULL,
-     NULL},
-    {{4, -256, 512, 0, -2, 64,     0, "fp16", 0,  0,    0, 16, 64,
-      8, 8,    0,   1, 1,  "auto", 1, 0,      32, 1024, 1, 0},
-     1,
-     "",
-     0,
-     "seqlen_q must be positive, got -256",
-     "rocke_attention_dense_d64_hq0_kv-2_bn64_fp16_bm16_kpad8_sq-256_sk512_full_sinks_lazyrs",
-     "qb_major"},
-    {{4, 256, 8192, 16,  -2, 128,    1, "fp16", 0,   1,  0, 128, 64,
-      2, 8,   0,    304, 1,  "auto", 1, 0,      128, 64, 0, 0},
-     1,
-     "",
-     0,
-     "num_kv_heads must be positive, got -2",
-     "rocke_attention_dense_d128_hq16_kv-2_bn64_fp16_bm128_sq256_sk8192_causal_ragged_lazyrs",
-     "qb_major"},
-    {{1, 512, 512, 32,  1, 128,    1, "fp16", 256, 0,  0, 128, 64,
-      2, 8,   0,   304, 1, "auto", 1, 1,      32,  64, 1, 0},
-     0,
-     "use_sinks is not yet supported with paged KV",
-     0,
-     "invalid AttentionDenseSpec: use_sinks is not yet supported with paged KV",
-     NULL,
-     NULL},
-    {{1, 256, 1024, 8, 1, 128,         1, "bf16", 0,  0,  1, 128, 128,
-      2, 0,   0,    4, 1, "hkv_major", 1, 1,      32, 64, 0, 1},
-     0,
-     "paged varlen not yet implemented (single-seq only)",
-     0,
-     "invalid AttentionDenseSpec: paged varlen not yet implemented (single-seq only)",
-     NULL,
-     NULL},
-    {{2147483647, 2048, 2048, 8, 1, 128,    1, "fp16", 0,  1, 0, 256, 32,
-      1,          8,    0,    4, 0, "it's", 0, 0,      48, 0, 1, 0},
-     0,
-     "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got \"it's\"",
-     0,
-     "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], "
-     "got \"it's\"",
-     NULL,
-     NULL},
-    {{0, 256, 2048, 16,  1, 128,    0, "bf16", 64, 0,  0, 256, 128,
-      2, 0,   0,    304, 1, "x\"y", 1, 0,      64, -1, 1, 0},
-     0,
-     "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'x\"y'",
-     0,
-     "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], "
-     "got 'x\"y'",
-     NULL,
-     NULL},
-    {{1, 1024, 1024, 16, 2, 64,     1, "bf16", 0,  1,  0, 128, 32,
-      2, 8,    1,    4,  1, "auto", 1, 0,      32, -1, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq16_kv2_bn32_bf16_bm128_kpad8_sq1024_sk1024_causal_ragged_sinks_"
-     "lazyrs_persist4_hkvmaj_intl",
-     "hkv_major"},
-    {{1, 512, 2048, 16,  1, 64,          1, "fp16", 0,  1,  0, 256, 128,
-      1, 0,   1,    256, 1, "hkv_major", 1, 0,      64, 64, 1, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq16_kv1_bn128_fp16_kpad0_sq512_sk2048_causal_br_ragged_sinks_"
-     "lazyrs_persist256_hkvmaj_intl",
-     "hkv_major"},
-    {{4, 1024, 1024, 8,   2, 64,          1, "fp16", 128, 0, 0, 128, 64,
-      1, 8,    1,    304, 0, "hkv_major", 1, 0,      8,   0, 1, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq8_kv2_bn64_fp16_bm128_kpad8_sq1024_sk1024_causal_br_swa128_sinks_"
-     "lazyrs_persist304_hkvmaj",
-     "hkv_major"},
-    {{1, 256, 1024, 8,   8, 64,          1, "bf16", 0,  0,       0, 128, 64,
-      4, 0,   1,    256, 1, "hkv_major", 1, 0,      64, 1048576, 1, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq8_kv8_bn64_bf16_bm128_kpad0_sq256_sk1024_causal_br_sinks_lazyrs_"
-     "persist256_hkvmaj_intl",
-     "hkv_major"},
-    {{1, 2048, 1024, 32, 2, 128,    1, "bf16", 128, 0,    0, 128, 64,
-      4, 16,   1,    64, 1, "auto", 1, 0,      8,   1024, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq32_kv2_bn64_bf16_bm128_sq2048_sk1024_causal_swa128_sinks_lazyrs_"
-     "persist64_hkvmaj_intl",
-     "hkv_major"},
-    {{2, 512, 1024, 16,  8, 64,     1, "bf16", 64, 0,    0, 128, 32,
-      1, 0,   1,    304, 1, "auto", 1, 0,      48, 1024, 1, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq16_kv8_bn32_bf16_bm128_kpad0_sq512_sk1024_causal_br_swa64_sinks_"
-     "lazyrs_persist304_intl",
-     "qb_major"},
-    {{1, 2048, 2048, 32, 8, 64,         1, "fp16", 256, 0,  0, 128, 64,
-      2, 16,   1,    64, 1, "qb_major", 1, 0,      16,  -1, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq32_kv8_bn64_fp16_bm128_kpad16_sq2048_sk2048_causal_swa256_sinks_"
-     "lazyrs_persist64_intl",
-     "qb_major"},
-    {{4, 256, 512, 16, 2, 128,         1, "fp16", 0, 1, 0, 128, 128,
-      4, 16,  1,   64, 1, "hkv_major", 1, 0,      0, 0, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq16_kv2_bn128_fp16_bm128_sq256_sk512_causal_ragged_sinks_lazyrs_"
-     "persist64_hkvmaj_intl",
-     "hkv_major"},
-    {{1, 1024, 1024, 32, 1, 128,         1, "fp16", 0,  1,  0, 128, 64,
-      1, 0,    1,    8,  0, "hkv_major", 1, 0,      32, 64, 1, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq32_kv1_bn64_fp16_bm128_sq1024_sk1024_causal_br_ragged_sinks_"
-     "lazyrs_persist8_hkvmaj",
-     "hkv_major"},
-    {{1, 256, 500, 32,  8, 128,         1, "bf16", 0, 1,       0, 128, 64,
-      4, 16,  1,   304, 1, "hkv_major", 1, 0,      8, 1048576, 0, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_bm128_sq256_sk500_causal_br_ragged_lazyrs_"
-     "persist304_hkvmaj_intl",
-     "hkv_major"},
-    {{2, 500, 500, 32,  8, 128,         1, "bf16", 0,     1,    0, 128, 32,
-      4, 0,   1,   304, 0, "hkv_major", 1, 0,      65536, 1024, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq32_kv8_bn32_bf16_bm128_sq500_sk500_causal_ragged_sinks_lazyrs_"
-     "persist304_hkvmaj",
-     "hkv_major"},
-    {{1, 300, 300, 8, 2, 64,         0, "fp16", 0,  1,       0, 128, 32,
-      4, 16,  1,   4, 1, "qb_major", 1, 0,      48, 1048576, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq8_kv2_bn32_fp16_bm128_kpad16_sq300_sk300_full_ragged_sinks_"
-     "lazyrs_persist4_intl",
-     "qb_major"},
-    {{4, 256, 256, 8, 1, 64,     1, "fp16", 0, 0,  0, 128, 64,
-      2, 16,  1,   4, 0, "auto", 1, 0,      0, -1, 0, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq8_kv1_bn64_fp16_bm128_kpad16_sq256_sk256_causal_br_lazyrs_"
-     "persist4_hkvmaj",
-     "hkv_major"},
-    {{1, 256, 1024, 32,  2, 64,     1, "fp16", 64, 0,       1, 128, 64,
-      4, 8,   0,    304, 0, "auto", 1, 0,      8,  1048576, 0, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d64_hq32_kv2_bn64_fp16_bm128_kpad8_sq256_sk1024_causal_br_swa64_varlen_"
-     "lazyrs",
-     "qb_major"},
-    {{1, 64, 512, 8, 8, 128,        1, "fp16", 128, 0,  0, 64, 64,
-      2, 8,  1,   8, 0, "qb_major", 1, 0,      128, 64, 0, 1},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq8_kv8_bn64_fp16_bm64_sq64_sk512_causal_br_swa128_lazyrs_"
-     "persist8",
-     "qb_major"},
-    {{1, 512, 8192, 32, 1, 128,         1, "fp16", 256, 0,       0, 256, 64,
-      2, 8,   0,    8,  0, "hkv_major", 1, 0,      0,   1048576, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq32_kv1_bn64_fp16_sq512_sk8192_causal_swa256_sinks_lazyrs",
-     "hkv_major"},
-    {{1, 512, 2048, 16,  2, 128,         1, "bf16", 0,  0, 0, 128, 128,
-      2, 16,  1,    304, 0, "hkv_major", 0, 0,      32, 0, 1, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq16_kv2_bn128_bf16_bm128_sq512_sk2048_causal_sinks_persist304_"
-     "hkvmaj",
-     "hkv_major"},
-    {{4, 2048, 2048, 8,   2, 128,        0, "bf16", 0, 0,    0, 128, 32,
-      2, 0,    0,    256, 0, "qb_major", 0, 0,      0, 1024, 0, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq8_kv2_bn32_bf16_bm128_sq2048_sk2048_full",
-     "qb_major"},
-    {{1, 512, 512, 8,   2, 128,    1, "fp16", 256, 0,  0, 256, 64,
-      2, 8,   0,   256, 0, "auto", 1, 1,      16,  64, 0, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq8_kv2_bn64_fp16_sq512_sk512_causal_swa256_pgd16_nb64_lazyrs",
-     "qb_major"},
-    {{1, 512, 512, 8,   2, 128,    1, "fp16", 256, 0,  0, 16, 64,
-      2, 8,   0,   256, 0, "auto", 1, 1,      16,  64, 0, 0},
-     0,
-     "division by zero",
-     0,
-     "invalid AttentionDenseSpec: division by zero",
-     NULL,
-     NULL},
-    {{1, 2048, 2048, 8,   2, 128,    1, "fp16", 256, 0,  0, 2048, 32,
-      2, 8,    0,    256, 0, "auto", 1, 1,      16,  64, 0, 0},
-     0,
-     "division by zero",
-     0,
-     "invalid AttentionDenseSpec: division by zero",
-     NULL,
-     NULL},
-    {{1, 65536, 65536, 128, 128, 128,    0, "bf16", 0, 0, 0, 256, 64,
-      2, 8,     0,     256, 0,   "auto", 1, 0,      0, 0, 0, 0},
-     1,
-     "",
-     0,
-     "K/V extent is 2147483648 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-     "rocke_attention_dense_d128_hq128_kv128_bn64_bf16_sq65536_sk65536_full_lazyrs",
-     "qb_major"},
-    {{1, 65536, 65536, 127, 127, 128,    0, "bf16", 0, 0, 0, 256, 64,
-      2, 8,     0,     256, 0,   "auto", 1, 0,      0, 0, 0, 0},
-     1,
-     "",
-     1,
-     "",
-     "rocke_attention_dense_d128_hq127_kv127_bn64_bf16_sq65536_sk65536_full_lazyrs",
-     "qb_major"},
-    {{2147483647, 2147483520, 2147483520, 2147483647, 2147483647, 128, 0, "bf16", 0,
-      0,          0,          128,        64,         2,          8,   0, 256,    0,
-      "auto",     1,          0,          0,          0,          0,   0},
-     1,
-     "",
-     0,
-     "K/V extent is 2535301046979548251017181102080 B, at or past the 32-bit buffer-resource limit "
-     "(2147483648 B)",
-     "rocke_attention_dense_d128_hq2147483647_kv2147483647_bn64_bf16_bm128_sq2147483520_"
-     "sk2147483520_full_lazyrs",
-     "qb_major"},
-};
 
 const rocke_attention_dense_traits_t* traits()
 {
@@ -674,38 +71,189 @@ bool validate_base(const void* ctx, char* reason, size_t cap)
         static_cast<const rocke_attention_dense_spec_t*>(ctx), traits(), reason, cap);
 }
 
+bool json_bool(const jd_val_t* v, bool* out)
+{
+    if(v == nullptr || v->kind != JD_BOOL)
+        return false;
+    *out = v->b;
+    return true;
+}
+
+bool json_int(const jd_val_t* v, int* out)
+{
+    double d;
+    if(!rocke_jnum(v, &d))
+        return false;
+    *out = static_cast<int>(d);
+    return static_cast<double>(*out) == d;
+}
+
+/* Optional[str]: a string, or JSON null for Python None. */
+bool json_opt_str(const jd_val_t* v, const char** out)
+{
+    if(v == nullptr)
+        return false;
+    if(v->kind == JD_NULL)
+    {
+        *out = nullptr;
+        return true;
+    }
+    *out = rocke_jstr(v);
+    return *out != nullptr;
+}
+
+/* Fill one spec field from its JSON value. Returns false for a field this C++
+ * port does not know: the Python dataclass gained or renamed a field, and the C
+ * struct has to follow. */
+bool set_field(rocke_attention_dense_spec_t* s, const char* name, const jd_val_t* v)
+{
+    struct IntField
+    {
+        const char* name;
+        int rocke_attention_dense_spec_t::*member;
+    };
+    struct BoolField
+    {
+        const char* name;
+        bool rocke_attention_dense_spec_t::*member;
+    };
+    struct StrField
+    {
+        const char* name;
+        const char* rocke_attention_dense_spec_t::*member;
+    };
+    static const IntField ints[] = {
+        {"batch", &rocke_attention_dense_spec_t::batch},
+        {"seqlen_q", &rocke_attention_dense_spec_t::seqlen_q},
+        {"seqlen_kv", &rocke_attention_dense_spec_t::seqlen_kv},
+        {"num_query_heads", &rocke_attention_dense_spec_t::num_query_heads},
+        {"num_kv_heads", &rocke_attention_dense_spec_t::num_kv_heads},
+        {"head_size", &rocke_attention_dense_spec_t::head_size},
+        {"sliding_window", &rocke_attention_dense_spec_t::sliding_window},
+        {"block_m", &rocke_attention_dense_spec_t::block_m},
+        {"block_n", &rocke_attention_dense_spec_t::block_n},
+        {"waves_per_eu", &rocke_attention_dense_spec_t::waves_per_eu},
+        {"lds_k_group_pad", &rocke_attention_dense_spec_t::lds_k_group_pad},
+        {"num_persistent", &rocke_attention_dense_spec_t::num_persistent},
+        {"block_size", &rocke_attention_dense_spec_t::block_size},
+        {"num_kv_blocks", &rocke_attention_dense_spec_t::num_kv_blocks},
+    };
+    static const BoolField bools[] = {
+        {"causal", &rocke_attention_dense_spec_t::causal},
+        {"ragged", &rocke_attention_dense_spec_t::ragged},
+        {"varlen", &rocke_attention_dense_spec_t::varlen},
+        {"persistent", &rocke_attention_dense_spec_t::persistent},
+        {"interleave", &rocke_attention_dense_spec_t::interleave},
+        {"lazy_rescale", &rocke_attention_dense_spec_t::lazy_rescale},
+        {"paged", &rocke_attention_dense_spec_t::paged},
+        {"use_sinks", &rocke_attention_dense_spec_t::use_sinks},
+        {"causal_bottom_right", &rocke_attention_dense_spec_t::causal_bottom_right},
+    };
+    static const StrField strs[] = {
+        {"dtype", &rocke_attention_dense_spec_t::dtype},
+        {"persist_decode", &rocke_attention_dense_spec_t::persist_decode},
+    };
+    for(const auto& f : ints)
+        if(std::strcmp(f.name, name) == 0)
+            return json_int(v, &(s->*f.member));
+    for(const auto& f : bools)
+        if(std::strcmp(f.name, name) == 0)
+            return json_bool(v, &(s->*f.member));
+    for(const auto& f : strs)
+        if(std::strcmp(f.name, name) == 0)
+            return json_opt_str(v, &(s->*f.member));
+    return false;
+}
+
+void check_case(int index, const jd_val_t* c)
+{
+    char where[32];
+    std::snprintf(where, sizeof(where), "case %d", index);
+
+    const jd_val_t* spec_json = rocke_jget(c, "spec");
+    const jd_val_t* expect = rocke_jget(c, "expect");
+    CHECK(spec_json != nullptr && spec_json->kind == JD_OBJ && expect != nullptr);
+    if(spec_json == nullptr || spec_json->kind != JD_OBJ || expect == nullptr)
+        return;
+
+    rocke_attention_dense_spec_t s = rocke_attention_dense_spec_default();
+    for(int i = 0; i < spec_json->obj_len; ++i)
+    {
+        const char* name = spec_json->obj[i].key;
+        if(!set_field(&s, name, spec_json->obj[i].val))
+        {
+            std::fprintf(stderr,
+                         "FAIL %s: spec field '%s' is unknown to the C++ port or has the "
+                         "wrong type; mirror the Python dataclass change in "
+                         "rocke_attention_dense_spec_t\n",
+                         where,
+                         name);
+            ++g_failures;
+            return;
+        }
+    }
+
+    bool want_valid = false;
+    bool want_preflight = false;
+    CHECK(json_bool(rocke_jget(expect, "valid"), &want_valid));
+    CHECK(json_bool(rocke_jget(expect, "preflight_ok"), &want_preflight));
+
+    char reason[ROCKE_ATTENTION_DENSE_REASON_CAP] = "";
+    const bool valid = rocke_attention_dense_spec_validate(&s, traits(), reason, sizeof(reason));
+    CHECK(valid == want_valid);
+    CHECK_STR(valid ? "" : reason, rocke_jstr(rocke_jget(expect, "reason")));
+
+    char pre[ROCKE_ATTENTION_DENSE_REASON_CAP] = "x";
+    const bool pok = rocke_attention_dense_spec_preflight(
+        &s, traits()->type_name, validate_base, &s, pre, sizeof(pre));
+    CHECK(pok == want_preflight);
+    CHECK_STR(pre, rocke_jstr(rocke_jget(expect, "preflight_reason")));
+
+    if(!want_valid)
+        return;
+    rocke_attention_dense_name_parts_t parts;
+    rocke_attention_dense_name_parts_base(&s, &parts);
+    char name[ROCKE_ATTENTION_DENSE_NAME_CAP];
+    CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_OK);
+    CHECK_STR(name, rocke_jstr(rocke_jget(expect, "kernel_name")));
+    CHECK_STR(rocke_attention_dense_spec_resolved_persist_decode(&s),
+              rocke_jstr(rocke_jget(expect, "resolved_persist_decode")));
+    int want_waves = -1;
+    int want_qpk = -1;
+    CHECK(json_int(rocke_jget(expect, "num_waves"), &want_waves));
+    CHECK(json_int(rocke_jget(expect, "num_queries_per_kv"), &want_qpk));
+    CHECK(rocke_attention_dense_spec_num_waves(&s) == want_waves);
+    CHECK(rocke_attention_dense_spec_num_queries_per_kv(&s) == want_qpk);
+}
+
 void check_vectors()
 {
-    for(size_t i = 0; i < sizeof(k_vectors) / sizeof(k_vectors[0]); ++i)
+    const char* where = "vectors file";
+    rocke_arena_t arena;
+    CHECK(rocke_arena_init(&arena, 0) == 0);
+    char err[256] = "";
+    const jd_val_t* root = rocke_json_parse(k_vectors_json, &arena, err, sizeof(err));
+    if(root == nullptr)
     {
-        const Vector& v = k_vectors[i];
-        char reason[ROCKE_ATTENTION_DENSE_REASON_CAP] = "";
-        const bool ok
-            = rocke_attention_dense_spec_validate(&v.spec, traits(), reason, sizeof(reason));
-        CHECK(ok == v.valid);
-        CHECK_STR(ok ? "" : reason, v.reason);
-
-        char pre[ROCKE_ATTENTION_DENSE_REASON_CAP] = "x";
-        const bool pok = rocke_attention_dense_spec_preflight(
-            &v.spec, traits()->type_name, validate_base, &v.spec, pre, sizeof(pre));
-        CHECK(pok == v.preflight_ok);
-        CHECK_STR(pre, v.preflight_reason);
-
-        if(v.kernel_name == NULL)
-            continue;
-        rocke_attention_dense_name_parts_t parts;
-        rocke_attention_dense_name_parts_base(&v.spec, &parts);
-        char name[ROCKE_ATTENTION_DENSE_NAME_CAP];
-        CHECK(rocke_attention_dense_kernel_name(&v.spec, &parts, name, sizeof(name)) == ROCKE_OK);
-        CHECK_STR(name, v.kernel_name);
-        CHECK_STR(rocke_attention_dense_spec_resolved_persist_decode(&v.spec),
-                  v.resolved_persist_decode);
+        std::fprintf(stderr, "FAIL: attention_dense_spec_vectors.json does not parse: %s\n", err);
+        ++g_failures;
+        rocke_arena_destroy(&arena);
+        return;
     }
+    const jd_val_t* cases = rocke_jget(root, "cases");
+    CHECK(cases != nullptr && cases->kind == JD_ARR && cases->arr_len > 0);
+    if(cases != nullptr && cases->kind == JD_ARR)
+    {
+        for(int i = 0; i < cases->arr_len; ++i)
+            check_case(i, cases->arr[i]);
+        std::printf("checked %d cases from attention_dense_spec_vectors.json\n", cases->arr_len);
+    }
+    rocke_arena_destroy(&arena);
 }
 
 void check_defaults_and_tables()
 {
-    const size_t i = 0;
+    const char* where = "defaults";
     const rocke_attention_dense_spec_t s = rocke_attention_dense_spec_default();
     CHECK(s.causal && !s.ragged && !s.varlen && s.lazy_rescale && !s.persistent);
     CHECK(s.block_m == 256 && s.block_n == 64 && s.waves_per_eu == 2);
@@ -722,7 +270,7 @@ void check_defaults_and_tables()
 
 void check_name_buffer_too_small()
 {
-    const size_t i = 0;
+    const char* where = "name buffer";
     rocke_attention_dense_spec_t s = rocke_attention_dense_spec_default();
     s.batch = 1;
     s.seqlen_q = s.seqlen_kv = 512;
