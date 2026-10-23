@@ -777,6 +777,8 @@ TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnZeroSq)
     std::vector<float> placeholder(1);
     problem.q = std::make_unique<ShallowTensor<float>>(placeholder.data(), emptyDims, emptyStrides);
     problem.o = std::make_unique<ShallowTensor<float>>(placeholder.data(), emptyDims, emptyStrides);
+    // Without stats, so the LSE shape check cannot reject the empty Q first.
+    problem.lse.reset();
     EXPECT_THROW(problem.run(), std::invalid_argument);
 }
 
