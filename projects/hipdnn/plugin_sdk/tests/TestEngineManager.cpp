@@ -122,7 +122,7 @@ TEST(TestEngineManager, AddMultipleEngines)
 
 /// Two engines hashing onto one id is an authoring collision (RFC 0003); the manager keeps
 /// the incumbent and logs the loser rather than dropping it silently. This is not the
-/// descriptor rule -- RFC 0020 §10.2.1 drops every UED in a name collision before
+/// descriptor rule -- RFC 0020 §13.2.1 drops every UED in a name collision before
 /// construction -- but the backstop for collisions that rule can't see, e.g. two
 /// hand-written engines.
 TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
