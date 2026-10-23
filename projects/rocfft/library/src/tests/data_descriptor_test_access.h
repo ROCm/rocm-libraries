@@ -22,6 +22,7 @@
 #define DATA_DESCRIPTOR_TEST_ACCESS_H
 
 #include "data_set_descriptor.h"
+#include <array>
 #include <vector>
 
 // Befriended by data_descriptor_t to let rocfft-internal-test drive its private members
@@ -41,10 +42,16 @@ struct data_descriptor_test_access
     {
         layout.full_range_reset(lengths, {}, {batch}, {}, false);
     }
-    // mimics friends setting an array type without a precision
+    // mimics friends setting an array type without a precision (offsets are kept)
     static void set_array_type(data_descriptor_t& layout, rocfft_array_type array_type)
     {
-        layout.array_type = array_type;
+        layout.set_array_type_and_offsets(array_type, layout.offsets);
+    }
+    static void set_array_type_and_offsets(data_descriptor_t&           layout,
+                                           rocfft_array_type            array_type,
+                                           const std::array<size_t, 2>& offsets)
+    {
+        layout.set_array_type_and_offsets(array_type, offsets);
     }
 };
 

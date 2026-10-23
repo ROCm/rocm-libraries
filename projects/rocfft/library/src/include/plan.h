@@ -348,12 +348,10 @@ private:
 
 struct rocfft_plan_description_t
 {
-    // Array types of the I/O data sets are stored in input_layout/output_layout
+    // Array types and in-buffer offsets of the I/O data sets are stored in
+    // input_layout/output_layout
     data_descriptor_t input_layout;
     data_descriptor_t output_layout;
-
-    std::array<size_t, 2> inOffset  = {0, 0};
-    std::array<size_t, 2> outOffset = {0, 0};
 
     std::vector<rocfft_field_t> inFields;
     std::vector<rocfft_field_t> outFields;

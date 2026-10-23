@@ -316,9 +316,7 @@ try
 
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
-        // object's I/O members to (re)set
-        auto& desc_io_offsets
-            = io == io_data_label::INPUT ? description->inOffset : description->outOffset;
+        // object's I/O member to (re)set
         auto& desc_io_layout
             = io == io_data_label::INPUT ? description->input_layout : description->output_layout;
         // user's setting
@@ -332,19 +330,18 @@ try
         // -------------------------------
         // Set/Reset description's members
         // -------------------------------
-        // array type
-        desc_io_layout.array_type = user_io_array_type;
-        // offsets
-        desc_io_offsets[0] = desc_io_offsets[1] = 0; // default if unspecified
+        // array type and offsets (0 if unspecified; offsets[1] only kept for planar types)
+        std::array<size_t, 2> io_offsets = {0, 0};
         if(user_io_offsets != nullptr)
         {
-            desc_io_offsets[0] = user_io_offsets[0];
+            io_offsets[0] = user_io_offsets[0];
             if(array_type_is_planar(user_io_array_type))
-                desc_io_offsets[1] = user_io_offsets[1];
+                io_offsets[1] = user_io_offsets[1];
         }
+        desc_io_layout.set_array_type_and_offsets(user_io_array_type, io_offsets);
         // layout parameters: implicit default strides (resp. distances) to be determined
         // at plan creation if strides are unspecified here (resp. distances are 0).
-        // NB: clear() leaves the array type (and precision) untouched.
+        // NB: clear() leaves the array type, offsets (and precision) untouched.
         desc_io_layout.clear();
         if(user_io_strides)
         {
@@ -620,8 +617,12 @@ std::string rocfft_bench_command(const rocfft_plan& plan)
     params.istride.assign(istrides.rbegin(), istrides.rend());
     params.ostride.assign(ostrides.rbegin(), ostrides.rend());
     // copy offsets
-    params.ioffset.assign(plan->desc.inOffset.begin(), plan->desc.inOffset.end());
-    params.ooffset.assign(plan->desc.outOffset.begin(), plan->desc.outOffset.end());
+    params.ioffset
+        = {plan->desc.input_layout.get_offset(0),
+           plan->desc.input_layout.num_planes() == 2 ? plan->desc.input_layout.get_offset(1) : 0};
+    params.ooffset
+        = {plan->desc.output_layout.get_offset(0),
+           plan->desc.output_layout.num_planes() == 2 ? plan->desc.output_layout.get_offset(1) : 0};
     // fields:
     auto copy_fields_to_params
         = [&](std::vector<fft_params::fft_field>& dest, const std::vector<rocfft_field_t>& src) {
@@ -1146,13 +1147,15 @@ rocfft_status
             {
             case rocfft_transform_type_complex_forward:
             case rocfft_transform_type_complex_inverse:
-                io_layout.array_type = rocfft_array_type_complex_interleaved;
+                io_layout.set_array_type_and_offsets(rocfft_array_type_complex_interleaved,
+                                                     io_layout.offsets);
                 break;
             case rocfft_transform_type_real_forward:
             case rocfft_transform_type_real_inverse:
-                io_layout.array_type = is_real_domain(dft_type, io)
-                                           ? rocfft_array_type_real
-                                           : rocfft_array_type_hermitian_interleaved;
+                io_layout.set_array_type_and_offsets(is_real_domain(dft_type, io)
+                                                         ? rocfft_array_type_real
+                                                         : rocfft_array_type_hermitian_interleaved,
+                                                     io_layout.offsets);
                 break;
             default:
                 throw std::invalid_argument("Unexpected type of transform given to "
@@ -1166,7 +1169,7 @@ rocfft_status
         {
             for(auto& brick : io_field.bricks)
             {
-                brick.layout.array_type = io_layout.array_type;
+                brick.layout.set_array_type_and_offsets(io_layout.array_type, brick.layout.offsets);
                 brick.layout.set_precision(precision);
             }
         }
@@ -1209,8 +1212,11 @@ rocfft_status
                 // single_dev_ifield and/or single_dev_ofield serve that purpose.
                 auto& single_dev_io_field
                     = io == io_data_label::INPUT ? single_dev_ifield : single_dev_ofield;
+                // brick offsets remain 0 (offsets are a property of the I/O descriptors)
+                auto brick_layout = expected_full_range;
+                brick_layout.set_array_type_and_offsets(brick_layout.get_array_type(), {0, 0});
                 std::vector<rocfft_brick_t> single_dev_io_field_bricks(
-                    1, {expected_full_range, get_current_location()});
+                    1, {brick_layout, get_current_location()});
                 single_dev_io_field
                     = std::make_optional<rocfft_field_t>(std::move(single_dev_io_field_bricks));
             }
@@ -1367,15 +1373,16 @@ rocfft_status
         const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
         if(!io_fields.empty())
             continue; // offsets are ignored if fields are used
-        const auto& io_offsets    = io == io_data_label::INPUT ? inOffset : outOffset;
-        const auto  io_array_type = io == io_data_label::INPUT ? input_layout.get_array_type()
-                                                               : output_layout.get_array_type();
-        if(io_offsets[0] != 0 || (array_type_is_planar(io_array_type) && io_offsets[1] != 0))
+        const auto& io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+        for(size_t plane = 0; plane < io_layout.num_planes(); plane++)
         {
-            if(LOG_PLAN_ENABLED())
-                *LogSingleton::GetInstance().GetPlanOS()
-                    << "Non-zero offsets are not supported yet" << std::endl;
-            return rocfft_status_invalid_offset;
+            if(io_layout.get_offset(plane) != 0)
+            {
+                if(LOG_PLAN_ENABLED())
+                    *LogSingleton::GetInstance().GetPlanOS()
+                        << "Non-zero offsets are not supported yet" << std::endl;
+                return rocfft_status_invalid_offset;
+            }
         }
     }
 
@@ -1482,36 +1489,16 @@ rocfft_status
             if(*expected_out_layout != out_layout)
                 throw std::runtime_error("Undistributed input and output layout are not compatible "
                                          "for single-device in-place transforms.");
-            // Check offsets if they're not to be ignored
-            if(inFields.empty() && outFields.empty())
+            // Offsets are compared above (all planes; real == 2 * hermitian for real
+            // transforms) unless they're ignored for fields. If input (resp. output) is a
+            // lone-brick field while output (resp. input) has no field set, the input
+            // (resp. output) offset values will be ignored and nonzero offset values on
+            // output (resp. input) cannot be accepted (note: planar array types not
+            // supported if any I/O field is set)
+            if((inFields.empty() && input_layout.get_offset() != 0 && !outFields.empty())
+               || (outFields.empty() && output_layout.get_offset() != 0 && !inFields.empty()))
             {
-                if(dft_type == rocfft_transform_type_complex_forward
-                   || dft_type == rocfft_transform_type_complex_inverse)
-                {
-                    if(inOffset[0] != outOffset[0]
-                       || (array_type_is_planar(input_layout.get_array_type())
-                           && inOffset[1] != outOffset[1]))
-                        throw std::runtime_error("Identical offsets are required for single-device "
-                                                 "in-place complex transforms.");
-                }
-                else
-                {
-                    const auto& real_offset
-                        = dft_type == rocfft_transform_type_real_forward ? inOffset : outOffset;
-                    const auto& hermitian_offset
-                        = dft_type == rocfft_transform_type_real_forward ? outOffset : inOffset;
-                    if(real_offset[0] != 2 * hermitian_offset[0])
-                        throw std::runtime_error(
-                            "Inconsistent offsets for single-device in-place real transforms.");
-                }
-            }
-            else if((inFields.empty() && inOffset[0] != 0 && !outFields.empty())
-                    || (outFields.empty() && outOffset[0] != 0 && !inFields.empty()))
-            {
-                // If input (resp. output) is a lone-brick field while output (resp. input) has
-                // no field set, the input (resp. output) offset values will be ignored and nonzero
-                // offset values on output (resp. input) cannot be accepted (note: planar array
-                // types not supported if any I/O field is set)
+                // NB: unreachable while non-zero offsets are rejected above (AIFFT-549)
                 throw std::runtime_error("Nonzero input (resp. output) offset values cannot be "
                                          "used for in-place operations if the output (resp. input) "
                                          "layout is dictated by a lone-brick field.");
@@ -5028,16 +5015,14 @@ try
     rocfft_cout << "batch size: " << plan->desc.batch() << std::endl;
     rocfft_cout << std::endl;
 
-    rocfft_cout << "input offset: " << plan->desc.inOffset[0];
-    if((plan->desc.input_layout.get_array_type() == rocfft_array_type_complex_planar)
-       || (plan->desc.input_layout.get_array_type() == rocfft_array_type_hermitian_planar))
-        rocfft_cout << ", " << plan->desc.inOffset[1];
+    rocfft_cout << "input offset: " << plan->desc.input_layout.get_offset(0);
+    if(plan->desc.input_layout.num_planes() == 2)
+        rocfft_cout << ", " << plan->desc.input_layout.get_offset(1);
     rocfft_cout << std::endl;
 
-    rocfft_cout << "output offset: " << plan->desc.outOffset[0];
-    if((plan->desc.output_layout.get_array_type() == rocfft_array_type_complex_planar)
-       || (plan->desc.output_layout.get_array_type() == rocfft_array_type_hermitian_planar))
-        rocfft_cout << ", " << plan->desc.outOffset[1];
+    rocfft_cout << "output offset: " << plan->desc.output_layout.get_offset(0);
+    if(plan->desc.output_layout.num_planes() == 2)
+        rocfft_cout << ", " << plan->desc.output_layout.get_offset(1);
     rocfft_cout << std::endl;
     rocfft_cout << std::endl;
 
