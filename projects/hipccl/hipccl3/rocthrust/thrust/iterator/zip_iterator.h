@@ -671,7 +671,7 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
 #endif
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-  return make_zip_iterator(_THRUST_STD::make_tuple(its...));
+  return thrust::make_zip_iterator(_THRUST_STD::make_tuple(its...));
 #else
   return make_zip_iterator(thrust::make_tuple(its...));
 #endif
