@@ -127,7 +127,7 @@ class Layout {
             if (!std::in_range<ptrdiff_t>(dimensions[axis])) {
                 return Unexpected(LayoutError::ExtentOutOfRange);
             }
-            const auto next = getOffsetMultiply(dimensions[axis], stride);
+            const auto next = LayoutOffset::getOffsetMultiply(dimensions[axis], stride);
             if (!next) {
                 return Unexpected(LayoutError::ContiguousStrideOverflow);
             }
@@ -192,7 +192,8 @@ class Layout {
     // Negative results and overlapping mappings are permitted without storage.
     detail::Expected<ptrdiff_t, detail::LayoutFailure> elementOffset(
         std::span<const size_t> indices) const noexcept {
-        return detail::getElementOffset(m_shape.dimensions(), m_strides, m_offset, indices);
+        return detail::LayoutOffset::getElementOffset(m_shape.dimensions(), m_strides, m_offset,
+                                                      indices);
     }
 
     bool operator==(const Layout&) const noexcept = default;
@@ -221,11 +222,12 @@ inline Expected<std::pair<ptrdiff_t, ptrdiff_t>, LayoutError> getElementBounds(
     ptrdiff_t lower = layout.offset();
     ptrdiff_t upper = lower;
     for (size_t axis = 0; axis < dimensions.size(); ++axis) {
-        const auto delta = getOffsetMultiply(dimensions[axis] - 1, layout.strides()[axis]);
+        const auto delta =
+            LayoutOffset::getOffsetMultiply(dimensions[axis] - 1, layout.strides()[axis]);
         if (!delta) {
             return Unexpected(LayoutError::OffsetMultiplyOverflow);
         }
-        auto sum = getOffsetAdd(*delta < 0 ? lower : upper, *delta);
+        auto sum = LayoutOffset::getOffsetAdd(*delta < 0 ? lower : upper, *delta);
         if (!sum) {
             return Unexpected(LayoutError::OffsetAddOverflow);
         }
