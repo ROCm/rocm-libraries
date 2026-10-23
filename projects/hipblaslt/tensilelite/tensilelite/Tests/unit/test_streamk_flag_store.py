@@ -3,12 +3,15 @@
 
 """Check the real StreamK flag emitter, including its active lanes on a GPU."""
 
+import re
 import struct
 import subprocess
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from rocisa import rocIsa
 from rocisa.code import Module, SrdUpperValue
 from rocisa.container import ContinuousRegister, EXEC, sgpr, vgpr
@@ -116,6 +119,103 @@ def test_flag_store_preserves_fences_and_registers(isa, wave, scalar):
     writer.sgprPool.checkIn(16)
     assert writer.vgprPool.checkOut(7, "balance check") == 1
     writer.vgprPool.checkIn(1)
+
+
+def _flag_store_indices(lines):
+    # Follow descriptors copied from AddressFlags, so a store bypassing the
+    # shared emitter is still checked even if it has no "set/reset flag" comment.
+    bases = set()
+    for index, line in enumerate(lines):
+        move = re.match(r"s_mov_b64 s\[(\d+):(\d+)\], (.*)", line)
+        if move:
+            base = int(move[1])
+            bases.discard(base)
+            if "sgprAddressFlags" in move[3]:
+                bases.add(base)
+        move = re.match(r"s_mov_b32 s(\d+),", line)
+        if move:
+            register = int(move[1])
+            bases.difference_update((register, register - 1))
+        store = re.match(r"buffer_store_\w+ \S+, \S+, s\[(\d+):(\d+)\]", line)
+        if store and int(store[1]) in bases:
+            yield index
+
+
+@pytest.mark.parametrize("arch,isa,wave", [("gfx950", (9, 5, 0), 64), ("gfx1250", (12, 5, 0), 32)])
+@pytest.mark.parametrize(
+    "assignment,tree",
+    [("StaticGrid", 0), ("StaticGrid", 1), ("DynamicWorkQueue", 0), ("Hybrid", 0)],
+)
+def test_generated_flag_stores_select_one_wave_and_lane(
+    tmp_path, monkeypatch, arch, isa, wave, assignment, tree
+):
+    from config_harness import emit_kernels_from_config
+    import tensilelite.BenchmarkProblems as benchmark_problems
+
+    _FlagWriter(isa, wave)
+    fixture = (
+        Path(__file__).parent
+        / "characterization/_codegen/data/test_data/_designed/gfx942/streamk.yaml"
+    )
+    config = yaml.safe_load(fixture.read_text())
+    group = config["BenchmarkProblems"][0][1]
+    forks = {key: value for fork in group["ForkParameters"] for key, value in fork.items()}
+    forks.update(
+        WorkAssignment=[assignment],
+        StreamKFixupTreeReduction=[tree],
+        StreamKAtomic=[0],
+        WavefrontSize=[wave],
+    )
+    if wave == 32:
+        # Two waves leave room for the gfx1250 hybrid kernel's persistent state.
+        forks["MatrixInstruction"][0][-2:] = [1, 2]
+    group["ForkParameters"] = [{key: value} for key, value in forks.items()]
+    path = tmp_path / "flags.yaml"
+    path.write_text(yaml.safe_dump(config))
+
+    def serial_map(function, objects, *_args, **_kwargs):
+        return [function(*args) for args in objects]
+
+    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
+    results = emit_kernels_from_config(
+        path, limit=1, arch=arch, canonical=False, expected_fork_count=1
+    )
+    assert len(results) == 1
+    _, source, error = results[0]
+    assert error == 0 and "overflowed resources" not in source
+    lines = [line.split("//")[0].strip() for line in source.splitlines()]
+    stores = list(_flag_store_indices(lines))
+    assert len(stores) >= 2  # Publication and reset must both be exercised.
+    assert sum("// set flag" in line for line in source.splitlines()) == 1
+    assert sum("// reset flag" in line for line in source.splitlines()) == len(stores) - 1
+    for store in stores:
+        # Check the caller's wave selection as well as the shared lane election.
+        guard = max(
+            index
+            for index in range(store)
+            if lines[index].startswith("s_cbranch_scc0 label_SK_SkipFlag")
+        )
+        target = lines[guard].split()[1] + ":"
+        end = lines.index(target, guard + 1)
+        assert guard < store < end
+        previous = [line for line in lines[:guard] if line and not line.startswith("s_wait")]
+        compare = re.fullmatch(r"s_cmp_eq_u32 (s\d+), 0", previous[-1])
+        assert compare is not None
+        assert re.fullmatch(
+            r"v_readfirstlane_b32 " + compare[1] + r", v\[vgprSerial(?:-256)?\]", previous[-2]
+        )
+        block = lines[guard + 1 : end]
+        save = next(line for line in block if line.startswith(f"s_and_saveexec_b{wave}"))
+        registers = save.split(" ", 1)[1].split(", ")
+        assert registers[0] == registers[1]
+        saved = registers[0]
+        low = saved if wave == 32 else "s" + re.fullmatch(r"s\[(\d+):(\d+)\]", saved)[1]
+        assert f"s_sub_u32 {low}, 0, exec_lo" in block[: block.index(save)]
+        if wave == 64:
+            high = "s" + re.fullmatch(r"s\[(\d+):(\d+)\]", saved)[2]
+            assert f"s_subb_u32 {high}, 0, exec_hi" in block[: block.index(save)]
+        restore = f"s_mov_b{wave} {'exec_lo' if wave == 32 else 'exec'}, {saved}"
+        assert block.index(save) < block.index(lines[store]) < block.index(restore)
 
 
 def _trace_kernel(writer, arch, wave):
