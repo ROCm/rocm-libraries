@@ -570,6 +570,161 @@ namespace
         return ok;
     }
 
+    /** What runGradientGemm found. */
+    enum class GradientResult
+    {
+        Correct, // D is the gradient of the caller's E, which came back unchanged
+        Unsupported, // the heuristic offers no algorithm for the problem
+        Wrong, // a call failed, D is wrong, or E changed
+    };
+
+    /**
+     * One fp16 DGELU matmul with separate C and D and no algo, with A and B all
+     * ones and E +8 on even rows and -8 on odd ones.
+     *
+     * The GELU derivative is 1 at +8 and 0 at -8 to well within fp16, in the
+     * tanh form and the erf form alike, so D must be exactly k on even rows and
+     * zero on odd ones. A product scaled by a zeroed E would be k / 2.
+     */
+    GradientResult runGradientGemm(int64_t m, int64_t n, int64_t k)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return GradientResult::Wrong;
+
+        const size_t          rows     = static_cast<size_t>(m);
+        const size_t          elements = static_cast<size_t>(m * n);
+        std::vector<uint16_t> e(elements);
+        for(size_t i = 0; i < elements; i++)
+            e[i] = halfBits((i % rows) % 2 == 0 ? 8.0f : -8.0f);
+
+        void*        dA      = nullptr;
+        void*        dB      = nullptr;
+        void*        dC      = nullptr;
+        void*        dD      = nullptr;
+        void*        dE      = nullptr;
+        void*        dWs     = nullptr;
+        const size_t wsBytes = 32 * 1024 * 1024;
+
+        bool ok = hipMalloc(&dA, m * k * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dB, k * n * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dC, elements * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dD, elements * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dE, elements * sizeof(uint16_t)) == hipSuccess
+                  && hipMalloc(&dWs, wsBytes) == hipSuccess;
+
+        if(ok)
+        {
+            const std::vector<uint16_t> onesA(static_cast<size_t>(m * k), halfBits(1.0f));
+            const std::vector<uint16_t> onesB(static_cast<size_t>(k * n), halfBits(1.0f));
+            ok = hipMemcpy(dA, onesA.data(), onesA.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
+                     == hipSuccess
+                 && hipMemcpy(
+                        dB, onesB.data(), onesB.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
+                        == hipSuccess
+                 && hipMemset(dC, 0, elements * sizeof(uint16_t)) == hipSuccess
+                 && hipMemset(dD, 0, elements * sizeof(uint16_t)) == hipSuccess
+                 && hipMemcpy(dE, e.data(), elements * sizeof(uint16_t), hipMemcpyHostToDevice)
+                        == hipSuccess;
+        }
+
+        hipblasLtMatrixLayout_t     layoutA = nullptr, layoutB = nullptr, layoutC = nullptr;
+        hipblasLtMatmulDesc_t       desc     = nullptr;
+        hipblasLtMatmulPreference_t pref     = nullptr;
+        const uint32_t              epilogue = HIPBLASLT_EPILOGUE_DGELU;
+        const int64_t               ldE      = m;
+        const uint64_t              maxWs    = wsBytes;
+
+        if(ok)
+        {
+            ok = hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &dE, sizeof(dE))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulDescSetAttribute(
+                        desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &ldE, sizeof(ldE))
+                        == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS
+                 && hipblasLtMatmulPreferenceSetAttribute(
+                        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                        == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        GradientResult result = GradientResult::Wrong;
+        if(ok)
+        {
+            // Only asks whether anything can run the problem. The matmul passes
+            // no algo, so the call that tunes launches the winner.
+            hipblasLtMatmulHeuristicResult_t heuristic[1];
+            int                              returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(
+                   handle, desc, layoutA, layoutB, layoutC, layoutC, pref, 1, heuristic, &returned)
+                   != HIPBLAS_STATUS_SUCCESS
+               || returned == 0)
+                result = GradientResult::Unsupported;
+            else
+            {
+                const float alpha = 1.0f;
+                const float beta  = 0.0f;
+                ok                = hipblasLtMatmul(handle,
+                                     desc,
+                                     &alpha,
+                                     dA,
+                                     layoutA,
+                                     dB,
+                                     layoutB,
+                                     &beta,
+                                     dC,
+                                     layoutC,
+                                     dD,
+                                     layoutC,
+                                     nullptr,
+                                     dWs,
+                                     wsBytes,
+                                     nullptr)
+                         == HIPBLAS_STATUS_SUCCESS
+                     && hipDeviceSynchronize() == hipSuccess;
+
+                std::vector<uint16_t> d(elements), eAfter(elements);
+                ok = ok
+                     && hipMemcpy(d.data(), dD, elements * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                            == hipSuccess
+                     && hipMemcpy(
+                            eAfter.data(), dE, elements * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                            == hipSuccess;
+
+                // The odd rows may come out as either signed zero.
+                const uint16_t product = halfBits(static_cast<float>(k));
+                for(size_t i = 0; ok && i < elements; i++)
+                    ok = (i % rows) % 2 == 0 ? d[i] == product : (d[i] & 0x7fff) == 0;
+                ok     = ok && eAfter == e;
+                result = ok ? GradientResult::Correct : GradientResult::Wrong;
+            }
+        }
+
+        if(pref)
+            hipblasLtMatmulPreferenceDestroy(pref);
+        if(desc)
+            hipblasLtMatmulDescDestroy(desc);
+        for(auto layout : {layoutA, layoutB, layoutC})
+            if(layout)
+                hipblasLtMatrixLayoutDestroy(layout);
+        for(void* buffer : {dWs, dE, dD, dC, dB, dA})
+            static_cast<void>(hipFree(buffer));
+        hipblasLtDestroy(handle);
+
+        return result;
+    }
+
     /**
      * Distinct (solution index, kernel name) pairs the heuristic offers for this
      * shape, newest API surface only.
@@ -1378,6 +1533,20 @@ namespace
         enterMode("cache", m_path);
         ASSERT_TRUE(runGemm(128, 128, 128, 0.0f, false, false, true));
         EXPECT_GE(counters().hits, 1u) << "tuned entry did not replay";
+    }
+
+    // A gradient epilogue reads E, which tune mode copies into its scratch for
+    // the candidates. The call that tunes must still compute the gradient of
+    // the caller's E, and leave that E as it was.
+    TEST_F(TuningTune_pre_checkin, TunedGradientEpilogueReadsTheCallersAux)
+    {
+        enterMode("tune", m_path);
+        const auto result = runGradientGemm(128, 128, 128);
+        if(result == GradientResult::Unsupported)
+            GTEST_SKIP() << "the heuristic offers no DGELU algorithm for this problem";
+        EXPECT_TRUE(result == GradientResult::Correct)
+            << "the tuned gradient is wrong, or tuning changed the caller's E";
+        EXPECT_EQ(counters().tuned, 1u) << "the gradient call was not tuned";
     }
 
     // A recorded datatype must parse back as the datatype it was written from.
@@ -2576,10 +2745,10 @@ namespace
         EXPECT_GT(plan.total, capped.cap);
     }
 
-    // The block count is hipblaslt-bench's for the same problem. A zero beta
-    // leaves C unread, so with C and D apart, fp16 1024^3 and a 512 MiB budget
-    // the bench plans 86 blocks of A, B and D, and 64 once beta reads C.
-    TEST_F(TuningScratchPlan_pre_checkin, BlockCountFollowsTheBenchFootprint)
+    // With C and D apart, fp16 1024^3 occupies 6 MiB for A, B and D, and
+    // 8 MiB once beta reads C. These are actual tensor bytes; the benchmark's
+    // C estimate uses sizeof(hipDataType) instead of the element size.
+    TEST_F(TuningScratchPlan_pre_checkin, BlockCountUsesActualTensorBytes)
     {
         PlanCase c;
         c.m = c.n = c.k = 1024;

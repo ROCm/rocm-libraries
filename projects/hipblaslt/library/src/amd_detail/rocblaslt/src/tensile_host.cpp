@@ -4506,10 +4506,10 @@ namespace
                              layout.strideScaleAlphaVec})
             perBlock = addSat(perBlock, stride);
 
-        // The block count is hipblaslt-bench's, from its footprint rather than
-        // the spans above, so the two plan the same rotation for one problem:
-        // C only when beta reads it, and every tensor in whole columns and
-        // batches. A block-scaled scale is in neither, as it is not rotated.
+        // Size rotation with the shared benchmark formulas and actual tensor
+        // bytes, rather than the allocation spans above. C counts only when
+        // beta reads it; matrices count whole columns and batches. Block-scaled
+        // and w4a16 scales remain caller-owned and do not count here.
         const auto elements = [&](size_t ld, size_t cols, size_t batchStride) {
             return hipblaslt_bench::rotating_tensor_elements(
                 toInt64(ld), toInt64(cols), toInt64(prob.batch_count), toInt64(batchStride));
@@ -4664,7 +4664,8 @@ namespace
     bool isFusedAllToAll(const RocblasltContractionProblem& prob)
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        return prob.fused_epilogue != nullptr;
+        RocblasltFusedEpilogueInfo info;
+        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info) && info.hasA2APrefix;
 #else
         static_cast<void>(prob);
         return false;

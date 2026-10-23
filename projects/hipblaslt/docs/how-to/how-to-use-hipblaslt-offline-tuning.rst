@@ -263,8 +263,10 @@ written under, with 0 beating every finite one, or when the search differs from 
 it. Re-running the same workload with the same settings therefore costs nothing: the search would
 measure the same candidates and stop in the same place, so it is not repeated and no second row is
 appended. Within a single process a shape is benchmarked at most once in any case, including when an
-attempt fails after ``tuning-start``. Rows written before these columns existed count as finished
-searches.
+attempt fails after ``tuning-start`` and when a later call cannot use the winner, for example because
+it allows less workspace. Such a call runs on another row that supports it, or on default selection,
+and a later process that meets it with no row it can use tunes it again. Rows written before these
+columns existed count as finished searches.
 
 Use the ceiling to bound how long tuning may run, not as a way to tune faster; to tune faster, reduce
 the candidate list or the iteration counts.
