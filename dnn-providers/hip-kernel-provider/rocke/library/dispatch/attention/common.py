@@ -873,6 +873,14 @@ class AttentionSpec:
     # (see :meth:`identity`).
     emit_lse: bool = False
 
+    def __post_init__(self) -> None:
+        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
+        # (1, "yes") would silently produce an LSE identity: refuse it instead.
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
+
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
         so an LSE-off spec keeps the hash that stored caches already hold."""
