@@ -1491,6 +1491,73 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardWithLSE)
     }
 }
 
+TEST(TestCpuFpReferenceSdpaBwd, BackwardWithFullyAdditiveInfMaskedRows)
+{
+    constexpr float INF = std::numeric_limits<float>::infinity();
+
+    // [B=1, H=2, Hkv=1, Sq=2, Skv=4, D=4] (GQA)
+    Tensor<float> q({1, 2, 2, 4});
+    Tensor<float> k({1, 1, 4, 4});
+    Tensor<float> v({1, 1, 4, 4});
+    Tensor<float> o({1, 2, 2, 4});
+    Tensor<float> dO({1, 2, 2, 4});
+    Tensor<float> dQ({1, 2, 2, 4});
+    Tensor<float> dK({1, 1, 4, 4});
+    Tensor<float> dV({1, 1, 4, 4});
+    Tensor<float> lse({1, 2, 2, 1});
+    Tensor<float> mask({1, 1, 2, 4}); // [1, 1, Sq, Skv]
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 500);
+    k.fillWithRandomValues(-1.0f, 1.0f, 501);
+    v.fillWithRandomValues(-1.0f, 1.0f, 502);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 503);
+    mask.fillWithValue(0.0f);
+
+    // Row 0 is fully masked, row 1 is partially masked
+    for(int skv = 0; skv < 4; ++skv)
+    {
+        mask.setHostValue(-INF, 0, 0, 0, skv);
+    }
+    mask.setHostValue(-INF, 0, 0, 1, 0);
+
+    // Forward pass with additive mask
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, &mask, false, &lse);
+
+    // Backward pass with additive mask
+    CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV, std::nullopt, &lse, &mask, false);
+
+    // No NaNs or Infs in gradients, even with fully masked rows
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int sq = 0; sq < 2; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                EXPECT_TRUE(std::isfinite(dQ.getHostValue(0, h, sq, d)));
+            }
+        }
+    }
+    for(int skv = 0; skv < 4; ++skv)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            EXPECT_TRUE(std::isfinite(dK.getHostValue(0, 0, skv, d)));
+            EXPECT_TRUE(std::isfinite(dV.getHostValue(0, 0, skv, d)));
+        }
+    }
+
+    for(int d = 0; d < 4; ++d)
+    {
+        // Fully masked query row 0 gets zero dQ for both Q heads
+        EXPECT_EQ(dQ.getHostValue(0, 0, 0, d), 0.0f);
+        EXPECT_EQ(dQ.getHostValue(0, 1, 0, d), 0.0f);
+
+        // Key 0 is masked for both rows, so it gets no gradients
+        EXPECT_EQ(dK.getHostValue(0, 0, 0, d), 0.0f);
+        EXPECT_EQ(dV.getHostValue(0, 0, 0, d), 0.0f);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Finite-difference gradient checking
 // ---------------------------------------------------------------------------

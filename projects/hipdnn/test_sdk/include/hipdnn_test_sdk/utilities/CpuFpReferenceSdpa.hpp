@@ -650,6 +650,7 @@ public:
                     // Step 2: Recompute attention scores and probabilities
                     // Option A: Use LSE if available (efficient)
                     // Option B: Recompute softmax from scratch
+                    std::vector<bool> isMaskedPos(static_cast<size_t>(seqKv), false);
                     if(lse != nullptr)
                     {
                         // Efficient recomputation using LSE from forward pass
@@ -664,6 +665,7 @@ public:
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
                                 probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                                isMaskedPos[static_cast<size_t>(skv)] = true;
                                 continue;
                             }
 
@@ -684,8 +686,18 @@ public:
                             {
                                 const auto maskIndices
                                     = computeMaskIndex(attnMask->dims(), b, hQ, sq, skv);
-                                scores[static_cast<size_t>(skv)] += static_cast<ComputeDataType>(
+                                const auto maskVal = static_cast<ComputeDataType>(
                                     attnMask->getHostValue(maskIndices));
+                                if(maskVal == -std::numeric_limits<ComputeDataType>::infinity())
+                                {
+                                    scores[static_cast<size_t>(skv)]
+                                        = -std::numeric_limits<ComputeDataType>::infinity();
+                                    probs[static_cast<size_t>(skv)]
+                                        = static_cast<ComputeDataType>(0.0);
+                                    isMaskedPos[static_cast<size_t>(skv)] = true;
+                                    continue;
+                                }
+                                scores[static_cast<size_t>(skv)] += maskVal;
                             }
 
                             // Recompute probability using LSE:
@@ -709,6 +721,7 @@ public:
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
+                                isMaskedPos[static_cast<size_t>(skv)] = true;
                                 continue;
                             }
 
@@ -744,6 +757,7 @@ public:
                                == -std::numeric_limits<ComputeDataType>::infinity())
                             {
                                 probs[static_cast<size_t>(skv)] = static_cast<ComputeDataType>(0.0);
+                                isMaskedPos[static_cast<size_t>(skv)] = true;
                             }
                             else
                             {
@@ -752,9 +766,14 @@ public:
                                 sumExp += probs[static_cast<size_t>(skv)];
                             }
                         }
-                        for(int64_t skv = 0; skv < seqKv; ++skv)
+
+                        // Normalize probabilities if sumExp > 0 (row not fully masked)
+                        if(sumExp > static_cast<ComputeDataType>(0.0))
                         {
-                            probs[static_cast<size_t>(skv)] /= sumExp;
+                            for(int64_t skv = 0; skv < seqKv; ++skv)
+                            {
+                                probs[static_cast<size_t>(skv)] /= sumExp;
+                            }
                         }
                     }
 
@@ -777,7 +796,7 @@ public:
                     // and accumulate gradients
                     for(int64_t skv = 0; skv < seqKv; ++skv)
                     {
-                        if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                        if(isMaskedPos[static_cast<size_t>(skv)])
                         {
                             continue;
                         }
