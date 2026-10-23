@@ -544,7 +544,7 @@ TEST_F(HostLevel1, spvv_transpose_complex_not_implemented)
                               temp),
                rocsparse_status_not_implemented);
 
-    rocsparse_clients_log_hip_error("hipFree", hipFree(temp));
+    EXPECT_EQ(hipFree(temp), hipSuccess);
 }
 
 // ---------------------------------------------------------------------------
