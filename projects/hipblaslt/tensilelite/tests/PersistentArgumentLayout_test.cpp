@@ -533,6 +533,17 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
                   pointerArray ? static_cast<void const*>(batchBias) : inputs.bias);
         EXPECT_EQ(value<uint32_t>(custom.args, "StrideA0"), initialStrides ? 1u : problem.a().strides()[1]);
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
+        if(layout == 2 && !initialStrides && !pointerArray && useBeta && k != 0 && alpha != 0.0f)
+        {
+            solution.problemType.useGradient = true;
+            problem.setUseGradient(true);
+            problem.setBias(rocisa::DataType::Float, 257, 521, true, ContractionProblemGemm::D);
+            const auto biasLaunch = solution.resolvePersistentSettings(problem, device);
+            ASSERT_GT(biasLaunch.clusterSchedule.biasWorkspaceOffset, 0u);
+            const auto biasCall = solution.generateCustomCall<true>(problem, inputs, device, biasLaunch);
+            EXPECT_EQ(value<void const*>(biasCall.args, "AddressBias"),
+                      static_cast<uint8_t*>(inputs.ws) + biasLaunch.clusterSchedule.biasWorkspaceOffset);
+        }
     }
 }
 
@@ -1182,6 +1193,9 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
     {
         ContractionSolution solution;
         configureClusterStreamK(solution, 4, 2);
+        solution.sizeMapping.macroTile = {64, 128, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1}; // Four wave32 waves.
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.problemType.useBias = 1;
         solution.problemType.useGradient = true;
         auto problem = clusterProblem(129, 129, 4097, 1);
@@ -1189,12 +1203,15 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
         problem.setUseGradient(true);
         problem.setBias(rocisa::DataType::Float, 129, 0, true, source);
         auto device = persistentDevice(128);
+        device.processor = AMDGPU::Processor::gfx1250;
+        device.wavefrontSize = 32;
         auto launch = solution.resolvePersistentSettings(problem, device);
         ASSERT_GT(launch.clusterSchedule.partialSlots, 0u);
-        const size_t partialBytes = launch.clusterSchedule.partialSlots * 128 * 128 * sizeof(float);
+        const size_t partialBytes = launch.clusterSchedule.partialSlots * 64 * 128 * sizeof(float);
+        const size_t biasTile = source == ContractionProblemGemm::TENSOR::A ? 64 : 128;
         const size_t biasBytes = source == ContractionProblemGemm::TENSOR::D
             ? 129 * 129 * sizeof(float)
-            : launch.clusterSchedule.partialSlots * 128 * 64 * sizeof(float);
+            : launch.clusterSchedule.partialSlots * biasTile * 32 * sizeof(float);
         EXPECT_EQ(launch.clusterSchedule.biasWorkspaceOffset, partialBytes);
         EXPECT_EQ(launch.clusterSchedule.biasWorkspaceBytes, biasBytes);
         EXPECT_EQ(launch.workspaceBytes, partialBytes + biasBytes);
