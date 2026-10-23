@@ -5,7 +5,12 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 5.3.0
 
+### Changed
+* The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
+
 ### Resolved issues
+* Fixed `rocsparse_spilu0` with a zero batch stride (all batch instances sharing the same values) for CSR matrices with long rows, that is, at least 512 non-zeros in a row on wave32 devices and 1024 on wave64 devices. The kernel launched one grid row per batch instance although the workspace holds the completion flags of a single instance, so the instances after the first accessed memory outside the workspace. The kernel now runs a single instance, as the other CSR `rocsparse_spilu0` kernel already did.
+* Fixed incomplete factorizations with a zero batch stride for `rocsparse_spic0` (CSR and BSR), `rocsparse_spilu0` (BSR), and `rocsparse_spildlt0` (CSR). The kernels launched one grid row per batch instance while every instance wrote the same values, so concurrent instances raced on those values and reported singularity positions for an instance that never ran. A zero value stride now factorizes a single instance, and that instance's singularity positions are copied to the others. `rocsparse_spildlt0` still writes each instance's diagonal output.
 * Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` rejecting rows whose hash table exactly fills the device shared-memory limit. The 8192-entry bucket was not checked, so 64-bit column indices requested 64 KiB of dynamic LDS, and a hash equal to the opt-in limit was still launched. Both now fall back to the bitmap path. This showed up as `rocsparse_status_internal_error` in the `GemmCalcGrids` csrgemm tests.
 * Fixed `rocsparse_Xcsr2hyb` leaving dangling ELL and COO pointers in a reused HYB matrix when the new conversion had no ELL or COO part (including `m == 0` or `n == 0`). A later `rocsparse_destroy_hyb_mat` or `rocsparse_Xcsr2hyb` freed them a second time.
 
