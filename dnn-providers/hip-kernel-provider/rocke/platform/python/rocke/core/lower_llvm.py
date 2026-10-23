@@ -64,6 +64,8 @@ from .ir import (
     Value,
     VectorType,
     _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
     _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
@@ -1864,6 +1866,23 @@ class _Lowerer:
             if f"%{p.name}" == v.name:
                 return _param_llvm_type(p)
         return _llvm_type(v.type)
+
+    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
+        """Refuse ``op_name`` when the module types its ``ptr`` operand other
+        than ``ptr addrspace(1)``.
+
+        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
+        check the IR type, but a parameter's ``addr_space`` override (such as
+        ``"constant"``) moves its header type away from it, and the emitted
+        instruction would then not match the header. The C++ engine
+        (``ll_require_global_header_ptr``) refuses with the same text.
+        """
+        header = self._ptr_llvm_type(ptr)
+        if header != "ptr addrspace(1)":
+            raise TypeError(
+                f"{op_name} ptr must be a global pointer, got {header} "
+                "(its parameter's addr_space)"
+            )
 
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
@@ -5319,6 +5338,7 @@ class _Lowerer:
         # ptr + byte_off as a new global pointer (getelementptr i8). The
         # offset must be i64 so block bases beyond 2 GiB do not overflow.
         ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_add", ptr)
         off_ty = _llvm_type(off.type)
         if off_ty == "i32":
             off64 = self._fresh("goff64")
@@ -5334,12 +5354,25 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off without ``inbounds``: the result may point outside
+        # the allocation, so the compiler must not assume it does not.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_offset", ptr)
+        self._current().emit(
+            f"  {op.result.name} = getelementptr i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {self._operand(off)}"
+        )
+
     def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
-        if len(op.operands) != 1 or len(op.results) != 1:
-            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._require_global_header_ptr("global_ptr_to_i64", ptr)
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
         )

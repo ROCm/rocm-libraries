@@ -1014,6 +1014,50 @@ static rocke_status_t _op_tile_global_ptr_add(rocke_h_lowerer_t* lw, const rocke
     return lw->status;
 }
 
+/* Python _op_tile_global_ptr_offset: integer arithmetic, so the sum is not an
+ * inbounds pointer step; the result keeps the pointer's element type. */
+static rocke_status_t _op_tile_global_ptr_offset(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[256];
+    const char* hip_type;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    hip_type = rocke_h_type_to_hip(lw, op->results[0]->type);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s)((uintptr_t)%s + (uint64_t)%s);",
+                  hip_type,
+                  rocke_h_name(lw, op->results[0]),
+                  hip_type,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]));
+    return lw->status;
+}
+
+/* Python _op_tile_global_ptr_to_i64 */
+static rocke_status_t _op_tile_global_ptr_to_i64(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_global_ptr_to_i64_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    rocke_h_emitf(lw,
+                  "int64_t %s = (int64_t)(uintptr_t)%s;",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, op->operands[0]));
+    return lw->status;
+}
+
 /* ======================= buffer resource descriptor ===================== */
 
 /* Python _op_tile_buffer_rsrc */
@@ -1788,6 +1832,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},
+           {ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, _op_tile_global_ptr_offset},
+           {ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, _op_tile_global_ptr_to_i64},
            {ROCKE_OP_TILE_BUFFER_RSRC, _op_tile_buffer_rsrc},
            /* buffer load/store */
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},

@@ -903,6 +903,68 @@ def _buffer_op_bytes(op: Op) -> int:
     return _buffer_vector_bytes(op.name, role, access_type)
 
 
+def _global_ptr_offset_error(
+    ptr_type: Type, byte_off_type: Type, result_type: Optional[Type] = None
+) -> Optional[str]:
+    """The error for a ``global_ptr_offset`` whose operands (and, once built,
+    result) have these types, or None when they are valid.
+
+    The pointer is a global pointer and the result has its type. The offset is
+    i64 and is not widened implicitly: it may be negative (the result may point
+    before the allocation), and zero-extending an i32 would turn -1 into 4 GiB.
+    The builder, the verifier and every lowering use this rule, and the C++
+    engine (``rocke_i_global_ptr_offset_error``) reports the same texts.
+    """
+    if not isinstance(ptr_type, PtrType) or ptr_type.space != "global":
+        return f"global_ptr_offset ptr must be a global pointer, got {ptr_type.name}"
+    if byte_off_type != I64:
+        return (
+            f"global_ptr_offset byte_off must be i64, got {byte_off_type.name}; "
+            "widen it with sext (a signed offset) or zext (an unsigned one)"
+        )
+    if result_type is not None and result_type != ptr_type:
+        return (
+            "global_ptr_offset result must have the pointer's type "
+            f"{ptr_type.name}, got {result_type.name}"
+        )
+    return None
+
+
+def _global_ptr_offset_op_error(op: "Op") -> Optional[str]:
+    """:func:`_global_ptr_offset_error` for a built ``tile.global_ptr_offset``
+    op, after its operand and result counts: serialized IR reaches the verifier
+    and the lowerings without passing the builder."""
+    if len(op.operands) != 2 or len(op.results) != 1:
+        return "global_ptr_offset expects two operands and one result"
+    ptr, byte_off = op.operands
+    return _global_ptr_offset_error(ptr.type, byte_off.type, op.results[0].type)
+
+
+def _global_ptr_to_i64_error(
+    ptr_type: Type, result_type: Optional[Type] = None
+) -> Optional[str]:
+    """The error for a ``global_ptr_to_i64`` whose operand (and, once built,
+    result) have these types, or None when they are valid: a global pointer
+    and an i64 result. The builder, the verifier and every lowering use this
+    rule, and the C++ engine (``rocke_i_global_ptr_to_i64_error``) reports the
+    same texts.
+    """
+    if not isinstance(ptr_type, PtrType) or ptr_type.space != "global":
+        return f"global_ptr_to_i64 ptr must be a global pointer, got {ptr_type.name}"
+    if result_type is not None and result_type != I64:
+        return f"global_ptr_to_i64 result must be i64, got {result_type.name}"
+    return None
+
+
+def _global_ptr_to_i64_op_error(op: "Op") -> Optional[str]:
+    """:func:`_global_ptr_to_i64_error` for a built ``tile.global_ptr_to_i64``
+    op, after its operand and result counts: serialized IR reaches the verifier
+    and the lowerings without passing the builder."""
+    if len(op.operands) != 1 or len(op.results) != 1:
+        return "global_ptr_to_i64 expects one operand and one result"
+    return _global_ptr_to_i64_error(op.operands[0].type, op.results[0].type)
+
+
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
@@ -5467,12 +5529,34 @@ class IRBuilder:
             result_name_hint="gptr",
         ).result
 
+    def global_ptr_offset(self, ptr: Value, byte_off: Value) -> Value:
+        """Return ``ptr`` moved by ``byte_off`` bytes as a new global pointer
+        (same type), which may point outside the allocation ``ptr`` points into.
+
+        Lowers to ``getelementptr i8, ptr addrspace(1) ptr, i64 byte_off``
+        without ``inbounds``. :meth:`global_ptr_add` promises the compiler that
+        its result stays inside the allocation (a result outside it is poison,
+        and the compiler may fold on that promise); this op makes no such
+        promise. Use it for an address that may land outside the tensor: one
+        that is only compared, converted to an integer, or handed to a buffer
+        descriptor that range-checks every access. ``byte_off`` is i64 and may
+        be negative; widen an i32 offset with :meth:`sext` or :meth:`zext`.
+        """
+        error = _global_ptr_offset_error(ptr.type, byte_off.type)
+        if error:
+            raise TypeError(error)
+        return self._op(
+            "tile.global_ptr_offset",
+            [ptr, byte_off],
+            [ptr.type],
+            result_name_hint="gptr",
+        ).result
+
     def global_ptr_to_i64(self, ptr: Value) -> Value:
         """Return the 64-bit address of a global pointer (``ptrtoint``)."""
-        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
-            raise TypeError(
-                f"global_ptr_to_i64 ptr must be a global pointer, got {ptr.type}"
-            )
+        error = _global_ptr_to_i64_error(ptr.type)
+        if error:
+            raise TypeError(error)
         return self._op(
             "tile.global_ptr_to_i64",
             [ptr],
@@ -6369,6 +6453,7 @@ PURE_OP_NAMES = {
     "tile.smem_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
+    "tile.global_ptr_offset",
     "tile.lane_id",
     "tile.ds_bpermute",
     "tile.ds_read_tr16_b64",

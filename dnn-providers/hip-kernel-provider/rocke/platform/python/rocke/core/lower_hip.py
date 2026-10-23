@@ -37,6 +37,8 @@ from .ir import (
     Value,
     VectorType,
     _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
     _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -1147,6 +1149,29 @@ class _Lowerer:
             f"const char* {_name(op.result)} = "
             f"(const char*){_name(ptr)} + (int64_t){_name(off)};"
         )
+
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off in integer arithmetic: C++ pointer arithmetic that
+        # leaves the allocation is undefined, and clang marks it inbounds.
+        # The result keeps the pointer's element type, so indexing it counts
+        # elements as it does on the operand. byte_off is i64 and may be
+        # negative; the uint64_t sum wraps to the same address.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        hip_type = _type_to_hip(op.result.type)
+        self._emit(
+            f"{hip_type} {_name(op.result)} = "
+            f"({hip_type})((uintptr_t){_name(ptr)} + (uint64_t){_name(off)});"
+        )
+
+    def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
+        (ptr,) = op.operands
+        self._emit(f"int64_t {_name(op.result)} = (int64_t)(uintptr_t){_name(ptr)};")
 
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
         # Lowers to ``__builtin_amdgcn_raw_buffer_load_b{32,64,128}``,

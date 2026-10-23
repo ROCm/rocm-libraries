@@ -919,10 +919,30 @@ static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, off));
 }
 
+/* Python _require_global_header_ptr; the text is the Python engine's. The
+ * global-pointer ops emit against ptr addrspace(1); the IR rules check the IR
+ * type, but a parameter's addr_space override (such as "constant") moves its
+ * header type away from it. Returns false after failing the lowering. */
+static bool
+    ll_require_global_header_ptr(rocke_lower_t* L, const char* op_name, const rocke_value_t* ptr)
+{
+    const char* header = rocke_ll_value_ptr_type(L, ptr);
+    if(strcmp(header, "ptr addrspace(1)") == 0)
+        return true;
+    rocke_ll_fail(L,
+                  ROCKE_ERR_VALUE,
+                  "%s ptr must be a global pointer, got %s (its parameter's addr_space)",
+                  op_name,
+                  header);
+    return false;
+}
+
 static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* off = op->operands[1];
+    if(!ll_require_global_header_ptr(L, "global_ptr_add", ptr))
+        return;
     const char* off_ty = rocke_ll_llvm_type(L, off->type);
     const char* off64;
     if(strcmp(off_ty, "i32") == 0)
@@ -946,16 +966,41 @@ static void op_tile_global_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
                    off64);
 }
 
+/* Python _op_tile_global_ptr_offset: no inbounds, the result may point outside
+ * the allocation. */
+static void op_tile_global_ptr_offset(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_ll_live(L))
+        return;
+    if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    if(!ll_require_global_header_ptr(L, "global_ptr_offset", op->operands[0]))
+        return;
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr i8, ptr addrspace(1) %s, i64 %s",
+                   ll_res(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
 static void op_tile_global_ptr_to_i64(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr;
+    char err[256];
     if(!rocke_ll_live(L))
         return;
-    if(op->num_operands != 1 || op->num_results != 1)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_ptr_to_i64 expects one operand and one result");
+    if(const char* error = rocke_i_global_ptr_to_i64_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
     ptr = op->operands[0];
-    if(strcmp(rocke_ll_value_ptr_type(L, ptr), "ptr addrspace(1)") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "global_ptr_to_i64 ptr must be a global pointer");
+    if(!ll_require_global_header_ptr(L, "global_ptr_to_i64", ptr))
+        return;
     rocke_ll_emitf(
         L, "  %s = ptrtoint ptr addrspace(1) %s to i64", ll_res(op), rocke_ll_operand(L, ptr));
 }
@@ -2048,6 +2093,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, op_tile_global_ptr_offset);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_RSRC, op_tile_buffer_rsrc);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);

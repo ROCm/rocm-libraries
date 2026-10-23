@@ -213,6 +213,35 @@ int rocke_i_buffer_vector_bytes(
  * the Python engine's refusal into `err`. */
 int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap);
 
+/* The error for a global_ptr_offset whose pointer, offset and (once built,
+ * else NULL) result have these types, or NULL when they are valid (Python
+ * core/ir.py::_global_ptr_offset_error, same texts): a global pointer, an i64
+ * offset, a result of the pointer's type. A returned error is written to `buf`. */
+const char* rocke_i_global_ptr_offset_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* byte_off_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap);
+
+/* rocke_i_global_ptr_offset_error for a built tile.global_ptr_offset op, after
+ * its operand and result counts (Python core/ir.py::_global_ptr_offset_op_error).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_global_ptr_offset_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The error for a global_ptr_to_i64 whose pointer and (once built, else NULL)
+ * result have these types, or NULL when they are valid (Python
+ * core/ir.py::_global_ptr_to_i64_error, same texts): a global pointer and an
+ * i64 result. A returned error is written to `buf`. */
+const char* rocke_i_global_ptr_to_i64_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap);
+
+/* rocke_i_global_ptr_to_i64_error for a built tile.global_ptr_to_i64 op, after
+ * its operand and result counts (Python core/ir.py::_global_ptr_to_i64_op_error).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
  * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
  * Otherwise returns false and writes the Python engine's refusal into `err`.

@@ -2642,9 +2642,135 @@ void case_global_ptr_to_i64()
         rejected = true;
         err = e.what();
     }
-    if(!rejected || err.find("global_ptr_to_i64 ptr must be a global pointer") == std::string::npos)
+    if(!rejected
+       || err.find("global_ptr_to_i64 ptr must be a global pointer, got ptr<f32,private>")
+              == std::string::npos)
         fail("global_ptr_to_i64 must reject a non-global pointer", __LINE__);
     rocke_ir_builder_free(&b);
+
+    /* A raw op with an f32 result, past the builder's check: the verifier
+     * refuses it. */
+    rocke_ir_builder_init(&b, "p2i_raw");
+    rocke_value_t* ptr = global_ptr_param(&b, "X", rocke_f32());
+    const rocke_type_t* result_types[] = {rocke_f32()};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_GLOBAL_PTR_TO_I64,
+               &ptr,
+               1,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "gaddr",
+               nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("global_ptr_to_i64 result must be i64, got f32") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a global_ptr_to_i64 with an f32 result", __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+/* global_ptr_offset: the C++ builder's op lowers without inbounds to LLVM, in
+ * integer arithmetic to HIP; the builder refuses a non-global pointer and a
+ * non-i64 offset, and the verifier the same offset in a raw op. */
+void build_global_ptr_offset(rocke_ir_builder_t* b)
+{
+    rocke_value_t* x = global_ptr_param(b, "X", rocke_f32());
+    rocke_value_t* z = global_ptr_param(b, "Z", rocke_i64());
+    rocke_value_t* off = rocke_b_param(b, "off", rocke_i64(), nullptr);
+    rocke_value_t* moved = rocke_b_global_ptr_offset(b, x, off);
+    rocke_b_global_store(b, z, rocke_b_const_i32(b, 0), rocke_b_global_ptr_to_i64(b, moved), 8);
+}
+
+std::string builder_error_of(rocke_value_t* (*build)(rocke_ir_builder_t*))
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "gpo_bad");
+    std::string err;
+    try
+    {
+        build(&b);
+        const char* msg = rocke_ir_builder_error(&b);
+        err = msg ? msg : "";
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return err;
+}
+
+void case_global_ptr_offset()
+{
+    const std::string ir = lower_one("gpo", build_global_ptr_offset, "gfx942");
+    EXPECT_IR(ir, " = getelementptr i8, ptr addrspace(1) %X, i64 %off\n");
+    EXPECT_NO_IR(ir, "getelementptr inbounds i8, ptr addrspace(1) %X");
+    EXPECT_IR(ir, " = ptrtoint ptr addrspace(1) %gptr");
+
+    const std::string hip = lower_one_hip("gpo_hip", build_global_ptr_offset, "gfx942");
+    EXPECT_IR(hip, " = (float*)((uintptr_t)X + (uint64_t)off);");
+    EXPECT_IR(hip, " = (int64_t)(uintptr_t)gptr");
+
+    const std::string non_global = builder_error_of([](rocke_ir_builder_t* b) {
+        return rocke_b_global_ptr_offset(
+            b, private_ptr_param(b, "flat", rocke_f32()), rocke_b_const_i64(b, 4));
+    });
+    if(non_global.find("global_ptr_offset ptr must be a global pointer, got ptr<f32,private>")
+       == std::string::npos)
+        fail("global_ptr_offset must reject a non-global pointer", __LINE__);
+    const std::string narrow = builder_error_of([](rocke_ir_builder_t* b) {
+        return rocke_b_global_ptr_offset(
+            b, global_ptr_param(b, "X", rocke_f32()), rocke_b_const_i32(b, 4));
+    });
+    if(narrow.find("global_ptr_offset byte_off must be i64, got i32; widen it with sext (a "
+                   "signed offset) or zext (an unsigned one)")
+       == std::string::npos)
+        fail("global_ptr_offset must reject an i32 offset", __LINE__);
+
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "gpo_raw");
+    rocke_value_t* x = global_ptr_param(&b, "X", rocke_f32());
+    rocke_value_t* operands[] = {x, rocke_b_const_i32(&b, 4)};
+    const rocke_type_t* result_types[] = {x->type};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
+               operands,
+               2,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "gptr",
+               nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = nullptr;
+    size_t n = 0;
+    rocke_verify(rocke_ir_builder_kernel(&b), &diags, &n);
+    bool saw = false;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const std::string m = diags[i].message ? diags[i].message : "";
+        saw |= m.find("global_ptr_offset byte_off must be i64, got i32") != std::string::npos;
+    }
+    rocke_diags_free(diags, n);
+    if(!saw)
+        fail("verifier must reject a global_ptr_offset with an i32 offset", __LINE__);
+    rocke_ir_builder_free(&b);
+
+    if(!rocke_opcode_is_pure(ROCKE_OP_TILE_GLOBAL_PTR_OFFSET))
+        fail("tile.global_ptr_offset must be pure", __LINE__);
 }
 
 void case_gfx1250_tdm_gated()
@@ -3883,6 +4009,7 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_i32_lds_address", case_gfx1250_tdm_i32_lds_address},
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
+    {"global_ptr_offset", case_global_ptr_offset},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},

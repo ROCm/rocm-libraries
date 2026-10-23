@@ -1131,13 +1131,34 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_ADD, ops, 2, ptr->type, NULL, "gptr");
 }
 
-rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr)
+rocke_value_t*
+    rocke_b_global_ptr_offset(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off)
 {
+    rocke_value_t* ops[2];
+    char err[256];
     if(!rocke_i_live(b))
         return NULL;
-    if(!rocke_i_is_global_ptr(ptr))
+    if(!ptr || !byte_off)
         return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "global_ptr_to_i64 ptr must be a global pointer");
+            b, ROCKE_ERR_VALUE, "global_ptr_offset: NULL operand");
+    if(const char* error
+       = rocke_i_global_ptr_offset_error(ptr->type, byte_off->type, NULL, err, sizeof err))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    ops[0] = ptr;
+    ops[1] = byte_off;
+    return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, ops, 2, ptr->type, NULL, "gptr");
+}
+
+rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr)
+{
+    char err[256];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_ptr_to_i64: NULL operand");
+    if(const char* error = rocke_i_global_ptr_to_i64_error(ptr->type, NULL, err, sizeof err))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
     return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, &ptr, 1, rocke_i64(), NULL, "gaddr");
 }
 
