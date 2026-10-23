@@ -236,15 +236,14 @@ def test_register_allocation_config_strings_are_named_by_their_mode(make_state):
     assert "STRA" not in name("off,classes=vs")
 
 
-def test_two_register_allocation_configs_cannot_share_a_name(make_state):
-    # Spellings of one config agree; different configs with one mode do not.
-    N.checkRegisterAllocationAgrees(
-        make_state(StinkyTofuRegisterAllocation="apply"),
-        make_state(StinkyTofuRegisterAllocation=2), "kernel")
-    with pytest.raises(RuntimeError, match="records only the mode"):
-        N.checkRegisterAllocationAgrees(
-            make_state(StinkyTofuRegisterAllocation="apply,classes=s"),
-            make_state(StinkyTofuRegisterAllocation="apply,classes=vs"), "kernel")
+def test_register_allocation_configs_with_one_mode_share_a_name(make_state):
+    # The name carries the mode only. Spellings of one config, and different
+    # configs with that mode, name one kernel.
+    def name(value):
+        return N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+
+    assert name("apply") == name(2) == name("apply,classes=s") == name("apply,classes=vs")
 
 
 def test_empty_custom_kernel_name_is_not_emitted_as_parameter(make_state):

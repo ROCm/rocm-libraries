@@ -1255,8 +1255,9 @@ validParameters = { # we need to make sure this matches develop
     # StinkyTofu parses them, so Tensile accepts exactly what the pipeline runs.
     # A solution keeps the shortest spelling: "apply" and "2,classes=s" are both
     # 2. The kernel name records only the mode: nothing for 0, STRA<mode>
-    # otherwise. Two configs with one mode would therefore share a kernel, so a
-    # run that asks for both is refused; benchmark them separately.
+    # otherwise. The string's other settings stay in the solution and out of
+    # the name, so two configs with one mode are one kernel, built with the
+    # first; Tensile warns about the other.
     "StinkyTofuRegisterAllocation": -1,
     # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
     # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,

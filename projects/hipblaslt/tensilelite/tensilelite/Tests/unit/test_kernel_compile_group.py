@@ -167,17 +167,38 @@ def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
         run.groupKernelRecords(kernels, False)
 
 
-def test_two_register_allocation_configs_cannot_share_a_kernel():
-    # The name records only the mode, so these would compile to one kernel.
-    kernels = [_kernel(), _kernel()]
+def _register_allocation_warnings(capsys):
+    return [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if "StinkyTofuRegisterAllocation" in line
+    ]
+
+
+def test_register_allocation_configs_with_one_mode_share_a_kernel(capsys):
+    # The name records only the mode, so these are one kernel, built with the
+    # first config. The two spellings of the other config are one warning.
+    kernels = [_kernel(), _kernel(), _kernel()]
     kernels[0]["StinkyTofuRegisterAllocation"] = "2,classes=s"
     kernels[1]["StinkyTofuRegisterAllocation"] = "2,classes=vs"
-    with pytest.raises(RuntimeError, match="records only the mode"):
-        groupKernelRecords(kernels, False)
+    kernels[2]["StinkyTofuRegisterAllocation"] = "apply,classes=vs"
 
+    [group] = groupKernelRecords(kernels, False)
+
+    assert group.representative is kernels[0]
+    assert group.aliases == tuple(kernels)
+    [warning] = _register_allocation_warnings(capsys)
+    assert "'2,classes=vs' is not built for 2 kernel(s)" in warning
+    assert "an earlier kernel with 2," in warning
+
+
+def test_spellings_of_one_register_allocation_config_are_not_merges(capsys):
+    kernels = [_kernel(), _kernel()]
     kernels[0]["StinkyTofuRegisterAllocation"] = "apply"
     kernels[1]["StinkyTofuRegisterAllocation"] = 2
+
     assert len(groupKernelRecords(kernels, False)) == 1
+    assert _register_allocation_warnings(capsys) == []
 
 
 def test_metadata_fans_out_to_all_placement_aliases():

@@ -26,6 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Utilities import printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -43,23 +44,35 @@ def getKernelCompileKey(state, splitGSU: bool) -> str:
   return getKernelNameMin(s, splitGSU)
 
 
-def checkRegisterAllocationAgrees(first, second, name: str) -> None:
-  """Refuse two kernels that share a name but not a register allocation config.
+class RegisterAllocationMerges:
+  """Kernels that took the name of an earlier kernel with another register allocation.
 
   The name records only the StinkyTofuRegisterAllocation mode, so two configs
-  with one mode would be merged into one kernel, and one of them would run as
-  the other. Spellings of the same config agree.
+  with one mode are one kernel, built with the first. Spellings of one config
+  are not merges. warn() reports each pair of configs once.
   """
-  configs = []
-  for kernel in (first, second):
-    state = kernel._state if hasattr(kernel, '_state') else kernel
-    configs.append(parseStinkyTofuRegisterAllocation(
-        state.get("StinkyTofuRegisterAllocation", 0))[0])
-  if configs[0] != configs[1]:
-    raise RuntimeError(
-        f"{name}: StinkyTofuRegisterAllocation {configs[0]!r} and {configs[1]!r} share this "
-        "kernel name, which records only the mode, so one would run as the other. "
-        "Benchmark them in separate runs.")
+
+  def __init__(self):
+    self._merged = {}
+
+  def add(self, built, merged, name: str) -> None:
+    pair = (_registerAllocationConfig(built), _registerAllocationConfig(merged))
+    if pair[0] != pair[1]:
+      self._merged.setdefault(pair, [name, 0])[1] += 1
+
+  def warn(self, consequence: str) -> None:
+    for (built, merged), (name, count) in self._merged.items():
+      printWarning(
+          f"StinkyTofuRegisterAllocation {merged!r} is not built for {count} kernel(s): "
+          f"each has the name of an earlier kernel with {built!r}, and a kernel name "
+          f"records only the mode. {consequence} First: {name}")
+
+
+def _registerAllocationConfig(kernel):
+  state = kernel._state if hasattr(kernel, '_state') else kernel
+  key = "StinkyTofuRegisterAllocation"
+  # Not .get(): tests pass MagicMock kernels, whose .get() ignores the default.
+  return parseStinkyTofuRegisterAllocation(state[key] if key in state else 0)[0]
 
 
 # Parameters that are "internal args" — runtime dispatch parameters that don't
@@ -152,8 +165,9 @@ def getPrimitiveParameterValueAbbreviation(key, value):
 
 
 def _registerAllocationAbbreviation(value) -> str:
-  """STRA's value: the mode alone. The rest of the config lives in the solution,
-  and checkRegisterAllocationAgrees refuses two configs that would share a name."""
+  """STRA's value: the mode alone. The rest of the config stays in the solution
+  and is not part of the kernel name; RegisterAllocationMerges reports configs
+  that a shared name merges."""
   return "%u" % parseStinkyTofuRegisterAllocation(value)[1]
 
 

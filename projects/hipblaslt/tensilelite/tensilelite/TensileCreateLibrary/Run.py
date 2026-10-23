@@ -62,7 +62,7 @@ from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architect
 from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
-from ..SolutionStructs.Naming import checkRegisterAllocationAgrees, getKernelCompileKey, \
+from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileKey, \
     getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
@@ -244,6 +244,7 @@ def groupKernelRecords(kernels, splitGSU: bool):
     """Group placement/runtime aliases by generated-assembly identity."""
     groups = {}
     artifactOwners = {}
+    merges = RegisterAllocationMerges()
     for kernel in kernels:
         key = getKernelCompileKey(kernel, splitGSU)
         symbol = getKernelNameMin(kernel, splitGSU)
@@ -265,9 +266,10 @@ def groupKernelRecords(kernels, splitGSU: bool):
         group = groups[key]
         if group["symbol"] != symbol or group["base"] != base:
             raise RuntimeError(f"Compile key {key!r} maps to inconsistent kernel names")
-        checkRegisterAllocationAgrees(group["representative"], kernel, symbol)
+        merges.add(group["representative"], kernel, symbol)
         if all(alias is not kernel for alias in group["aliases"]):
             group["aliases"].append(kernel)
+    merges.warn("Their solutions run that kernel.")
     return [
         KernelCompileGroup(
             key,
