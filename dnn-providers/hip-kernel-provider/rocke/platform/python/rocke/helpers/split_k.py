@@ -67,6 +67,57 @@ _ARCH_NUM_XCDS: dict[str, int] = {
 }
 _DEFAULT_NUM_XCDS = 1
 
+
+@dataclass(frozen=True)
+class WgradSplitPolicy:
+    """Per-arch wgrad split-K degree policy, replacing the CK formulas.
+
+    The degree is ``min(target / CTAs-at-split_k=1, wg_K / min_slice_k, cap)``:
+
+    * ``target_ctas`` / ``grouped_target_ctas`` -- the launch size the degree
+      fills to. A grouped launch fills best at a higher CTA count because its
+      per-group tiles are small.
+    * ``min_slice_k`` -- the shallowest K-slice worth a CTA; shallower slices pay
+      the fixed per-CTA cost and one more atomic pass for little work.
+    * ``max_degree`` / ``max_degree_by_dtype`` -- the cap, overridable per dW
+      dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
+      so with same-sign partials the relative error grows with the degree, up
+      to about ``degree * 2**-(mantissa bits + 1)``. A 16-bit dtype's cap keeps
+      that bound under the 5e-2 tolerance the wgrad suite verifies against;
+      fp16's is lower still because its packed atomic loses throughput under
+      contention. The general cap is for fp32 dW, whose atomic rounding is
+      negligible at any degree here.
+    """
+
+    target_ctas: int
+    grouped_target_ctas: int
+    min_slice_k: int
+    max_degree: int
+    max_degree_by_dtype: tuple[tuple[str, int], ...] = ()
+
+    def degree_cap(self, dtype_d: str) -> int:
+        return dict(self.max_degree_by_dtype).get(dtype_d, self.max_degree)
+
+
+# Arches whose wgrad split-K degree comes from a fitted policy rather than the
+# CK formulas, whose fill targets leave these devices mostly idle. Fitted on
+# gfx1250 bf16/fp16 wgrad.
+#
+# The bf16 cap is an accuracy bound, not a throughput fit: bf16 keeps 8
+# significant bits, so 16 same-sign partials stay within 16 * 2**-9 of the
+# exact sum, under the 5e-2 tolerance. Higher degrees are faster on
+# small-channel shapes with a deep reduction, but all-positive inputs then
+# exceed that tolerance.
+_WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
+    "gfx1250": WgradSplitPolicy(
+        target_ctas=2048,
+        grouped_target_ctas=4096,
+        min_slice_k=2048,
+        max_degree=128,
+        max_degree_by_dtype=(("bf16", 16), ("fp16", 8)),
+    ),
+}
+
 # Occupancy target for the *grouped* wgrad path, in WAVES per CU.
 #
 # ``WGRAD_ASSUMED_WAVES_PER_CU`` above is really a blocks-per-CU proxy pinned at
@@ -267,8 +318,14 @@ def select_split_k_wgrad(
     waves_per_cu: int = WGRAD_ASSUMED_WAVES_PER_CU,
     groups: int = 1,
     block_size: int = 256,
+    dtype_d: str | None = None,
 ) -> SplitKDecision:
     """Pick a split-K degree for a wgrad GEMM, mirroring CK's formula.
+
+    ``dtype_d`` is the dW dtype. On an arch with a :class:`WgradSplitPolicy`
+    it selects the policy (whose cap depends on it) in place of the CK
+    formulas below; ``waves_per_cu`` and ``block_size`` then do not apply.
+    Callers that pass none -- dgrad among them -- always get the CK formulas.
 
     Conv callers resolve split-K through a resolver that uses the split-K cost
     model (:mod:`rocke.helpers.split_k_planner`) where an arch has one and falls
@@ -331,6 +388,30 @@ def select_split_k_wgrad(
 
     if base_grid <= 0:
         return SplitKDecision(1, base_grid, max_capacity, "empty grid")
+
+    policy = _WGRAD_SPLIT_POLICY.get(arch) if dtype_d is not None else None
+    if policy is not None:
+        if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
+            raise ValueError(f"groups must be a positive integer (got {groups!r})")
+        n_groups = groups
+        target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
+        grid_no_split = base_grid * n_groups
+        # Every bound is folded into one cap, so nothing applied after it can
+        # raise the degree past any of them.
+        cap = min(
+            wg_K // policy.min_slice_k,
+            policy.degree_cap(dtype_d),
+            MAX_GRID_DIM_Z // n_groups,
+        )
+        split_k = max(1, min(target // grid_no_split, cap))
+        return SplitKDecision(
+            split_k,
+            base_grid,
+            target,
+            f"{arch} wgrad policy ({dtype_d}): min(floor({target} / "
+            f"{grid_no_split}), floor({wg_K} / {policy.min_slice_k}), "
+            f"{policy.degree_cap(dtype_d)}) = {split_k}",
+        )
 
     if groups <= 1:
         split_k = max(1, int(max_capacity // base_grid))

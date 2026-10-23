@@ -1,6 +1,7 @@
 {
   "version": 1,
   "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
+  "_comment_has_global_float_atomic_add": "Float add global atomics: scalar f32 global_atomic_add and the packed <2 x bf16> / <2 x f16> global_atomic_pk_add. Like the other gfx1250 memory flags, set only where these were run on a device; MFMA targets reach them through their own validated paths and do not consult it.",
   "_comment_async_lds_max_dwords": "Widest per-lane DRAM->LDS DMA the buffer_load_lds family can do, in dwords; 0 where the arch has no such instruction. This is NOT buffer_load_max_dwords: that one is the *register* vector buffer-load width (4 everywhere), while the load-*to-LDS* form is narrower. CDNA3 (gfx942) has only the dword form; the b96/b128 forms (dwords 3 and 4) arrived with CDNA4 (gfx950). Emitting a wider one than the arch supports does not produce a diagnostic -- the AMDGPU backend aborts the process with 'LLVM ERROR: Do not know how to expand this operator's operand!'.",
   "_comment_vmcnt_bits": "Width in bits of the vector-memory counter an s_waitcnt can wait on. On gfx9 the field is split across bits [3:0] and [15:14] of the immediate, so it is 6 bits wide, not 4. Measured with llvm-mc -show-encoding (LLVM 20, 22, 23 and 24): vmcnt(63) encodes and vmcnt(64) is refused on gfx90a, gfx942, gfx950, gfx1151 and gfx11-generic.",
   "generic_targets": {
@@ -209,6 +210,7 @@
         "has_global_prefetch": true,
         "has_cluster_launch": true,
         "has_multicast_load": true,
+        "has_global_float_atomic_add": true,
         "buffer_load_max_dwords": 4
       },
       "limits": {

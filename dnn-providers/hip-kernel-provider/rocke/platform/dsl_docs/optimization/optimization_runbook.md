@@ -2388,6 +2388,23 @@ sweep CSVs.
   display kernel symbol is the same across two compile-time-constant
   variants, the cache can serve the wrong HSACO. Salt the kernel
   symbol with a shape hash before compile (see §12.2).
+- **16-bit split-K degree outgrows the atomic's rounding.** A packed
+  bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
+  dW on every add, so with same-sign partials the relative error grows
+  roughly linearly in the split degree, up to about
+  `degree * 2**-(mantissa bits + 1)`. A degree picked for CTA fill alone
+  on a small-channel, deep-reduction wgrad can pass on signed random
+  inputs and still miss the tolerance on all-positive ones. Cap the
+  16-bit degree from that bound, not from throughput, and test the cap
+  with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
+  gfx1250 caps bf16 at 16).
+- **Validator rule scoped to the wrong epilogue.** A store-width rule
+  written for the MFMA cshuffle epilogue also gated the WMMA split-K
+  epilogue, which never reads that width. Hand-built specs left the width
+  unset and passed, while every AOT cache job pins it, so the cache built
+  no split-K binary at all. Scope each validator rule to the code path
+  that consumes it, and test reachability through the AOT grid, not a
+  hand-built spec.
 
 ### 14.2 Performance Failures
 
@@ -2523,6 +2540,10 @@ An optimization is done when:
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
+- If a higher 16-bit split-K degree is faster, check it against the
+  atomic-rounding bound before raising the cap (§14.1): the speed comes
+  from accepting more rounding error. Only a wider dW dtype raises the
+  bound itself.
 
 ### 16.2 Anti-patterns (what to avoid)
 
