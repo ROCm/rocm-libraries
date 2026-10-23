@@ -496,6 +496,35 @@ struct data_descriptor_t
                                                              const data_descriptor_t& second);
 
     /**
+     * @brief Merges batch axes of all `descriptors` simultaneously, as long as some
+     * pair of batch axes can be merged into one in every descriptor.
+     *
+     * Any pair of batch axes `(a, b)` is considered, regardless of their positions.
+     * In a given descriptor, `a` may be merged as the outer axis over the inner axis
+     * `b` iff `stride(a) == stride(b) * span(b)` or `a` is trivial (unit span and
+     * zero lower bound). The merge is done iff it is valid with the same outer/inner
+     * roles in every descriptor and neither axis is a length axis of the embedding
+     * data set of any (embedded) descriptor. The merged axis has `b`'s stride, the
+     * span `span(a) * span(b)` and the lower bound `lower(b) + span(b) * lower(a)`,
+     * which keeps the in-buffer location of every logical element unchanged (partial
+     * ranges included). It takes the position of the higher-indexed axis of the pair
+     * and the other one is erased (embedding maps are updated accordingly). Merging
+     * is repeated until no pair can be merged. Length axes are never modified.
+     * Only batch strides and spans matter: descriptors may have different array types,
+     * precisions (set or not) and offsets, and each returned descriptor keeps its own.
+     *
+     * @param[in] descriptors data descriptors that must all be dimensionally consistent
+     * with one another and have the same spans along all batch axes.
+     * @return The compressed descriptors, in the order of `descriptors` (empty if
+     * `descriptors` is empty).
+     *
+     * @throw An `std::invalid_argument` is thrown if `descriptors` are not dimensionally
+     * consistent with one another or have different spans along any batch axis.
+     */
+    static std::vector<data_descriptor_t>
+        compress_batch_axes_consistently_in(std::vector<data_descriptor_t> descriptors);
+
+    /**
      * @param[in] other data descriptor against which ranks are to be compared
      * @return `true` if this data descriptor is dimensionally consistent with `other` 
      */

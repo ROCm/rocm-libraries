@@ -32,6 +32,10 @@ struct data_descriptor_test_access
     {
         layout.reorder_length_axes(order);
     }
+    static void set_embedding(data_descriptor_t& layout, const std::vector<size_t>& embedding)
+    {
+        layout.embedding = embedding;
+    }
     static void clear(data_descriptor_t& layout)
     {
         layout.clear();

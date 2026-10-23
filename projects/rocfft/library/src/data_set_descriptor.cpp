@@ -723,6 +723,72 @@ data_descriptor_t
     return ret;
 }
 
+std::vector<data_descriptor_t> data_descriptor_t::compress_batch_axes_consistently_in(
+    std::vector<data_descriptor_t> descriptors)
+{
+    for(const auto& d : descriptors)
+    {
+        if(!d.is_dimensionally_consistent_with(descriptors.front()))
+            throw std::invalid_argument("Dimensionally-inconsistent arguments for "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        for(size_t i = 0; i < d.get_batch_rank(); i++)
+            if(d.batch_axes[i].logical_span() != descriptors.front().batch_axes[i].logical_span())
+                throw std::invalid_argument("Different batch spans for arguments of "
+                                            + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    // true iff batch axis `outer` may be merged over batch axis `inner` in `d`
+    auto mergeable = [](const data_descriptor_t& d, size_t outer, size_t inner) {
+        const auto& o = d.batch_axes[outer];
+        const auto& i = d.batch_axes[inner];
+        if(d.embedding)
+        {
+            const auto& e = *d.embedding;
+            if(std::find(e.begin(), e.end(), d.get_len_rank() + outer) != e.end()
+               || std::find(e.begin(), e.end(), d.get_len_rank() + inner) != e.end())
+                return false;
+        }
+        return o.inbuffer_stride == i.inbuffer_stride * i.logical_span()
+               || (o.logical_span() == 1 && o.lower == 0);
+    };
+
+    bool merged = true;
+    while(merged && !descriptors.empty())
+    {
+        merged         = false;
+        const auto num = descriptors.front().get_batch_rank();
+        for(size_t outer = 0; !merged && outer < num; outer++)
+        {
+            for(size_t inner = 0; !merged && inner < num; inner++)
+            {
+                if(inner == outer
+                   || !std::all_of(descriptors.begin(), descriptors.end(), [&](const auto& d) {
+                          return mergeable(d, outer, inner);
+                      }))
+                    continue;
+                const auto keep = std::max(outer, inner);
+                const auto del  = std::min(outer, inner);
+                for(auto& d : descriptors)
+                {
+                    const auto o      = d.batch_axes[outer];
+                    const auto i      = d.batch_axes[inner];
+                    auto&      k      = d.batch_axes[keep];
+                    k.lower           = i.lower + i.logical_span() * o.lower;
+                    k.upper           = k.lower + i.logical_span() * o.logical_span();
+                    k.inbuffer_stride = i.inbuffer_stride;
+                    d.batch_axes.erase(d.batch_axes.begin() + del);
+                    if(d.embedding)
+                        for(auto& axis_idx : *d.embedding)
+                            if(axis_idx > d.get_len_rank() + del)
+                                axis_idx--;
+                }
+                merged = true;
+            }
+        }
+    }
+    return descriptors;
+}
+
 std::vector<size_t>
     data_descriptor_t::length_axes_by_increasing_strides(bool pin_innermost_axis) const
 {
