@@ -212,12 +212,14 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
 
-    # Skips itself when PyTorch, which the generator needs, is not installed.
+    # Exits 77 when every case skipped (no PyTorch, which the generator needs), which ctest
+    # reports as Skipped rather than Passed.
     add_test(
         NAME hipdnn_golden_paged_generator_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_paged_golden.py
     )
+    set_tests_properties(hipdnn_golden_paged_generator_python_tests PROPERTIES SKIP_RETURN_CODE 77)
     set(HIPDNN_IT_GOLDEN_PAGED_GENERATOR_TEST hipdnn_golden_paged_generator_python_tests)
 endif()
 
