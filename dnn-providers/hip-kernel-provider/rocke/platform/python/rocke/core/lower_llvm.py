@@ -62,6 +62,7 @@ from .ir import (
     Value,
     VectorType,
     _is_unsigned,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     check_cluster_dims,
@@ -501,9 +502,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "minnum.f32": "declare float @llvm.minnum.f32(float, float)",
     "minnum.f16": "declare half @llvm.minnum.f16(half, half)",
     "minnum.bf16": "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)",
+    "fabs.f64": "declare double @llvm.fabs.f64(double)",
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
+    "amdgcn.fdot2.f16": (
+        "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"
+    ),
+    "amdgcn.fdot2.bf16": (
+        "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"
+    ),
     "fmuladd.f32": "declare float @llvm.fmuladd.f32(float, float, float)",
     "fmuladd.f16": "declare half @llvm.fmuladd.f16(half, half, half)",
     "fmuladd.bf16": "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)",
@@ -689,6 +697,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "mfma.f32.4x4x4f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
         "<4 x half>, <4 x half>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.4x4x4bf16.1k": (
+        # bf16 4x4x4 goes through the `_1k` variant like 16x16x16 / 32x32x8
+        # bf16: operands are `<4 x i16>` (bitcast of `<4 x bfloat>`).
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+        "<4 x i16>, <4 x i16>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     # FP8 / BF8 MFMA (gfx940+). Operands are packed as <2 x i32>
@@ -1790,6 +1805,8 @@ class _Lowerer:
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
+        # Byte size of each allocation placed in the pool.
+        self._smem_sizes: Dict[str, int] = {}
         # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
         self._smem_offsets: Dict[str, int] = {}
         self._smem_pool_size: int = 0
@@ -1801,7 +1818,7 @@ class _Lowerer:
         # waits vmcnt(0) first; with them it waits only for DMA into the
         # read's own allocation.
         self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
-        self._smem_sizes: Dict[str, int] = {}
+        # i64 LDS address value name -> the allocation it points into.
         self._lds_prov: Dict[str, str] = {}
         self._lds_aa_used = False
         # Cache of per-allocation base pointers already emitted, keyed by
@@ -2035,6 +2052,23 @@ class _Lowerer:
             )
         return v
 
+    def _require_fp8_scale_conversion(
+        self, op: Op, instruction: str, fallback: str
+    ) -> None:
+        """Reject a fused scale-and-convert op on a target without the instruction.
+
+        LLVM does not always refuse the intrinsic on such a target: it can
+        select it and write an encoding the GPU does not have. So the check is
+        made here, from the backend's capability, before anything is emitted.
+        """
+        gfx = self._backend.arch.gfx
+        if not self._backend.has_fp8_scale_conversion:
+            raise ValueError(
+                f"{op.name} needs {instruction}, which {gfx} does not have "
+                f"(gfx950 does); convert with {fallback} and multiply by the "
+                "scale instead"
+            )
+
     def _require_llvm23_target_fact(self, op: str, fact: _OpTargetFact) -> None:
         """Reject an LLVM-23-only operation unless the target records ``fact``.
 
@@ -2192,8 +2226,9 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
-        otherwise.  The pool itself is rounded up to 16-byte alignment.
+        Each allocation's offset is aligned to 16 bytes for byte-element
+        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
+        The pool itself is rounded up to 16-byte alignment.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
@@ -2543,11 +2578,17 @@ class _Lowerer:
         """Lower ``arith.fabs`` to ``llvm.fabs.<ty>`` so the AMDGPU
         backend can fold the absolute-value modifier into the
         consumer (free) instead of materialising ``-a`` and a
-        ``v_max_f32(a, -a)`` pair (the historical idiom).
+        ``v_max_f32(a, -a)`` pair (the historical idiom). For f64 it is a
+        sign-bit clear on the high dword.
         """
         (v,) = op.operands
         ty_name = v.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         if llvm_ty is None:
             raise NotImplementedError(f"fabs: unsupported FP type {ty_name!r}")
         self._need(f"fabs.{ty_name}")
@@ -2574,6 +2615,22 @@ class _Lowerer:
             f"  {op.result.name} = call {llvm_ty} @llvm.fmuladd.{ty_name}("
             f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)}, "
             f"{llvm_ty} {self._operand(c)})"
+        )
+
+    def _op_arith_fdot2(self, op: Op) -> None:
+        """Lower ``arith.fdot2`` to ``llvm.amdgcn.fdot2[.f32.bf16]`` (clamp off)."""
+        a, b, c = op.operands
+        elem = a.type.elem.name
+        if elem == "bf16":
+            vty, fn = "<2 x bfloat>", "llvm.amdgcn.fdot2.f32.bf16"
+        elif elem == "f16":
+            vty, fn = "<2 x half>", "llvm.amdgcn.fdot2"
+        else:
+            raise NotImplementedError(f"fdot2: unsupported element type {elem!r}")
+        self._need(f"amdgcn.fdot2.{elem}")
+        self._current().emit(
+            f"  {op.result.name} = call float @{fn}({vty} {self._operand(a)}, "
+            f"{vty} {self._operand(b)}, float {self._operand(c)}, i1 false)"
         )
 
     def _op_arith_fmax3(self, op: Op) -> None:
@@ -2829,6 +2886,7 @@ class _Lowerer:
         )
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = uitofp {_llvm_type(v.type)} {self._operand(v)} to float"
@@ -2942,6 +3000,9 @@ class _Lowerer:
         showed FP8 long-prefill inner loop drop ``v_pk_mul`` count
         from 64 → 16.
         """
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_fp8", "cvt_pk_f32_fp8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.fp8")
         packed_i32 = f"{op.result.name}p"
@@ -2965,6 +3026,9 @@ class _Lowerer:
 
     def _op_arith_cvt_scalef32_pk_f32_bf8(self, op: Op) -> None:
         """e5m2 sibling of :meth:`_op_arith_cvt_scalef32_pk_f32_fp8`."""
+        self._require_fp8_scale_conversion(
+            op, "v_cvt_scalef32_pk_f32_bf8", "cvt_pk_f32_bf8x4"
+        )
         v, scale = op.operands
         self._need("amdgcn.cvt.scalef32.pk.f32.bf8")
         packed_i32 = f"{op.result.name}p"
@@ -4584,6 +4648,26 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.4x4x4bf16.1k")
+        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_vector_bitcast(self, op: Op) -> None:
         (v,) = op.operands
         target = op.result.type
@@ -5135,7 +5219,7 @@ class _Lowerer:
         raw = self._fresh("tr.raw")
         self._current().emit(
             f"  {raw} = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
-            f"ptr addrspace(3) {base})"
+            f"ptr addrspace(3) {base}){self._lds_aa_suffix(gname)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         self._current().emit(
@@ -6322,6 +6406,7 @@ class _Lowerer:
             f"i32 {self._operand(soffset)}, "
             f"i32 0, "
             f"i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_ptr.name))}"
         )
 
     def _op_tile_buffer_load_lds_async(self, op: Op) -> None:

@@ -187,7 +187,8 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
     .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
 
-static const rocke_isa_backend_t LL_BACKEND_GFX950 = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX950
+    = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS, .has_fp8_scale_conversion = true};
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
@@ -1477,6 +1478,10 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     int* offsets = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
     if(!offsets)
         rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets alloc");
+    /* Bytes each placed allocation spans (Python _smem_sizes); 0 if dead. */
+    int* sizes = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!sizes)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: sizes alloc");
 
     for(size_t si = 0; si < n; si++)
     {
@@ -1492,6 +1497,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
             continue;
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
         int seg = ll_smem_seg_size(stype);
+        sizes[gi] = seg;
         int aln = ll_smem_align(stype);
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
@@ -2335,7 +2341,6 @@ static void ll_lower_into(rocke_lower_t* L,
     {
         L->debug = rocke_ll_debug_create(L, kernel->name);
     }
-
     /* Entry block (ll_make_block raises on OOM). */
     ll_make_block(L, "entry");
 

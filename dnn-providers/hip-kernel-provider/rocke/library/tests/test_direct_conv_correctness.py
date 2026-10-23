@@ -2425,17 +2425,30 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
 class TestDirectConvValidation(unittest.TestCase):
     """Validation-only tests that do not require a GPU."""
 
-    def test_cpg4_bf16_rejected(self):
-        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+    def test_cpg4_bf16_accepted(self):
+        """cpg=4 + bf16 validates: the 4c kernel takes mfma_f32_4x4x4_bf16 (the
+        CDNA2+ ``_1k`` atom), and the kernel name carries the dtype. Any other
+        dtype is still refused."""
         from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
+            is_valid_spec_4c,
         )
 
         p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
         spec = DirectConv4cSpec(problem=p)
+        spec.validate()
+        for arch in ("gfx942", "gfx950"):
+            self.assertTrue(is_valid_spec_4c(spec, arch=arch)[0])
+        self.assertTrue(spec.kernel_name().endswith("_bf16"))
+        bad = DirectConv4cSpec(
+            problem=DirectConvProblem(
+                N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="fp32"
+            )
+        )
         with self.assertRaises(ValueError):
-            spec.validate()
+            bad.validate()
+        self.assertFalse(is_valid_spec_4c(bad)[0])
 
     def test_depthwise_filter_limit(self):
         """Both depthwise forward variants accept filters up to 32x32 and reject
@@ -2930,8 +2943,10 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     }
     rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
     rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
-    rt.memset(bufs["dx"], 0, dX.nbytes)
-    # Garbage in the workspaces: a correct pipeline overwrites what it reads.
+    # NaN in dX (0xFFFF is a NaN in fp16 and bf16): every output must be
+    # written. Garbage in the workspaces: a correct pipeline overwrites what
+    # it reads.
+    rt.memset(bufs["dx"], 0xFF, dX.nbytes)
     rt.memset(bufs["ws_t"], 0x7F, ws_t_bytes)
     rt.memset(bufs["ws_coa"], 0x7F, ws_coa_bytes)
 
@@ -3063,18 +3078,317 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
                 self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
 
     def test_mfma_dgrad_baked(self):
-        for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
-            # One baked binary per shape: the first of each case. Each case
-            # opens with a shape the baked reorganize pass serves: one group
-            # (it offsets the W_T column by the group) and, where the weights
-            # are reorganized, whole K-atoms (it leaves the workspace tail of
-            # a partial one unwritten).
-            self._check(label, knobs, fold_k32, shapes[:1], "fp16", False)
+        # One baked binary per shape, on every shape of every case: grouped
+        # problems and partial K-atoms included. The coalesced cases
+        # (waves_k > 1, runtime_k_loop) run the baked reorganize pass, which
+        # must read W_T's per-group column and zero-fill out-of-range lanes.
+        for dtype in ("fp16", "bf16"):
+            for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+                self._check(label, knobs, fold_k32, shapes, dtype, False)
 
     def test_mfma_dgrad_runtime_channels(self):
         for dtype in ("fp16", "bf16"):
             for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
                 self._check(label, knobs, fold_k32, shapes, dtype, True)
+
+
+# ---------------------------------------------------------------------------
+# The AOT sweep's direct wgrad kernels: conv_direct_wgrad_tiled (fp32 atomics),
+# conv_direct_dw_wgrad (depthwise, partial slots) and conv_direct_wgrad_gather
+# (dense small C, partial slots).
+# ---------------------------------------------------------------------------
+#
+# Each case is built the way the kernel cache builds it -- on the probe problem
+# of its capability row -- and launched on the problem listed here, so every
+# extent the binary takes as a kernarg (and the host/kernel agreement on the
+# partition and split counts) is exercised. The partial-slot kernels run the
+# fold after the pass, as the sweep's two-step plan does.
+
+# (id, variant, DirectConvProblem fields, knobs)
+_AOT_WGRAD_CASES = [
+    (
+        "tiled_c64",
+        "direct_wgrad_tiled",
+        dict(N=2, H=16, W=32, groups=1, cpg=64, kpg=64),
+        dict(rows_per_seg=30),
+    ),
+    # Valid padding, a partial wave tile in K and C, grouped.
+    (
+        "tiled_g2_pad0",
+        "direct_wgrad_tiled",
+        dict(N=2, H=13, W=37, groups=2, cpg=48, kpg=40, PAD=0),
+        dict(wave_k16=1, wave_c16=1, waves_k=2, waves_c=2, rows_per_seg=12),
+    ),
+    # Four images packed into one 32-column strip of a narrow map.
+    (
+        "tiled_unfold4",
+        "direct_wgrad_tiled",
+        dict(N=6, H=15, W=8, groups=1, cpg=32, kpg=32),
+        dict(waves_k=1, waves_c=1, rows_per_seg=15, unfold_n=4),
+    ),
+    # Two wave groups, the second half a row behind (pingpong); segment counts
+    # that leave the second group a dummy segment.
+    (
+        "tiled_qg2_pp",
+        "direct_wgrad_tiled",
+        dict(N=3, H=9, W=40, groups=1, cpg=32, kpg=64),
+        dict(
+            wave_k16=1,
+            waves_k=2,
+            rows_per_seg=12,
+            prefetch=3,
+            q_groups=2,
+            pingpong=True,
+            target_blocks=8,
+        ),
+    ),
+    (
+        "dw_c64",
+        "direct_wgrad_dw",
+        dict(N=2, H=17, W=33, groups=64, cpg=1, kpg=1),
+        dict(lanes_c=8, lanes_w=8, prefetch=2, rows_per_seg=16, target_blocks=1024),
+    ),
+    # Stride 2 and a channel count that leaves a partial channel tile.
+    (
+        "dw_c40_s2",
+        "direct_wgrad_dw",
+        dict(N=2, H=20, W=24, groups=40, cpg=1, kpg=1, stride=2),
+        dict(lanes_c=8, lanes_w=16, prefetch=1, rows_per_seg=16, target_blocks=2048),
+    ),
+    # The stem: C = 3, 7x7, stride 2.
+    (
+        "dw_cols_c3_7x7_s2",
+        "direct_wgrad_dw_cols",
+        dict(N=2, H=20, W=64, groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2),
+        dict(channels=3, strip=8, threads=128, target_blocks=2048),
+    ),
+    # Valid padding (the capability rows the probe width makes buildable).
+    (
+        "dw_cols_c4_pad0",
+        "direct_wgrad_dw_cols",
+        dict(N=2, H=12, W=34, groups=4, cpg=1, kpg=1, PAD=0),
+        dict(channels=4, strip=16, threads=256, target_blocks=4096),
+    ),
+    # Gathered X operand (S * C = 6).
+    (
+        "gather_c3_s2",
+        "direct_wgrad_gather",
+        dict(N=2, H=24, W=64, groups=1, cpg=3, kpg=24, stride=2),
+        dict(wave_k16=2, waves_k=1, prefetch=2, rows_per_seg=8, target_blocks=256),
+    ),
+    # Transpose-read X operand.
+    (
+        "gather_c24_s2",
+        "direct_wgrad_gather",
+        dict(N=2, H=30, W=40, groups=1, cpg=24, kpg=96, stride=2),
+        dict(wave_k16=1, waves_k=6, prefetch=2, rows_per_seg=8, target_blocks=256),
+    ),
+    # Stride 1 with a K that leaves a partial k tile.
+    (
+        "gather_c4_s1",
+        "direct_wgrad_gather",
+        dict(N=1, H=16, W=32, groups=1, cpg=4, kpg=40, stride=1),
+        dict(wave_k16=2, waves_k=1, prefetch=1, rows_per_seg=16, target_blocks=1024),
+    ),
+    # Valid padding, three k-waves of one atom each over two k tiles.
+    (
+        "gather_c8_pad0_w1x3",
+        "direct_wgrad_gather",
+        dict(N=2, H=20, W=32, groups=1, cpg=8, kpg=96, PAD=0, stride=1),
+        dict(wave_k16=1, waves_k=3, prefetch=2, rows_per_seg=8, target_blocks=256),
+    ),
+    # Valid padding at stride 2, three k-waves of two atoms, a partial k tile.
+    (
+        "gather_c3_pad0_w2x3_s2",
+        "direct_wgrad_gather",
+        dict(N=2, H=21, W=64, groups=1, cpg=3, kpg=104, PAD=0, stride=2),
+        dict(wave_k16=2, waves_k=3, prefetch=1, rows_per_seg=16, target_blocks=1024),
+    ),
+    # The cases above give every block one segment. Two blocks walking several
+    # segments each (ten, two): accumulation across segments and ring reuse
+    # after the end-of-segment barrier.
+    (
+        "dw_c64_tb2",
+        "direct_wgrad_dw",
+        dict(N=2, H=40, W=40, groups=64, cpg=1, kpg=1),
+        dict(lanes_c=8, lanes_w=8, prefetch=2, rows_per_seg=16, target_blocks=2),
+    ),
+    (
+        "gather_c3_s2_tb2",
+        "direct_wgrad_gather",
+        dict(N=2, H=24, W=64, groups=1, cpg=3, kpg=24, stride=2),
+        dict(wave_k16=2, waves_k=1, prefetch=2, rows_per_seg=8, target_blocks=2),
+    ),
+    # 128 partitions: the fold loops over its 64-partition stride twice.
+    (
+        "dw_c64_parts128",
+        "direct_wgrad_dw",
+        dict(N=4, H=64, W=64, groups=64, cpg=1, kpg=1),
+        dict(lanes_c=8, lanes_w=8, prefetch=2, rows_per_seg=16, target_blocks=1024),
+    ),
+    # KW * C = 72 outputs over 64 threads (a second epilogue pass), one block
+    # per filter row walking two units.
+    (
+        "dw_cols_c8_9x9_t64",
+        "direct_wgrad_dw_cols",
+        dict(N=2, H=16, W=32, groups=8, cpg=1, kpg=1, KH=9, KW=9, PAD=4),
+        dict(channels=8, strip=8, threads=64, target_blocks=9),
+    ),
+]
+
+
+def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
+    """Build ``variant`` on its cache probe, launch it on ``problem``, return
+    the max error relative to the largest reference dW entry."""
+    import torch
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_direct_dw_wgrad import (
+        DW_WGRAD_FOLD_ARGS,
+        dw_wgrad_fold_signature,
+    )
+    from kernels.conv.direct_aot_jobs import DirectCaps, probe_problem
+    from kernels.conv.direct_variants import (
+        DIRECT_WGRAD_FOLD,
+        DIRECT_WGRAD_FOLDED,
+        direct_wgrad_fold_knobs,
+        make_direct_spec,
+        select_direct_kernel_builder,
+        validate_direct_spec,
+    )
+    from rocke import compile_kernel
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    p = problem
+    folded = variant in DIRECT_WGRAD_FOLDED
+    if variant == "direct_wgrad_tiled":
+        caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=0, kpg=0)
+    elif variant == "direct_wgrad_gather":
+        caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=0)
+    else:
+        caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=1, kpg=1)
+    probe = probe_problem(caps, p.dtype, variant, knobs)
+    build_spec = make_direct_spec(variant, probe, knobs)
+    spec = make_direct_spec(variant, p, knobs)
+    for s, what in ((build_spec, "probe"), (spec, "problem")):
+        ok, why = validate_direct_spec(variant, s, arch)
+        assert ok, f"{variant} rejects its {what}: {why}"
+    assert build_spec.kernel_name() == spec.kernel_name()
+    art = compile_kernel(
+        select_direct_kernel_builder(variant, build_spec, arch), arch=arch
+    )
+
+    torch.manual_seed(7)
+    td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
+    total_c, total_k = p.groups * p.cpg, p.groups * p.kpg
+    if folded and variant != "direct_wgrad_gather":
+        total_k = total_c = p.groups  # depthwise
+    X = torch.empty(p.N, p.H, p.W, total_c, dtype=td).uniform_(-0.5, 0.5)
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=td).uniform_(-0.5, 0.5)
+    dw_elems = total_k * p.KH * p.KW * p.cpg
+
+    W_ref = torch.zeros(
+        total_k, p.cpg, p.KH, p.KW, dtype=torch.float32, device="cuda"
+    ).requires_grad_(True)
+    out = torch.nn.functional.conv2d(
+        X.float().cuda().permute(0, 3, 1, 2),
+        W_ref,
+        padding=p.PAD,
+        stride=p.stride,
+        groups=p.groups,
+    )
+    out.backward(dY.float().cuda().permute(0, 3, 1, 2))
+    ref = W_ref.grad.permute(0, 2, 3, 1).contiguous().cpu()  # [K, KH, KW, cpg]
+
+    rt = Runtime()
+    bufs = {
+        "x": (rt.alloc(X.nbytes), X.nbytes),
+        "dy": (rt.alloc(dY.nbytes), dY.nbytes),
+        "dw": (rt.alloc(dw_elems * 4), dw_elems * 4),
+    }
+    if folded:
+        ws_bytes = spec.workspace_bytes()
+        bufs["ws"] = (rt.alloc(ws_bytes), ws_bytes)
+    try:
+        rt.memcpy_h2d(bufs["x"][0], _u8(X), X.nbytes)
+        rt.memcpy_h2d(bufs["dy"][0], _u8(dY), dY.nbytes)
+        # The atomic kernel adds into a zeroed dW; the fold writes dW whole,
+        # so poison it to catch an element the fold misses.
+        rt.memset(bufs["dw"][0], 0 if not folded else 0xFF, bufs["dw"][1])
+        out_buf = "ws" if folded else "dw"
+        grid, block = spec.launch_geometry()
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=conv_direct_args_signature(p.dtype, direction="wgrad"),
+        )
+        values = ConvArgs.from_problem(p, direction="wgrad").to_launch_values(
+            int(bufs["dy"][0]),
+            int(bufs["x"][0]),
+            int(bufs[out_buf][0]),
+            bufs["dy"][1],
+            bufs["x"][1],
+            bufs[out_buf][1],
+        )
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        if folded:
+            fold_knobs = direct_wgrad_fold_knobs(variant, p.KH, p.KW, p.cpg)
+            fold_spec = make_direct_spec(DIRECT_WGRAD_FOLD, p, fold_knobs)
+            fold_art = compile_kernel(
+                select_direct_kernel_builder(DIRECT_WGRAD_FOLD, fold_spec, arch),
+                arch=arch,
+            )
+            channels = (
+                spec.fold_channels() if variant == "direct_wgrad_gather" else p.groups
+            )
+            fgrid, fblock = fold_spec.launch_geometry(channels)
+            fold = KernelLauncher(
+                hsaco=fold_art.hsaco,
+                kernel_name=fold_art.kernel_name,
+                signature=dw_wgrad_fold_signature(fold_spec),
+            )
+            fvalues = {
+                "A": int(bufs["ws"][0]),
+                "D": int(bufs["dw"][0]),
+                "A_bytes": bufs["ws"][1],
+                "D_bytes": bufs["dw"][1],
+                **dict(zip(DW_WGRAD_FOLD_ARGS, (spec.n_partitions(), channels))),
+            }
+            fold(fvalues, config=LaunchConfig(grid=fgrid, block=fblock, fence=True))
+        dW = torch.empty(dw_elems, dtype=torch.float32)
+        rt.memcpy_d2h(_u8(dW), bufs["dw"][0], bufs["dw"][1])
+    finally:
+        for ptr, _ in bufs.values():
+            rt.free(ptr)
+        synchronize_and_release(0)
+
+    got = dW.view(total_k, p.KH, p.KW, p.cpg)
+    scale = ref.abs().max().clamp(min=1.0)
+    return float(((got - ref).abs().max() / scale).nan_to_num(float("inf")))
+
+
+@unittest.skipUnless(not _WGRAD_SKIP_REASON, _WGRAD_SKIP_REASON or "no GPU")
+class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
+    """The tiled, depthwise and gather direct wgrad kernels of the AOT sweep."""
+
+    def _check(self, dtype: str) -> None:
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
+        for case_id, variant, shape, knobs in _AOT_WGRAD_CASES:
+            problem = DirectConvProblem(dtype=dtype, **shape)
+            with self.subTest(case=case_id, dtype=dtype):
+                rel_err = _run_aot_wgrad_one(GPU_ARCH, variant, problem, knobs)
+                print(f"  {case_id:24s} {dtype}  rel_err={rel_err:.2e}", flush=True)
+                self.assertLess(rel_err, tol, f"{case_id} {problem.short()} {dtype}")
+
+    def test_aot_wgrad_fp16(self):
+        self._check("fp16")
+
+    def test_aot_wgrad_bf16(self):
+        self._check("bf16")
 
 
 if __name__ == "__main__":

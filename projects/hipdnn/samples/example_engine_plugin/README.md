@@ -27,6 +27,7 @@ Runtime Compilation):
 ```
 example_engine_plugin/
 ├── CMakeLists.txt                       # Root CMake: project options, dependencies
+├── CMakePresets.json                    # Ninja debug/release configure and build presets
 ├── README.md                            # This file
 ├── README_TEMPLATE.md                   # Template README for new plugins (copy as README.md)
 ├── ai_plugin_rename_prompt.md            # AI agent prompt for copy-and-rename plugin creation
@@ -53,7 +54,7 @@ example_engine_plugin/
 │   ├── ExampleProviderContainer.hpp/cpp   # Engine registration and EngineManager
 │   ├── ExampleProviderHandle.hpp/cpp      # Plugin handle (stream, container reference)
 │   ├── ExampleProviderContext.hpp         # Execution context
-│   ├── ExampleProviderSettings.hpp        # Execution settings (reluNegativeSlope)
+│   ├── ExampleProviderSettings.hpp        # Execution settings (reluNegativeSlope, blockSize)
 │   ├── hip/                             # HIPRTC infrastructure (DI interfaces + impls)
 │   │   ├── IKernelCompiler.hpp          # Interface: compile(filename, options)
 │   │   ├── ICompiledProgram.hpp         # Interface: getRunnableKernel(name)
@@ -201,6 +202,9 @@ The tests and sample can also be run directly:
 |---|---|---|
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
+| `EXAMPLEPROVIDER_ENABLE_CLANG_TIDY` | `OFF` | Run clang-tidy during compilation (requires `clang-tidy` on `PATH`) |
+| `BUILD_ADDRESS_SANITIZER` | `OFF` | Build with Address Sanitizer (Linux only) |
+| `TEST_ENVIRONMENT` | `""` | Environment variables for the unit tests, as `VAR1=val1;VAR2=val2` |
 | `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable; inherited from the samples parent build |
 | `EXAMPLE_PROVIDER_GTEST_VERSION` | `1.17.0` | GoogleTest tag used by the explicit fetch fallback; installed packages and supplied source trees take precedence |
 
@@ -625,15 +629,17 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 |---|---|
 | `hipdnn-example-provider` (project name) | `your-name-provider` |
 | `example_provider_impl` | `your_name_provider_impl` |
+| `example_provider_impl_kernel_sources` | `your_name_provider_impl_kernel_sources` |
 | `example_provider_private` | `your_name_provider_private` |
 | `example_provider_plugin` | `your_name_provider_plugin` |
 | `example_provider_compile_options` | `your_name_provider_compile_options` |
 | `example_provider_kernel_embed` | `your_name_provider_kernel_embed` |
-| `example_provider_tests` | `your_name_provider_tests` |
-| `example_provider_sample` | `your_name_provider_sample` |
+| `hipdnn_example_provider_unit_tests` | `hipdnn_your_name_provider_unit_tests` |
+| `hipdnn_example_provider_sample` | `hipdnn_your_name_provider_sample` |
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `YOURNAMEPROVIDER_BUILD_UNIT_TESTS` |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `YOURNAMEPROVIDER_BUILD_SAMPLE` |
 | `EXAMPLEPROVIDER_ENABLE_CLANG_TIDY` | `YOURNAMEPROVIDER_ENABLE_CLANG_TIDY` |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `YOUR_NAME_PROVIDER_GTEST_VERSION` |
 | `example_provider_version_file_dir` (function) | `your_name_provider_version_file_dir` |
 | `example_provider_setup_version` (function) | `your_name_provider_setup_version` |
 | `example_provider_generate_version_header` (function) | `your_name_provider_generate_version_header` |
