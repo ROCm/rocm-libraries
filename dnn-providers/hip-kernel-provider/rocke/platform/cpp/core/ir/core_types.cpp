@@ -889,7 +889,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.cvt_f32_to_u8_sat",
 
     /* arith.* range marker */
-    "arith.assume_range"};
+    "arith.assume_range",
+
+    /* arith.fdot2 */
+    "arith.fdot2"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1171,7 +1174,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.cvt_f32_to_u8_sat    */ true,
 
     /* arith.* range marker */
-    /* arith.assume_range         */ true};
+    /* arith.assume_range         */ true,
+
+    /* arith.fdot2 */
+    /* arith.fdot2                */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

@@ -9,16 +9,20 @@
  * actionAfterAdding() to improve coverage of HeuristicPluginManager.hpp
  */
 
+#include "BuiltInHeuristicPolicies.hpp"
 #include "HipdnnException.hpp"
 #include "PlatformUtils.hpp"
 #include "TestPluginConstants.hpp"
 #include "plugin/HeuristicPluginManager.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <set>
+#include <vector>
 
 // Test plugin name constants (defined here because CMake ordering prevents proper macro propagation)
 namespace
@@ -31,6 +35,8 @@ constexpr const char* DUPLICATE_POLICY_ID_B_PLUGIN = "test_duplicate_policy_id_b
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
+using hipdnn_backend::test_utilities::builtInPolicyIds;
+using hipdnn_backend::test_utilities::registeredPolicyIds;
 using namespace hipdnn_backend::plugin_constants;
 
 class TestHeuristicPluginManagerValidationPaths : public ::testing::Test
@@ -268,9 +274,8 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, ConstructorSetsUpValidationInf
     // otherwise the test is just re-checking SetUp's invariant.
     const HeuristicPluginManager manager;
 
-    // A freshly-constructed manager always contains the Config + StaticOrdering
-    // built-ins (registered in HeuristicPluginManager's constructor); nothing else yet.
-    EXPECT_EQ(manager.getPlugins().size(), 2u);
+    // A freshly-constructed manager holds exactly the built-in policies; nothing else yet.
+    EXPECT_EQ(registeredPolicyIds(manager), builtInPolicyIds());
 }
 
 // ========== Destructor Path Coverage ==========
@@ -396,8 +401,9 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, BadApiVersionPluginRejected)
 
     _manager->loadPlugins({badPlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Bad API version plugin should be rejected";
+    // Only the built-ins remain.
+    EXPECT_EQ(registeredPolicyIds(*_manager), builtInPolicyIds())
+        << "Bad API version plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
@@ -410,8 +416,9 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyNamePluginRejected)
 
     _manager->loadPlugins({emptyNamePlugin}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Built-in Config + StaticOrdering are always present; no external plugin should have loaded.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u) << "Empty policy name plugin should be rejected";
+    // Only the built-ins remain.
+    EXPECT_EQ(registeredPolicyIds(*_manager), builtInPolicyIds())
+        << "Empty policy name plugin should be rejected";
 }
 
 TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsRejected)
@@ -426,12 +433,14 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
         GTEST_SKIP() << "test_duplicate_policy_id plugins not found";
     }
 
+    const size_t builtInCount = _manager->getPlugins().size();
     _manager->loadPlugins({pluginA, pluginB}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Built-in Config + StaticOrdering are always present, plus the first of the
-    // duplicate pair (pluginA). The second (pluginB) is rejected for duplicate policy ID.
+    // Only the first of the duplicate pair (pluginA) joins the built-ins; the second
+    // (pluginB) is rejected for duplicate policy ID.
     const auto& plugins = _manager->getPlugins();
-    ASSERT_EQ(plugins.size(), 3u) << "Built-ins + first duplicate plugin should be present";
+    ASSERT_EQ(plugins.size(), builtInCount + 1u)
+        << "Built-ins + first duplicate plugin should be present";
 
     // The survivor must be pluginA (first offered). Probe pluginA on its own to
     // capture its policy IDs, then verify those IDs appear in the loaded set —
@@ -439,17 +448,19 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, DuplicatePolicyIdPluginsReject
     // an unrelated reason and pluginB loaded.
     HeuristicPluginManager probeA;
     probeA.loadPlugins({pluginA}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    ASSERT_EQ(probeA.getPlugins().size(), 3u)
+    ASSERT_EQ(probeA.getPlugins().size(), builtInCount + 1u)
         << "pluginA should load successfully alongside the built-ins to be a valid baseline";
 
     // Find the non-built-in plugin in the probe to get pluginA's policy IDs.
+    const auto builtIns = builtInPolicyIds();
     std::vector<int64_t> pluginAPolicyIds;
     for(const auto& plugin : probeA.getPlugins())
     {
-        const std::string name(plugin->name());
-        if(name != "BuiltInStaticOrderingHeuristic" && name != "BuiltInConfigHeuristic")
+        const auto ids = plugin->getAllPolicyIds();
+        if(std::none_of(
+               ids.begin(), ids.end(), [&](int64_t id) { return builtIns.count(id) != 0U; }))
         {
-            pluginAPolicyIds = plugin->getAllPolicyIds();
+            pluginAPolicyIds = ids;
             break;
         }
     }
@@ -530,6 +541,6 @@ TEST_F(TestHeuristicPluginManagerValidationPaths, EmptyDirectorySkipsValidation)
     // Load from empty directory - no plugins to validate
     _manager->loadPlugins({emptyDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
-    // Built-in Config + StaticOrdering are always present; the empty directory contributed nothing.
-    EXPECT_EQ(_manager->getPlugins().size(), 2u);
+    // Only the built-ins remain; the empty directory contributed nothing.
+    EXPECT_EQ(registeredPolicyIds(*_manager), builtInPolicyIds());
 }
