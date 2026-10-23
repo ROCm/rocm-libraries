@@ -124,9 +124,36 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
     static constexpr const char* name = "tdm_kr_ktr";
 
+    // dS write-after-read across hot-loop iterations: with two or more Q/dO
+    // slots no barrier separates iteration i's dS LDS reads (slow waves) from
+    // iteration i+1's dS store (fast waves). Elementwise bias / dbias already
+    // put a workgroup barrier in front of the store. Without them:
+    //   tuned schedule  -> alternate between two dS buffers; a barrier in
+    //                      front of the store would stall the overlapped
+    //                      gemm_3 / dQ atomics.
+    //   other schedules -> a barrier in front of the store; it is nearly free
+    //                      there, while the larger LDS footprint is not.
+    // CK_TILE_FMHA_BWD_DS_FIX_MODE forces one choice: 1 barrier, 2 double
+    // buffer, 0 automatic (default).
+#ifndef CK_TILE_FMHA_BWD_DS_FIX_MODE
+#define CK_TILE_FMHA_BWD_DS_FIX_MODE 0
+#endif
+    static constexpr index_t kDSFixMode = CK_TILE_FMHA_BWD_DS_FIX_MODE;
+    static constexpr bool kDSRaceExposed =
+        Policy::template GetQDOSlots<Problem>() >= 2 &&
+        BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS && !kHasBiasGrad;
+    static constexpr bool kDSDoubleBuf =
+        kDSRaceExposed && (kDSFixMode == 2 || (kDSFixMode == 0 && kTunedSched));
+    static constexpr bool kDSPreBarrier = kDSRaceExposed && !kDSDoubleBuf;
+    static constexpr index_t kDSSecondBufOffset =
+        integer_least_multiple(Policy::template GetSmemSize<Problem>(), 128);
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        if constexpr(kDSDoubleBuf)
+            return kDSSecondBufOffset + Policy::template GetSmemSizeSGrad<Problem>();
+        else
+            return Policy::template GetSmemSize<Problem>();
     }
 
     // Fold the gemm_4 accumulator so one dQ atomic covers one whole cache line.
@@ -590,6 +617,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                              make_tuple(number<kN0>{}, number<kM0>{}),
                              ds_lds_window.get_window_origin(),
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
+
+        GemmDataType* ds_lds_ptr1 = static_cast<GemmDataType*>(
+            static_cast<void*>(static_cast<char*>(smem_ptr) + kDSSecondBufOffset));
+        ignore = ds_lds_ptr1;
 
         auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
             Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
@@ -1182,13 +1213,30 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
+            if constexpr(kDSDoubleBuf)
+            {
+                // Alternate dS buffers: iteration i writes buffer i & 1, so the
+                // store never overwrites the buffer slow waves may still be
+                // reading from iteration i - 1. Only the base pointer moves;
+                // the precomputed window coordinates are buffer-relative.
+                GemmDataType* ds_ptr_it = (i_total_loops & 1) ? ds_lds_ptr1 : ds_lds_ptr;
+                ds_lds_window.set_bottom_tensor_view_data_ptr(ds_ptr_it);
+                ds_lds_read_window.set_bottom_tensor_view_data_ptr(ds_ptr_it);
+            }
+            if constexpr(kDSPreBarrier && kTunedSched)
+            {
+                // Every wave has finished reading the previous tile's dS.
+                block_sync_lds();
+            }
             if constexpr(!kTunedSched)
             {
             // Original schedule for all non-tuned instances.
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            if constexpr(kHasBiasGrad)
+            if constexpr(kHasBiasGrad || kDSPreBarrier)
             {
-                // SGrad and BiasGrad use the same address in LDS.
+                // SGrad and BiasGrad use the same address in LDS; without
+                // dbias, every wave must have finished reading the previous
+                // tile's dS before it is overwritten.
                 block_sync_lds();
             }
             store_tile(ds_lds_window, dst_reg_tensor);
