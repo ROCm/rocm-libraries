@@ -14,8 +14,7 @@
 # against the manifest. A cell is (dtype, head_size, heads); block_size, its tile
 # and num_segments are the arms. `default: true` marks each cell's default arm (the
 # split rule's pick for kv_block_size 16, batch 32, seqlen_k 8192); neither it nor
-# `reduction` reaches a descriptor. 2192 is over the 1000 AOT budget: accepted
-# pending owner sign-off.
+# `reduction` reaches a descriptor. 2,192 exceeds the 1000 AOT budget (warning).
 
 dialect: packaged
 authored_subpath: rocKE/gfx942_attention_unified_3d

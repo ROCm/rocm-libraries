@@ -76,7 +76,7 @@ kmd_fields:
   default_value: 16
 # Number of KV splits the segment kernel is compiled for; also the reduce
 # kernel's input count. Any value is correct; the native scorer picks the one
-# closest to rocKE's gfx942 split rule for the live CU count (D5).
+# closest to rocKE's gfx942 split rule for the live CU count.
 - name: num_segments
   type: int
   default_value: 16
@@ -133,8 +133,9 @@ enumerate:
   request: dispatch.attention.common:AttentionRequest
   # Selects the one strided (dense KV) split-KV decode candidate.
   pin: {algorithm: strided_decode, spec_id: strided_decode}
-  # Request fields every cell shares. num_cus 304 is MI300X (owner decision D5);
-  # it changes only which num_segments the split rule emits, never admission.
+  # Request fields every cell shares. num_cus 304 is the MI300X CU count, the
+  # catalog's reference device; the runtime scorer reads the live count instead.
+  # num_cus changes only which num_segments the split rule emits, never admission.
   fixed: {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
   # Crossed in order, first group outermost (the catalog order). Every cell is
   # admitted by the candidate: D 64/128/256 x fp16/bf16
@@ -245,7 +246,7 @@ enumerate:
   # test_every_shipped_engine_manifest_loads_through_its_own_loader), but the
   # enumerator enforces it only under `space: slice`. Under `space: full` it only
   # records the enumerated count; the aot_budget_per_arch WARN below is the live
-  # check (2192 > 1000, accepted pending owner sign-off).
+  # check (2,192 exceeds the 1000 AOT budget: a warning).
   max_kernels: 2192
 
 # How the variant space is reduced; copied verbatim into the generated config.
