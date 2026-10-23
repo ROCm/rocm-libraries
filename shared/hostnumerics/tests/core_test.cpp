@@ -439,7 +439,9 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
     EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
     EXPECT_EQ(Layout(Shape{}, {}), Layout{});
-    EXPECT_EQ(layout.elementOffset(std::array<size_t, 2>{1, 2}), 5);
+    const auto offset = layout.elementOffset(std::array<size_t, 2>{1, 2});
+    ASSERT_TRUE(offset);
+    EXPECT_EQ(*offset, 5);
 }
 
 TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
@@ -455,7 +457,6 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         EXPECT_EQ(copied, Layout{});
         EXPECT_EQ(copied.shape().elementCount(), 1);
         EXPECT_TRUE(copied.strides().empty());
-        EXPECT_EQ(copied.elementOffset({}), 0);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Layout assigned;
@@ -468,7 +469,6 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         EXPECT_EQ(assigned, Layout{});
         EXPECT_EQ(assigned.shape().elementCount(), 1);
         EXPECT_TRUE(assigned.strides().empty());
-        EXPECT_EQ(assigned.elementOffset({}), 0);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
         Layout& self = moveAssigned;
         moveAssigned = std::move(self);
@@ -478,12 +478,42 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
 
 TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
     using namespace roc::hostnumerics::detail;
-    const auto result = tryContiguousLayout(Shape{std::numeric_limits<size_t>::max()}, false);
+    const auto result = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), LayoutError::ExtentOutOfRange);
-    const auto valid = tryContiguousLayout(Shape{2, 3}, false);
+    const auto valid = Layout::getContiguousLayout(Shape{2, 3});
     ASSERT_TRUE(valid);
     EXPECT_EQ(valid->stride(0), 3);
     EXPECT_EQ(valid->stride(1), 1);
+    const auto invalidOrder = Layout::getContiguousLayout(Shape{2, 3}, std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(invalidOrder);
+    EXPECT_EQ(invalidOrder.error(), LayoutError::InvalidOrder);
+    static_assert(noexcept(std::declval<const Layout&>() == std::declval<const Layout&>()));
+}
+
+TEST(LayoutCpp, OffsetFailuresCarryContextWithoutThrowing) {
+    using namespace roc::hostnumerics::detail;
+    static_assert(noexcept(std::declval<const Layout&>().elementOffset({})));
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>, ptrdiff_t>);
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>,
+                                                  Unexpected<LayoutFailure>>);
+    const Layout layout(Shape{3, 3}, {std::numeric_limits<ptrdiff_t>::max(), 1});
+    const auto rank = layout.elementOffset(std::array<size_t, 1>{0});
+    ASSERT_FALSE(rank);
+    EXPECT_EQ(rank.error().error, LayoutError::CoordinateRankMismatch);
+    EXPECT_EQ(rank.error().value, 1);
+    EXPECT_EQ(rank.error().limit, 2);
+    const auto bounds = layout.elementOffset(std::array<size_t, 2>{2, 3});
+    ASSERT_FALSE(bounds);
+    EXPECT_EQ(bounds.error().error, LayoutError::CoordinateOutOfRange);
+    EXPECT_EQ(bounds.error().dimension, 1);
+    EXPECT_EQ(bounds.error().value, 3);
+    EXPECT_EQ(bounds.error().limit, 3);
+    const auto multiply = layout.elementOffset(std::array<size_t, 2>{2, 0});
+    ASSERT_FALSE(multiply);
+    EXPECT_EQ(multiply.error().error, LayoutError::OffsetMultiplyOverflow);
+    const auto add = layout.elementOffset(std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(add);
+    EXPECT_EQ(add.error().error, LayoutError::OffsetAddOverflow);
 }
 }  // namespace

@@ -24,3 +24,22 @@ move constructors and support the corresponding assignment. This keeps the
 stored value or error present even if copying a replacement throws.
 `Expected<void, E>` is not supported; add and test that specialization alongside
 the first check that needs to return only success or an error.
+
+## Layout boundaries
+
+`Layout::elementOffset` returns `detail::Expected<ptrdiff_t, detail::LayoutFailure>`
+and is `noexcept`. Rank, coordinate, and arithmetic errors retain an error code
+and numeric context. Checking an offset neither allocates nor formats diagnostics.
+The Python `element_offset` binding reports these errors as `RuntimeError` with
+the same rank, coordinate, and overflow messages.
+
+`Layout::getContiguousLayout` returns validation errors through `Expected`.
+It copies the Shape and allocates strides, so allocation errors can still throw.
+`Layout::contiguous` is a convenience boundary that reports validation errors as
+`std::runtime_error`. Both use orders listing axes from slowest to fastest, as in
+`Shape::linearIndex`.
+
+Assertions check established internal preconditions. Public checked operations
+return errors for invalid input in both debug and release builds. Returning an
+error does not require callers to choose a fallback: an outer boundary can
+report it as an exception when that operation cannot continue.
