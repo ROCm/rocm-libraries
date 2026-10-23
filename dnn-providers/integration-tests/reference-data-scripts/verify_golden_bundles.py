@@ -4,7 +4,6 @@
 """Verify hipDNN golden bundle directories."""
 
 import argparse
-import glob
 import json
 import math
 import re
@@ -253,6 +252,9 @@ def validate_reference_flags_require_golden(
     result: VerificationResult,
     prefix: str = "",
 ) -> None:
+    # An expected rejection ignores the reference flags: nothing is ever compared.
+    if metadata.get("expected_rejection") is True:
+        return
     if (
         all(metadata.get(key) is True for key in REFERENCE_DISABLE_FLAGS)
         and not golden_declared
@@ -280,6 +282,33 @@ def validate_expected_rejection_has_no_golden(
         )
 
 
+def single_graph_golden_declared(directory: Path, stem: str) -> bool:
+    """Mirror the C++ loader: the `.tensors.dvc` pointer, or a blob for every output.
+
+    Input-only or partial output blobs do not declare golden data. A graph that
+    cannot be read declares only through its pointer (the graph check reports it).
+    """
+    if (directory / f"{stem}.tensors.dvc").is_file():
+        return True
+    try:
+        graph = json.loads((directory / f"{stem}.json").read_text())
+        nodes = graph["nodes"]
+        virtual = {
+            tensor["uid"]
+            for tensor in graph["tensors"]
+            if isinstance(tensor, dict) and tensor.get("virtual") is True
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not isinstance(nodes, list):
+        return False
+    output_uids = extract_output_tensor_uids(nodes, directory, VerificationResult())
+    output_uids -= virtual
+    return bool(output_uids) and all(
+        (directory / f"{stem}.tensor{uid}.bin").is_file() for uid in output_uids
+    )
+
+
 def validate_metadata(path: Path, result: VerificationResult) -> None:
     try:
         metadata = json.loads(path.read_text())
@@ -295,9 +324,7 @@ def validate_metadata(path: Path, result: VerificationResult) -> None:
 
     if path.name.endswith(".meta.json") and path.name != "meta.json":
         stem = path.name[: -len(".meta.json")]
-        golden_declared = (path.parent / f"{stem}.tensors.dvc").is_file() or any(
-            path.parent.glob(f"{glob.escape(stem)}.tensor*.bin")
-        )
+        golden_declared = single_graph_golden_declared(path.parent, stem)
         validate_reference_flags_require_golden(metadata, golden_declared, path, result)
         validate_expected_rejection_has_no_golden(
             metadata, golden_declared, path, result

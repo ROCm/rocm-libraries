@@ -195,7 +195,7 @@ public:
             }
         }();
 
-        if(TestConfig::get().writeSupportClaims())
+        if(_deps.policy.writeSupportClaims)
         {
             // An expected-rejection bundle carries no claim, so there is nothing to
             // refresh. Counted as skipped before observation, like the SetUp() skips,
@@ -365,7 +365,7 @@ private:
     bool shouldObserveClaims() const
     {
         return _engineUnderTest.has_value() && !excludedFromClaims()
-               && !TestConfig::get().writeSupportClaims() && carriesSidecar();
+               && !_deps.policy.writeSupportClaims && carriesSidecar();
     }
 
     // Null-guarded because SetUp() reaches shouldObserveClaims() before it checks for

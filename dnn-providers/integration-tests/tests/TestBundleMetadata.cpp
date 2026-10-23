@@ -715,17 +715,4 @@ TEST(TestLoadBundleMetadata, NonBooleanFlagFromAFileThrows)
     EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 
-TEST(TestExcludedFromSupportClaims, OnlyAnExpectedRejectionIsExcluded)
-{
-    BundleMetadata meta;
-    EXPECT_FALSE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
-
-    meta.noCpuReference = true;
-    meta.noGpuReference = true;
-    EXPECT_FALSE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
-
-    meta.expectedRejection = true;
-    EXPECT_TRUE(hipdnn_integration_tests::excludedFromSupportClaims(meta));
-}
-
 // NOLINTEND(readability-identifier-naming)

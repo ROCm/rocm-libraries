@@ -25,6 +25,7 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
@@ -71,6 +72,12 @@ protected:
         _tempDir = _scopedDir->path();
         testing_support::captureVerifiers(_mocks.reporter, _verifiers, &_verifierDetails);
         testing_support::captureUnverifiable(_mocks.reporter, _unverifiable);
+        SupportObservationLog::get().reset();
+    }
+
+    void TearDown() override
+    {
+        SupportObservationLog::get().reset();
     }
 
     std::shared_ptr<IntegrationTestBundle> rejectedBundle() const
@@ -364,6 +371,40 @@ TEST_F(TestExpectedRejection, UnflaggedBundleWithASidecarIsStillCounted)
         LoadedEngine{ENGINE_ID, ENGINE_NAME},
         &results,
         writeSidecar(R"({"version": 1, "claims": {}})"));
+}
+
+// An authoring run (--write-support-claims) refreshes claims, and an expected rejection
+// has none to refresh: it is skipped, counted as skipped before observation so the
+// run's totals still reconcile, and never observed.
+TEST_F(TestExpectedRejection, AuthoringRunSkipsWithoutObservingAndCountsTheSkip)
+{
+    _policy.writeSupportClaims = true;
+    answerRankedQueryWith(/*resolved=*/true, /*ranked=*/true);
+
+    ::testing::TestPartResultArray results;
+    runPinned(&results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 0u);
+    EXPECT_EQ(SupportObservationLog::get().graphsUnobserved(), 0u);
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
+}
+
+// The control: the same authoring run on an ordinary bundle observes it, so the skip
+// above is the flag's doing.
+TEST_F(TestExpectedRejection, AuthoringRunObservesAnOrdinaryBundle)
+{
+    _policy.writeSupportClaims = true;
+    answerRankedQueryWith(/*resolved=*/true, /*ranked=*/true);
+
+    ::testing::TestPartResultArray results;
+    run(fixtures::loadBundle(_tempDir, "Ordinary", /*includeGoldenOutput=*/true),
+        LoadedEngine{ENGINE_ID, ENGINE_NAME},
+        &results);
+
+    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 1u);
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 0u);
 }
 
 // NOLINTEND(readability-identifier-naming)

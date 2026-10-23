@@ -1654,6 +1654,22 @@ TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithoutGoldenLoads
     EXPECT_TRUE(std::get<IntegrationTestBundle>(result).metadata.expectedRejection);
 }
 
+// The reference flags are ignored on an expected rejection, so setting both without any
+// golden data is not the both-off error (which would make the combination unsatisfiable:
+// the golden data it demands is the golden data an expected rejection must not have).
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleIgnoresBothReferenceFlags)
+{
+    const auto dir = _tempDir / "op" / "rejectedbothoff";
+    createMinimalBundle(dir, "rejectedbothoff");
+    writeFlagsMeta(
+        dir,
+        "rejectedbothoff",
+        {{"expected_rejection", true}, {"no_cpu_reference", true}, {"no_gpu_reference", true}});
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(dir / "rejectedbothoff.json")));
+}
+
 // An expected rejection is never executed, so golden data beside it can only be a
 // mistake -- and would drag the bundle into the golden-data binary.
 TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithGoldenIsError)

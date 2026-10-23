@@ -350,19 +350,6 @@ TEST(TestGoldenDataPlanDisabledLane, AFlagBesideAKnownGapEntryFailsNamingBoth)
     EXPECT_NE(failure.message.find("knownReferenceGaps()"), std::string::npos) << failure.message;
 }
 
-// The loader refuses golden data beside an expected rejection, so no such bundle
-// reaches this binary; what it would see is a bundle with nothing to validate.
-TEST(TestGoldenDataPlanDisabledLane, AnExpectedRejectionBundleIsNeverPlanned)
-{
-    auto bundle
-        = loaded("quick_Matmul_x", "Rejected", buildMatmulGraph(), /*hasGoldenOutputs=*/false);
-    bundle.bundle->metadata.expectedRejection = true;
-
-    const auto plan = planGoldenDataValidation({bundle}, session(true, true, true));
-
-    EXPECT_TRUE(plan.tests.empty());
-}
-
 TEST(TestGoldenDataPlanJudgeLane, ADisabledReferenceIsJudgedBeforeItsOpSetOrCost)
 {
     auto costly = graphBundle(buildSdpaGraph(8192), true);

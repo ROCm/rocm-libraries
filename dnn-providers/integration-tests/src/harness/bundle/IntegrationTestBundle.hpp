@@ -750,7 +750,8 @@ inline std::optional<std::filesystem::path>
 // names are only there after `dvc pull`. Reading it from the pointer keeps these
 // rules the same on a machine that has not pulled.
 //
-//   * Both references disabled: nothing but golden data could ever verify the
+//   * Both references disabled (not on an expected rejection, which ignores them):
+//     nothing but golden data could ever verify the
 //     bundle, so it must declare some.
 //   * An expected-rejection bundle is never executed, so golden data beside it is
 //     meaningless, and would also pull the bundle into the golden-data binary.
@@ -760,12 +761,18 @@ inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMe
                                         bool goldenDeclared,
                                         const std::string& where)
 {
-    if(metadata.expectedRejection && goldenDeclared)
+    if(metadata.expectedRejection)
     {
-        throw hipdnn_integration_tests::BundleMetadataError(
-            where
-            + " is an expected_rejection bundle but declares golden data; it is never executed, so"
-              " there is nothing to compare against");
+        // The reference flags are ignored on an expected rejection (nothing is ever
+        // compared), so the both-off rule below must not apply to it.
+        if(goldenDeclared)
+        {
+            throw hipdnn_integration_tests::BundleMetadataError(
+                where
+                + " is an expected_rejection bundle but declares golden data; it is never"
+                  " executed, so there is nothing to compare against");
+        }
+        return;
     }
     if(metadata.noCpuReference && metadata.noGpuReference && !goldenDeclared)
     {

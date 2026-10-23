@@ -676,26 +676,70 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             "is an expected_rejection bundle but declares golden data", completed.stderr
         )
 
-    def test_expected_rejection_with_tensor_blobs_fails(self) -> None:
-        for options in (
-            {"write_input_tensor": True, "write_output_tensor": False},
-            {"write_input_tensor": False, "write_output_tensor": True},
-        ):
-            with self.subTest(**options):
-                completed = self.run_single_graph_with_metadata(
-                    {
-                        "generator": "manual",
-                        "reference_source": "manual",
-                        "expected_rejection": True,
-                    },
-                    **options,
-                )
+    def test_expected_rejection_with_output_blobs_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=True,
+        )
 
-                self.assertEqual(completed.returncode, 1, completed.stdout)
-                self.assertIn(
-                    "is an expected_rejection bundle but declares golden data",
-                    completed.stderr,
-                )
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn(
+            "is an expected_rejection bundle but declares golden data",
+            completed.stderr,
+        )
+
+    # Input blobs alone are not golden data (the loader needs every output's blob),
+    # so they neither trip the expected-rejection rule nor satisfy the both-off one.
+    def test_expected_rejection_with_input_blobs_only_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+            },
+            write_input_tensor=True,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_both_references_disabled_with_input_blobs_only_fails(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=True,
+            write_output_tensor=False,
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertIn("disables both references", completed.stderr)
+
+    # The reference flags are ignored on an expected rejection, so setting both
+    # without golden data is not the both-off error.
+    def test_expected_rejection_with_both_references_disabled_passes(self) -> None:
+        completed = self.run_single_graph_with_metadata(
+            {
+                "generator": "manual",
+                "reference_source": "manual",
+                "expected_rejection": True,
+                "no_cpu_reference": True,
+                "no_gpu_reference": True,
+            },
+            write_input_tensor=False,
+            write_output_tensor=False,
+        )
+
+        self.assertNotIn("disables both references", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_expected_rejection_false_with_golden_passes(self) -> None:
         completed = self.run_single_graph_with_metadata(
