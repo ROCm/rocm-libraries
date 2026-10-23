@@ -76,6 +76,7 @@ _BASELINE: Dict[str, Any] = dict(
     group_merge=1,
     prefetch_addr=False,
     uniform_k_decode=False,
+    patch=False,
     num_load_waves=0,
     cshuffle_no_alias=False,
     is_3d=False,
@@ -265,6 +266,7 @@ _TAGS: Tuple[_Tag, ...] = (
     _num(("group_merge",), "gm"),
     _Tag(("prefetch_addr",), "pfa"),
     _Tag(("uniform_k_decode",), "ukd"),
+    _Tag(("patch",), "patch"),
     _num(("max_sub_gemms",), "msg"),
     _num(("block_h",), "bh"),
 )
