@@ -276,7 +276,8 @@ private:
     }
 
     // Same per-batch window mask as the kernel. Keeps skv in
-    // [sq + windowOffset - leftBound, sq + windowOffset + rightBound]. A negative bound is open.
+    // [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound] (cuDNN: leftBound = L
+    // keeps L keys, diagonal included). A negative bound is open.
     static bool isMasked(
         int64_t sq, int64_t skv, int64_t leftBound, int64_t rightBound, int64_t windowOffset)
     {
@@ -288,7 +289,7 @@ private:
                 return true;
             }
         }
-        if(leftBound >= 0 && skv < sq + windowOffset - leftBound)
+        if(leftBound >= 0 && skv <= sq + windowOffset - leftBound)
         {
             return true;
         }

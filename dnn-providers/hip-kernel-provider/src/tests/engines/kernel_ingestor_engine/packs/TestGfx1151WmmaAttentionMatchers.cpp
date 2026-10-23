@@ -480,6 +480,32 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the kernel's window_left follows FlashAttention (keys before the
+// diagonal), so the same window binds as L - 1. left_bound = 0 keeps no key.
+TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
+{
+    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+    GraphSpec spec;
+    spec.leftBound = 7;
+    spec.rightBound = 3;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_left"), 6);
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_right"), 3);
+
+    spec.leftBound = 1;
+    spec.rightBound = 0;
+    const auto diagonalOnly = matchGraph(spec);
+    ASSERT_TRUE(diagonalOnly.has_value());
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.window_left"), 0);
+
+    spec.leftBound = 0;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 // The deprecated causal flags override the bounds and alignment, as in the
 // hipDNN reference; otherwise a left bound would drop the causal limit.
 TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)

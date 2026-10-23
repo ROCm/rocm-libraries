@@ -300,8 +300,9 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(asm_sdpa_engine::deprecatedCausalMaskCases()),
                          asm_sdpa_engine::deprecatedCausalMaskCaseName);
 
-// The mask graph is 256x256, so a top-left left bound of 255 covers the whole
-// sequence and is plain causal, while 254 is a genuine sliding window.
+// The mask graph is 256x256. left_bound follows cuDNN (L keeps the L keys ending at
+// the diagonal), so a top-left left bound of 256 covers the whole sequence and is
+// plain causal, while 255 is a genuine sliding window (the last query drops key 0).
 bool extractCausalForTopLeftWindow(int64_t leftBound)
 {
     auto builder = asm_sdpa_engine::createSdpaFwdGraphWithMask(
@@ -318,13 +319,13 @@ bool extractCausalForTopLeftWindow(int64_t leftBound)
 
 TEST(TestHipFlash2ExtractParamsWindow, CoveringLeftBoundIsCausal)
 {
-    EXPECT_TRUE(extractCausalForTopLeftWindow(255));
+    EXPECT_TRUE(extractCausalForTopLeftWindow(256));
     EXPECT_TRUE(extractCausalForTopLeftWindow(4294967298));
 }
 
 TEST(TestHipFlash2ExtractParamsWindow, GenuineWindowIsNotCausal)
 {
-    EXPECT_FALSE(extractCausalForTopLeftWindow(254));
+    EXPECT_FALSE(extractCausalForTopLeftWindow(255));
 }
 
 } // namespace

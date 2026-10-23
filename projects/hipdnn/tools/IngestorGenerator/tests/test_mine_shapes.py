@@ -393,7 +393,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
     def test_the_deprecated_boolean_keeps_a_stored_left_bound(self, tmp_path):
         self._graph(
             tmp_path / "graphs" / "g.json",
-            {"causal_mask": True, "left_bound": 127, "right_bound": None},
+            {"causal_mask": True, "left_bound": 128, "right_bound": None},
         )
         shapes = self._mine(tmp_path)
         assert [
@@ -426,6 +426,14 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": "unbounded", "right_bound": 0},
+        )
+        self._assert_refused(tmp_path)
+
+    def test_a_zero_left_bound_is_refused(self, tmp_path):
+        """left_bound follows cuDNN (L keys ending at the diagonal), so 0 keeps no key."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            {"causal_mask": False, "left_bound": 0, "right_bound": 0},
         )
         self._assert_refused(tmp_path)
 
@@ -687,7 +695,7 @@ class TestEveryRequestSemanticSurvivesMining:
 
     _UNMASKED = {"causal_mask": False, "left_bound": None, "right_bound": None}
     _CAUSAL = {"causal_mask": False, "left_bound": -1, "right_bound": 0}
-    _WINDOW = {"causal_mask": False, "left_bound": 127, "right_bound": 0}
+    _WINDOW = {"causal_mask": False, "left_bound": 128, "right_bound": 0}
 
     def test_an_asymmetric_v_head_dimension_is_carried_not_copied_from_q(
         self, tmp_path
@@ -748,11 +756,11 @@ class TestEveryRequestSemanticSurvivesMining:
         as the same request."""
         self._graph(
             tmp_path / "graphs" / "w64.json",
-            attrs={"causal_mask": False, "left_bound": 63, "right_bound": 0},
+            attrs={"causal_mask": False, "left_bound": 64, "right_bound": 0},
         )
         self._graph(
             tmp_path / "graphs" / "w128.json",
-            attrs={"causal_mask": False, "left_bound": 127, "right_bound": 0},
+            attrs={"causal_mask": False, "left_bound": 128, "right_bound": 0},
         )
         rc, output, shapes = self._mine(tmp_path)
         assert rc == 0, output
@@ -1456,7 +1464,7 @@ class TestABottomRightWindowAcrossLengthsIsRefused:
             tmp_path / "graphs" / "g.json",
             512,
             4096,
-            {"left_bound": 127, "right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
+            {"left_bound": 128, "right_bound": 0, "diagonal_alignment": "BOTTOM_RIGHT"},
         )
         out = tmp_path / "shapes.json"
         result = subprocess.run(
@@ -1531,7 +1539,7 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
             {"left_bound": -1, "right_bound": 0, "diagonal_alignment": "TOP_LEFT"},
         )
         _sdpa_graph(
-            graphs / "swa.json", 4096, 4096, {"left_bound": 127, "right_bound": 0}
+            graphs / "swa.json", 4096, 4096, {"left_bound": 128, "right_bound": 0}
         )
         catalog = tmp_path / "MODEL_CATALOG.md"
         catalog.write_text(_CATALOG)
@@ -1557,7 +1565,7 @@ class TestTheOutputIsWhatTheRequestClassAccepts:
             "prefill": {frozenset({"causal"})},
             "decode": {frozenset({"causal", "causal_bottom_right"})},
         }
-        # left_bound 127, right_bound 0: the request states the width and a right bound
+        # left_bound 128, right_bound 0: the request states the width and a right bound
         # of 0, which rocKE normalizes to a band 128 keys wide ending on the diagonal.
         assert [
             (
