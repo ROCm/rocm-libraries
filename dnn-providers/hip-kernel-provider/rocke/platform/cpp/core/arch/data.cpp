@@ -571,6 +571,47 @@ static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
         *out1 = col;
 }
 
+/* One f8f6f4 operand's A map from its fragment layout (Python
+ * _lane_map_from_fragment_layout): lane l slot s sits at row l % LanesPerGroup
+ * and K (l / LanesPerGroup) * Chunk + (s / Chunk) * LaneGroups * Chunk
+ * + s % Chunk, the coordinates rocke_matrix_fragment_layout_coord gives for
+ * rocke_matrix_operand_layout. */
+template <int Chunk, int LaneGroups, int LanesPerGroup>
+static void _fragment_layout_a(rocke_ir_builder_t* b,
+                               rocke_value_t* lane,
+                               int slot,
+                               rocke_value_t** out0,
+                               rocke_value_t** out1)
+{
+    rocke_value_t *c_lanes, *index, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c_lanes = rocke_b_const_i32(b, LanesPerGroup);
+    index = rocke_b_mod(b, lane, c_lanes);
+    /* Pin the mul (with its constant) before the slot's constant: Python
+     * evaluates add's arguments left to right. */
+    {
+        rocke_value_t* k_run
+            = rocke_b_mul(b, rocke_b_div(b, lane, c_lanes), rocke_b_const_i32(b, Chunk));
+        k = rocke_b_add(
+            b, k_run, rocke_b_const_i32(b, (slot / Chunk) * LaneGroups * Chunk + slot % Chunk));
+    }
+    if(out0)
+        *out0 = index;
+    if(out1)
+        *out1 = k;
+}
+
+/* The B map: the A map with the coordinates swapped, (K, column). */
+template <int Chunk, int LaneGroups, int LanesPerGroup>
+static void _fragment_layout_b(rocke_ir_builder_t* b,
+                               rocke_value_t* lane,
+                               int slot,
+                               rocke_value_t** out0,
+                               rocke_value_t** out1)
+{
+    _fragment_layout_a<Chunk, LaneGroups, LanesPerGroup>(b, lane, slot, out1, out0);
+}
+
 /* =========================================================================
  * Per-op_id LayoutMap statics (the precomputed _build_mma_op output)
  * =========================================================================
@@ -594,6 +635,17 @@ static const rocke_layout_map_t lm_wmma_scale_k16_a
     = {ROCKE_MMA_ROLE_A_SCALE, 8, 32, _wmma_gfx1250_a_scale};
 static const rocke_layout_map_t lm_wmma_scale_k16_b
     = {ROCKE_MMA_ROLE_B_SCALE, 8, 32, _wmma_gfx1250_b_scale};
+
+/* gfx1250 f8f6f4 16x16x128 operands: 64 values per lane over two groups of 16
+ * lanes, in K runs of 16 (8-bit formats) or 32 (6-bit and 4-bit formats). */
+static const rocke_layout_map_t lm_wmma_gfx1250_f8f6f4_run16_a
+    = {ROCKE_MMA_ROLE_A, 64, 32, _fragment_layout_a<16, 2, 16>};
+static const rocke_layout_map_t lm_wmma_gfx1250_f8f6f4_run16_b
+    = {ROCKE_MMA_ROLE_B, 64, 32, _fragment_layout_b<16, 2, 16>};
+static const rocke_layout_map_t lm_wmma_gfx1250_f8f6f4_run32_a
+    = {ROCKE_MMA_ROLE_A, 64, 32, _fragment_layout_a<32, 2, 16>};
+static const rocke_layout_map_t lm_wmma_gfx1250_f8f6f4_run32_b
+    = {ROCKE_MMA_ROLE_B, 64, 32, _fragment_layout_b<32, 2, 16>};
 
 /* --- Dense MFMA A and B operand maps by (rows, K per lane): one formula,
  * _mfma_operand_a / _mfma_operand_b (Python _mfma_operand_map), for every
@@ -3197,20 +3249,68 @@ consteval scaled_ids make_scaled_ids()
 }
 constexpr auto k_scaled_ids = make_scaled_ids();
 
+/* f8f6f4 -> f32 at 16x16x128, every format pair with a 6-bit or 4-bit operand
+ * (Python narrow_f8f6f4_op_ids): 64 values of A and of B per lane, each in the
+ * operand layout of its own format, and the gfx12 accumulator. Then f4 at
+ * 32x16x128: 128 fp4 values of A and 64 of B per lane, sixteen results, no
+ * lane maps until one is checked against an independent source. */
+constexpr int k_f8f6f4_count = 21;
+constexpr auto k_f8f6f4_ids = rocke_make_narrow_f8f6f4_op_ids("wmma_gfx1250_f32_16x16x128_f8f6f4");
+static_assert(k_rocke_narrow_matrix_format_pairs.count == k_f8f6f4_count);
+constexpr const rocke_layout_map_t* f8f6f4_map(int format, bool for_b)
+{
+    if(rocke_matrix_format_bits(format) == 8)
+        return for_b ? &lm_wmma_gfx1250_f8f6f4_run16_b : &lm_wmma_gfx1250_f8f6f4_run16_a;
+    return for_b ? &lm_wmma_gfx1250_f8f6f4_run32_b : &lm_wmma_gfx1250_f8f6f4_run32_a;
+}
+constexpr rocke_mma_op_t k_f4_32x16x128 = {"wmma",
+                                           "fp4e2m1",
+                                           "fp4e2m1",
+                                           "fp32",
+                                           32,
+                                           16,
+                                           128,
+                                           "wmma_gfx1250_f32_32x16x128_f4",
+                                           128,
+                                           64,
+                                           16,
+                                           32};
+constexpr int k_dense_count = k_unscaled_count + k_f8f6f4_count + 1;
+
 struct gfx1250_catalog
 {
-    rocke_mma_op_t ops[k_unscaled_count + k_scaled_count];
+    rocke_mma_op_t ops[k_dense_count + k_scaled_count];
 };
 consteval gfx1250_catalog make_gfx1250_catalog()
 {
     gfx1250_catalog result{};
     for(int i = 0; i < k_unscaled_count; ++i)
         result.ops[i] = k_mma_gfx1250_unscaled[i];
+    for(int i = 0; i < k_f8f6f4_count; ++i)
+    {
+        const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+        result.ops[k_unscaled_count + i] = {"wmma",
+                                            k_rocke_matrix_formats[pair.a],
+                                            k_rocke_matrix_formats[pair.b],
+                                            "fp32",
+                                            16,
+                                            16,
+                                            128,
+                                            k_f8f6f4_ids.ids[i],
+                                            64,
+                                            64,
+                                            8,
+                                            32,
+                                            f8f6f4_map(pair.a, false),
+                                            f8f6f4_map(pair.b, true),
+                                            &lm_wmma_gfx12_c};
+    }
+    result.ops[k_unscaled_count + k_f8f6f4_count] = k_f4_32x16x128;
     for(int i = 0; i < k_scaled_count; ++i)
     {
         const auto& key = k_scaled_keys.rows[i];
         const bool k32 = key.mode == 0;
-        result.ops[k_unscaled_count + i] = {
+        result.ops[k_dense_count + i] = {
             "wmma_scaled",
             k_input_dtypes[key.a],
             k_input_dtypes[key.b],

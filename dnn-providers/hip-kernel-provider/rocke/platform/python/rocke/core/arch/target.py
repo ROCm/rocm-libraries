@@ -30,7 +30,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Re-export for callers using the original architecture entry point.
 from ..dtypes import normalize_dtype
+from ..storage import MatrixFragmentLayout
 from . import domain as arch_domain
+from .mfma_scale import matrix_operand_layout, narrow_matrix_format_pairs
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
@@ -933,6 +935,61 @@ def integer_mma_op_ids(op_id: str, bits: int) -> Tuple[str, str, str, str]:
     )
 
 
+def narrow_f8f6f4_op_ids(op_id: str) -> dict[str, tuple[str, str]]:
+    """The op_ids of one f8f6f4 instruction, one per format pair it owns.
+
+    Each (A, B) pair of
+    :func:`~rocke.core.arch.mfma_scale.narrow_matrix_format_pairs` (a 6-bit or
+    4-bit operand) is its own catalog row: ``op_id`` with ``_<a>_<b>`` appended
+    in canonical dtype names, for example
+    ``wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1``. Returns
+    ``{op_id: (a, b)}`` in pair order.
+    """
+    return {f"{op_id}_{a}_{b}": (a, b) for a, b in narrow_matrix_format_pairs()}
+
+
+def _lane_map_from_fragment_layout(layout: MatrixFragmentLayout, role: str):
+    """The ``(builder, lane, slot) -> coords`` lane map of ``layout`` for operand
+    ``role`` (``"a"`` or ``"b"``).
+
+    Lane ``l`` slot ``s`` sits at index ``l % lanes_per_group`` (the row of A,
+    the column of B) and K ``(l // lanes_per_group) * chunk_elements + c``,
+    where ``c = (s // chunk_elements) * lane_groups * chunk_elements +
+    s % chunk_elements`` is a constant per slot -- the same coordinates
+    :meth:`MatrixFragmentLayout.coord` gives. A returns ``(row, k)``, B
+    ``(k, col)``. The C++ twin is ``_fragment_layout_a`` / ``_fragment_layout_b``
+    in ``cpp/core/arch/data.cpp``.
+    """
+    if role not in ("a", "b"):
+        raise ValueError(f"a fragment layout maps operand 'a' or 'b', got {role!r}")
+    chunk_elements = layout.chunk_elements
+    run_stride = layout.lane_groups * chunk_elements
+
+    def placement(builder, lane, slot):
+        chunk, element = divmod(slot, chunk_elements)
+        c_lanes = builder.const_i32(layout.lanes_per_group)
+        index = builder.mod(lane, c_lanes)
+        k = builder.add(
+            builder.mul(builder.div(lane, c_lanes), builder.const_i32(chunk_elements)),
+            builder.const_i32(chunk * run_stride + element),
+        )
+        return (index, k) if role == "a" else (k, index)
+
+    return placement
+
+
+def _f8f6f4_operand_maps(a: str, b: str, words: int, lane_groups: int, lanes: int):
+    """The A and B lane maps of an f8f6f4 instruction reading ``a`` x ``b``."""
+    return (
+        _lane_map_from_fragment_layout(
+            matrix_operand_layout(a, words, lane_groups, lanes), "a"
+        ),
+        _lane_map_from_fragment_layout(
+            matrix_operand_layout(b, words, lane_groups, lanes), "b"
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
@@ -1278,6 +1335,27 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         op_id: _FragInfo(32, 32, 8, 32)
         for op_id in integer_mma_op_ids("wmma_gfx1250_i32_16x16x64_iu8", 8)
     },
+    # --- WMMA f8f6f4 16x16x128 and f4 32x16x128 (wave32, gfx1250) -------------
+    # Each format pair with a 6-bit or 4-bit operand: 64 values of A and of B
+    # per lane in the f8f6f4 operand layout of its own format (16 words, two
+    # groups of 16 lanes; CK's runs), and the gfx12 accumulator, the same as
+    # the scaled f8f6f4 ops'. f4 32x16x128: 128 fp4 values of A and 64 of B per
+    # lane, sixteen results; no lane maps until one is checked against an
+    # independent source.
+    **{
+        op_id: _FragInfo(
+            64,
+            64,
+            8,
+            32,
+            *_f8f6f4_operand_maps(a, b, 16, 2, 16),
+            _wmma_gfx12_acc_16x16,
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids(
+            "wmma_gfx1250_f32_16x16x128_f8f6f4"
+        ).items()
+    },
+    "wmma_gfx1250_f32_32x16x128_f4": _FragInfo(128, 64, 16, 32),
 }
 
 
