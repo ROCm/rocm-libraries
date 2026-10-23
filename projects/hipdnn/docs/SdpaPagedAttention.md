@@ -1,21 +1,27 @@
 # SDPA forward with a paged K/V cache
 
 This page defines the graph contract for scaled dot-product attention (SDPA) forward over a paged
-K/V cache, alone or combined with ragged queries. The semantics follow the cuDNN frontend's paged
-attention ([cudnn-frontend `docs/operations/Attention.md`](https://github.com/NVIDIA/cudnn-frontend/blob/main/docs/operations/Attention.md),
-"Paged attention", and `PagedCacheLoadNode::pre_validate_node`). Where hipDNN differs from cuDNN,
-[Differences from cuDNN](#differences-from-cudnn) says so.
+K/V cache, alone or combined with ragged queries. The semantics follow the paged attention of cuDNN
+frontend 1.24.0, the version the compatibility shim targets: the sample
+[`samples/cpp/sdpa/fp16_fwd_with_paged_caches.cpp`](https://github.com/NVIDIA/cudnn-frontend/blob/v1.24.0/samples/cpp/sdpa/fp16_fwd_with_paged_caches.cpp),
+`PagedCacheLoadNode::pre_validate_node` in
+[`include/cudnn_frontend/node/paged_cache_load.h`](https://github.com/NVIDIA/cudnn-frontend/blob/v1.24.0/include/cudnn_frontend/node/paged_cache_load.h),
+and the SDPA checks in
+[`include/cudnn_frontend/node/sdpa_support_surface.h`](https://github.com/NVIDIA/cudnn-frontend/blob/v1.24.0/include/cudnn_frontend/node/sdpa_support_surface.h).
+Where hipDNN differs from cuDNN, [Differences from cuDNN](#differences-from-cudnn) says so.
 
 The frontend checks the graph rules in `SdpaFwdNode::pre_validate_node`. The CPU reference
 (`CpuFpReferenceSdpaRagged::forwardPaged`) and the GPU reference
-(`GpuFpReferenceSdpaRagged::fpropPaged`) implement the runtime semantics. Engines that accept a
-paged graph must match them.
+(`GpuFpReferenceSdpaRagged::fpropPaged`) implement the runtime semantics and accept the same
+arguments: both apply the frontend's shape rules through one set of checks
+(`hipdnn_test_sdk/utilities/detail/SdpaPagedChecks.hpp`). Engines that accept a paged graph must
+match them.
 
 ## Graph
 
 | Operand | Setter | Dims | Type | Notes |
 |---|---|---|---|---|
-| Q | `sdpa(q, ...)` | `[B, H_q, S_q, D]` | FP16 or BF16 | Any strides. Dense, or ragged at the sequence axis (below). |
+| Q | `sdpa(q, ...)` | `[B, H_q, S_q, D]` | See [Data types](#data-types) | Any strides. Dense, or ragged at the sequence axis (below). |
 | K | `sdpa(.., k, ..)` | `[num_blocks, H_k, block_size, D]` | same as Q | Block container, any strides. |
 | V | `sdpa(.., v, ..)` | `[num_blocks_v, H_v, block_size, D_v]` | same as Q | Block container, any strides. Same `block_size` as K. |
 | Page table K | `set_paged_attention_k_table` | `[B, 1, M, 1]` | INT32 | Any strides. Row `b` lists the physical blocks of sequence `b`. |
@@ -23,9 +29,10 @@ paged graph must match them.
 | Sequence length KV | `set_seq_len_kv` | `[B, 1, 1, 1]` | INT32 | Required. Device tensor. |
 | Sequence length Q | `set_seq_len_q` | `[B, 1, 1, 1]` | INT32 | Required for ragged Q, optional for dense Q. |
 | Max KV length | `set_paged_attention_max_seq_len_kv` | scalar | int32 | Required. `M == ceil(max_seq_len_kv / block_size)`. |
-| O | output | `[B, H_q, S_q, D_v]` | same as Q | Dense or ragged, like Q. |
+| O | output | `[B, H_q, S_q, D_v]` | same as Q; BF16 for FP8 Q | Dense or ragged, like Q. |
 | Stats | `set_generate_stats(true)` | `[B, H_q, S_q, 1]` | FP32 | Optional log-sum-exp. Dense or ragged, like Q. |
 | Sink token | `set_sink_token` | `[1, H_q, 1, 1]` | FP32, or same as Q | Optional attention sink, one logit per query head. See [Attention sinks](#attention-sinks). |
+| Descales | `set_descale_q` / `_k` / `_v` | `[1]`, or `[B, H_k, 1, 1]` (Q, K) and `[B, H_v, 1, 1]` (V) | FP32 | Optional; for FP8 Q/K/V. A per-KV-head Q descale is read by each query head's KV head. |
 
 GQA and MQA follow from the head counts (`H_q % H_k == 0`, `H_q % H_v == 0`). Masks use the diagonal
 band: bottom-right causal is `set_diagonal_alignment(BOTTOM_RIGHT)` with
@@ -40,6 +47,20 @@ Because containers and page tables take arbitrary strides, a framework's cache b
 For example, a cache that stores K and V of one token side by side has K strides
 `[H_k * block_size * 2D, block_size * 2D, 2D, 1]`, and V is the same view `D` elements further on.
 A `[num_reqs, M]` block table is the page table with strides `[M, M, 1, 1]`.
+
+### Data types
+
+`pre_validate_node` does not restrict the Q/K/V/O data types of a paged graph. The references
+serve these:
+
+| Reference | Q, K, V | O | Descales |
+|---|---|---|---|
+| GPU (`fpropPaged` and the GPU graph executor) | FP16 or BF16 | same as Q | Optional |
+| GPU (`fpropPaged` and the GPU graph executor) | FP8 E4M3 | BF16 | Optional |
+| CPU graph executor | FP32, FP16 or BF16 | same as Q | Declined |
+
+`forwardPaged` itself also takes FP8 Q/K/V with a BF16 O and descales; the GPU reference tests
+compare the FP8 GPU path with it. Engines serve their own subsets.
 
 ### Frontend rules
 
@@ -60,9 +81,9 @@ on any SDPA forward graph, must be INT32 `[B, 1, 1, 1]`.
 
 For each batch `b` (`seq_len_*` values are read on the device at execute time):
 
-- **Query rows.** `seq_q[b]` is `seq_len_q[b]` if set; otherwise the ragged-offset length for a
-  ragged Q; otherwise `S_q`. It is at most the rows that `b` owns in Q. Rows at or past `seq_q[b]`
-  are not written.
+- **Query rows.** `seq_q[b]` is `seq_len_q[b]` if set, otherwise `S_q` (only a dense Q may omit
+  `seq_len_q`). It is at most the rows that `b` owns in Q. Rows at or past `seq_q[b]` are not
+  written.
 - **Key rows.** `seq_kv[b] = seq_len_kv[b]`, with `0 <= seq_kv[b] <= max_seq_len_kv`. Key `s`
   (`0 <= s < seq_kv[b]`) is `K[page_table_k[b, 0, s / block_size, 0], h_k, s % block_size, :]`, and
   likewise for V. Only the first `ceil(seq_kv[b] / block_size)` page-table entries are read, and
@@ -82,7 +103,7 @@ For each batch `b` (`seq_len_*` values are read on the device at execute time):
 
 An optional `sink_token` adds one learned logit per query head to the softmax, as in gpt-oss
 and StreamingLLM. It follows cuDNN's `SDPA_attributes::set_sink_token`
-([cudnn-frontend sample `samples/cpp/sdpa/fp16_fwd_with_sink_token.cpp`](https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/cpp/sdpa/fp16_fwd_with_sink_token.cpp)
+([cudnn-frontend 1.24.0 sample `samples/cpp/sdpa/fp16_fwd_with_sink_token.cpp`](https://github.com/NVIDIA/cudnn-frontend/blob/v1.24.0/samples/cpp/sdpa/fp16_fwd_with_sink_token.cpp)
 and the softmax node). It applies the same way to dense, ragged and paged graphs, because it is
 per head, not per sequence. SDPA backward rejects it.
 
@@ -109,7 +130,7 @@ logits. Bind it without a copy as the view `[1, H, 1, 1]` with strides `[H, 1, 1
 
 ## Differences from cuDNN
 
-| Topic | cuDNN frontend | hipDNN |
+| Topic | cuDNN frontend 1.24 | hipDNN |
 |---|---|---|
 | Paging one side only | K or V can be paged alone | Both page tables or neither |
 | `max_seq_len_kv` | Optional; inferred from the page tables when absent | Required for paged graphs |
@@ -117,7 +138,7 @@ logits. Bind it without a copy as the view `[1, H, 1, 1]` with strides `[H, 1, 1
 | Block size | K and V containers may differ | Must match |
 | Packed (ragged) page tables | Supported (cuDNN 9.10.2+) | Rejected |
 | Sink token data type | FLOAT in every sample; no frontend check | FLOAT, or the Q data type when that is HALF or BFLOAT16; checked by `pre_validate_node` |
-| `cu_seq_len_q` / `cu_seq_len_kv` | Supported (cuDNN 9.24+) | Not available; use `ragged_offset` with a multiplier |
+| Status of a rejected paged graph | `GRAPH_NOT_SUPPORTED` (paged without `seq_len_q` / `seq_len_kv`, `max_seq_len_kv` without paging) | `ATTRIBUTE_NOT_SET` when `seq_len_kv`, `max_seq_len_kv` or (ragged Q) `seq_len_q` is missing; `INVALID_VALUE` for every other rule, including `max_seq_len_kv` without page tables |
 
 ## Test coverage
 

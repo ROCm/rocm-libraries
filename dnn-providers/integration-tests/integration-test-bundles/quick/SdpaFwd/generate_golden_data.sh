@@ -300,8 +300,9 @@ if [[ "${GENERATE_SINKS:-0}" == "1" ]]; then
         --attn-scale "$SCALE_D64"
 
     # Mixed prefill/decode with gpt-oss's 128-token sliding window (left bound 127),
-    # ragged Q, a sequence with Q rows but no keys, interleaved K|V views of one
-    # cache and one shared page table (vLLM's layout).
+    # ragged Q, a sequence with Q rows but no keys, separate K and V containers with
+    # a 2*D row pitch (the strides of an interleaved K|V cache) and one shared page
+    # table.
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd64_window_ragged_paged_sinks"
     generate_paged_bundle "$OUTDIR" "Mixed" --dtype bf16 \
         --num-heads-q 16 --num-heads-kv 2 --head-dim 64 \

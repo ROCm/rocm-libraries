@@ -104,6 +104,8 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 
 hipDNN requires both `set_paged_attention_k_table` and `set_paged_attention_v_table` (or neither), requires `set_paged_attention_max_seq_len_kv` with exactly `ceil(max_seq_len_kv / block_size)` page-table columns, requires K and V to share a block size, and rejects packed (ragged) page tables. `seq_len_q` is optional for dense queries and `use_padding_mask` is not required. Full contract and differences: [SdpaPagedAttention.md](./SdpaPagedAttention.md).
 
+Status codes differ from cuDNN FE 1.24, which returns `GRAPH_NOT_SUPPORTED` for a paged graph without sequence lengths and for `max_seq_len_kv` without paging. hipDNN's `validate()` returns `ATTRIBUTE_NOT_SET` for a paged graph without `seq_len_kv`, `max_seq_len_kv` or (ragged Q) `seq_len_q`, and `INVALID_VALUE` for `max_seq_len_kv` without page tables.
+
 ## SDPA attention sinks
 
 `set_sink_token` takes `[1, H_q, 1, 1]` as in cuDNN. hipDNN also accepts a sink in the Q data type when that is HALF or BFLOAT16 (cuDNN uses FLOAT), and rejects any other shape or data type in `pre_validate_node`. The math is cuDNN's. Contract: [SdpaPagedAttention.md](./SdpaPagedAttention.md#attention-sinks).
