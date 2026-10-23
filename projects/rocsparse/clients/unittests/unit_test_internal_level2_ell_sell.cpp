@@ -643,7 +643,7 @@ TEST_F(EllSv, lower_non_unit)
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
-    run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
+    ASSERT_NO_FATAL_FAILURE(run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot));
     EXPECT_EQ(analysis_pivot, -1);
     EXPECT_EQ(solve_pivot, -1);
 
@@ -712,7 +712,7 @@ TEST_F(EllSv, lower_unit_diagonal)
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
-    run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
+    ASSERT_NO_FATAL_FAILURE(run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot));
     EXPECT_EQ(analysis_pivot, -1);
     EXPECT_EQ(solve_pivot, -1);
 
@@ -786,7 +786,7 @@ TEST_F(EllSv, zero_pivot)
               rocsparse_status_success);
 
     int64_t analysis_pivot = -2, solve_pivot = -2;
-    run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot);
+    ASSERT_NO_FATAL_FAILURE(run_ellsv(handle, A, dx, dy, alpha, &analysis_pivot, &solve_pivot));
     // The diagonal entry is present (just zero), so analysis finds no
     // *missing* diagonal; the zero is only caught numerically during solve.
     EXPECT_EQ(analysis_pivot, -1);
@@ -840,19 +840,19 @@ TEST_F(SellMv, none_small_slice)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_none,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
 
 // Transpose, slice size 32 (small-slice kernel sellmvt_device). m = 40 is not a
@@ -873,19 +873,19 @@ TEST_F(SellMv, transpose_small_slice_partial_last_slice)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_transpose,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_transpose,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
 
 // Non-transpose, slice size 256 (>128, large-slice kernel
@@ -907,19 +907,19 @@ TEST_F(SellMv, none_large_slice)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_none,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
 
 // Transpose, slice size 256 (large-slice kernel sellmvt_large_slice_device).
@@ -938,19 +938,19 @@ TEST_F(SellMv, transpose_large_slice)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_transpose,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_transpose,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
 
 // Slice size 1: rocsparse_sellmv_impl dispatches this straight to the CSR
@@ -970,19 +970,19 @@ TEST_F(SellMv, slice_size_one_csr_fallback)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_none,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
 
 // beta != 0, so y is read as well as written and the kernels take their
@@ -1007,17 +1007,17 @@ TEST_F(SellMv, none_small_slice_nonzero_beta)
     std::vector<float> expected = host_sellmv(
         m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
 
-    run_v2_spmv_sell(handle,
-                     rocsparse_operation_none,
-                     m,
-                     n,
-                     offs,
-                     cols,
-                     vals,
-                     slice,
-                     hx,
-                     alpha,
-                     beta,
-                     hy0,
-                     expected);
+    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                             rocsparse_operation_none,
+                                             m,
+                                             n,
+                                             offs,
+                                             cols,
+                                             vals,
+                                             slice,
+                                             hx,
+                                             alpha,
+                                             beta,
+                                             hy0,
+                                             expected));
 }
