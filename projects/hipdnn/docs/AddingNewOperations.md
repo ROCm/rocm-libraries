@@ -246,7 +246,11 @@ table MatmulAttributes (matcher_opcode: "matmul") {
 
 Follow these conventions:
 
-- **Opcode:** lower snake case of the op, e.g. `convolution_fwd`, `sdpa_bwd`. A table that
+- **Opcode:** lowercase snake case of the op. A forward op has no suffix (`convolution`,
+  `sdpa`); a backward op ends in `_bwd` (`sdpa_bwd`, or `convolution_bwd_data` and
+  `convolution_bwd_filter` for separate variants); a normalization name is one word
+  (`rmsnorm`, `rmsnorm_bwd`). Opcodes must be unique when compared case-insensitively; the
+  registry generator enforces it. A table that
   serves several modes, such as `PointwiseAttributes`, still gets one opcode. Its mode stays
   an enum attribute (`operation`), so a pattern matches `pointwise` and its criteria test
   the mode.

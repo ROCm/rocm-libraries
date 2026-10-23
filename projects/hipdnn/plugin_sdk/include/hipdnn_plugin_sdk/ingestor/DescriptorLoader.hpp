@@ -182,6 +182,9 @@ struct DescriptorCatalog
     KernelMap kernels;
 };
 
+namespace detail
+{
+
 /// Every top-level key a UED may carry, excluding extension keys. This is RFC 0020 §4.2's
 /// members with one `heuristic` id in place of the three role maps (see the divergence
 /// list at the top of this file). The UED JSON Schema's `properties` list the same set.
@@ -203,9 +206,6 @@ inline constexpr std::array<std::string_view, 4> UED_REQUIRED_KEYS{
 /// The two arms of a UED's `graph_match`. An object carries exactly one: the declarative
 /// pattern (see CompiledGraphPattern.hpp) or a GraphMatchRegistry symbol.
 inline constexpr std::array<std::string_view, 2> GRAPH_MATCH_KEYS{"nodes", "native"};
-
-namespace detail
-{
 
 /// A descriptor file's type, taken from the suffix of its filename. The stem is free-form
 /// documentation and is never parsed: `pointwise_add.kdp.json` and `a.kdp.json` are read
@@ -244,25 +244,6 @@ struct FileType
     bool headerOnly;
     void (*insert)(DescriptorCatalog&, const DescriptorFile&);
 };
-
-inline void requireObject(const nlohmann::json& value, const std::string& where)
-{
-    if(!value.is_object())
-    {
-        fail(where + " must be a JSON object");
-    }
-}
-
-inline const nlohmann::json&
-    requireKey(const nlohmann::json& object, std::string_view key, const std::string& where)
-{
-    const auto it = object.find(std::string(key));
-    if(it == object.end())
-    {
-        fail("missing required key '" + std::string(key) + "' in " + where);
-    }
-    return *it;
-}
 
 /// Every string in the format names something -- a descriptor, a symbol, a field, a file
 /// -- so an empty one is an authoring mistake, not a value: it would reach EngineRegistrar
@@ -637,22 +618,6 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.kind = heuristicKindFromString(requireString(root, "kind", where), where);
     heuristic.payload = requireString(root, "payload", where);
     return heuristic;
-}
-
-/// Duplicates in any of the UED's three lists are authoring mistakes rather than
-/// redundancies to collapse: a repeated knob is reported twice in EngineDetails, and a
-/// repeated note twice in diagnostics (RFC 0020 §4.2, `uniqueItems`).
-inline void requireNoDuplicates(const std::vector<std::string>& values,
-                                std::string_view what,
-                                const std::string& where)
-{
-    for(auto value = values.begin(); value != values.end(); ++value)
-    {
-        if(std::find(values.begin(), value, *value) != value)
-        {
-            fail(std::string(what) + " '" + *value + "' is listed twice in " + where);
-        }
-    }
 }
 
 /// A gfx base target id: "gfx" then a lowercase base id, and nothing else. A device

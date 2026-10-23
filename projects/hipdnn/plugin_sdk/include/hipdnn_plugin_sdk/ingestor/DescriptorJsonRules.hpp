@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -18,8 +19,8 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 /// @file DescriptorJsonRules.hpp
-/// @brief Error helper and unknown-key rule shared by the descriptor loader and the
-///        `graph_match.nodes` pattern parser.
+/// @brief Error helper, identifier rule, and required-key, unknown-key and duplicate checks
+///        shared by the descriptor loader and the `graph_match.nodes` pattern parser.
 
 namespace hipdnn_plugin_sdk::ingestor::detail
 {
@@ -81,6 +82,55 @@ inline void requireKnownKeys(const nlohmann::json& object,
                              const std::string& where)
 {
     requireKnownKeys(object, allowed.data(), allowed.data() + N, where);
+}
+
+/// True for `[A-Za-z_][A-Za-z0-9_]*`, the form of a token root.
+inline bool isIdentifier(std::string_view text)
+{
+    const auto isLeading
+        = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
+    if(text.empty() || !isLeading(text.front()))
+    {
+        return false;
+    }
+    return std::all_of(text.begin() + 1, text.end(), [&isLeading](char c) {
+        return isLeading(c) || (c >= '0' && c <= '9');
+    });
+}
+
+inline void requireObject(const nlohmann::json& value, const std::string& where)
+{
+    if(!value.is_object())
+    {
+        fail(where + " must be a JSON object");
+    }
+}
+
+inline const nlohmann::json&
+    requireKey(const nlohmann::json& object, std::string_view key, const std::string& where)
+{
+    const auto it = object.find(std::string(key));
+    if(it == object.end())
+    {
+        fail("missing required key '" + std::string(key) + "' in " + where);
+    }
+    return *it;
+}
+
+/// Duplicates in any of the UED's three lists are authoring mistakes rather than
+/// redundancies to collapse: a repeated knob is reported twice in EngineDetails, and a
+/// repeated note twice in diagnostics (RFC 0020 §4.2, `uniqueItems`).
+inline void requireNoDuplicates(const std::vector<std::string>& values,
+                                std::string_view what,
+                                const std::string& where)
+{
+    for(auto value = values.begin(); value != values.end(); ++value)
+    {
+        if(std::find(values.begin(), value, *value) != value)
+        {
+            fail(std::string(what) + " '" + *value + "' is listed twice in " + where);
+        }
+    }
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor::detail

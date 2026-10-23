@@ -283,7 +283,7 @@ inline nlohmann::json convPattern(bool swapXAndW = false)
     const auto* wEdge = swapXAndW ? "x" : "w";
     return nlohmann::json::array({{{"kind", "op"},
                                    {"id", "conv"},
-                                   {"op", "convolution_fwd"},
+                                   {"op", "convolution"},
                                    {"operands", {{xEdge, "$x"}, {wEdge, "$w"}}},
                                    {"results", {{"y", "$y"}}}}});
 }

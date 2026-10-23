@@ -41,7 +41,7 @@ const std::string OPTIONAL_SECOND_OPERAND = R"([{"kind": "op", "id": "pointwise"
     "results": {"out_0": "$output"}}])";
 
 const std::string CONV_ADD_CHAIN = R"([
-    {"kind": "op", "id": "conv", "op": "convolution_fwd",
+    {"kind": "op", "id": "conv", "op": "convolution",
      "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
     {"kind": "op", "id": "add", "op": "pointwise",
      "operands": {"in_0": "$conv_out", "in_1": "$bias"}, "results": {"out_0": "$y"}}
@@ -50,7 +50,7 @@ const std::string CONV_ADD_CHAIN = R"([
 /// CONV_ADD_CHAIN with the add reading a graph input instead of the convolution's output.
 /// Both nodes are roots.
 const std::string CONV_AND_ADD = R"([
-    {"kind": "op", "id": "conv", "op": "convolution_fwd",
+    {"kind": "op", "id": "conv", "op": "convolution",
      "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
     {"kind": "op", "id": "add", "op": "pointwise",
      "operands": {"in_0": "$a", "in_1": "$bias"}, "results": {"out_0": "$y"}}
@@ -409,7 +409,7 @@ TEST(TestGraphPatternMatcher, CountsATensorACustomOpListProducesAsProduced)
 TEST(TestGraphPatternMatcher, OpcodeSetMatchesEitherMember)
 {
     const std::string anyConvolution = R"([{"kind": "op", "id": "conv",
-        "op": {"one_of": ["convolution_fwd", "convolution_bwd_data"]},
+        "op": {"one_of": ["convolution", "convolution_bwd_data"]},
         "operands": {"w": "$w"}}])";
 
     PatternGraphBuilder forward;
@@ -430,7 +430,7 @@ TEST(TestGraphPatternMatcher, OpcodeSetMatchesEitherMember)
 TEST(TestGraphPatternMatcher, OpcodeSetPublishesOnlyAttributesEveryMemberDeclares)
 {
     const std::string anyNorm = R"([{"kind": "op", "id": "norm",
-        "op": {"one_of": ["rms_norm", "layernorm"]},
+        "op": {"one_of": ["rmsnorm", "layernorm"]},
         "operands": {"x": "$x", "scale": "$scale", "epsilon": "$epsilon"},
         "results": {"y": "$y"}}])";
     PatternGraphBuilder graph;

@@ -16,7 +16,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 
 /// @file GraphPattern.hpp
@@ -40,6 +39,9 @@ inline constexpr size_t MAX_PATTERN_NODES = 32;
 /// is 528 at MAX_PATTERN_NODES. Only graphs with many interchangeable nodes reach the
 /// budget. Their search grows factorially, so no practical budget would finish it.
 inline constexpr size_t MAX_PATTERN_MATCH_STEPS = 65536;
+
+namespace detail
+{
 
 /// Keys a pattern node object may carry, besides extension keys.
 inline constexpr std::array<std::string_view, 5> PATTERN_NODE_KEYS{
@@ -80,9 +82,6 @@ struct PatternNode
     /// Sorted by edge name.
     std::vector<PatternEdge> results;
 };
-
-namespace detail
-{
 
 inline bool isReservedPatternRoot(std::string_view name)
 {
@@ -219,10 +218,7 @@ inline PatternNode
     requireKnownKeys(object, PATTERN_NODE_KEYS, position);
     for(const auto key : PATTERN_NODE_REQUIRED_KEYS)
     {
-        if(!object.contains(std::string(key)))
-        {
-            fail("missing required key '" + std::string(key) + "' in " + position);
-        }
+        static_cast<void>(requireKey(object, key, position));
     }
 
     const auto& id = object.at("id");
@@ -343,6 +339,89 @@ inline void checkPatternVariables(const std::vector<PatternNode>& nodes, const s
     }
 }
 
+/// Fails when nodes depend on each other in a cycle: each reads a result of the one before
+/// it, so none can come first. hipDNN graphs are acyclic, so such a pattern matches no
+/// graph. A node that reads its own result is a cycle of one. Run after
+/// checkPatternVariables(), which guarantees each variable has at most one producer.
+inline void checkPatternAcyclic(const std::vector<PatternNode>& nodes, const std::string& where)
+{
+    const size_t count = nodes.size();
+    std::map<std::string_view, size_t> producerOf;
+    for(size_t node = 0; node < count; ++node)
+    {
+        for(const auto& edge : nodes[node].results)
+        {
+            producerOf.emplace(edge.binding.variable, node);
+        }
+    }
+    std::vector<std::vector<size_t>> producers(count);
+    for(size_t node = 0; node < count; ++node)
+    {
+        for(const auto& edge : nodes[node].operands)
+        {
+            const auto producer = producerOf.find(edge.binding.variable);
+            if(producer != producerOf.end())
+            {
+                producers[node].push_back(producer->second);
+            }
+        }
+    }
+
+    // Place every node whose producers are all placed. What remains is the cycles and the
+    // nodes downstream of them.
+    std::vector<bool> placed(count, false);
+    size_t placedCount = 0;
+    for(bool progress = true; progress && placedCount < count;)
+    {
+        progress = false;
+        for(size_t node = 0; node < count; ++node)
+        {
+            if(!placed[node]
+               && std::all_of(producers[node].begin(),
+                              producers[node].end(),
+                              [&placed](size_t producer) { return placed[producer]; }))
+            {
+                placed[node] = true;
+                ++placedCount;
+                progress = true;
+            }
+        }
+    }
+    if(placedCount == count)
+    {
+        return;
+    }
+
+    // Every unplaced node has an unplaced producer, so following producers from any one of
+    // them must revisit a node. The walk from that node on is a cycle.
+    std::vector<size_t> walk;
+    std::vector<bool> visited(count, false);
+    auto current
+        = static_cast<size_t>(std::find(placed.begin(), placed.end(), false) - placed.begin());
+    while(!visited[current])
+    {
+        visited[current] = true;
+        walk.push_back(current);
+        current = *std::find_if(producers[current].begin(),
+                                producers[current].end(),
+                                [&placed](size_t producer) { return !placed[producer]; });
+    }
+
+    // The walk runs from reader to producer. Reverse it so each node reads a result of the
+    // one before it, and close the loop on the first node.
+    std::string cycle;
+    const auto first = std::find(walk.begin(), walk.end(), current);
+    for(auto it = walk.end(); it != first;)
+    {
+        --it;
+        cycle += "'" + nodes[*it].id + "' -> ";
+    }
+    cycle += "'" + nodes[walk.back()].id + "'";
+    fail("pattern nodes " + cycle + " in " + where
+         + " depend on each other in a cycle; no hipDNN graph is cyclic, so the pattern could"
+           " never match");
+}
+
 /// Parses @p nodes, the value of `graph_match.nodes`, and checks its grammar and
 /// well-formedness. @p where names the UED in every error.
 inline std::vector<PatternNode> parsePatternNodes(const nlohmann::json& nodes,
@@ -369,6 +448,7 @@ inline std::vector<PatternNode> parsePatternNodes(const nlohmann::json& nodes,
         parsed.push_back(parsePatternNode(nodes[i], i, where));
     }
     checkPatternVariables(parsed, where);
+    checkPatternAcyclic(parsed, where);
     return parsed;
 }
 

@@ -26,17 +26,17 @@
 
   <!-- op box -->
   <rect x="80" y="185" width="110" height="40" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
-  <text x="135" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="11">sdpa_fwd</text>
+  <text x="135" y="210" text-anchor="middle" font-family="Consolas, monospace" font-size="11">sdpa</text>
 
   <!-- output tensor node -->
   <rect x="110" y="295" width="50" height="30" rx="8" fill="#ffffff" stroke="#4a72c4" stroke-width="1.5"/>
   <text x="135" y="315" text-anchor="middle">O</text>
 
-  <!-- edges Q,K,V -> sdpa_fwd -->
+  <!-- edges Q,K,V -> sdpa -->
   <line x1="70" y1="110" x2="112" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
   <line x1="135" y1="110" x2="135" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
   <line x1="200" y1="110" x2="158" y2="184" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
-  <!-- edge sdpa_fwd -> O -->
+  <!-- edge sdpa -> O -->
   <line x1="135" y1="225" x2="135" y2="294" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
 
   <!-- Arrow Stage1 -> Stage2 (match) -->
@@ -47,7 +47,7 @@
   <rect x="330" y="55" width="310" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="345" y="76" font-size="10" fill="#4a72c4" font-weight="600">UED nodes &#183; the engine's pattern</text>
   <rect x="340" y="82" width="290" height="64" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.2"/>
-  <text x="352" y="101" font-family="Consolas, monospace" font-size="11">nodes:  op sdpa_fwd</text>
+  <text x="352" y="101" font-family="Consolas, monospace" font-size="11">nodes:  op sdpa</text>
   <text x="352" y="119" font-family="Consolas, monospace" font-size="11">  operands { Q:$q, K:$k, V:$v }</text>
   <text x="352" y="137" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
   <text x="345" y="168" font-size="10" fill="#8a6d1f" font-weight="600">UMD criteria &#183; one expression tree</text>
@@ -56,7 +56,7 @@
   <text x="345" y="224" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.rank", 4]},</text>
   <text x="345" y="242" font-family="Consolas, monospace" font-size="11">  {"==": ["$q.dims[3]", "$kernel.head_size"]},</text>
   <text x="345" y="260" font-family="Consolas, monospace" font-size="11">  {"==": ["$k.dims[3]", "$q.dims[3]"]},</text>
-  <text x="345" y="278" font-family="Consolas, monospace" font-size="11">  {"!": ["$sdpa_fwd.causal_mask"]}</text>
+  <text x="345" y="278" font-family="Consolas, monospace" font-size="11">  {"!": ["$sdpa.causal_mask"]}</text>
   <text x="345" y="296" font-family="Consolas, monospace" font-size="11">]}</text>
   <text x="345" y="318" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor&#183;Graph&#183;Attrs&#183;$kernel&#183;$device</text>
   <text x="345" y="336" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import HkpPackError
+from .errors import HkpPackError, OpSchemaRegistryError
 from .json_rules import (
     DuplicateKeyError,
     NonStandardLiteralError,
@@ -44,6 +44,12 @@ _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # Environment override for the registry path. CMake sets it for tests and the
 # configure probe. The pack step passes the path as an argument.
 OP_SCHEMA_REGISTRY_ENV = "HKP_OP_SCHEMA_REGISTRY"
+
+# Set by CMake, with a reason, when the build has no registry to offer. A pattern
+# that needs the registry then fails with that reason instead of resolving against
+# the repository copy, which belongs to a different hipDNN than the one the build
+# links.
+OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV = "HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE"
 
 # The committed registry. This package sits at
 # <repo>/dnn-providers/hip-kernel-provider/descriptor-packaging/python/hkp_pack.
@@ -84,13 +90,18 @@ def resolve_op_schema_registry(path=None):
     """Return the registry path from the argument, the environment, or the repo copy.
 
     An empty argument or environment value counts as absent, so
-    `hkp_pack.py --op-schema-registry ""` gets the default.
+    `hkp_pack.py --op-schema-registry ""` gets the default. When neither names a
+    path and OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV carries a reason, raise
+    OpSchemaRegistryError with it.
     """
     if path:
         return Path(path)
     env = os.environ.get(OP_SCHEMA_REGISTRY_ENV)
     if env:
         return Path(env)
+    unavailable = os.environ.get(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV)
+    if unavailable:
+        raise OpSchemaRegistryError(unavailable)
     return DEFAULT_OP_SCHEMA_REGISTRY
 
 
@@ -101,7 +112,7 @@ def _registry_edges(entries, path, opcode, direction):
         and isinstance(entry.get("optional"), bool)
         for entry in entries
     ):
-        raise HkpPackError(
+        raise OpSchemaRegistryError(
             f"malformed op-schema registry {path}: op '{opcode}' {direction} must "
             "be an array of objects with a string 'name' and a bool 'optional'"
         )
@@ -114,7 +125,9 @@ def _load_op_schema_registry(path):
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise HkpPackError(f"cannot read op-schema registry {path}: {exc}") from exc
+        raise OpSchemaRegistryError(
+            f"cannot read op-schema registry {path}: {exc}"
+        ) from exc
     try:
         doc = loads_strict(text)
     except (
@@ -123,16 +136,18 @@ def _load_op_schema_registry(path):
         UnrepresentableValueError,
         json.JSONDecodeError,
     ) as exc:
-        raise HkpPackError(f"malformed op-schema registry {path}: {exc}") from exc
+        raise OpSchemaRegistryError(
+            f"malformed op-schema registry {path}: {exc}"
+        ) from exc
     ops = doc.get("ops") if isinstance(doc, dict) else None
     if not isinstance(ops, dict):
-        raise HkpPackError(
+        raise OpSchemaRegistryError(
             f"malformed op-schema registry {path}: 'ops' must be an object"
         )
     registry = {}
     for opcode, entry in ops.items():
         if not isinstance(entry, dict):
-            raise HkpPackError(
+            raise OpSchemaRegistryError(
                 f"malformed op-schema registry {path}: op '{opcode}' must be an object"
             )
         registry[opcode] = OpSchema(
@@ -330,6 +345,60 @@ def _check_variables(nodes, where):
             graph_input[edge.variable] = site
 
 
+def _check_acyclic(nodes, where):
+    """Reject nodes that depend on each other in a cycle.
+
+    A node depends on the producer of each variable it reads. hipDNN graphs are
+    acyclic, so a cyclic pattern matches no graph. A node that reads its own
+    result is a cycle of one. Runs after _check_variables, which guarantees each
+    variable has at most one producer.
+    """
+    producer_of = {}
+    for index, node in enumerate(nodes):
+        for edge in node.results:
+            producer_of.setdefault(edge.variable, index)
+    producers = [
+        [
+            producer_of[edge.variable]
+            for edge in node.operands
+            if edge.variable in producer_of
+        ]
+        for node in nodes
+    ]
+
+    # Place every node whose producers are all placed. What remains is the
+    # cycles and the nodes downstream of them.
+    placed = [False] * len(nodes)
+    progress = True
+    while progress:
+        progress = False
+        for index, node_producers in enumerate(producers):
+            if not placed[index] and all(placed[p] for p in node_producers):
+                placed[index] = True
+                progress = True
+    if all(placed):
+        return
+
+    # Every unplaced node has an unplaced producer, so following producers from
+    # any one of them must revisit a node. The walk from that node on is a cycle.
+    walk = []
+    visited = set()
+    current = placed.index(False)
+    while current not in visited:
+        visited.add(current)
+        walk.append(current)
+        current = next(p for p in producers[current] if not placed[p])
+
+    # The walk runs from reader to producer. Reverse it so each node reads a
+    # result of the one before it, and close the loop on the first node.
+    cycle = list(reversed(walk[walk.index(current) :]))
+    path = " -> ".join(f"'{nodes[i].id}'" for i in cycle + [cycle[0]])
+    raise HkpPackError(
+        f"pattern nodes {path} in {where} depend on each other in a cycle; no "
+        "hipDNN graph is cyclic, so the pattern could never match"
+    )
+
+
 def _optionality(optional):
     return "optional" if optional else "required"
 
@@ -411,5 +480,6 @@ def validate_graph_pattern(nodes, where, registry_path=None):
         )
     parsed = [_parse_node(index, node, where) for index, node in enumerate(nodes)]
     _check_variables(parsed, where)
+    _check_acyclic(parsed, where)
     registry = load_op_schema_registry(resolve_op_schema_registry(registry_path))
     _resolve(parsed, registry, where)

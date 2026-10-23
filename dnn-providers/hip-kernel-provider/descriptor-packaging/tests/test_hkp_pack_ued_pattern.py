@@ -22,12 +22,13 @@ from hkp_pack.descriptors import (
     UED_REQUIRED_KEYS,
     load_flat_input,
 )
-from hkp_pack.errors import HkpPackError
+from hkp_pack.errors import HkpPackError, OpSchemaRegistryError
 from hkp_pack.graph_pattern import (
     MAX_PATTERN_NODES,
     NODE_KEYS,
     NODE_REQUIRED_KEYS,
     OP_SCHEMA_REGISTRY_ENV,
+    OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -97,10 +98,9 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
 @pytest.mark.quick
 @pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
 def test_valid_fixture_conforms_to_the_schema(fixture):
-    # Imported here, not at module scope, so a host without jsonschema fails
-    # this test alone rather than the collection of the whole module. The
-    # build's configure requires it (hkp_register_tests in HkpPackaging.cmake).
-    import jsonschema
+    # Skipped on a host without jsonschema: this is the only test that needs it, so
+    # the build's configure does not require it.
+    jsonschema = pytest.importorskip("jsonschema")
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.Draft7Validator.check_schema(schema)
@@ -171,6 +171,49 @@ def test_nan_literal_names_the_literal_and_the_file(tmp_path):
         load_flat_input(root)
 
 
+def _chain(*links):
+    """A nodes UED whose nodes are (id, read variable, written variable) links."""
+    nodes = [
+        {
+            "kind": "op",
+            "id": node_id,
+            "op": "pointwise",
+            "operands": {"in_0": f"${read}"},
+            "results": {"out_0": f"${written}"},
+        }
+        for node_id, read, written in links
+    ]
+    return dict(_NODES_UED, graph_match={"nodes": nodes})
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("links", "cycle"),
+    [
+        ([("a", "x", "x")], "'a' -> 'a'"),
+        (
+            [("first", "seed", "mid"), ("b", "q", "p"), ("c", "p", "q")],
+            "'c' -> 'b' -> 'c'",
+        ),
+        (
+            [("a", "z", "x"), ("b", "x", "y"), ("c", "y", "z"), ("d", "z", "out")],
+            "'b' -> 'c' -> 'a' -> 'b'",
+        ),
+    ],
+    ids=["self-loop", "cycle-beside-an-acyclic-node", "three-cycle-with-a-tail"],
+)
+def test_a_cyclic_pattern_is_rejected_naming_the_nodes_in_the_cycle(
+    tmp_path, links, cycle
+):
+    # The cycle check precedes registry resolution, so no registry is read.
+    ued = _chain(*links)
+    root = _ued_root(tmp_path, json.dumps(ued), ued["metadata"])
+
+    with pytest.raises(HkpPackError, match="depend on each other in a cycle") as exc:
+        load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
+    assert f"pattern nodes {cycle} in UED fixture.ued.json" in str(exc.value)
+
+
 @pytest.mark.quick
 @pytest.mark.parametrize("source", ["argument", "environment"])
 def test_nodes_pattern_with_missing_registry_names_its_path(
@@ -187,6 +230,37 @@ def test_nodes_pattern_with_missing_registry_names_its_path(
     with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
         load_flat_input(root, **kwargs)
     assert str(missing) in str(exc.value)
+
+
+@pytest.mark.quick
+def test_an_unavailable_registry_fails_a_nodes_pattern_with_the_reason(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+
+    with pytest.raises(OpSchemaRegistryError, match="hipDNN has no registry"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_a_named_registry_wins_over_the_unavailable_reason(tmp_path, monkeypatch):
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
+
+    with pytest.raises(HkpPackError, match="cannot read op-schema registry"):
+        load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
+
+
+@pytest.mark.quick
+def test_native_ued_loads_though_the_registry_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV, "hipDNN has no registry")
+    native = dict(_NODES_UED, graph_match={"native": "hipkernel.pointwise.graph_match"})
+    root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
+
+    load_flat_input(root)
 
 
 @pytest.mark.quick

@@ -35,15 +35,15 @@ struct PatternVariable
 {
     std::string name;
     /// No pattern node produces it, so it names a graph input bound by exactly one operand.
-    bool graphInput;
+    bool graphInput = false;
     /// Bound with `?`. If the graph omits it, the match succeeds and publishes nothing for it.
-    bool optional;
+    bool optional = false;
 };
 
 /// One opcode a pattern node may match, with its edges resolved.
 struct CompiledPatternCandidate
 {
-    const hipdnn_flatbuffers_sdk::data_objects::op_schema::OpSchema* schema;
+    const hipdnn_flatbuffers_sdk::data_objects::op_schema::OpSchema* schema = nullptr;
     /// Index-aligned with CompiledPatternNode::operandVariables.
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*> operands;
     /// Index-aligned with CompiledPatternNode::resultVariables.
@@ -62,7 +62,7 @@ struct CompiledPatternAttribute
 {
     /// `<node id>.<attribute>`.
     std::string token;
-    bool optional;
+    bool optional = false;
 };
 
 struct CompiledPatternNode
@@ -130,10 +130,7 @@ public:
 
     /// Indices into nodes(), with each producer before the nodes that read its results.
     /// Each step takes the first unplaced node, in authored order, whose producers are all
-    /// placed. When a dependency cycle leaves no node ready, the step takes the first
-    /// unplaced node and the next step resumes the ready-first rule. A cyclic pattern
-    /// matches only a graph with the same cycle, and hipDNN graphs are acyclic, so it
-    /// declines every graph.
+    /// placed. A pattern has no dependency cycles, so such a node always exists.
     const std::vector<size_t>& matchOrder() const noexcept
     {
         return _matchOrder;
@@ -386,9 +383,8 @@ inline std::vector<size_t> patternMatchOrder(const std::vector<std::vector<size_
         }
         if(next == count)
         {
-            // Dependency cycle. No node is ready, so take the first unplaced one.
-            next = static_cast<size_t>(std::find(placed.begin(), placed.end(), false)
-                                       - placed.begin());
+            // parsePatternNodes() rejects dependency cycles, so some node is always ready.
+            fail("graph pattern has no node ready to place; its dependencies are cyclic");
         }
         placed[next] = true;
         order.push_back(next);

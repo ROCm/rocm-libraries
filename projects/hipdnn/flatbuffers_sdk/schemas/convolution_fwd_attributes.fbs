@@ -12,7 +12,7 @@ attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table ConvolutionFwdAttributes (matcher_opcode: "convolution_fwd") {
+table ConvolutionFwdAttributes (matcher_opcode: "convolution") {
     // Input/Output tensor UIDs
     x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");   // Input tensor
     w_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "w");   // Weights/filter tensor

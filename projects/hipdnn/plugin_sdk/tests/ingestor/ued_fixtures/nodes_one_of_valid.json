@@ -8,7 +8,7 @@
     "metadata": "52bbfd34-12dc-5f27-b764-d97869d723af",
     "graph_match": {
       "nodes": [
-        {"kind": "op", "id": "norm", "op": {"one_of": ["layernorm", "rms_norm"]}, "operands": {"x": "$x", "scale": "$scale", "epsilon": "$epsilon"}, "results": {"y": "$y"}}
+        {"kind": "op", "id": "norm", "op": {"one_of": ["layernorm", "rmsnorm"]}, "operands": {"x": "$x", "scale": "$scale", "epsilon": "$epsilon"}, "results": {"y": "$y"}}
       ]
     }
   }

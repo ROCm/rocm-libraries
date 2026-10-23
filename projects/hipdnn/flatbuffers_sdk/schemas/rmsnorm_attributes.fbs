@@ -12,7 +12,7 @@ attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table RMSNormAttributes (matcher_opcode: "rms_norm") {
+table RMSNormAttributes (matcher_opcode: "rmsnorm") {
     x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");
     scale_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "scale");
     epsilon_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "epsilon");

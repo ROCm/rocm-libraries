@@ -9,7 +9,7 @@
     "metadata": "196057bb-4fe7-5426-a27b-29f23d2d46de",
     "graph_match": {
       "nodes": [
-        {"kind": "op", "id": "norm", "op": {"one_of": ["layernorm", "rms_norm"], "mode": "fast"}, "operands": {"x": "$x"}, "results": {"y": "$y"}}
+        {"kind": "op", "id": "norm", "op": {"one_of": ["layernorm", "rmsnorm"], "mode": "fast"}, "operands": {"x": "$x"}, "results": {"y": "$y"}}
       ]
     }
   }

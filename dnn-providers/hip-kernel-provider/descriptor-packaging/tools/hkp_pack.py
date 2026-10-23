@@ -78,7 +78,14 @@ def _parse_args(argv):
             "  HKP_OP_SCHEMA_REGISTRY\n"
             "                 The op-schema registry JSON when "
             "--op-schema-registry is not\n"
-            "                 given."
+            "                 given.\n"
+            "  HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE\n"
+            "                 Why the build has no registry. Used only when "
+            "neither the\n"
+            "                 argument nor HKP_OP_SCHEMA_REGISTRY names one: a "
+            "UED with a\n"
+            "                 graph_match.nodes pattern then fails with this "
+            "text."
         ),
     )
     p.add_argument(

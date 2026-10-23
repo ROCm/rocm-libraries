@@ -452,7 +452,7 @@ each format are specified in that format's follow-up RFC.
   "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD: the variant schema this engine's kernels fill
   "graph_match": {        // how this engine matches a graph and binds the symbols every consumer reads
     "nodes": [            // the declarative arm: the graph this engine serves
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
        "results":  {"o": "$o"}}
     ]
@@ -784,7 +784,7 @@ five namespaces, and every criteria and dispatch expression draws from the same 
   to `false` and gates a matcher out before its criteria run
   ([RFC 0018 A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
-  `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.attn_scale_value`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
+  `{"id": "sdpa"}` exposes `$sdpa.attn_scale_value`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
   Only what the operation's schema declares an attribute is here: head size, batch, and head count
   are tensor extents, read positionally from the Tensor namespace, not attributes.
 - **Kernel metadata:** `$kernel.<field>`, the values a kernel descriptor (UKD) supplies for the fields
@@ -896,7 +896,7 @@ it constrains them:
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",   // one KMD, supplying $kernel.*
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
     ]
   }
@@ -925,15 +925,15 @@ it constrains them:
     {"==":    ["$k.dims[3]", "$q.dims[3]"]},                    // one head size across Q, K, V
     {"==":    ["$v.dims[3]", "$q.dims[3]"]},
     {"==":    ["$q.dims[3]", "$kernel.head_size"]},             // head size is a tensor extent, not an attribute
-    {"!":     ["$sdpa_fwd.causal_mask"]},                       // an unmasked graph, served by a
-    {"!":     ["$sdpa_fwd.causal_mask_bottom_right"]},          // kernel built for no mask mode
+    {"!":     ["$sdpa.causal_mask"]},                       // an unmasked graph, served by a
+    {"!":     ["$sdpa.causal_mask_bottom_right"]},          // kernel built for no mask mode
     {"==":    ["$kernel.mask_mode", "none"]},
     {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
   ]}
 }
 ```
 
-Every graph `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa_fwd`, is
+Every graph `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa`, is
 something the engine's pattern published; that is the whole interface between the two descriptors,
 and the loader checks it. `$kernel.dtype`, `$kernel.head_size`, and `$kernel.mask_mode` are the
 other kind of token, fields the engine's KMD declares and each UKD supplies. They are what makes
@@ -1084,7 +1084,7 @@ chain as a single kernel.
   "metadata":  "c07e4b31-95a2-4d68-b1fc-3e8a06d25b7c",
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "conv", "op": "convolution_fwd",
+      {"kind": "op", "id": "conv", "op": "convolution",
        "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
       {"kind": "op", "id": "bias", "op": "pointwise_add",
        "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
@@ -1136,7 +1136,7 @@ follow-up ([Section 14.2](#142-follow-up-rfcs)), describes grid, block, shared m
 workspace as formulas over the schema's declared fields. A UDD formula draws on the same five
 namespaces as the criteria: tensor fields (a bound
 operand's dims and attributes, `$q.*`), graph facts (`$graph.*`), node attributes (`$conv.*`,
-`$sdpa_fwd.*`), kernel metadata (`$kernel.*`, the values this UKD supplies for fields its engine's
+`$sdpa.*`), kernel metadata (`$kernel.*`, the values this UKD supplies for fields its engine's
 KMD declares), and device properties (`$device.*`). A safe interpreter evaluates each formula,
 failing closed on an undeclared field or invalid operation and never executing arbitrary code, so
 descriptors stay pure data.

@@ -8,7 +8,7 @@
     "metadata": "c8fbf7c2-4624-57e9-88ae-a5bc20c6e360",
     "graph_match": {
       "nodes": [
-        {"kind": "op", "id": "conv", "op": "convolution_fwd", "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
+        {"kind": "op", "id": "conv", "op": "convolution", "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
         {"kind": "op", "id": "add", "op": "pointwise", "operands": {"in_0": "$conv_out", "in_1": "$bias"}, "results": {"out_0": "$bias_out"}},
         {"kind": "op", "id": "relu", "op": "pointwise", "operands": {"in_0": "$bias_out"}, "results": {"out_0": "$y"}}
       ]

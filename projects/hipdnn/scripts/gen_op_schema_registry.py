@@ -326,6 +326,14 @@ class Registry:
                     f"opcode '{opcode}' is declared by both "
                     f"'{ops[opcode].table}' and '{table_name}'"
                 )
+            # Generated array names use opcode.upper(), so opcodes must be
+            # unique case-insensitively.
+            for other in ops.values():
+                if other.opcode.upper() == opcode.upper():
+                    _fail(
+                        f"opcodes '{other.opcode}' ('{other.table}') and "
+                        f"'{opcode}' ('{table_name}') collide after upper-casing"
+                    )
             op = OpSchema(opcode, table_name)
             for field in self._fields(table):
                 self._classify_field(op, field, table_name)

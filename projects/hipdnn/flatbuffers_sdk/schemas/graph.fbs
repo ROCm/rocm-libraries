@@ -56,9 +56,16 @@ attribute "cache_uid_key";
 // - Any other scalar field is an attribute, named by the field.
 // - `= null` makes an edge or attribute optional.
 
-// Table annotation: the opcode a UED pattern names the op by, for example "sdpa_fwd".
+// Table annotation: the opcode a UED pattern names the op by, for example "sdpa".
 // Required on every `NodeAttributes` member. A table has one opcode, so a table that
 // serves several modes exposes the mode as an enum attribute.
+// Opcode naming:
+// - Lowercase snake_case.
+// - A forward op has no suffix ("convolution", "sdpa").
+// - A backward op ends in `_bwd` ("sdpa_bwd"); an op with separate backward variants
+//   refines it ("convolution_bwd_data", "convolution_bwd_filter").
+// - A normalization name is one word ("rmsnorm", "rmsnorm_bwd").
+// - Opcodes are unique when compared case-insensitively; the registry generator enforces it.
 attribute "matcher_opcode";
 // Field flag: the field is an input (operand) tensor uid or a vector of them.
 attribute "matcher_input_tensor";

@@ -36,7 +36,8 @@ out_root.mkdir(parents=True, exist_ok=True)
     'argv': argv,
     'env': {key: os.environ.get(key) for key in
             ('ROCKE_BACKEND', 'ROCKE_CPP_STRICT', 'ROCKE_COMGR_LIB',
-             'HKP_PACK_JOBS', 'PYTHONPATH')},
+             'HKP_PACK_JOBS', 'PYTHONPATH', 'HKP_OP_SCHEMA_REGISTRY',
+             'HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE')},
 }), encoding='utf-8')
 """
 
@@ -53,10 +54,12 @@ class _Consumer(SuppliedPython):
         (self.source / "authored").mkdir()
         (self.source / "kpack with spaces" / "rocm_kpack").mkdir(parents=True)
 
-    def wire(self, rocke_keywords):
-        """One root, wired with `rocke_keywords` spliced into the call."""
+    def wire(self, rocke_keywords, *, prelude=""):
+        """One root, wired with `rocke_keywords` spliced into the call, after
+        `prelude`."""
         self._write(
-            """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
+            prelude
+            + """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
 hkp_wire_pack_target(
     NAME off
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
@@ -142,6 +145,8 @@ def test_a_root_without_rocke_packs_under_a_base_interpreter_without_pip(consume
         "ROCKE_COMGR_LIB": None,
         "HKP_PACK_JOBS": "2",
         "PYTHONPATH": None,
+        "HKP_OP_SCHEMA_REGISTRY": None,
+        "HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE": None,
     }
     assert "path_list_prepend" not in (consumer.build_dir / "build.ninja").read_text(
         encoding="utf-8"
@@ -546,3 +551,175 @@ endforeach()
     consumer._write(gates(True))
     output = consumer.configure()
     assert _reported(output, "offered") == ("TRUE" if enable_rocke == "ON" else "FALSE")
+
+
+# A pattern over `pointwise`, as the packer's own tests write one.
+_POINTWISE_PATTERN = {
+    "nodes": [
+        {
+            "kind": "op",
+            "id": "pointwise",
+            "op": "pointwise",
+            "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+            "results": {"out_0": "$output"},
+        }
+    ]
+}
+_POINTWISE_SCHEMA = {
+    "operands": [
+        {"name": "in_0", "optional": False},
+        {"name": "in_1", "optional": False},
+    ],
+    "results": [{"name": "out_0", "optional": False}],
+}
+
+
+def _graph_match_root(empty_arch_fixture, destination, graph_match):
+    """The empty-arch fixture, its UED matching by `graph_match`. It ships
+    `test_fixture:solo` for gfx942."""
+    shutil.copytree(empty_arch_fixture, destination, dirs_exist_ok=True)
+    path = destination / "solo.ued.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["graph_match"] = graph_match
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def _write_registry(path, ops):
+    path.write_text(json.dumps({"ops": ops}), encoding="utf-8")
+
+
+def _probe_authored_root():
+    return f"""_hkp_root_probe(_shipped _offered _ok
+    "${{CMAKE_CURRENT_SOURCE_DIR}}/authored" "gfx942" "" "")
+{_report("ok", "${_ok}")}
+{_report("shipped", "${_shipped}")}
+"""
+
+
+_NO_REGISTRY = """add_library(hipdnn_flatbuffers_sdk INTERFACE IMPORTED)
+_hkp_resolve_op_schema_registry()
+get_property(_reason GLOBAL PROPERTY HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE)
+"""
+_NO_REGISTRY_REASON = (
+    "was built with HIPDNN_ENABLE_KERNEL_INGESTOR=OFF (or predates the op-schema "
+    "registry). Rebuild it or set HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY."
+)
+
+
+def test_a_hipdnn_without_a_registry_fails_configure_only_for_a_nodes_root(
+    consumer, empty_arch_fixture
+):
+    """An installed hipDNN built without the kernel ingestor ships no registry. A
+    root whose UED is `native` never reads one, so configure goes on; a root with
+    a `nodes` pattern cannot be packed, and configure says why."""
+    authored = consumer.source / "authored"
+    _graph_match_root(
+        empty_arch_fixture, authored, {"native": "hipkernel.pointwise.graph_match"}
+    )
+    consumer._write(
+        _NO_REGISTRY + _report("reason", "${_reason}") + "\n" + _probe_authored_root()
+    )
+    output = consumer.configure()
+    assert _NO_REGISTRY_REASON in _reported(output, "reason")
+    assert _reported(output, "ok") == "TRUE"
+    assert json.loads(_reported(output, "shipped"))["gfx942"] == ["test_fixture:solo"]
+
+    _graph_match_root(empty_arch_fixture, authored, _POINTWISE_PATTERN)
+    diagnostic = consumer.configure(success=False)
+    assert "holds a graph_match `nodes` pattern" in diagnostic
+    assert _NO_REGISTRY_REASON in diagnostic
+
+
+@pytest.mark.parametrize("registry_available", [True, False])
+def test_the_pack_step_is_given_the_registry_or_the_reason_there_is_none(
+    consumer, registry_available
+):
+    """The pack runs with the build's registry, never one the caller's environment
+    happens to carry, and without a registry it is told why."""
+    consumer.env["HKP_OP_SCHEMA_REGISTRY"] = str(consumer.root / "ambient.json")
+    registry = consumer.root / "op_schema_registry.json"
+    _write_registry(registry, {})
+    prelude = "add_library(hipdnn_flatbuffers_sdk INTERFACE IMPORTED)\n"
+    if registry_available:
+        prelude += (
+            f'set(HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY "{registry.as_posix()}")\n'
+        )
+    consumer.wire(
+        "ENABLE_ROCKE OFF", prelude=prelude + "_hkp_resolve_op_schema_registry()\n"
+    )
+    consumer.configure()
+    consumer.build()
+
+    env = consumer.invocation()["env"]
+    if registry_available:
+        assert Path(env["HKP_OP_SCHEMA_REGISTRY"]) == registry
+        assert env["HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE"] is None
+    else:
+        assert env["HKP_OP_SCHEMA_REGISTRY"] is None
+        assert _NO_REGISTRY_REASON in env["HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE"]
+
+
+def test_a_registry_without_the_patterns_opcode_fails_the_probe_derive_and_pack(
+    consumer, empty_arch_fixture, rocm_kpack_dir
+):
+    """Probe, derive and pack all resolve a `nodes` pattern against the configured
+    registry. The same root answers the probe and derives against a registry that
+    holds `pointwise`, so the registry is what fails them."""
+    authored = consumer.source / "authored"
+    _graph_match_root(empty_arch_fixture, authored, _POINTWISE_PATTERN)
+    complete = consumer.root / "complete.json"
+    _write_registry(complete, {"pointwise": _POINTWISE_SCHEMA})
+    lacking = consumer.root / "lacking.json"
+    _write_registry(lacking, {})
+    missing = "opcode 'pointwise' is not in the op-schema registry"
+    derive = f"""include("{(PKG / "cmake" / "HkpPackagingProbes.cmake").as_posix()}")
+_hkp_probe_derive_root(derived "${{CMAKE_CURRENT_SOURCE_DIR}}/authored" gfx942
+    "${{CMAKE_CURRENT_BINARY_DIR}}/derived/root" _expect)
+{_report("expect", "${_expect}")}
+"""
+
+    def registry(path):
+        return f"-DHIPKERNELPROVIDER_OP_SCHEMA_REGISTRY={path}"
+
+    consumer._write(_probe_authored_root())
+    output = consumer.configure(registry(complete))
+    assert _reported(output, "ok") == "TRUE"
+    output = consumer.configure(registry(lacking))
+    assert _reported(output, "ok") == "FALSE"
+    assert missing in output
+
+    consumer._write(derive)
+    output = consumer.configure(registry(complete))
+    assert _reported(output, "expect").endswith("expect.json")
+    diagnostic = consumer.configure(registry(lacking), success=False)
+    assert "deriving the probe root failed" in diagnostic
+    assert missing in diagnostic
+
+    # The pack tool as the pack step launches it, with the registry in its
+    # environment. It runs under the test's own interpreter, which has rocm_kpack.
+    command = [
+        sys.executable,
+        str(PKG / "tools" / "hkp_pack.py"),
+        "--source-root",
+        str(authored),
+        "--out-root",
+        str(consumer.root / "out"),
+        "--arches",
+        "gfx942",
+        "--hipcc",
+        "unused",
+        "--inter-root",
+        str(consumer.root / "inter"),
+        "--source-label",
+        "wiring",
+    ]
+    if rocm_kpack_dir:
+        command += ["--kpack-python-dir", rocm_kpack_dir]
+    proc = subprocess.run(
+        command,
+        env={**os.environ, "HKP_OP_SCHEMA_REGISTRY": str(lacking)},
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert missing in proc.stderr

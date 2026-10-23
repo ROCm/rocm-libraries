@@ -10,7 +10,7 @@ attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table RMSNormBackwardAttributes (matcher_opcode: "rms_norm_bwd") {
+table RMSNormBackwardAttributes (matcher_opcode: "rmsnorm_bwd") {
     dy_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "dy");
     x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");
     scale_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "scale");

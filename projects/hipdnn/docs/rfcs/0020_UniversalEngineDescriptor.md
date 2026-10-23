@@ -182,7 +182,7 @@ to be a UED.
   "metadata":        "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD id (required)
   "graph_match": {                                 // stage one: how this engine matches and binds
     "nodes": [                                     // declarative arm: the graph shape served (§ 4.3)
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"q": "$q", "k": "$k", "v": "$v", "attn_mask": "$attn_mask?"},
        "results":  {"o": "$o"}}
     ]
@@ -501,7 +501,7 @@ ident        = ( letter | "_" ) , { letter | digit | "_" } ;
 | Member | Req. | Meaning |
 |---|---|---|
 | `kind` | yes | The node kind. `"op"` is the only value at this version; the member exists so a future node kind (a tensor-shaped or control-shaped node) is an additive change rather than a reinterpretation of an existing object. |
-| `id` | yes | Names this node within the pattern, and is the **Attributes namespace root** its scalar attributes bind under: `{"id": "sdpa_fwd"}` publishes `$sdpa_fwd.causal_mask` (§ 6.1). Unique within the block. Bare in the descriptor; the `$` appears only on the reference. |
+| `id` | yes | Names this node within the pattern, and is the **Attributes namespace root** its scalar attributes bind under: `{"id": "sdpa"}` publishes `$sdpa.causal_mask` (§ 6.1). Unique within the block. Bare in the descriptor; the `$` appears only on the reference. |
 | `op` | yes | The opcode this node matches, keyed against the op-schema registry (§ 5, Appendix B). A bare string matches exactly. An **opcode set**, `{"one_of": ["a", "b"]}`, matches any listed opcode; every member must declare the operand and result names this node binds, so one node covers a family of ops that agree on their edges. |
 | `operands` | no | Input edges: an object mapping an operand **name the op declares** to a pattern variable. Absent or `{}` binds no operands, which is legal but publishes nothing for that node's inputs. |
 | `results` | no | Output edges, same form. A result binding takes no `?`: an op's declared result is always produced. |
@@ -532,7 +532,7 @@ carried entirely by `$conv_out` and `$bias_out` appearing twice each:
 
 ```jsonc
 "nodes": [
-  {"kind": "op", "id": "conv", "op": "convolution_fwd",
+  {"kind": "op", "id": "conv", "op": "convolution",
    "operands": {"x": "$x", "w": "$w"},              "results": {"y": "$conv_out"}},
   {"kind": "op", "id": "bias", "op": "pointwise",
    "operands": {"in_0": "$conv_out", "in_1": "$b"}, "results": {"out_0": "$bias_out"}},
@@ -596,7 +596,7 @@ Two single-op patterns under these rules:
 // $conv.compute_data_type. The padding, stride, and dilation vectors are not scalars and
 // are not published.
 "nodes": [
-  {"kind": "op", "id": "conv", "op": "convolution_fwd",
+  {"kind": "op", "id": "conv", "op": "convolution",
    "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$y"}}
 ]
 ```
@@ -773,7 +773,7 @@ of § 6.
 **The registry is generated from schema annotations, not name conventions.** A table-level
 FlatBuffers attribute names the op, and field-level attributes on each op's attribute table declare
 the binding contract next to the field they govern. `matcher_opcode` on the attribute table gives the
-op's descriptor-facing opcode (`SdpaAttributes (matcher_opcode: "sdpa_fwd")`); a pattern node's `op`
+op's descriptor-facing opcode (`SdpaAttributes (matcher_opcode: "sdpa")`); a pattern node's `op`
 names it, and the registry keys on it. Every table in the `NodeAttributes` union must carry one, and
 the generator fails the build on a table without it, so the schema is the single source of truth
 for the opcode rather than an ad-hoc string.
@@ -891,13 +891,13 @@ the interpreter fails closed on anything undeclared:
   `allow_override_shape`, which is the matcher's opt-in to accepting such a graph at all
   ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
 - **Attributes** — a matched node's scalars, named by the node's pattern `id`: an
-  `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
+  `{"id": "sdpa"}` node exposes `$sdpa.dropout_probability`, a `{"id": "conv"}` node
   `$conv.conv_mode`. An optional attribute is asked about the same way, with those same operators.
   The namespace spans two schema tables, which a reader never has to distinguish: the op's own
   attribute table (the union arm `NodeAttributes` selects), **and the `Node` table's own scalars**,
   of which `compute_data_type` is the one that is not `cache_ignore`. A node's compute precision is
   a property of the node exactly as its dropout probability is, and a criterion gating it —
-  `{"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]}` — would otherwise have nowhere to read it
+  `{"==": ["$sdpa.compute_data_type", "FLOAT"]}` — would otherwise have nowhere to read it
   from. Appendix B.3 states the generator rule, and the two tables cannot collide because a
   duplicate bind name within one op is a build error.
 - **Kernel metadata** — `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares
@@ -952,7 +952,7 @@ uint         = digit , { digit } ;
 |---|---|---|---|---|
 | Tensor | a pattern variable (`$q`) | the pattern | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
 | Graph | `$graph` | the pattern | `node_count`, `is_override_shape_enabled` | `Int` / `Bool` |
-| Attributes | a node `id` (`$sdpa_fwd`) | the pattern | `<attr-name>`, from the op's attribute table or the `Node` table (Appendix B.3) | scalar |
+| Attributes | a node `id` (`$sdpa`) | the pattern | `<attr-name>`, from the op's attribute table or the `Node` table (Appendix B.3) | scalar |
 | Kernel | `$kernel` | the UKD, per candidate | `<field>` a UKD supplies ([RFC 0017 § 4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)) | scalar |
 | Device | `$device` | the `Handle` | `<field>` (`lds_size`, `warp_size`, …) | scalar |
 
@@ -965,7 +965,7 @@ uint         = digit , { digit } ;
   it of a required operand is refused at compile, the answer being fixed by the pattern.
 - **A `$` marks a reference.** Every reference to a bound field carries a leading `$`: tensors and
   their fields (`$q`, `$q.uid`, `$q.dims[2]`, `$q.rank`), a node's attributes
-  (`$sdpa_fwd.dropout_probability` — the node id `sdpa_fwd` is bare, the reference carries the `$`),
+  (`$sdpa.dropout_probability` — the node id `sdpa` is bare, the reference carries the `$`),
   `$graph.node_count`, `$kernel.tile_m`, and `$device.lds_size`. Tokens without a `$` are literals:
   numbers, enum values (`"BFLOAT16"`, `"gfx942"`), opcodes, and layout aliases.
 - What a **read of an absent** optional operand or attribute yields, and how the criteria language
@@ -1016,7 +1016,7 @@ registration instead (§ 12), which is the same load-time failure at a coarser g
 
 **Root-opcode indexing, over engines.** The compiled patterns are indexed by their root node's
 opcode, so match cost does not grow linearly with the number of descriptors: a graph whose root op
-is `sdpa_fwd` only consults engines whose pattern is rooted at `sdpa_fwd`. This is the index RFC
+is `sdpa` only consults engines whose pattern is rooted at `sdpa`. This is the index RFC
 0017 § 16 calls for, and putting the pattern on the engine makes it coarser and therefore cheaper —
 a miss prunes an engine and every pack naming it in one step, without loading a single UMD. Only the
 surviving engines pay for criteria at all. A native match carries no root opcode to index on
@@ -1586,7 +1586,7 @@ declares (§ A.1); the notes are RFC 0010 annotations.
   "metadata":        "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",   // the KMD (§ A.1)
   "graph_match": {                                             // declarative arm (§ 4.3)
     "nodes": [                                                 // the graph shape
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"q": "$q", "k": "$k", "v": "$v",
                     "attn_mask": "$attn_mask?",                // optional: bound, and declined by criteria
                     "scale":     "$scale?"},
@@ -1620,7 +1620,7 @@ else the pattern would have to bind:
   "metadata":  "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {"q": "$q", "k": "$k", "v": "$v"}, "results": {"o": "$o"}}
     ]
   }
@@ -1651,9 +1651,16 @@ declaration before an attribute may be used, and declared attributes — on a ta
 retained in the binary reflection schema (`.bfbs`), which is what the generator reads.
 
 ```fbs
-// Table annotation: the opcode a UED pattern names the op by, for example "sdpa_fwd".
+// Table annotation: the opcode a UED pattern names the op by, for example "sdpa".
 // Required on every `NodeAttributes` member. A table has one opcode, so a table that
 // serves several modes exposes the mode as an enum attribute.
+// Opcode naming:
+// - Lowercase snake_case.
+// - A forward op has no suffix ("convolution", "sdpa").
+// - A backward op ends in `_bwd` ("sdpa_bwd"); an op with separate backward variants
+//   refines it ("convolution_bwd_data", "convolution_bwd_filter").
+// - A normalization name is one word ("rmsnorm", "rmsnorm_bwd").
+// - Opcodes are unique when compared case-insensitively; the registry generator enforces it.
 attribute "matcher_opcode";
 // Field flag: the field is an input (operand) tensor uid or a vector of them.
 attribute "matcher_input_tensor";
@@ -1680,7 +1687,7 @@ re-annotated: a UID field's `= null` default (an optional field) already encodes
 derives required-vs-optional from the field's presence semantics rather than a fourth attribute.
 
 ```fbs
-table SdpaAttributes (matcher_opcode: "sdpa_fwd") {              // table-level opcode shorthand
+table SdpaAttributes (matcher_opcode: "sdpa") {              // table-level opcode shorthand
   q_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "q");   // required input
   k_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "k");
   v_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "v");
@@ -1771,8 +1778,8 @@ visible to patterns under a name no one chose) and classifies each field by thes
   non-edge by elimination, and its bind name *is* its field name, which reflection already reports. So
   every unannotated field is auto-bound in the Attributes namespace as `$<node_id>.<field_name>`
   (§ 6.1) with its reflected type and its
-  `= null`-derived optionality — `$sdpa_fwd.dropout_probability`, `$sdpa_fwd.alibi_mask`,
-  `$sdpa_fwd.left_bound` bind with no annotation (B.5). The one consequence is that a scalar's bind
+  `= null`-derived optionality — `$sdpa.dropout_probability`, `$sdpa.alibi_mask`,
+  `$sdpa.left_bound` bind with no annotation (B.5). The one consequence is that a scalar's bind
   name is coupled to its field name: renaming the field renames the symbol, whereas `matcher_name`
   insulates an operand from a field rename. If a scalar ever needs that insulation, the additive
   extension is an optional `matcher_name` on an unflagged field, used purely as a bind-name override; the
@@ -1782,7 +1789,7 @@ visible to patterns under a name no one chose) and classifies each field by thes
   table itself, and `compute_data_type` is the one that matters: it is a per-node value the
   frontend stamps, it is the field an author reaches for to gate a node's compute precision, and
   under the attribute-table-only rule it would be unreachable — a criterion naming
-  `$sdpa_fwd.compute_data_type` would fail § 13.2's reference check at load while looking
+  `$sdpa.compute_data_type` would fail § 13.2's reference check at load while looking
   perfectly ordinary. The generator therefore classifies the `Node` table's non-`cache_ignore`
   scalar fields by the same rules and merges them into **every** op's scalar-attribute set, so
   `$<node_id>.compute_data_type` binds on any matched node. Two properties keep the merge safe.
@@ -1823,7 +1830,7 @@ The emitted entry for one opcode is, conceptually:
 
 ```jsonc
 // generated; illustrative shape, not a wire format
-"sdpa_fwd": {                          // key: the table's matcher_opcode
+"sdpa": {                          // key: the table's matcher_opcode
   "attributes_type": "SdpaAttributes", // NodeAttributes union member; matched via Node::attributes_type()
   "operands": [
     {"name": "q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},

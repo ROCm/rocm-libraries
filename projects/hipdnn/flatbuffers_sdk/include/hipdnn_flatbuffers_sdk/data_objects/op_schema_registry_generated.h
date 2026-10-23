@@ -313,6 +313,20 @@ inline constexpr std::array<AttributeSchema, 4> BLOCK_SCALE_QUANTIZE_ATTRIBUTES 
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
+inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_OPERANDS = {{
+    {"x", false, &readEdge<&ConvolutionFwdAttributes::x_tensor_uid>},
+    {"w", false, &readEdge<&ConvolutionFwdAttributes::w_tensor_uid>},
+}};
+
+inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_RESULTS = {{
+    {"y", false, &readEdge<&ConvolutionFwdAttributes::y_tensor_uid>},
+}};
+
+inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_ATTRIBUTES = {{
+    {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionFwdAttributes::conv_mode, &EnumNameConvMode>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
+}};
+
 inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_BWD_DATA_OPERANDS = {{
     {"dy", false, &readEdge<&ConvolutionBwdAttributes::dy_tensor_uid>},
     {"w", false, &readEdge<&ConvolutionBwdAttributes::w_tensor_uid>},
@@ -338,20 +352,6 @@ inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_BWD_FILTER_RESULTS = {{
 
 inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_BWD_FILTER_ATTRIBUTES = {{
     {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionWrwAttributes::conv_mode, &EnumNameConvMode>},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
-}};
-
-inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_FWD_OPERANDS = {{
-    {"x", false, &readEdge<&ConvolutionFwdAttributes::x_tensor_uid>},
-    {"w", false, &readEdge<&ConvolutionFwdAttributes::w_tensor_uid>},
-}};
-
-inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_FWD_RESULTS = {{
-    {"y", false, &readEdge<&ConvolutionFwdAttributes::y_tensor_uid>},
-}};
-
-inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_FWD_ATTRIBUTES = {{
-    {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionFwdAttributes::conv_mode, &EnumNameConvMode>},
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
@@ -487,6 +487,22 @@ inline constexpr std::array<AttributeSchema, 3> REDUCTION_ATTRIBUTES = {{
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
+inline constexpr std::array<EdgeSchema, 1> RESAMPLE_OPERANDS = {{
+    {"x", false, &readEdge<&ResampleFwdAttributes::x_tensor_uid>},
+}};
+
+inline constexpr std::array<EdgeSchema, 2> RESAMPLE_RESULTS = {{
+    {"y", false, &readEdge<&ResampleFwdAttributes::y_tensor_uid>},
+    {"index", true, &readEdge<&ResampleFwdAttributes::index_tensor_uid>},
+}};
+
+inline constexpr std::array<AttributeSchema, 4> RESAMPLE_ATTRIBUTES = {{
+    {"resample_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::resample_mode, &EnumNameResampleMode>},
+    {"padding_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::padding_mode, &EnumNamePaddingMode>},
+    {"generate_index", ValueKind::BOOL, true, &readScalar<bool, &ResampleFwdAttributes::generate_index>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
+}};
+
 inline constexpr std::array<EdgeSchema, 2> RESAMPLE_BWD_OPERANDS = {{
     {"dy", false, &readEdge<&ResampleBwdAttributes::dy_tensor_uid>},
     {"index", true, &readEdge<&ResampleBwdAttributes::index_tensor_uid>},
@@ -502,53 +518,88 @@ inline constexpr std::array<AttributeSchema, 3> RESAMPLE_BWD_ATTRIBUTES = {{
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline constexpr std::array<EdgeSchema, 1> RESAMPLE_FWD_OPERANDS = {{
-    {"x", false, &readEdge<&ResampleFwdAttributes::x_tensor_uid>},
-}};
-
-inline constexpr std::array<EdgeSchema, 2> RESAMPLE_FWD_RESULTS = {{
-    {"y", false, &readEdge<&ResampleFwdAttributes::y_tensor_uid>},
-    {"index", true, &readEdge<&ResampleFwdAttributes::index_tensor_uid>},
-}};
-
-inline constexpr std::array<AttributeSchema, 4> RESAMPLE_FWD_ATTRIBUTES = {{
-    {"resample_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::resample_mode, &EnumNameResampleMode>},
-    {"padding_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::padding_mode, &EnumNamePaddingMode>},
-    {"generate_index", ValueKind::BOOL, true, &readScalar<bool, &ResampleFwdAttributes::generate_index>},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
-}};
-
-inline constexpr std::array<EdgeSchema, 4> RMS_NORM_OPERANDS = {{
+inline constexpr std::array<EdgeSchema, 4> RMSNORM_OPERANDS = {{
     {"x", false, &readEdge<&RMSNormAttributes::x_tensor_uid>},
     {"scale", false, &readEdge<&RMSNormAttributes::scale_tensor_uid>},
     {"epsilon", false, &readEdge<&RMSNormAttributes::epsilon_tensor_uid>},
     {"bias", true, &readEdge<&RMSNormAttributes::bias_tensor_uid>},
 }};
 
-inline constexpr std::array<EdgeSchema, 2> RMS_NORM_RESULTS = {{
+inline constexpr std::array<EdgeSchema, 2> RMSNORM_RESULTS = {{
     {"y", false, &readEdge<&RMSNormAttributes::y_tensor_uid>},
     {"inv_rms", true, &readEdge<&RMSNormAttributes::inv_rms_tensor_uid>},
 }};
 
-inline constexpr std::array<AttributeSchema, 2> RMS_NORM_ATTRIBUTES = {{
+inline constexpr std::array<AttributeSchema, 2> RMSNORM_ATTRIBUTES = {{
     {"forward_phase", ValueKind::ENUM_NAME, false, &readEnumName<&RMSNormAttributes::forward_phase, &EnumNameNormFwdPhase>},
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline constexpr std::array<EdgeSchema, 4> RMS_NORM_BWD_OPERANDS = {{
+inline constexpr std::array<EdgeSchema, 4> RMSNORM_BWD_OPERANDS = {{
     {"dy", false, &readEdge<&RMSNormBackwardAttributes::dy_tensor_uid>},
     {"x", false, &readEdge<&RMSNormBackwardAttributes::x_tensor_uid>},
     {"scale", false, &readEdge<&RMSNormBackwardAttributes::scale_tensor_uid>},
     {"inv_rms", false, &readEdge<&RMSNormBackwardAttributes::inv_rms_tensor_uid>},
 }};
 
-inline constexpr std::array<EdgeSchema, 3> RMS_NORM_BWD_RESULTS = {{
+inline constexpr std::array<EdgeSchema, 3> RMSNORM_BWD_RESULTS = {{
     {"dx", false, &readEdge<&RMSNormBackwardAttributes::dx_tensor_uid>},
     {"dscale", false, &readEdge<&RMSNormBackwardAttributes::dscale_tensor_uid>},
     {"dbias", true, &readEdge<&RMSNormBackwardAttributes::dbias_tensor_uid>},
 }};
 
-inline constexpr std::array<AttributeSchema, 1> RMS_NORM_BWD_ATTRIBUTES = {{
+inline constexpr std::array<AttributeSchema, 1> RMSNORM_BWD_ATTRIBUTES = {{
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
+}};
+
+inline constexpr std::array<EdgeSchema, 21> SDPA_OPERANDS = {{
+    {"q", false, &readEdge<&SdpaAttributes::q_tensor_uid>},
+    {"k", false, &readEdge<&SdpaAttributes::k_tensor_uid>},
+    {"v", false, &readEdge<&SdpaAttributes::v_tensor_uid>},
+    {"attn_mask", true, &readEdge<&SdpaAttributes::attn_mask_tensor_uid>},
+    {"scale", true, &readEdge<&SdpaAttributes::scale_tensor_uid>},
+    {"seq_len_q", true, &readEdge<&SdpaAttributes::seq_len_q_tensor_uid>},
+    {"seq_len_kv", true, &readEdge<&SdpaAttributes::seq_len_kv_tensor_uid>},
+    {"seed", true, &readEdge<&SdpaAttributes::seed_tensor_uid>},
+    {"offset", true, &readEdge<&SdpaAttributes::offset_tensor_uid>},
+    {"dropout_mask", true, &readEdge<&SdpaAttributes::dropout_mask_tensor_uid>},
+    {"dropout_scale", true, &readEdge<&SdpaAttributes::dropout_scale_tensor_uid>},
+    {"page_table_k", true, &readEdge<&SdpaAttributes::page_table_k_tensor_uid>},
+    {"page_table_v", true, &readEdge<&SdpaAttributes::page_table_v_tensor_uid>},
+    {"block_mask", true, &readEdge<&SdpaAttributes::block_mask_tensor_uid>},
+    {"sink_token", true, &readEdge<&SdpaAttributes::sink_token_tensor_uid>},
+    {"descale_q", true, &readEdge<&SdpaAttributes::descale_q_tensor_uid>},
+    {"descale_k", true, &readEdge<&SdpaAttributes::descale_k_tensor_uid>},
+    {"descale_v", true, &readEdge<&SdpaAttributes::descale_v_tensor_uid>},
+    {"descale_s", true, &readEdge<&SdpaAttributes::descale_s_tensor_uid>},
+    {"scale_s", true, &readEdge<&SdpaAttributes::scale_s_tensor_uid>},
+    {"scale_o", true, &readEdge<&SdpaAttributes::scale_o_tensor_uid>},
+}};
+
+inline constexpr std::array<EdgeSchema, 7> SDPA_RESULTS = {{
+    {"o", false, &readEdge<&SdpaAttributes::o_tensor_uid>},
+    {"stats", true, &readEdge<&SdpaAttributes::stats_tensor_uid>},
+    {"max", true, &readEdge<&SdpaAttributes::max_tensor_uid>},
+    {"sum_exp", true, &readEdge<&SdpaAttributes::sum_exp_tensor_uid>},
+    {"rng_dump", true, &readEdge<&SdpaAttributes::rng_dump_tensor_uid>},
+    {"amax_s", true, &readEdge<&SdpaAttributes::amax_s_tensor_uid>},
+    {"amax_o", true, &readEdge<&SdpaAttributes::amax_o_tensor_uid>},
+}};
+
+inline constexpr std::array<AttributeSchema, 14> SDPA_ATTRIBUTES = {{
+    {"generate_stats", ValueKind::BOOL, true, &readScalar<bool, &SdpaAttributes::generate_stats>},
+    {"alibi_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::alibi_mask>},
+    {"padding_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::padding_mask>},
+    {"causal_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask>},
+    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask_bottom_right>},
+    {"dropout_probability", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::dropout_probability>},
+    {"attn_scale_value", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::attn_scale_value>},
+    {"left_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::left_bound>},
+    {"right_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::right_bound>},
+    {"max_seq_len_kv", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::max_seq_len_kv>},
+    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::diagonal_alignment, &EnumNameDiagonalAlignment>},
+    {"mma_core_mode", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::mma_core_mode, &EnumNameDataType>},
+    {"implementation", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::implementation, &EnumNameAttentionImplementation>},
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
@@ -590,57 +641,6 @@ inline constexpr std::array<AttributeSchema, 10> SDPA_BWD_ATTRIBUTES = {{
     {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline constexpr std::array<EdgeSchema, 21> SDPA_FWD_OPERANDS = {{
-    {"q", false, &readEdge<&SdpaAttributes::q_tensor_uid>},
-    {"k", false, &readEdge<&SdpaAttributes::k_tensor_uid>},
-    {"v", false, &readEdge<&SdpaAttributes::v_tensor_uid>},
-    {"attn_mask", true, &readEdge<&SdpaAttributes::attn_mask_tensor_uid>},
-    {"scale", true, &readEdge<&SdpaAttributes::scale_tensor_uid>},
-    {"seq_len_q", true, &readEdge<&SdpaAttributes::seq_len_q_tensor_uid>},
-    {"seq_len_kv", true, &readEdge<&SdpaAttributes::seq_len_kv_tensor_uid>},
-    {"seed", true, &readEdge<&SdpaAttributes::seed_tensor_uid>},
-    {"offset", true, &readEdge<&SdpaAttributes::offset_tensor_uid>},
-    {"dropout_mask", true, &readEdge<&SdpaAttributes::dropout_mask_tensor_uid>},
-    {"dropout_scale", true, &readEdge<&SdpaAttributes::dropout_scale_tensor_uid>},
-    {"page_table_k", true, &readEdge<&SdpaAttributes::page_table_k_tensor_uid>},
-    {"page_table_v", true, &readEdge<&SdpaAttributes::page_table_v_tensor_uid>},
-    {"block_mask", true, &readEdge<&SdpaAttributes::block_mask_tensor_uid>},
-    {"sink_token", true, &readEdge<&SdpaAttributes::sink_token_tensor_uid>},
-    {"descale_q", true, &readEdge<&SdpaAttributes::descale_q_tensor_uid>},
-    {"descale_k", true, &readEdge<&SdpaAttributes::descale_k_tensor_uid>},
-    {"descale_v", true, &readEdge<&SdpaAttributes::descale_v_tensor_uid>},
-    {"descale_s", true, &readEdge<&SdpaAttributes::descale_s_tensor_uid>},
-    {"scale_s", true, &readEdge<&SdpaAttributes::scale_s_tensor_uid>},
-    {"scale_o", true, &readEdge<&SdpaAttributes::scale_o_tensor_uid>},
-}};
-
-inline constexpr std::array<EdgeSchema, 7> SDPA_FWD_RESULTS = {{
-    {"o", false, &readEdge<&SdpaAttributes::o_tensor_uid>},
-    {"stats", true, &readEdge<&SdpaAttributes::stats_tensor_uid>},
-    {"max", true, &readEdge<&SdpaAttributes::max_tensor_uid>},
-    {"sum_exp", true, &readEdge<&SdpaAttributes::sum_exp_tensor_uid>},
-    {"rng_dump", true, &readEdge<&SdpaAttributes::rng_dump_tensor_uid>},
-    {"amax_s", true, &readEdge<&SdpaAttributes::amax_s_tensor_uid>},
-    {"amax_o", true, &readEdge<&SdpaAttributes::amax_o_tensor_uid>},
-}};
-
-inline constexpr std::array<AttributeSchema, 14> SDPA_FWD_ATTRIBUTES = {{
-    {"generate_stats", ValueKind::BOOL, true, &readScalar<bool, &SdpaAttributes::generate_stats>},
-    {"alibi_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::alibi_mask>},
-    {"padding_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::padding_mask>},
-    {"causal_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask>},
-    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask_bottom_right>},
-    {"dropout_probability", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::dropout_probability>},
-    {"attn_scale_value", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::attn_scale_value>},
-    {"left_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::left_bound>},
-    {"right_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::right_bound>},
-    {"max_seq_len_kv", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::max_seq_len_kv>},
-    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::diagonal_alignment, &EnumNameDiagonalAlignment>},
-    {"mma_core_mode", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::mma_core_mode, &EnumNameDataType>},
-    {"implementation", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::implementation, &EnumNameAttentionImplementation>},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
-}};
-
 /// Sorted by opcode.
 inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
     {"batchnorm", NodeAttributes::BatchnormAttributes, spanOf(BATCHNORM_OPERANDS), spanOf(BATCHNORM_RESULTS), spanOf(BATCHNORM_ATTRIBUTES), spanOf(BATCHNORM_OPERAND_LISTS), {}},
@@ -649,9 +649,9 @@ inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
     {"batchnorm_inference_variance_ext", NodeAttributes::BatchnormInferenceAttributesVarianceExt, spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_OPERANDS), spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_RESULTS), spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_ATTRIBUTES), {}, {}},
     {"block_scale_dequantize", NodeAttributes::BlockScaleDequantizeAttributes, spanOf(BLOCK_SCALE_DEQUANTIZE_OPERANDS), spanOf(BLOCK_SCALE_DEQUANTIZE_RESULTS), spanOf(BLOCK_SCALE_DEQUANTIZE_ATTRIBUTES), {}, {}},
     {"block_scale_quantize", NodeAttributes::BlockScaleQuantizeAttributes, spanOf(BLOCK_SCALE_QUANTIZE_OPERANDS), spanOf(BLOCK_SCALE_QUANTIZE_RESULTS), spanOf(BLOCK_SCALE_QUANTIZE_ATTRIBUTES), {}, {}},
+    {"convolution", NodeAttributes::ConvolutionFwdAttributes, spanOf(CONVOLUTION_OPERANDS), spanOf(CONVOLUTION_RESULTS), spanOf(CONVOLUTION_ATTRIBUTES), {}, {}},
     {"convolution_bwd_data", NodeAttributes::ConvolutionBwdAttributes, spanOf(CONVOLUTION_BWD_DATA_OPERANDS), spanOf(CONVOLUTION_BWD_DATA_RESULTS), spanOf(CONVOLUTION_BWD_DATA_ATTRIBUTES), {}, {}},
     {"convolution_bwd_filter", NodeAttributes::ConvolutionWrwAttributes, spanOf(CONVOLUTION_BWD_FILTER_OPERANDS), spanOf(CONVOLUTION_BWD_FILTER_RESULTS), spanOf(CONVOLUTION_BWD_FILTER_ATTRIBUTES), {}, {}},
-    {"convolution_fwd", NodeAttributes::ConvolutionFwdAttributes, spanOf(CONVOLUTION_FWD_OPERANDS), spanOf(CONVOLUTION_FWD_RESULTS), spanOf(CONVOLUTION_FWD_ATTRIBUTES), {}, {}},
     {"custom_op", NodeAttributes::CustomOpAttributes, {}, {}, spanOf(CUSTOM_OP_ATTRIBUTES), spanOf(CUSTOM_OP_OPERAND_LISTS), spanOf(CUSTOM_OP_RESULT_LISTS)},
     {"layernorm", NodeAttributes::LayernormAttributes, spanOf(LAYERNORM_OPERANDS), spanOf(LAYERNORM_RESULTS), spanOf(LAYERNORM_ATTRIBUTES), {}, {}},
     {"layernorm_bwd", NodeAttributes::LayernormBackwardAttributes, spanOf(LAYERNORM_BWD_OPERANDS), spanOf(LAYERNORM_BWD_RESULTS), spanOf(LAYERNORM_BWD_ATTRIBUTES), {}, {}},
@@ -660,12 +660,12 @@ inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
     {"moe_grouped_matmul_bwd", NodeAttributes::MoeGroupedMatmulBwdAttributes, spanOf(MOE_GROUPED_MATMUL_BWD_OPERANDS), spanOf(MOE_GROUPED_MATMUL_BWD_RESULTS), spanOf(MOE_GROUPED_MATMUL_BWD_ATTRIBUTES), {}, {}},
     {"pointwise", NodeAttributes::PointwiseAttributes, spanOf(POINTWISE_OPERANDS), spanOf(POINTWISE_RESULTS), spanOf(POINTWISE_ATTRIBUTES), {}, {}},
     {"reduction", NodeAttributes::ReductionAttributes, spanOf(REDUCTION_OPERANDS), spanOf(REDUCTION_RESULTS), spanOf(REDUCTION_ATTRIBUTES), {}, {}},
+    {"resample", NodeAttributes::ResampleFwdAttributes, spanOf(RESAMPLE_OPERANDS), spanOf(RESAMPLE_RESULTS), spanOf(RESAMPLE_ATTRIBUTES), {}, {}},
     {"resample_bwd", NodeAttributes::ResampleBwdAttributes, spanOf(RESAMPLE_BWD_OPERANDS), spanOf(RESAMPLE_BWD_RESULTS), spanOf(RESAMPLE_BWD_ATTRIBUTES), {}, {}},
-    {"resample_fwd", NodeAttributes::ResampleFwdAttributes, spanOf(RESAMPLE_FWD_OPERANDS), spanOf(RESAMPLE_FWD_RESULTS), spanOf(RESAMPLE_FWD_ATTRIBUTES), {}, {}},
-    {"rms_norm", NodeAttributes::RMSNormAttributes, spanOf(RMS_NORM_OPERANDS), spanOf(RMS_NORM_RESULTS), spanOf(RMS_NORM_ATTRIBUTES), {}, {}},
-    {"rms_norm_bwd", NodeAttributes::RMSNormBackwardAttributes, spanOf(RMS_NORM_BWD_OPERANDS), spanOf(RMS_NORM_BWD_RESULTS), spanOf(RMS_NORM_BWD_ATTRIBUTES), {}, {}},
+    {"rmsnorm", NodeAttributes::RMSNormAttributes, spanOf(RMSNORM_OPERANDS), spanOf(RMSNORM_RESULTS), spanOf(RMSNORM_ATTRIBUTES), {}, {}},
+    {"rmsnorm_bwd", NodeAttributes::RMSNormBackwardAttributes, spanOf(RMSNORM_BWD_OPERANDS), spanOf(RMSNORM_BWD_RESULTS), spanOf(RMSNORM_BWD_ATTRIBUTES), {}, {}},
+    {"sdpa", NodeAttributes::SdpaAttributes, spanOf(SDPA_OPERANDS), spanOf(SDPA_RESULTS), spanOf(SDPA_ATTRIBUTES), {}, {}},
     {"sdpa_bwd", NodeAttributes::SdpaBackwardAttributes, spanOf(SDPA_BWD_OPERANDS), spanOf(SDPA_BWD_RESULTS), spanOf(SDPA_BWD_ATTRIBUTES), {}, {}},
-    {"sdpa_fwd", NodeAttributes::SdpaAttributes, spanOf(SDPA_FWD_OPERANDS), spanOf(SDPA_FWD_RESULTS), spanOf(SDPA_FWD_ATTRIBUTES), {}, {}},
 }};
 
 } // namespace detail

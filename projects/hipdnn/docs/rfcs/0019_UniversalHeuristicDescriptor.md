@@ -418,7 +418,7 @@ identity, versioning, and the feature contract without understanding the ranking
     "$device.cu_count", "$device.lds_size",            // device props → arch-aware
     "$kernel.tile_m", "$kernel.split_k",               // KMD fields, exposed as knobs (Section 3.2)
     "$q.dims[3]", "$q.dims[2]",                        // positional tensor dims (Section 6.1)
-    {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]},     // computed inline — no $derived.* (Section 6.4)
+    {"/": ["$sdpa.flops", "$sdpa.bytes"]},     // computed inline — no $derived.* (Section 6.4)
     {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}    // tile quantization, also inline
   ],
   "categorical_encoding": { … },                       // string → code maps, generated (Section 6.5)
@@ -1019,7 +1019,7 @@ fields` in one direction and `UHD features ⊄ knobs` in the other.
 that read like attributes are dims: for a rank-4 SDPA tensor laid out as
 `(batch, heads, sequence, head_dim)`, batch is `$q.dims[0]`, head count `$q.dims[1]`, sequence length
 `$q.dims[2]`, and head size `$q.dims[3]`. A node's `$<node>.*` namespace carries **scalar attributes**
-only — `$sdpa_fwd.dropout_probability` and the like — so a signature that reads a size reads a dim.
+only — `$sdpa.dropout_probability` and the like — so a signature that reads a size reads a dim.
 
 > **Implementation note — the bound set is op-specific.** Which tensors a pattern binds, and what each
 > dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for
@@ -1077,7 +1077,7 @@ Order and form must match training exactly.
   {"log2": ["$q.dims[2]"]},
   {"/": ["$q.dims[2]", "$k.dims[2]"]},                           // aspect ratio
   {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]},                // tile quantization
-  {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}                  // arithmetic intensity (Section 13.6)
+  {"/": ["$sdpa.flops", "$sdpa.bytes"]}                  // arithmetic intensity (Section 13.6)
 ]
 ```
 
@@ -1372,7 +1372,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 | `log2_batch … log2_hdim_v` (7) | computed: `{"log2": ["$q.<dim>"]}` |
 | `gqa_ratio` = nhead_q/nhead_k | `{"/": ["$q.dims[1]", "$k.dims[1]"]}` |
 | `aspect_sq_sk` = seqlen_q/seqlen_k | `{"/": ["$q.dims[2]", "$k.dims[2]"]}` |
-| `log2_ops` | `{"log2": ["$sdpa_fwd.flops"]}` |
+| `log2_ops` | `{"log2": ["$sdpa.flops"]}` |
 | `decode_flag` = (seqlen_q ≤ 1) | `{"<=": ["$q.dims[2]", 1]}` |
 
 **Kernel — `$kernel.*` (from the `kernel` dict = KMD fields) — 20**
@@ -1389,7 +1389,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
-| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa.flops", "$sdpa.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
 | `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
 | `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
@@ -2622,12 +2622,12 @@ additive schema change rather than a per-pack extension point
 byte counts fit that mechanism, as per-op precomputed fields:
 
 ```jsonc
-// available wherever an sdpa_fwd node is bound — no descriptor declares these
-"$sdpa_fwd.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
-"$sdpa_fwd.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
+// available wherever an sdpa node is bound — no descriptor declares these
+"$sdpa.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
+"$sdpa.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
 
 // so a features_signature entry just divides them
-"arithmetic_intensity": {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}
+"arithmetic_intensity": {"/": ["$sdpa.flops", "$sdpa.bytes"]}
 ```
 
 These are **not** authored as expression strings in table-level `.fbs` annotations. Embedding an

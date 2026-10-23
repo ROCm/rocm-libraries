@@ -5,7 +5,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -18,29 +17,11 @@
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
-
-namespace detail
-{
-
-/// True for `[A-Za-z_][A-Za-z0-9_]*`, the form of a token root.
-inline bool isIdentifier(std::string_view text)
-{
-    const auto isLeading
-        = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
-    if(text.empty() || !isLeading(text.front()))
-    {
-        return false;
-    }
-    return std::all_of(text.begin() + 1, text.end(), [&isLeading](char c) {
-        return isLeading(c) || (c >= '0' && c <= '9');
-    });
-}
-
-} // namespace detail
 
 /// Builds a tensor field token such as `input_a.dtype`.
 inline std::string tensorField(std::string_view root, std::string_view field)

@@ -305,6 +305,12 @@ class TestBuildErrors(unittest.TestCase):
             [table("First", [], "op"), table("Second", [], "op")], r"'First'.*'Second'"
         )
 
+    def test_opcodes_differing_only_in_case_fail(self):
+        self.assertFails(
+            [table("First", [], "Foo"), table("Second", [], "foo")],
+            r"'Foo'.*'foo'.*collide",
+        )
+
     def test_a_table_without_matcher_opcode_fails(self):
         self.assertFails(
             [table("First", [], "first"), table("MatmulAttributes", [])],

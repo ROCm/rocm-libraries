@@ -23,7 +23,7 @@ enum AttentionImplementation : byte {
     UNIFIED   = 2,
 }
 
-table SdpaAttributes (matcher_opcode: "sdpa_fwd") {
+table SdpaAttributes (matcher_opcode: "sdpa") {
     // Required input tensor UIDs
     q_tensor_uid:             long (cache_uid, matcher_input_tensor, matcher_name: "q");
     k_tensor_uid:             long (cache_uid, matcher_input_tensor, matcher_name: "k");

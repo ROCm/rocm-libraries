@@ -52,6 +52,7 @@ namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
+namespace ingestor_detail = hipdnn_plugin_sdk::ingestor::detail;
 
 struct UedFixture
 {
@@ -227,8 +228,8 @@ TEST(TestUedFixtureParity, SchemaTopLevelKeysMatchTheLoader)
 {
     const auto schema = readSchema();
 
-    EXPECT_EQ(keysOf(schema.at("properties")), setOf(UED_KEYS));
-    EXPECT_EQ(stringsOf(schema.at("required")), setOf(UED_REQUIRED_KEYS));
+    EXPECT_EQ(keysOf(schema.at("properties")), setOf(ingestor_detail::UED_KEYS));
+    EXPECT_EQ(stringsOf(schema.at("required")), setOf(ingestor_detail::UED_REQUIRED_KEYS));
 }
 
 /// The loader requires exactly one arm. The schema expresses this as a oneOf of single-key
@@ -238,7 +239,7 @@ TEST(TestUedFixtureParity, SchemaGraphMatchArmsMatchTheLoader)
     const auto schema = readSchema();
     const auto& graphMatch = schema.at("properties").at("graph_match");
 
-    EXPECT_EQ(keysOf(graphMatch.at("properties")), setOf(GRAPH_MATCH_KEYS));
+    EXPECT_EQ(keysOf(graphMatch.at("properties")), setOf(ingestor_detail::GRAPH_MATCH_KEYS));
     EXPECT_FALSE(graphMatch.contains("required"));
 
     std::set<std::string> arms;
@@ -248,8 +249,8 @@ TEST(TestUedFixtureParity, SchemaGraphMatchArmsMatchTheLoader)
         ASSERT_EQ(required.size(), 1u) << arm.dump();
         arms.insert(*required.begin());
     }
-    EXPECT_EQ(graphMatch.at("oneOf").size(), GRAPH_MATCH_KEYS.size());
-    EXPECT_EQ(arms, setOf(GRAPH_MATCH_KEYS));
+    EXPECT_EQ(graphMatch.at("oneOf").size(), ingestor_detail::GRAPH_MATCH_KEYS.size());
+    EXPECT_EQ(arms, setOf(ingestor_detail::GRAPH_MATCH_KEYS));
 }
 
 TEST(TestUedFixtureParity, SchemaPatternNodeKeysMatchTheParser)
@@ -257,9 +258,10 @@ TEST(TestUedFixtureParity, SchemaPatternNodeKeysMatchTheParser)
     const auto schema = readSchema();
     const auto& node = patternNodeSchema(schema);
 
-    EXPECT_EQ(keysOf(node.at("properties")), setOf(PATTERN_NODE_KEYS));
-    EXPECT_EQ(stringsOf(node.at("required")), setOf(PATTERN_NODE_REQUIRED_KEYS));
-    EXPECT_EQ(keysOf(opcodeSetSchema(schema).at("properties")), setOf(PATTERN_OPCODE_SET_KEYS));
+    EXPECT_EQ(keysOf(node.at("properties")), setOf(ingestor_detail::PATTERN_NODE_KEYS));
+    EXPECT_EQ(stringsOf(node.at("required")), setOf(ingestor_detail::PATTERN_NODE_REQUIRED_KEYS));
+    EXPECT_EQ(keysOf(opcodeSetSchema(schema).at("properties")),
+              setOf(ingestor_detail::PATTERN_OPCODE_SET_KEYS));
 }
 
 TEST(TestUedFixtureParity, SchemaPatternNodeLimitMatchesTheParser)
@@ -299,7 +301,7 @@ TEST(TestUedFixtureParity, SchemaExtensionKeysMatchTheLoader)
                 = std::any_of(patterns.begin(), patterns.end(), [&key](const std::regex& pattern) {
                       return std::regex_search(key, pattern);
                   });
-            EXPECT_EQ(schemaAllows, hipdnn_plugin_sdk::ingestor::detail::isExtensionKey(probe))
+            EXPECT_EQ(schemaAllows, ingestor_detail::isExtensionKey(probe))
                 << "key '" << key << "' in " << object->value("description", object->dump());
         }
     }

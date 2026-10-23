@@ -76,6 +76,15 @@
         {"name": "scale", "optional": false}
       ]
     },
+    "convolution": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "w", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false}
+      ]
+    },
     "convolution_bwd_data": {
       "operands": [
         {"name": "dy", "optional": false},
@@ -92,15 +101,6 @@
       ],
       "results": [
         {"name": "dw", "optional": false}
-      ]
-    },
-    "convolution_fwd": {
-      "operands": [
-        {"name": "x", "optional": false},
-        {"name": "w", "optional": false}
-      ],
-      "results": [
-        {"name": "y", "optional": false}
       ]
     },
     "custom_op": {
@@ -184,6 +184,15 @@
         {"name": "out", "optional": false}
       ]
     },
+    "resample": {
+      "operands": [
+        {"name": "x", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "index", "optional": true}
+      ]
+    },
     "resample_bwd": {
       "operands": [
         {"name": "dy", "optional": false},
@@ -193,16 +202,7 @@
         {"name": "dx", "optional": false}
       ]
     },
-    "resample_fwd": {
-      "operands": [
-        {"name": "x", "optional": false}
-      ],
-      "results": [
-        {"name": "y", "optional": false},
-        {"name": "index", "optional": true}
-      ]
-    },
-    "rms_norm": {
+    "rmsnorm": {
       "operands": [
         {"name": "x", "optional": false},
         {"name": "scale", "optional": false},
@@ -214,7 +214,7 @@
         {"name": "inv_rms", "optional": true}
       ]
     },
-    "rms_norm_bwd": {
+    "rmsnorm_bwd": {
       "operands": [
         {"name": "dy", "optional": false},
         {"name": "x", "optional": false},
@@ -227,32 +227,7 @@
         {"name": "dbias", "optional": true}
       ]
     },
-    "sdpa_bwd": {
-      "operands": [
-        {"name": "q", "optional": false},
-        {"name": "k", "optional": false},
-        {"name": "v", "optional": false},
-        {"name": "o", "optional": false},
-        {"name": "do", "optional": false},
-        {"name": "stats", "optional": false},
-        {"name": "scale", "optional": true},
-        {"name": "attn_mask", "optional": true},
-        {"name": "seq_len_q", "optional": true},
-        {"name": "seq_len_kv", "optional": true},
-        {"name": "seed", "optional": true},
-        {"name": "offset", "optional": true},
-        {"name": "dropout_mask", "optional": true},
-        {"name": "dropout_scale", "optional": true},
-        {"name": "dropout_scale_inv", "optional": true}
-      ],
-      "results": [
-        {"name": "dq", "optional": false},
-        {"name": "dk", "optional": false},
-        {"name": "dv", "optional": false},
-        {"name": "dbias", "optional": true}
-      ]
-    },
-    "sdpa_fwd": {
+    "sdpa": {
       "operands": [
         {"name": "q", "optional": false},
         {"name": "k", "optional": false},
@@ -284,6 +259,31 @@
         {"name": "rng_dump", "optional": true},
         {"name": "amax_s", "optional": true},
         {"name": "amax_o", "optional": true}
+      ]
+    },
+    "sdpa_bwd": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "o", "optional": false},
+        {"name": "do", "optional": false},
+        {"name": "stats", "optional": false},
+        {"name": "scale", "optional": true},
+        {"name": "attn_mask", "optional": true},
+        {"name": "seq_len_q", "optional": true},
+        {"name": "seq_len_kv", "optional": true},
+        {"name": "seed", "optional": true},
+        {"name": "offset", "optional": true},
+        {"name": "dropout_mask", "optional": true},
+        {"name": "dropout_scale", "optional": true},
+        {"name": "dropout_scale_inv", "optional": true}
+      ],
+      "results": [
+        {"name": "dq", "optional": false},
+        {"name": "dk", "optional": false},
+        {"name": "dv", "optional": false},
+        {"name": "dbias", "optional": true}
       ]
     }
   }
