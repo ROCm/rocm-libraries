@@ -378,16 +378,54 @@ data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_
 {
     if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " requires set array types.");
-    if(array_type_is_real(array_type) != array_type_is_real(new_array_type))
+    if(array_type_is_real(array_type) == array_type_is_real(new_array_type))
+    {
+        if(!same_format_up_to_hermitian(array_type, new_array_type))
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                        + " cannot switch between interleaved and planar formats.");
+        // allowed relabels keep the number of planes, hence the offsets
+        auto ret = *this;
+        ret.set_array_type_and_offsets(new_array_type, offsets);
+        return ret;
+    }
+
+    const bool to_complex = array_type_is_real(array_type);
+    if(array_type_is_planar(to_complex ? new_array_type : array_type))
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + ": reinterpreting real data as complex data (or vice versa)"
-                                 " is not implemented yet.");
-    if(!same_format_up_to_hermitian(array_type, new_array_type))
+                               + ": reinterpreting real data as planar complex data (or vice"
+                                 " versa) is not implemented yet.");
+    // real <-> complex/hermitian: length axis 0 is split/merged, so it must be the
+    // embedding's length axis 0 for get_embedding_layout() to commute with this
+    if(embedding && (*embedding)[0] != 0)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " cannot switch between interleaved and planar formats.");
-    // allowed relabels keep the number of planes, hence the offsets
-    auto ret = *this;
-    ret.set_array_type_and_offsets(new_array_type, offsets);
+                                    + " requires length axis 0 of an embedded data set to be"
+                                      " the embedding's length axis 0.");
+
+    // real element 2k (resp. 2k + 1) is the real (resp. imaginary) part of complex
+    // element k: positions in real units are twice the positions in complex units
+    if(len_axes[0].inbuffer_stride != 1)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires a unit stride along length axis 0 to"
+                                      " reinterpret between real and interleaved data.");
+    if(to_complex)
+    {
+        bool all_even
+            = len_axes[0].lower % 2 == 0 && len_axes[0].upper % 2 == 0 && offsets[0] % 2 == 0;
+        for(size_t dim = 1; dim < get_full_rank(); dim++)
+            all_even &= (*this)[dim].inbuffer_stride % 2 == 0;
+        if(!all_even)
+            throw std::invalid_argument(
+                ROCFFT_CURRENT_FUNCTION
+                + " requires even bounds along length axis 0 and even other strides,"
+                  " distances and offset to reinterpret real data as interleaved data.");
+    }
+    const auto convert    = [to_complex](size_t x) { return to_complex ? x / 2 : 2 * x; };
+    auto       ret        = *this;
+    ret.len_axes[0].lower = convert(len_axes[0].lower);
+    ret.len_axes[0].upper = convert(len_axes[0].upper);
+    for(size_t dim = 1; dim < get_full_rank(); dim++)
+        ret[dim].inbuffer_stride = convert((*this)[dim].inbuffer_stride);
+    ret.set_array_type_and_offsets(new_array_type, {convert(offsets[0]), 0});
     return ret;
 }
 

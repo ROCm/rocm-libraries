@@ -798,12 +798,11 @@ TEST_F(data_descriptor_test, reinterpret_as)
     EXPECT_FALSE(
         no_precision.reinterpret_as(rocfft_array_type_hermitian_interleaved).has_precision());
 
-    // real <-> complex is not implemented yet (AIFFT-566)
+    // real <-> planar complex is not implemented yet (AIFFT-566)
     const std::pair<rocfft_array_type, rocfft_array_type> not_implemented[]
-        = {{rocfft_array_type_real, rocfft_array_type_complex_interleaved},
-           {rocfft_array_type_real, rocfft_array_type_hermitian_interleaved},
-           {rocfft_array_type_real, rocfft_array_type_complex_planar},
-           {rocfft_array_type_complex_interleaved, rocfft_array_type_real},
+        = {{rocfft_array_type_real, rocfft_array_type_complex_planar},
+           {rocfft_array_type_real, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_complex_planar, rocfft_array_type_real},
            {rocfft_array_type_hermitian_planar, rocfft_array_type_real}};
     for(auto [from, to] : not_implemented)
     {
@@ -836,6 +835,212 @@ TEST_F(data_descriptor_test, reinterpret_as)
                      std::invalid_argument);
     }
     EXPECT_THROW(base.reinterpret_as(rocfft_array_type_complex_interleaved), std::invalid_argument);
+}
+
+namespace
+{
+    const rocfft_array_type interleaved_types[]
+        = {rocfft_array_type_complex_interleaved, rocfft_array_type_hermitian_interleaved};
+
+    // in-buffer position (in elements, offset included) of logical coordinate `coord`
+    size_t position_of(const data_descriptor_t& layout, const std::vector<size_t>& coord)
+    {
+        const auto strides = layout.strides_and_distances();
+        size_t     ret     = layout.get_offset();
+        for(size_t d = 0; d < coord.size(); d++)
+            ret += coord[d] * strides[d];
+        return ret;
+    }
+
+    // calls f(coord) for every logical coordinate of a non-empty layout
+    template <typename F>
+    void for_each_coordinate(const data_descriptor_t& layout, F f)
+    {
+        const auto lower = layout.lower();
+        const auto upper = layout.upper();
+        auto       coord = lower;
+        while(true)
+        {
+            f(coord);
+            size_t d = 0;
+            for(; d < coord.size() && ++coord[d] == upper[d]; d++)
+                coord[d] = lower[d];
+            if(d == coord.size())
+                return;
+        }
+    }
+}
+
+TEST_F(data_descriptor_test, reinterpret_real_as_interleaved)
+{
+    struct layout_t
+    {
+        std::vector<size_t> lower, upper, strides;
+        size_t              offset;
+    };
+    struct case_t
+    {
+        layout_t real, cplx;
+        size_t   batch_rank;
+    };
+    // {real layout, expected complex layout, batch rank}: 1D, 2D with lower bounds
+    // and an offset, 3D with two batch axes
+    const case_t cases[]
+        = {{{{0, 0}, {8, 3}, {1, 10}, 0}, {{0, 0}, {4, 3}, {1, 5}, 0}, 1},
+           {{{2, 1, 0}, {8, 5, 3}, {1, 10, 60}, 4}, {{1, 1, 0}, {4, 5, 3}, {1, 5, 30}, 2}, 1},
+           {{{0, 0, 0, 0, 0}, {6, 4, 2, 3, 2}, {1, 8, 32, 64, 192}, 6},
+            {{0, 0, 0, 0, 0}, {3, 4, 2, 3, 2}, {1, 4, 16, 32, 96}, 3},
+            2}};
+    for(const auto& [r, c, batch_rank] : cases)
+    {
+        for(auto p : {rocfft_precision_single, rocfft_precision_double})
+        {
+            for(auto t : interleaved_types)
+            {
+                const data_descriptor_t real(p,
+                                             rocfft_array_type_real,
+                                             r.lower,
+                                             r.upper,
+                                             r.strides,
+                                             batch_rank,
+                                             {r.offset, 0});
+                const data_descriptor_t expected(
+                    p, t, c.lower, c.upper, c.strides, batch_rank, {c.offset, 0});
+                SCOPED_TRACE(real.str());
+                const auto dst = real.reinterpret_as(t);
+                EXPECT_TRUE(dst == expected) << dst.str();
+                EXPECT_EQ(dst.get_precision(), p);
+                EXPECT_TRUE(expected.reinterpret_as(rocfft_array_type_real) == real);
+            }
+        }
+    }
+}
+
+TEST_F(data_descriptor_test, reinterpret_real_interleaved_round_trip_and_positions)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // random interleaved layout (any lower bounds, strides and offset) with a
+        // unit stride along length axis 0
+        const auto len_rank   = uniform(1, 3);
+        const auto batch_rank = uniform(1, 2);
+        const auto lower      = random_vec(len_rank + batch_rank, 0, 3);
+        auto       upper      = random_vec(len_rank + batch_rank, 1, 4);
+        for(size_t d = 0; d < upper.size(); d++)
+            upper[d] += lower[d];
+        auto strides = random_vec(len_rank + batch_rank, 1, 40);
+        strides[0]   = 1;
+        const auto p = uniform(0, 1) ? rocfft_precision_single : rocfft_precision_double;
+        const auto t = interleaved_types[uniform(0, 1)];
+        const data_descriptor_t cplx(p, t, lower, upper, strides, batch_rank, {uniform(0, 9), 0});
+        SCOPED_TRACE(cplx.str());
+
+        const auto real = cplx.reinterpret_as(rocfft_array_type_real);
+        SCOPED_TRACE(real.str());
+        EXPECT_EQ(real.get_precision(), p);
+        EXPECT_EQ(real.logical_count(), 2 * cplx.logical_count());
+        EXPECT_TRUE(real.reinterpret_as(t) == cplx);
+        for(auto t2 : interleaved_types)
+            EXPECT_TRUE(real.reinterpret_as(t2).reinterpret_as(rocfft_array_type_real) == real);
+
+        // real element 2k (resp. 2k + 1) is the real (resp. imaginary) part of
+        // complex element k, at the same byte position
+        for_each_coordinate(cplx, [&](const std::vector<size_t>& coord) {
+            auto real_coord = coord;
+            real_coord[0] *= 2;
+            EXPECT_EQ(position_of(real, real_coord), 2 * position_of(cplx, coord));
+            EXPECT_EQ(position_of(real, real_coord) * real.element_size(),
+                      position_of(cplx, coord) * cplx.element_size());
+            real_coord[0] += 1;
+            EXPECT_EQ(position_of(real, real_coord), 2 * position_of(cplx, coord) + 1);
+        });
+    }
+}
+
+TEST_F(data_descriptor_test, reinterpret_real_interleaved_rejects_bad_layouts)
+{
+    // 2D real layout with two batch axes, valid unless modified
+    const std::vector<size_t> lower{0, 0, 0, 0}, upper{8, 4, 3, 2}, strides{1, 10, 40, 120};
+    const auto                make = [&](rocfft_array_type          t,
+                          const std::vector<size_t>& lo,
+                          const std::vector<size_t>& up,
+                          const std::vector<size_t>& st,
+                          size_t                     offset) {
+        return data_descriptor_t(rocfft_precision_single, t, lo, up, st, 2, {offset, 0});
+    };
+    const auto with = [](std::vector<size_t> v, size_t idx, size_t value) {
+        v[idx] = value;
+        return v;
+    };
+    for(auto t : interleaved_types)
+    {
+        EXPECT_NO_THROW(make(rocfft_array_type_real, lower, upper, strides, 2).reinterpret_as(t));
+        const data_descriptor_t rejected[]
+            = {// non-unit stride along length axis 0
+               make(rocfft_array_type_real, lower, upper, with(strides, 0, 2), 2),
+               // odd bounds along length axis 0
+               make(rocfft_array_type_real, with(lower, 0, 1), upper, strides, 2),
+               make(rocfft_array_type_real, lower, with(upper, 0, 7), strides, 2),
+               // odd stride, odd distances
+               make(rocfft_array_type_real, lower, upper, with(strides, 1, 11), 2),
+               make(rocfft_array_type_real, lower, upper, with(strides, 2, 41), 2),
+               make(rocfft_array_type_real, lower, upper, with(strides, 3, 121), 2),
+               // odd offset
+               make(rocfft_array_type_real, lower, upper, strides, 3)};
+        for(const auto& real : rejected)
+        {
+            SCOPED_TRACE(real.str());
+            EXPECT_THROW(real.reinterpret_as(t), std::invalid_argument);
+        }
+
+        // complex to real only requires a unit stride along length axis 0
+        EXPECT_NO_THROW(make(t, {1, 0, 0, 0}, {7, 3, 3, 2}, {1, 11, 41, 121}, 3)
+                            .reinterpret_as(rocfft_array_type_real));
+        EXPECT_THROW(
+            make(t, lower, upper, with(strides, 0, 2), 2).reinterpret_as(rocfft_array_type_real),
+            std::invalid_argument);
+    }
+}
+
+TEST_F(data_descriptor_test, reinterpret_real_interleaved_embedded)
+{
+    const data_descriptor_t L(rocfft_precision_double,
+                              rocfft_array_type_real,
+                              {0, 0, 0, 0},
+                              {8, 4, 6, 3},
+                              {1, 10, 40, 240},
+                              1,
+                              {4, 0});
+    for(auto t : interleaved_types)
+    {
+        // length axis 0 of the sub-layout is L's: the embedding map is kept and
+        // reinterpreting commutes with get_embedding_layout()
+        const auto sub = L.get_layout_for_len_axes({0, 2});
+        ASSERT_TRUE(sub.is_embedded());
+        const auto dst = sub.reinterpret_as(t);
+        EXPECT_TRUE(dst.is_embedded());
+        EXPECT_TRUE(dst.get_embedding_layout() == L.reinterpret_as(t)) << dst.str();
+        EXPECT_EQ(dst.corresponding_axes_in_embedding(), sub.corresponding_axes_in_embedding());
+        const auto back = dst.reinterpret_as(rocfft_array_type_real);
+        EXPECT_TRUE(back == sub);
+        EXPECT_TRUE(back.get_embedding_layout() == L);
+
+        // length axis 0 of the sub-layout is not L_t's, although it is otherwise
+        // reinterpretable (unit stride, even bounds, even other strides and offset)
+        const data_descriptor_t L_t(rocfft_precision_double,
+                                    rocfft_array_type_real,
+                                    {0, 0, 0, 0},
+                                    {4, 8, 6, 3},
+                                    {8, 1, 32, 192},
+                                    1,
+                                    {4, 0});
+        EXPECT_THROW(L_t.get_layout_for_len_axes({1}).reinterpret_as(t), std::invalid_argument);
+        EXPECT_THROW(L_t.get_layout_for_len_axes({1, 2}).reinterpret_as(t), std::invalid_argument);
+        const data_descriptor_t L_t_cplx(
+            rocfft_precision_double, t, {0, 0, 0, 0}, {4, 8, 6, 3}, {8, 1, 32, 192}, 1, {3, 0});
+        EXPECT_THROW(L_t_cplx.get_layout_for_len_axes({1}).reinterpret_as(rocfft_array_type_real),
+                     std::invalid_argument);
+    }
 }
 
 namespace

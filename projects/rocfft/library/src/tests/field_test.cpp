@@ -173,10 +173,17 @@ TEST(field_test, reinterpret_as_relabels_all_bricks)
 
 TEST(field_test, failing_reinterpret_as_leaves_field_unchanged)
 {
-    rocfft_field_t field({half_brick(0, rocfft_precision_single, rocfft_array_type_real),
-                          half_brick(1, rocfft_precision_single, rocfft_array_type_real)});
-    const auto     original = field;
-    EXPECT_THROW(field.reinterpret_as(rocfft_array_type_complex_interleaved), std::logic_error);
+    // brick 0 can be reinterpreted as interleaved complex; brick 1 cannot (odd distance)
+    const auto odd_distance = rocfft_brick_t{
+        data_descriptor_t(rocfft_precision_single, rocfft_array_type_real, {4, 0}, {8, 1}, {1, 5}),
+        rocfft_location_t(0, 1)};
+    rocfft_field_t field(
+        {half_brick(0, rocfft_precision_single, rocfft_array_type_real), odd_distance});
+    const auto original = field;
+    EXPECT_NO_THROW(
+        field.get_brick(0).layout.reinterpret_as(rocfft_array_type_complex_interleaved));
+    EXPECT_THROW(field.reinterpret_as(rocfft_array_type_complex_interleaved),
+                 std::invalid_argument);
     EXPECT_EQ(field, original);
     EXPECT_EQ(field.get_array_type(), rocfft_array_type_real);
 }
