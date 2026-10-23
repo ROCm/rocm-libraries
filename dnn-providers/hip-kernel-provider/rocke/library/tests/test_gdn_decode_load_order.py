@@ -22,13 +22,13 @@ before the first float op and some after it. The no-new-spill check of the
 tiles that load first and the exempt tile's zero-scratch contract are in
 ``test_gdn_decode_fused.py``.
 
-Reachability: the registered GDN tiles come from dispatch. The KDA tuned tiles
-at every state dtype, the raw-gate and no-L2-norm variants, the fused modes
-and the knobs are built as specs directly here. Dispatch routes f32 state and
-the fused modes (``tests/dispatch/gdn/test_gfx950_wiring.py``,
-``TestStateDtypeDispatch`` and ``TestFusedDispatch``) but sets no knob, so the
-knob cases guard direct ``build_gdn_decode`` callers and the paths dispatch
-will route later.
+Reachability: the registered GDN tiles come from dispatch, at their base
+configuration (``dispatch_gdn_decode_bases``). The KDA tuned tiles at every
+state dtype, the raw-gate and no-L2-norm variants, the fused modes and the
+knob stacks are built as specs directly here. Dispatch reaches each of those
+knob stacks by pin (``spec_id`` with ``tuning_knobs`` or ``tuning_id``,
+ALGORITHM.md §4.6), so the knob cases guard dispatched configurations as well
+as direct ``build_gdn_decode`` callers.
 
 Builds IR only: no lowering, no GPU, no comgr.
 """
