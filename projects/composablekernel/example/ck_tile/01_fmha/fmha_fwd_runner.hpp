@@ -467,8 +467,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     const bool kv_vectorized = (kv_layout == "vec");
     const bool kv_indptr     = (kv_lookup_str == "indptr");
-    // -kv_pad: batch_prefill nhd/hnd K/V with strides that are not their packed sizes, as
-    // aiter allows: kv_pad more elements after each row of hdim elements and after each page.
+    // -kv_pad: batch_prefill/pagedkv nhd/hnd K/V with strides that are not their packed sizes,
+    // as aiter allows: kv_pad more elements after each row of hdim elements and after each page.
     // K/V tensors head-major (as -iperm=1): the paged layouts by -kv_layout, the others by
     // -iperm
     const bool kv_perm                        = 0 < page_block_size ? kv_layout != "nhd" : i_perm;
@@ -493,11 +493,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
     }
     if(kv_pad != 0 && !(0 < kv_pad && kv_pad % kv_vector_size == 0 && !kv_vectorized &&
-                        is_v_rowmajor && 0 < page_block_size && mode == mode_enum::group &&
-                        num_splits == 1 && (api == "batch_prefill" || auto_runs_batch_prefill)))
+                        is_v_rowmajor && 0 < page_block_size && num_splits == 1 &&
+                        !need_append_kvcache && (api == "batch_prefill" || api == "pagedkv")))
     {
-        std::cerr << "kv_pad needs batch_prefill (group mode, page_block_size > 0, num_splits = "
-                     "1), nhd/hnd K/V with row-major V, and a multiple of "
+        std::cerr << "kv_pad needs -api=batch_prefill or pagedkv (page_block_size > 0, "
+                     "num_splits = 1), nhd/hnd K/V with row-major V, and a multiple of "
                   << kv_vector_size << std::endl;
         return fwd_result::invalid_args;
     }
@@ -1682,6 +1682,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
         args.batch_stride_q = batch_stride_q;
         args.batch_stride_k = batch_stride_k;
         args.batch_stride_v = batch_stride_v;
+        if constexpr(std::is_same_v<fmha_batch_prefill_args, std::decay_t<decltype(args)>> ||
+                     std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>>)
+        {
+            if(0 < kv_pad)
+            {
+                const auto k_strides = kv_padded_strides(hdim_q);
+                const auto v_strides = kv_padded_strides(hdim_v);
+                args.stride_k        = k_strides[0];
+                args.nhead_stride_k  = k_strides[1];
+                args.batch_stride_k  = k_strides[2];
+                args.stride_v        = v_strides[0];
+                args.nhead_stride_v  = v_strides[1];
+                args.batch_stride_v  = v_strides[2];
+            }
+        }
 
         if constexpr(std::is_same_v<fmha_fwd_appendkv_args, std::decay_t<decltype(args)>>)
         {
@@ -2023,17 +2038,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.stride_v       = kv_vector_size;
                     args.nhead_stride_k = page_block_size * hdim_q;
                     args.nhead_stride_v = page_block_size * hdim_v;
-                }
-                if(0 < kv_pad)
-                {
-                    const auto k_strides = kv_padded_strides(hdim_q);
-                    const auto v_strides = kv_padded_strides(hdim_v);
-                    args.stride_k        = k_strides[0];
-                    args.nhead_stride_k  = k_strides[1];
-                    args.batch_stride_k  = k_strides[2];
-                    args.stride_v        = v_strides[0];
-                    args.nhead_stride_v  = v_strides[1];
-                    args.batch_stride_v  = v_strides[2];
                 }
 
                 // pertensor: one Q/K/V scale each; kv_blockscale: Q per tensor, K/V per

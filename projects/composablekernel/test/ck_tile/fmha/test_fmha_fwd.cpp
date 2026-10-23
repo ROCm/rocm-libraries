@@ -1651,30 +1651,38 @@ TEST(TestCkTileFmhaFwd, TraitsFlatAggregateInit)
 #pragma clang diagnostic pop
 
 // batch_prefill on K/V with strides that are not their packed sizes (-kv_pad, as aiter
-// allows): rows of hdim + 8 elements, pages 8 elements longer. Page strides that are not a
-// multiple of the row stride leave the gfx125 TDM gathers out, so pages smaller than a warp's
-// K/V rows then have no instance (pages of 16: qr_tdm, whose warps read 16 rows, instead of
-// qr_tdm_sched, 32 rows).
-// page_block_size, kv_layout, mask, gfx125 pipeline ("": no instance)
-using BatchPrefillPaddedKVCase = std::tuple<int, const char*, const char*, const char*>;
+// allows): rows of hdim + 8 elements, pages 8 elements longer, so a page stride is not a
+// multiple of the row stride; the gfx125 TDM gathers (pages smaller than a warp's 32 K/V
+// rows) then count rows in units of their common divisor. pagedkv_prefill reads the same
+// layouts on its gfx125 TDM gathers ("_gather").
+// api, page_block_size, kv_layout, mask, gfx125 kernel name part
+using BatchPrefillPaddedKVCase =
+    std::tuple<const char*, int, const char*, const char*, const char*>;
 
 class BatchPrefillPaddedKV : public TestWithParam<BatchPrefillPaddedKVCase>
 {
 };
 
-INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         BatchPrefillPaddedKV,
-                         Values(BatchPrefillPaddedKVCase{1024, "nhd", "b", "_qr_tdm_sched_"},
-                                BatchPrefillPaddedKVCase{16, "hnd", "0", "_qr_tdm_vr"},
-                                BatchPrefillPaddedKVCase{32, "nhd", "t:64,32", "_qr_tdm_sched_"},
-                                BatchPrefillPaddedKVCase{7, "nhd", "b", ""}));
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefillPaddedKV,
+    Values(BatchPrefillPaddedKVCase{"batch_prefill", 1024, "nhd", "b", "_ps1024_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 32, "nhd", "t:64,32", "_psrt_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 16, "hnd", "0", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 7, "nhd", "b", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 1, "hnd", "t:64,32", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"pagedkv", 7, "nhd", "b", "_gather"},
+           BatchPrefillPaddedKVCase{"pagedkv", 16, "hnd", "0", "_gather"}));
 
 TEST_P(BatchPrefillPaddedKV, DataTypeConfig)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
-        const auto [page_block_size, kv_layout, mask_str, gfx125_pipeline] = GetParam();
-        if(!ck_tile::is_gfx125_supported() && !(page_block_size == 16 || page_block_size == 1024))
+        const auto [api, page_block_size, kv_layout, mask_str, gfx125_name] = GetParam();
+        const bool batch_prefill = std::string(api) == "batch_prefill";
+        if(!ck_tile::is_gfx125_supported() &&
+           !(batch_prefill &&
+             (page_block_size == 1 || page_block_size == 16 || page_block_size == 1024)))
             GTEST_SKIP() << "other page sizes run on the gfx125 TDM pipelines only";
 
         constexpr int batch = 3;
@@ -1715,19 +1723,19 @@ TEST_P(BatchPrefillPaddedKV, DataTypeConfig)
                                                    &selected_kernel,
                                                    kv_layout,
                                                    "block_table",
-                                                   "batch_prefill",
+                                                   api,
                                                    "",
                                                    0,
                                                    false,
                                                    8);
-        if(ck_tile::is_gfx125_supported() && std::string(gfx125_pipeline).empty())
-        {
-            EXPECT_EQ(result, fwd_result::no_instance) << selected_kernel;
-            return;
-        }
         CHECK_RESULT(result);
-        const char* pipeline = ck_tile::is_gfx125_supported() ? gfx125_pipeline : "_qr_async_";
-        EXPECT_NE(selected_kernel.find(pipeline), std::string::npos) << selected_kernel;
+        if(ck_tile::is_gfx125_supported())
+        {
+            EXPECT_NE(selected_kernel.find("_qr_tdm_sched_"), std::string::npos) << selected_kernel;
+            EXPECT_NE(selected_kernel.find(gfx125_name), std::string::npos) << selected_kernel;
+        }
+        else
+            EXPECT_NE(selected_kernel.find("_qr_async_"), std::string::npos) << selected_kernel;
     }
     else
     {

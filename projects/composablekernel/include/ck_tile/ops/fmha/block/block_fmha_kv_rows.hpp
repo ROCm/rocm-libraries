@@ -25,7 +25,8 @@ struct BlockFmhaDenseKVRows
 // - gather (kGatherWarpRows > 0, pages smaller than a warp's rows): the window origin is the
 //   sequence row, and load_gather() reads every 8 rows of a warp with one TDM gather whose row
 //   indices come from the page table. Rows past seqlen_k get an out-of-range index, which TDM
-//   zero-fills. Needs each K/V page stride to be a multiple of its row stride.
+//   zero-fills. The row indices count units of gather_unit(page stride, row stride) elements,
+//   so a page stride need not be a multiple of the row stride.
 // MakeKView/MakeVView(physical_page, rows) return the view of the first `rows` rows of a
 // page, with the type of the K/V views the pipeline was called with.
 // kPageSize 0 (pagedkv_prefill) takes the page size at run time, and the sequence may then
@@ -60,7 +61,9 @@ struct BlockFmhaPagedKVRows
                                              index_t k_page_rows_ = 0,
                                              index_t v_page_rows_ = 0,
                                              index_t page_size_   = kPageSize,
-                                             index_t row_offset_  = 0)
+                                             index_t row_offset_  = 0,
+                                             index_t k_row_units_ = 1,
+                                             index_t v_row_units_ = 1)
         : page_idx(page_idx_),
           max_page(max_page_),
           seqlen_k(seqlen_k_),
@@ -70,6 +73,8 @@ struct BlockFmhaPagedKVRows
           v_page_rows(v_page_rows_),
           page_size(page_size_),
           row_offset(row_offset_),
+          k_row_units(k_row_units_),
+          v_row_units(v_row_units_),
           page_shift(page_size_ > 0 && (page_size_ & (page_size_ - 1)) == 0
                          ? __builtin_ctz(static_cast<unsigned>(page_size_))
                          : -1)
@@ -81,12 +86,29 @@ struct BlockFmhaPagedKVRows
     index_t seqlen_k;
     MakeKView make_k_view;
     MakeVView make_v_view;
-    // gather: K/V page stride in units of the K/V row stride
+    // gather: K/V page stride in gather units (the row stride if it divides the page stride)
     index_t k_page_rows = 0;
     index_t v_page_rows = 0;
     // kPageSize == 0 only: rows per page, and the page row of sequence row 0
     index_t page_size  = kPageSize;
     index_t row_offset = 0;
+    // gather: K/V row stride in gather units
+    index_t k_row_units = 1;
+    index_t v_row_units = 1;
+
+    // gather: the unit (in elements) the TDM gather row indices count, the greatest common
+    // divisor of a page stride and a row stride
+    CK_TILE_HOST_DEVICE static constexpr index_t gather_unit(index_t page_stride,
+                                                             index_t row_stride)
+    {
+        while(row_stride != 0)
+        {
+            const index_t r = page_stride % row_stride;
+            page_stride     = row_stride;
+            row_stride      = r;
+        }
+        return page_stride;
+    }
     // kPageSize == 0: log2 of a power-of-two page size (pages are found by shifts), else -1
     index_t page_shift = -1;
 
@@ -177,6 +199,7 @@ struct BlockFmhaPagedKVRows
 
             const index_t seq_row   = __builtin_amdgcn_readfirstlane(row + warp_row_of(window));
             const index_t page_rows = kIsK ? k_page_rows : v_page_rows;
+            const index_t row_units = kIsK ? k_row_units : v_row_units;
             auto& g                 = kIsK ? k_gather : v_gather;
             // One vector load reads the page ids of all rows, lane j for row j.
             const auto fetch = [&](index_t first_row) {
@@ -186,10 +209,12 @@ struct BlockFmhaPagedKVRows
                 if constexpr(kVectorized)
                 {
                     ignore = page_rows;
+                    ignore = row_units;
                     return static_cast<uint32_t>(page);
                 }
                 else // unsigned: TDM row indices span 32 bits
-                    return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + row_in_page(pr)
+                    return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows +
+                                              static_cast<uint32_t>(row_in_page(pr) * row_units)
                                         : 0xffffffffu;
             };
             if(seq_row == g.next_row)
@@ -249,10 +274,12 @@ struct BlockFmhaPagedKVRows
         const index_t warp_row  = warp_row_of(window);
         const index_t col       = window.get_window_origin()[number<1>{}];
 
-        const auto& view         = window.get_bottom_tensor_view();
-        const auto& desc         = view.get_tensor_descriptor();
-        const index_t hdim       = desc.get_length(number<1>{});
-        const index_t row_step   = desc.calculate_offset(make_multi_index(1, 0));
+        const auto& view   = window.get_bottom_tensor_view();
+        const auto& desc   = view.get_tensor_descriptor();
+        const index_t hdim = desc.get_length(number<1>{});
+        // TDM gather rows are gather units apart; a K/V row is row_units of them
+        const index_t row_step =
+            desc.calculate_offset(make_multi_index(1, 0)) / (kIsK ? k_row_units : v_row_units);
         const DataType* gptr     = view.get_buffer_view().p_data_ + col;
         const uint32_t row_index = (kIsK ? k_gather : v_gather).cur;
 

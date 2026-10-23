@@ -253,8 +253,8 @@ class FmhaFwdApiTrait:
         if self.pipeline_tag == "qr_pagedkv":
             return " && (a.page_block_size % 128 == 0)"
         if self.kv_gather == "t":
-            # a gather row index counts K/V rows from the start of the cache
-            return " && (a.batch_stride_k % a.stride_k == 0) && (a.batch_stride_v % a.stride_v == 0)"
+            # any page and row strides (gather row indices count their common divisor)
+            return ""
         # each warp's K/V rows must lie in one page
         return f" && (a.page_block_size % {self.kv_warp_rows} == 0) && !(t.is_group_mode && a.is_gappy)"
 

@@ -2091,7 +2091,8 @@ class TestGfx125PagedKVCodegen(unittest.TestCase):
         self.assertIn(
             "(a.page_block_size % 32 == 0) && !(t.is_group_mode && a.is_gappy)", api
         )
-        self.assertIn("(a.batch_stride_k % a.stride_k == 0)", api)
+        # gathers take any page stride
+        self.assertNotIn("a.batch_stride_k % a.stride_k", api)
         # pingpong, then sched, then qr_tdm, then qr_pagedkv; page view before gather
         order = [
             api.index(f't.pipeline == "{tag}"')
@@ -2216,11 +2217,11 @@ class TestGfx125BatchPrefillPageSizes(unittest.TestCase):
             bp.write_fwd_api(pool, Path(output_dir))
             api = (Path(output_dir) / "fmha_batch_prefill_api.cpp").read_text()
         # page views: each warp's 16 or 32 K/V rows in one page; per-page scales: whole
-        # 128-row K/V tiles; gathers: page strides in rows; vectorized: whole vectors
+        # 128-row K/V tiles; gathers: any page stride; vectorized: whole vectors
         self.assertIn("a.page_block_size % 16 == 0", api)
         self.assertIn("a.page_block_size % 32 == 0", api)
         self.assertIn("a.page_block_size % 128 == 0", api)
-        self.assertIn("a.batch_stride_k % a.stride_k == 0", api)
+        self.assertNotIn("a.batch_stride_k % a.stride_k", api)
         self.assertIn("a.page_block_size % 8 == 0", api)
         self.assertIn("t.page_size == a.page_block_size", api)
         # the compiled page size is tried before the run-time ones of the same pipeline

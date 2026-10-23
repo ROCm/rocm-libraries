@@ -135,7 +135,8 @@ auto create_args(int argc, char* argv[])
                 "(their O and LSE are left unwritten); 0: off")
         .insert("kv_pad",
                 "0",
-                "batch_prefill, nhd/hnd: K/V rows of hdim + kv_pad elements and pages kv_pad "
+                "-api=batch_prefill/pagedkv, nhd/hnd: K/V rows of hdim + kv_pad elements and pages "
+                "kv_pad "
                 "elements longer (strides that are not the packed sizes); 0: packed")
         .insert("kv_gappy",
                 "0",

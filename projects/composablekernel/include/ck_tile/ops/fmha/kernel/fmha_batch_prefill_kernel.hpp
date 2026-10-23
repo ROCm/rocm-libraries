@@ -1396,19 +1396,35 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                         return kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
                 }();
                 constexpr index_t kKVRowsPageSize = kIsRuntimePageSize ? 0 : kPageBlockSize;
-                const auto kv_rows =
-                    BlockFmhaPagedKVRows<kKVRowsPageSize,
-                                         remove_cvref_t<decltype(make_k_view)>,
-                                         remove_cvref_t<decltype(make_v_view)>,
-                                         kGatherWarpRows,
-                                         kVectorizedKV>{page_idx,
-                                                        max_page_table_idx,
-                                                        kargs.seqlen_k,
-                                                        make_k_view,
-                                                        make_v_view,
-                                                        kargs.batch_stride_k / kargs.stride_k,
-                                                        kargs.batch_stride_v / kargs.stride_v,
-                                                        page_block_size};
+                using KVRows                      = BlockFmhaPagedKVRows<kKVRowsPageSize,
+                                                                         remove_cvref_t<decltype(make_k_view)>,
+                                                                         remove_cvref_t<decltype(make_v_view)>,
+                                                                         kGatherWarpRows,
+                                                                         kVectorizedKV>;
+                // gather: row indices in units dividing both the page and the row stride
+                const index_t k_unit = [&] {
+                    if constexpr(kGatherWarpRows > 0 && !kVectorizedKV)
+                        return KVRows::gather_unit(kargs.batch_stride_k, kargs.stride_k);
+                    else
+                        return kargs.stride_k;
+                }();
+                const index_t v_unit = [&] {
+                    if constexpr(kGatherWarpRows > 0 && !kVectorizedKV)
+                        return KVRows::gather_unit(kargs.batch_stride_v, kargs.stride_v);
+                    else
+                        return kargs.stride_v;
+                }();
+                const auto kv_rows = KVRows{page_idx,
+                                            max_page_table_idx,
+                                            kargs.seqlen_k,
+                                            make_k_view,
+                                            make_v_view,
+                                            kargs.batch_stride_k / k_unit,
+                                            kargs.batch_stride_v / v_unit,
+                                            page_block_size,
+                                            0,
+                                            kargs.stride_k / k_unit,
+                                            kargs.stride_v / v_unit};
                 // Q (and PERTENSOR K) descales are already in sm_scale.
                 const float* k_descale_tdm  = nullptr;
                 const float* v_descale_tdm  = nullptr;

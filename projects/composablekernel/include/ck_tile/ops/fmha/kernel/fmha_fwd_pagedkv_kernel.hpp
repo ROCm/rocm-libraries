@@ -1255,20 +1255,36 @@ struct FmhaFwdPagedKVKernel
                 constexpr index_t kKVWarpRows =
                     FmhaPipeline::kN0 / (FmhaPipeline::kBlockSize / get_warp_size());
                 constexpr index_t kGatherWarpRows = kKVGather ? kKVWarpRows : 0;
-                const auto kv_rows                = BlockFmhaPagedKVRows<0,
+                using KVRows                      = BlockFmhaPagedKVRows<0,
                                                                          remove_cvref_t<decltype(make_k_view)>,
                                                                          remove_cvref_t<decltype(make_v_view)>,
-                                                                         kGatherWarpRows>{
-                    kargs.block_table_ptr +
-                        static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_table,
-                    max_page,
-                    kargs.seqlen_k,
-                    make_k_view,
-                    make_v_view,
-                    kargs.batch_stride_k / kargs.stride_k,
-                    kargs.batch_stride_v / kargs.stride_v,
-                    kargs.page_block_size,
-                    kv_l2p_offset};
+                                                                         kGatherWarpRows>;
+                // gather: row indices in units dividing both the page and the row stride
+                const index_t k_unit = [&] {
+                    if constexpr(kKVGather)
+                        return KVRows::gather_unit(kargs.batch_stride_k, kargs.stride_k);
+                    else
+                        return kargs.stride_k;
+                }();
+                const index_t v_unit = [&] {
+                    if constexpr(kKVGather)
+                        return KVRows::gather_unit(kargs.batch_stride_v, kargs.stride_v);
+                    else
+                        return kargs.stride_v;
+                }();
+                const auto kv_rows =
+                    KVRows{kargs.block_table_ptr +
+                               static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_table,
+                           max_page,
+                           kargs.seqlen_k,
+                           make_k_view,
+                           make_v_view,
+                           kargs.batch_stride_k / k_unit,
+                           kargs.batch_stride_v / v_unit,
+                           kargs.page_block_size,
+                           kv_l2p_offset,
+                           kargs.stride_k / k_unit,
+                           kargs.stride_v / v_unit};
                 if constexpr(kIsSegmentedTdmPipeline)
                 {
                     using Policy = typename FmhaPipeline::Policy;

@@ -362,11 +362,8 @@ class FmhaFwdApiTrait:
             if self.kv_memory_layout == "vectorized":
                 # one box per vector of rows
                 return f"{same} && a.page_block_size % {128 // DTYPE_BITS[self.dtype]} == 0"
-            # a gather row index counts K/V rows from the start of the cache
-            return (
-                f"{same} && a.batch_stride_k % a.stride_k == 0"
-                " && a.batch_stride_v % a.stride_v == 0"
-            )
+            # any page and row strides (gather row indices count their common divisor)
+            return same
         return f"t.page_size == {self.page_size}"
 
     @property
