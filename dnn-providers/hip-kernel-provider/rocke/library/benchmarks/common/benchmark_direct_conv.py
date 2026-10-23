@@ -22,7 +22,11 @@ and K), so they can instead be compiled once and reused for any matching shape:
   python benchmark_direct_conv.py --run-from-cache ./kernel_cache --N 8 --Hi 56 --Wi 56 \
       --C 1024 --K 1024 --groups 64 --verify
 The capability list (filters, strides, paddings, channels per group) lives in
-benchmarks/common/direct_kernel_sweep.py.
+benchmarks/common/direct_kernel_sweep.py. ``--variants`` restricts a
+``--run-from-cache`` run to some of its variants, e.g. only the single-kernel
+grouped dgrad forms:
+  python benchmark_direct_conv.py --run-from-cache ./kernel_cache --direction dgrad \
+      --variants direct_grouped_dgrad_4c,direct_grouped_dgrad_fused ...
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ from builders.common.conv_reference import wgrad_reference as _wgrad_reference_s
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
 # ---------------------------------------------------------------------------
 
-from benchmarks.common.direct_kernel_sweep import (
+from kernels.conv.direct_aot_jobs import (
     BLOCK_GROUPS as _BLOCK_GROUPS,
     BLOCK_Q as _BLOCK_Q,
     DGRAD_BLOCK_H as _DGRAD_BLOCK_H,
@@ -123,6 +127,7 @@ class DepthwiseResult:
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",  # rejected — fp32 not supported
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "int8",  # rejected — int8 not supported
@@ -147,6 +152,10 @@ def parse_miopen_cmd_direct(cmd: str):
     driver_kw = None
     driver_idx = None
     for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
         key = t.split("/")[-1].lower()
         if key in _MIOPEN_DTYPE_MAP:
             driver_kw = key
@@ -233,16 +242,18 @@ def parse_miopen_cmd_direct(cmd: str):
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
+    # The direct kernels take one stride and one padding for both axes;
+    # substituting the H value for W would run, and report, another problem.
     sH = miopen_args.sH
     if miopen_args.sH != miopen_args.sW:
-        print(
-            f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one stride for both axes "
+            f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
     if miopen_args.pH != miopen_args.pW:
-        print(
-            f"[warn] pH={miopen_args.pH} != pW={miopen_args.pW}; using pH={miopen_args.pH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one padding for both axes "
+            f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
         )
 
     from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -2104,6 +2115,49 @@ def _cache_directions(args) -> "tuple[str, ...] | None":
     return directions
 
 
+def _cache_variants(args) -> "frozenset[str]":
+    """The cache variants ``--variants`` keeps (empty: every variant)."""
+    if not getattr(args, "variants", None):
+        return frozenset()
+    from benchmarks.common.direct_kernel_sweep import DIRECT_CAPABILITIES
+
+    variants = frozenset(v.strip() for v in args.variants.split(",") if v.strip())
+    unknown = sorted(variants - set(DIRECT_CAPABILITIES))
+    if unknown:
+        raise ValueError(
+            f"unknown direct variant(s) {', '.join(unknown)}; use "
+            f"{', '.join(DIRECT_CAPABILITIES)}"
+        )
+    return variants
+
+
+def _filter_variants(plans: list, rejected: list, variants: "frozenset[str]"):
+    """``(plans, rejected)`` of the cache variants ``--variants`` keeps (all of
+    them when ``variants`` is empty). Either list may come back empty."""
+    if not variants:
+        return plans, rejected
+    return (
+        [pl for pl in plans if pl.identity.algorithm in variants],
+        [r for r in rejected if r[0].algorithm in variants],
+    )
+
+
+def _no_plan_reason(rejected: list, dtype: str, variants: "frozenset[str]") -> str:
+    """Why a case has no runnable cached kernel, from its (filtered) rejections:
+    the first rejection's reason, else what is missing from the cache."""
+    if rejected:
+        return rejected[0][1]
+    if variants:
+        return (
+            f"no cached {dtype} kernel of --variants {', '.join(sorted(variants))} "
+            "has these capabilities"
+        )
+    return (
+        f"no cached {dtype} kernel has these capabilities; "
+        f"build them with --compile-all --dtype {dtype}"
+    )
+
+
 def _cache_dispatch(args, arch: str, cases: list) -> int:
     """Handle the two cache modes.
 
@@ -2124,6 +2178,14 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
         directions = _cache_directions(args)
     except ValueError as e:
         print(f"error: --directions: {e}", file=sys.stderr)
+        return 2
+    if args.compile_all and args.variants:
+        print("error: --variants only filters --run-from-cache", file=sys.stderr)
+        return 2
+    try:
+        _cache_variants(args)
+    except ValueError as e:
+        print(f"error: --variants: {e}", file=sys.stderr)
         return 2
 
     if args.compile_all:
@@ -2154,6 +2216,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_fwd",
             "direct_dgrad",
             "direct_dgrad_helper",
+            "direct_fwd_helper",
             "direct_wgrad",
         ),
     )
@@ -2180,8 +2243,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
+    variants = _cache_variants(args)
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
         if dtype not in DIRECT_DTYPES:
@@ -2192,14 +2256,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
-            plans, rejected = direct_plans(cache, p, direction, arch)
+            plans, rejected = _filter_variants(
+                *direct_plans(cache, p, direction, arch), variants
+            )
             if not plans:
-                why = (
-                    rejected[0][1]
-                    if rejected
-                    else f"no cached {dtype} kernel has these capabilities; "
-                    f"build them with --compile-all --dtype {dtype}"
-                )
+                why = _no_plan_reason(rejected, dtype, variants)
                 print(
                     f"Case {case_idx} {p.short()} {direction}: no runnable kernel "
                     f"(KH={p.KH} PAD={p.PAD} stride={p.stride} cpg={p.cpg} kpg={p.kpg}: {why})",
@@ -2543,6 +2604,17 @@ def main() -> int:
         "--run-from-cache defaults to each case's own direction.",
     )
     cache_grp.add_argument(
+        "--variants",
+        default=None,
+        dest="variants",
+        help="--run-from-cache only: comma-separated cache variants to run "
+        "(the keys of DIRECT_CAPABILITIES in "
+        "benchmarks/common/direct_kernel_sweep.py), e.g. "
+        "direct_grouped_dgrad_4c,direct_grouped_dgrad_fused to time only the "
+        "single-kernel grouped dgrad forms. Default: every cached kernel that "
+        "fits the case.",
+    )
+    cache_grp.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -2552,7 +2624,7 @@ def main() -> int:
 
     args = parser.parse_args()
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
-    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
+    from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
     if args.dtype is None:
@@ -2660,16 +2732,13 @@ def main() -> int:
             )
             return 2
 
-        if args.sH != args.sW:
+        if args.sH != args.sW or args.pH != args.pW:
             print(
-                f"warning: sH={args.sH} != sW={args.sW}; using sH={args.sH}",
+                f"error: direct conv takes one stride and one padding for both "
+                f"axes (got sH={args.sH} sW={args.sW} pH={args.pH} pW={args.pW})",
                 file=sys.stderr,
             )
-        if args.pH != args.pW:
-            print(
-                f"warning: pH={args.pH} != pW={args.pW}; using pH={args.pH}",
-                file=sys.stderr,
-            )
+            return 2
 
         problem = DirectConvProblem(
             N=args.N,
