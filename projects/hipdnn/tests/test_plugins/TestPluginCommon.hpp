@@ -404,6 +404,11 @@ public:
         HIPDNN_PLUGIN_LOG_INFO("executeGraph called");
     }
 
+    // Called from CreateExecutionContext once the engine is known to be usable.
+    // Derived classes override this to simulate a plugin that accepts a graph in
+    // GetApplicableEngineIds but cannot build a plan for it (e.g. no solver).
+    virtual void onCreateExecutionContext() const {}
+
     /// Returns the calling thread's mutable last-call record for this plugin.
     virtual TestPluginLastCallRecord& lastCallRecord() const
     {
@@ -877,6 +882,8 @@ public:
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                     "No engines available - cannot create execution context");
             }
+
+            getInstance()->onCreateExecutionContext();
 
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
                 opGraph->ptr, opGraph->size);
