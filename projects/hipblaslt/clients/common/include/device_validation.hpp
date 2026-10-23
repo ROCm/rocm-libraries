@@ -65,11 +65,12 @@ bool supported_validation_type(hipDataType type, std::string* why = nullptr);
 
 // Project on the GPU with the shared client observer. Unsupported output codecs
 // or overflowing exception lists use an explicit full-output readback fallback.
-ValidationResult verify_freivalds_device(const DeviceMatrix&                               output,
-                                         std::span<const roc::hostnumerics::FreivaldsPlan> plans,
-                                         hipStream_t                                       stream,
-                                         size_t maximumExceptions
-                                         = std::numeric_limits<size_t>::max());
+ValidationResult
+    verify_freivalds_device(const DeviceMatrix&                               output,
+                            std::span<const roc::hostnumerics::FreivaldsPlan> plans,
+                            hipStream_t                                       stream,
+                            size_t maximumExceptions = std::numeric_limits<size_t>::max(),
+                            const roc::hostnumerics::FreivaldsCheckOptions& options = {});
 
 // Returns why a case that needs device_bytes of device memory and host_bytes of host memory
 // cannot run here, or an empty string when both fit. Device memory is what hipMemGetInfo reports
