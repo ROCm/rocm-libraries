@@ -1062,10 +1062,20 @@ typedef enum rocsparse_singularity_
  *  \details
  *  This is a list of supported \ref rocsparse_sptrsv_alg types that are used to perform
  *  triangular solve.
+ *
+ *  \ref rocsparse_sptrsv_alg_transpose_free solves the cases where the matrix is not stored
+ *  in the orientation of the requested operation (CSR and COO with transpose or conjugate
+ *  transpose, CSC without transpose) directly on the stored matrix, without the transposed
+ *  copy and the per-solve gather of the matrix values used by
+ *  \ref rocsparse_sptrsv_alg_default. For these cases, the analysis is kept in the SpTRSV
+ *  descriptor regardless of the analysis policy, and the solve uses atomic additions, so results
+ *  are not bitwise reproducible. The other cases are solved as with
+ *  \ref rocsparse_sptrsv_alg_default.
  */
 typedef enum rocsparse_sptrsv_alg_
 {
-    rocsparse_sptrsv_alg_default = 0, /**< Default SpTRSV algorithm for the given format. */
+    rocsparse_sptrsv_alg_default        = 0, /**< Default SpTRSV algorithm for the given format. */
+    rocsparse_sptrsv_alg_transpose_free = 1 /**< Transpose-free SpTRSV algorithm. */
 } rocsparse_sptrsv_alg;
 
 /*! \ingroup types_module

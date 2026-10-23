@@ -389,6 +389,8 @@ constexpr auto rocsparse_sptrsvalg2string(rocsparse_sptrsv_alg alg)
     {
     case rocsparse_sptrsv_alg_default:
         return "default";
+    case rocsparse_sptrsv_alg_transpose_free:
+        return "transpose_free";
     }
     return "invalid";
 }

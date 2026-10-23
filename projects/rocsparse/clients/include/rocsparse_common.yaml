@@ -173,6 +173,7 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_sptrsv_alg_default: 0
+        rocsparse_sptrsv_alg_transpose_free: 1
   - rocsparse_solve_mode:
       bases: [c_int ]
       attr:
@@ -471,7 +472,7 @@ All rocsparse_spsv_alg: &all_rocsparse_spsv_alg
         [rocsparse_spsv_alg_default]
 
 All rocsparse_sptrsv_alg: &all_rocsparse_sptrsv_alg
-        [rocsparse_sptrsv_alg_default]
+        [rocsparse_sptrsv_alg_default, rocsparse_sptrsv_alg_transpose_free]
 
 All rocsparse_spitsv_alg: &all_rocsparse_spitsv_alg
         [rocsparse_spitsv_alg_default]
