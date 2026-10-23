@@ -142,7 +142,7 @@ foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
     # A variant's committed lock publishes it, with its own archive and bundle.
     # The architecture's GPU CTest runs every variant installed here.
     set(_variants "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}")
-    file(GLOB _locks RELATIVE "${_variants}" "${_variants}/*/baseline_lock.json")
+    file(GLOB _locks CONFIGURE_DEPENDS RELATIVE "${_variants}" "${_variants}/*/baseline_lock.json")
     list(LENGTH _locks _lock_count)
     if(_lock_count EQUAL 0)
       message(FATAL_ERROR
