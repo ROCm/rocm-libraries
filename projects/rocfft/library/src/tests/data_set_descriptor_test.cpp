@@ -22,6 +22,7 @@
 #include "data_descriptor_test_access.h"
 #include "data_set_descriptor.h"
 #include <algorithm>
+#include <array>
 #include <gtest/gtest.h>
 #include <map>
 #include <numeric>
@@ -51,16 +52,19 @@ namespace
         return ret + " }";
     }
 
-    // copy of a full layout (no embedding) with a precision and an array type
-    data_descriptor_t
-        with_type(const data_descriptor_t& layout, rocfft_precision p, rocfft_array_type t)
+    // copy of a full layout (no embedding) with a precision, an array type and offsets
+    data_descriptor_t with_type(const data_descriptor_t&     layout,
+                                rocfft_precision             p,
+                                rocfft_array_type            t,
+                                const std::array<size_t, 2>& offsets = {0, 0})
     {
         return data_descriptor_t(p,
                                  t,
                                  layout.lower(),
                                  layout.upper(),
                                  layout.strides_and_distances(),
-                                 layout.get_batch_rank());
+                                 layout.get_batch_rank(),
+                                 offsets);
     }
 }
 
@@ -832,4 +836,284 @@ TEST_F(data_descriptor_test, reinterpret_as)
                      std::invalid_argument);
     }
     EXPECT_THROW(base.reinterpret_as(rocfft_array_type_complex_interleaved), std::invalid_argument);
+}
+
+namespace
+{
+    const rocfft_array_type all_array_types[] = {rocfft_array_type_unset,
+                                                 rocfft_array_type_real,
+                                                 rocfft_array_type_complex_interleaved,
+                                                 rocfft_array_type_hermitian_interleaved,
+                                                 rocfft_array_type_complex_planar,
+                                                 rocfft_array_type_hermitian_planar};
+
+    bool is_planar(rocfft_array_type t)
+    {
+        return t == rocfft_array_type_complex_planar || t == rocfft_array_type_hermitian_planar;
+    }
+
+    // valid offsets for array type t: second offset only set if planar
+    std::array<size_t, 2> offsets_for(rocfft_array_type t, size_t first, size_t second)
+    {
+        return {first, is_planar(t) ? second : 0};
+    }
+}
+
+TEST_F(data_descriptor_test, offsets_default_to_zero_with_one_per_plane)
+{
+    EXPECT_EQ(data_descriptor_t::default_full_layout({8}, 2).num_planes(), 1u);
+    EXPECT_EQ(data_descriptor_t::default_full_layout({8}, 2).get_offset(), 0u);
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    for(auto type : all_array_types)
+    {
+        const auto layout = with_type(base, rocfft_precision_single, type);
+        SCOPED_TRACE(layout.str());
+        EXPECT_EQ(layout.num_planes(), is_planar(type) ? 2u : 1u);
+        EXPECT_EQ(layout.get_offset(), 0u);
+        EXPECT_EQ(layout.get_offset(0), 0u);
+        if(is_planar(type))
+        {
+            EXPECT_EQ(layout.get_offset(1), 0u);
+        }
+        else
+        {
+            EXPECT_THROW(layout.get_offset(1), std::out_of_range);
+        }
+        EXPECT_THROW(layout.get_offset(2), std::out_of_range);
+    }
+}
+
+TEST_F(data_descriptor_test, offsets_constructor_enforces_invariant)
+{
+    for(auto type : all_array_types)
+    {
+        const data_descriptor_t layout(
+            rocfft_precision_double, type, {0, 0}, {4, 3}, {1, 4}, 1, offsets_for(type, 3, 5));
+        SCOPED_TRACE(layout.str());
+        EXPECT_EQ(layout.get_offset(0), 3u);
+        if(is_planar(type))
+        {
+            EXPECT_EQ(layout.get_offset(1), 5u);
+        }
+        else
+        {
+            EXPECT_THROW(layout.get_offset(1), std::out_of_range);
+            EXPECT_THROW(
+                data_descriptor_t(rocfft_precision_double, type, {0, 0}, {4, 3}, {1, 4}, 1, {3, 5}),
+                std::invalid_argument);
+        }
+    }
+}
+
+TEST_F(data_descriptor_test, offsets_setter_enforces_invariant)
+{
+    auto layout = data_descriptor_t::default_full_layout({8, 4}, 2);
+    data_descriptor_test_access::set_array_type_and_offsets(
+        layout, rocfft_array_type_complex_planar, {1, 2});
+    EXPECT_EQ(layout.get_offset(1), 2u);
+
+    // a violation leaves the object untouched
+    for(auto type : all_array_types)
+    {
+        if(is_planar(type))
+            continue;
+        EXPECT_THROW(data_descriptor_test_access::set_array_type_and_offsets(layout, type, {1, 2}),
+                     std::invalid_argument);
+        EXPECT_THROW(data_descriptor_test_access::set_array_type(layout, type),
+                     std::invalid_argument);
+        EXPECT_EQ(layout.get_array_type(), rocfft_array_type_complex_planar);
+        EXPECT_EQ(layout.get_offset(0), 1u);
+        EXPECT_EQ(layout.get_offset(1), 2u);
+    }
+
+    data_descriptor_test_access::set_array_type_and_offsets(
+        layout, rocfft_array_type_complex_interleaved, {1, 0});
+    EXPECT_EQ(layout.get_array_type(), rocfft_array_type_complex_interleaved);
+    EXPECT_EQ(layout.get_offset(), 1u);
+    EXPECT_THROW(layout.get_offset(1), std::out_of_range);
+}
+
+TEST_F(data_descriptor_test, offsets_survive_reinterpret_as)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const std::pair<rocfft_array_type, rocfft_array_type> allowed[]
+        = {{rocfft_array_type_complex_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_complex_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_complex_interleaved},
+           {rocfft_array_type_hermitian_interleaved, rocfft_array_type_hermitian_interleaved},
+           {rocfft_array_type_complex_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_complex_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_complex_planar},
+           {rocfft_array_type_hermitian_planar, rocfft_array_type_hermitian_planar},
+           {rocfft_array_type_real, rocfft_array_type_real}};
+    for(auto [from, to] : allowed)
+    {
+        const auto src = with_type(base, rocfft_precision_single, from, offsets_for(from, 7, 9));
+        const auto dst = src.reinterpret_as(to);
+        SCOPED_TRACE(dst.str());
+        EXPECT_EQ(dst.num_planes(), src.num_planes());
+        for(size_t plane = 0; plane < src.num_planes(); plane++)
+            EXPECT_EQ(dst.get_offset(plane), src.get_offset(plane));
+        EXPECT_TRUE(dst.reinterpret_as(from) == src);
+    }
+}
+
+TEST_F(data_descriptor_test, offsets_inplace_mapping)
+{
+    // complex transforms: identical offsets in all planes
+    for(auto type : {rocfft_array_type_complex_interleaved, rocfft_array_type_complex_planar})
+    {
+        const auto in  = with_type(data_descriptor_t::default_full_layout({16}, 4),
+                                  rocfft_precision_double,
+                                  type,
+                                  offsets_for(type, 6, 11));
+        const auto out = in.get_other_inplace_layout_for(io_data_label::OUTPUT,
+                                                         rocfft_transform_type_complex_forward);
+        ASSERT_TRUE(out.has_value());
+        EXPECT_TRUE(*out == in) << out->str();
+    }
+
+    // real transforms: real offset == 2 * hermitian offset
+    const auto padded = data_descriptor_t::default_full_layout({16}, 4, true);
+    const auto real   = with_type(padded, rocfft_precision_single, rocfft_array_type_real, {6, 0});
+    const auto odd_real
+        = with_type(padded, rocfft_precision_single, rocfft_array_type_real, {7, 0});
+    for(auto [fft_type, herm_io] :
+        {std::pair{rocfft_transform_type_real_forward, io_data_label::OUTPUT},
+         std::pair{rocfft_transform_type_real_inverse, io_data_label::INPUT}})
+    {
+        const auto herm = real.get_other_inplace_layout_for(herm_io, fft_type);
+        ASSERT_TRUE(herm.has_value());
+        EXPECT_EQ(herm->get_offset(), 3u);
+        const auto back = herm->get_other_inplace_layout_for(other(herm_io), fft_type);
+        ASSERT_TRUE(back.has_value());
+        EXPECT_TRUE(*back == real) << back->str();
+
+        // an odd real offset cannot be halved
+        EXPECT_FALSE(odd_real.get_other_inplace_layout_for(herm_io, fft_type).has_value());
+    }
+
+    // a second (planar) offset cannot be expressed in a single-plane layout
+    const auto herm_planar = with_type(data_descriptor_t::default_full_layout({9}, 4),
+                                       rocfft_precision_single,
+                                       rocfft_array_type_hermitian_planar,
+                                       {4, 2});
+    EXPECT_FALSE(
+        herm_planar
+            .get_other_inplace_layout_for(io_data_label::OUTPUT, rocfft_transform_type_real_inverse)
+            .has_value());
+
+    // any hermitian offset doubles, odd ones included
+    const auto herm      = with_type(data_descriptor_t::default_full_layout({9}, 4),
+                                rocfft_precision_single,
+                                rocfft_array_type_hermitian_interleaved,
+                                {5, 0});
+    const auto from_herm = herm.get_other_inplace_layout_for(io_data_label::OUTPUT,
+                                                             rocfft_transform_type_real_inverse);
+    ASSERT_TRUE(from_herm.has_value());
+    EXPECT_EQ(from_herm->get_array_type(), rocfft_array_type_real);
+    EXPECT_EQ(from_herm->get_offset(), 10u);
+
+    // unset array type: offsets derived alike
+    auto unset = padded;
+    data_descriptor_test_access::set_array_type_and_offsets(unset, rocfft_array_type_unset, {4, 0});
+    const auto unset_herm = unset.get_other_inplace_layout_for(io_data_label::OUTPUT,
+                                                               rocfft_transform_type_real_forward);
+    ASSERT_TRUE(unset_herm.has_value());
+    EXPECT_EQ(unset_herm->get_array_type(), rocfft_array_type_unset);
+    EXPECT_EQ(unset_herm->get_offset(), 2u);
+}
+
+TEST_F(data_descriptor_test, offsets_equality_is_strict)
+{
+    const auto base = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const auto make = [&base](const std::array<size_t, 2>& offsets) {
+        return with_type(base, rocfft_precision_single, rocfft_array_type_complex_planar, offsets);
+    };
+    EXPECT_TRUE(make({1, 2}) == make({1, 2}));
+    EXPECT_FALSE(make({1, 2}) == make({1, 3}));
+    EXPECT_FALSE(make({1, 2}) == make({0, 2}));
+    EXPECT_FALSE(make({1, 2}) == make({0, 0}));
+}
+
+TEST_F(data_descriptor_test, offsets_pass_through_subsets_and_embeddings)
+{
+    const auto layout = with_type(data_descriptor_t::default_full_layout({4, 8, 2}, 3),
+                                  rocfft_precision_double,
+                                  rocfft_array_type_complex_planar,
+                                  {3, 5});
+    for(const auto& len_indices : {std::set<size_t>{0, 1, 2}, std::set<size_t>{0, 2}})
+    {
+        const auto sub = layout.get_layout_for_len_axes(len_indices);
+        EXPECT_EQ(sub.get_offset(0), 3u);
+        EXPECT_EQ(sub.get_offset(1), 5u);
+        const auto embedding = sub.get_embedding_layout();
+        EXPECT_EQ(embedding.get_offset(0), 3u);
+        EXPECT_EQ(embedding.get_offset(1), 5u);
+    }
+}
+
+TEST_F(data_descriptor_test, offsets_zero_in_intersection)
+{
+    const auto base  = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const auto xsect = data_descriptor_t::make_contiguous_intersection_of(
+        with_type(base, rocfft_precision_single, rocfft_array_type_complex_planar, {3, 5}),
+        with_type(base, rocfft_precision_single, rocfft_array_type_hermitian_planar, {1, 2}));
+    EXPECT_EQ(xsect.get_offset(0), 0u);
+    EXPECT_EQ(xsect.get_offset(1), 0u);
+}
+
+TEST_F(data_descriptor_test, offsets_survive_clear_and_reset)
+{
+    auto layout = with_type(data_descriptor_t::default_full_layout({8, 4}, 2),
+                            rocfft_precision_half,
+                            rocfft_array_type_hermitian_planar,
+                            {3, 5});
+    data_descriptor_test_access::clear(layout);
+    EXPECT_EQ(layout.get_offset(0), 3u);
+    EXPECT_EQ(layout.get_offset(1), 5u);
+    data_descriptor_test_access::full_range_reset(layout, {16}, 3);
+    EXPECT_EQ(layout.get_offset(0), 3u);
+    EXPECT_EQ(layout.get_offset(1), 5u);
+}
+
+TEST_F(data_descriptor_test, offsets_in_str)
+{
+    const auto base = data_descriptor_t::default_full_layout({8}, 2);
+    const auto planar
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_planar, {3, 5});
+    EXPECT_NE(planar.str().find("offsets 3 5"), std::string::npos) << planar.str();
+    const auto interleaved
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_interleaved, {3, 0});
+    EXPECT_NE(interleaved.str().find("offsets 3"), std::string::npos) << interleaved.str();
+    EXPECT_EQ(interleaved.str().find("offsets 3 0"), std::string::npos) << interleaved.str();
+}
+
+// offset_in, is_continuous_in, is_contiguous and buffer_element_count are
+// relative to the planes' offsets, which they ignore
+TEST_F(data_descriptor_test, offsets_ignored_by_relative_queries)
+{
+    const auto whole = with_type(data_descriptor_t::default_full_layout({8, 4}, 2),
+                                 rocfft_precision_single,
+                                 rocfft_array_type_complex_planar);
+    const auto chunk = data_descriptor_t(rocfft_precision_single,
+                                         rocfft_array_type_complex_planar,
+                                         {0, 1, 0},
+                                         {8, 3, 2},
+                                         whole.strides_and_distances());
+    const auto shifted_whole
+        = with_type(whole, rocfft_precision_single, rocfft_array_type_complex_planar, {3, 5});
+    const auto shifted_chunk = data_descriptor_t(rocfft_precision_single,
+                                                 rocfft_array_type_complex_planar,
+                                                 chunk.lower(),
+                                                 chunk.upper(),
+                                                 chunk.strides_and_distances(),
+                                                 1,
+                                                 {7, 11});
+    EXPECT_EQ(shifted_chunk.offset_in(shifted_whole), chunk.offset_in(whole));
+    EXPECT_EQ(shifted_chunk.offset_in(whole), chunk.offset_in(whole));
+    EXPECT_EQ(shifted_chunk.is_continuous_in(shifted_whole), chunk.is_continuous_in(whole));
+    EXPECT_EQ(shifted_whole.is_contiguous(), whole.is_contiguous());
+    EXPECT_EQ(shifted_whole.buffer_element_count(), whole.buffer_element_count());
+    EXPECT_EQ(shifted_chunk.buffer_element_count(), chunk.buffer_element_count());
 }

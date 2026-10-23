@@ -138,15 +138,16 @@ data_descriptor_t::data_descriptor_t(const std::vector<size_t>& lower,
     }
 }
 
-data_descriptor_t::data_descriptor_t(rocfft_precision           precision,
-                                     rocfft_array_type          array_type,
-                                     const std::vector<size_t>& lower,
-                                     const std::vector<size_t>& upper,
-                                     const std::vector<size_t>& strides,
-                                     size_t                     batch_rank)
+data_descriptor_t::data_descriptor_t(rocfft_precision             precision,
+                                     rocfft_array_type            array_type,
+                                     const std::vector<size_t>&   lower,
+                                     const std::vector<size_t>&   upper,
+                                     const std::vector<size_t>&   strides,
+                                     size_t                       batch_rank,
+                                     const std::array<size_t, 2>& offsets)
     : data_descriptor_t(lower, upper, strides, batch_rank)
 {
-    this->array_type = array_type;
+    set_array_type_and_offsets(array_type, offsets);
     set_precision(precision);
 }
 
@@ -213,6 +214,28 @@ bool data_descriptor_t::has_precision() const
 void data_descriptor_t::set_precision(rocfft_precision p)
 {
     precision = static_cast<std::underlying_type_t<rocfft_precision>>(p);
+}
+
+void data_descriptor_t::set_array_type_and_offsets(rocfft_array_type            new_array_type,
+                                                   const std::array<size_t, 2>& new_offsets)
+{
+    if(new_offsets[1] != 0 && !array_type_is_planar(new_array_type))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires a zero second offset for non-planar array types.");
+    array_type = new_array_type;
+    offsets    = new_offsets;
+}
+
+size_t data_descriptor_t::num_planes() const
+{
+    return array_type_is_planar(array_type) ? 2 : 1;
+}
+
+size_t data_descriptor_t::get_offset(size_t plane) const
+{
+    if(plane >= num_planes())
+        throw std::out_of_range(ROCFFT_CURRENT_FUNCTION + " accessing an out-of-range plane.");
+    return offsets[plane];
 }
 
 std::vector<size_t> data_descriptor_t::lengths_and_batches() const
@@ -362,8 +385,9 @@ data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_
     if(!same_format_up_to_hermitian(array_type, new_array_type))
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
                                     + " cannot switch between interleaved and planar formats.");
-    auto ret       = *this;
-    ret.array_type = new_array_type;
+    // allowed relabels keep the number of planes, hence the offsets
+    auto ret = *this;
+    ret.set_array_type_and_offsets(new_array_type, offsets);
     return ret;
 }
 
@@ -375,7 +399,8 @@ bool data_descriptor_t::is_contiguous() const
 bool data_descriptor_t::operator==(const data_descriptor_t& other) const
 {
     return len_axes == other.len_axes && batch_axes == other.batch_axes
-           && array_type == other.array_type && precision == other.precision;
+           && array_type == other.array_type && precision == other.precision
+           && offsets == other.offsets;
 }
 
 bool data_descriptor_t::has_same_logical_range_as(const data_descriptor_t& other) const
@@ -419,6 +444,7 @@ data_descriptor_t
         else
             ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
     }
+    // zero offsets: the intersection describes a fresh contiguous buffer
     ret.embedding  = first.embedding;
     ret.array_type = first.array_type;
     ret.precision  = first.precision;
@@ -560,6 +586,9 @@ std::string data_descriptor_t::str() const
     ret += has_precision() ? precision_name(get_precision()) : "unset";
     ret += " array type ";
     ret += fft_enum_to_string(fft_array_type_from_rocfft_array_type(array_type));
+    ret += " offsets";
+    for(size_t plane = 0; plane < num_planes(); plane++)
+        ret += " " + std::to_string(offsets[plane]);
 
     if(is_embedded())
     {
@@ -654,7 +683,7 @@ std::optional<data_descriptor_t>
     if(fft_type == rocfft_transform_type_complex_forward
        || fft_type == rocfft_transform_type_complex_inverse)
     {
-        // simple copy
+        // simple copy (identical offsets in all planes)
         return std::make_optional<data_descriptor_t>(*this);
     }
     else if(fft_type != rocfft_transform_type_real_forward
@@ -683,10 +712,16 @@ std::optional<data_descriptor_t>
     }
     // copy layout and modify what needs be
     auto ret = std::make_optional<data_descriptor_t>(*this);
-    if(array_type != rocfft_array_type_unset)
-        ret->array_type = is_real_domain(fft_type, other_io)
-                              ? rocfft_array_type_real
-                              : rocfft_array_type_hermitian_interleaved;
+    // the returned layout is never planar: a second plane's offset cannot be expressed
+    // and real offsets are twice the hermitian ones
+    if(offsets[1] != 0 || (!is_real_domain(fft_type, other_io) && offsets[0] % 2 != 0))
+        return std::nullopt;
+    const auto ret_array_type = array_type == rocfft_array_type_unset ? array_type
+                                : is_real_domain(fft_type, other_io)
+                                    ? rocfft_array_type_real
+                                    : rocfft_array_type_hermitian_interleaved;
+    ret->set_array_type_and_offsets(
+        ret_array_type, {is_real_domain(fft_type, other_io) ? 2 * offsets[0] : offsets[0] / 2, 0});
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
               ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
@@ -718,6 +753,7 @@ data_descriptor_t
     data_descriptor_t ret;
     ret.array_type = array_type;
     ret.precision  = precision;
+    ret.offsets    = offsets;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
     // Turn non-desired length axes into additional batch axes
@@ -777,6 +813,7 @@ data_descriptor_t data_descriptor_t::get_embedding_layout() const
     data_descriptor_t ret;
     ret.array_type = array_type;
     ret.precision  = precision;
+    ret.offsets    = offsets;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
     // all other batch axes that aren't part of the embedding remain batch axes
