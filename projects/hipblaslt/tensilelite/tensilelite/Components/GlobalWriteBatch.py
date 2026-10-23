@@ -899,6 +899,8 @@ class GlobalWriteBatchWriter:
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
     if self.ss.emitGateResidual:
       module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
+    if self.kernel["CompactLoopStore"] and self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]:
+      module.add(SMovB32(dst=sgpr("CLSERowInc"), src=0, comment="Init E CLS row offset"))
     if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
       self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
@@ -1418,7 +1420,9 @@ class GlobalWriteBatchWriter:
         if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
           vgprIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
           vgprDst = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else "ValuC+%d"%vgprIdx
-          module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+          module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge,
+                                                elementIdx=elementIdx, batchIdx=self.batchIdx,
+                                                overrideAfterPrimerRows=self._lookaheadRowInc(elementIdx), comment="store E"))
 
         sumIdx = self.ss.elementSumIdx[elementIdx]
         if self.kernel["StoreRemapVectorWidth"]:
@@ -2118,7 +2122,9 @@ class GlobalWriteBatchWriter:
         else:
           printExit("Unsupport compute type for E output. (%s)"%self.kernel["ProblemType"]["ComputeDataType"].toEnum())
 
-        module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+        module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge,
+                                              elementIdx=elementIdx, batchIdx=self.batchIdx,
+                                              overrideAfterPrimerRows=_emitOverrideRows, comment="store E"))
         if self.parentWriter.states.bpeE * self.gwvw > 8:
           module.add(SNop(1, "2 wait states required when next inst writes vgprs held by previous dwordx3/x4 store inst"))
 

@@ -9221,6 +9221,9 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.useGateResidual:
         module.add(self.defineSgpr("CLSGateRowInc", 1))
         module.add(RegSet("s", "sgprCLSGateRowInc", self.sgprs["CLSGateRowInc"]))
+      if kernel["ProblemType"]["UseE"] and not kernel["ProblemType"]["Gradient"]:
+        module.add(self.defineSgpr("CLSERowInc", 1))
+        module.add(RegSet("s", "sgprCLSERowInc", self.sgprs["CLSERowInc"]))
 
     # Load kernel args end
     ########################################
@@ -18060,8 +18063,11 @@ class KernelWriterAssembly(KernelWriter):
         else:
           addr0 = vgpr(addrCalc.addrEVgpr,2)
           addr1 = ""
-        if ss.optSrdIncForRow and addrCalc.rowInc:
-          module.add(addrCalc.incrementToNextRow(kernel, tc, ss, tmpS01, bpeType=self.states.bpeE))
+        # CLS: E runs its own primer chain (own stride and bpe), seeded on elt0/batch0.
+        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+          _stmp = "CLSERowInc" if kernel["CompactLoopStore"] else tmpS01
+          module.add(addrCalc.incrementToNextRow(kernel, tc, ss, _stmp, forceinitrow0=1, bpeType=self.states.bpeE,
+                                                 overrideAfterPrimerRows=overrideAfterPrimerRows))
         dataType     = kernel["ProblemType"]["DataTypeE"]
         globalOffset = addrCalc.globalOffsetE
       else:
