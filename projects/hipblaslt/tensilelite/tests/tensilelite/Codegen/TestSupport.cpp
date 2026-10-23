@@ -1,9 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "ArithDeviceTest.hpp"
-
-#include "HipTestSupport.hpp"
+#include "TestSupport.hpp"
 
 #include <tensilelite/API/Compiler.hpp>
 #include <tensilelite/Codegen/Kernel.hpp>
@@ -20,18 +18,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-namespace rocm::tensilelite::codegen::test {
+using namespace rocm::tensilelite;
+using namespace rocm::tensilelite::codegen;
+using namespace rocm::tensilelite::codegen::test;
 
 namespace {
+
+// Registers every address computation of the kernel is built from.
+struct Addressing {
+  RegisterRange localId;                   // Workitem id x, in a VGPR.
+  RegisterRange groupOffset;               // Workgroup id * 4, in an SGPR.
+  std::optional<RegisterRange> laneOffset; // Byte offset of this lane's word.
+};
+
+// Device-side layout of the kernel arguments, shared with the kernel builder.
+struct ArgumentLayout {
+  std::vector<int> pointerOffsets; // out first, then the inputs.
+  int segmentSize;
+};
+
+} // namespace
 
 constexpr const char *archName = "gfx950";
 constexpr const char *kernelName = "codegen_arith";
@@ -43,14 +59,88 @@ constexpr uint32_t randomSeed = 0x5EED1234;
 constexpr int groupBytesLog2 = 8;
 constexpr int wordBytesLog2 = 2;
 
-// Registers every address computation of the kernel is built from.
-struct Addressing {
-  RegisterRange localId;                   // Workitem id x, in a VGPR.
-  RegisterRange groupOffset;               // Workgroup id * 4, in an SGPR.
-  std::optional<RegisterRange> laneOffset; // Byte offset of this lane's word.
-};
+void test::expectLinesInOrder(const std::string &text,
+                              std::vector<std::string_view> needles) {
+  std::vector<std::string> lines;
+  std::istringstream stream(text);
+  for (std::string line; std::getline(stream, line);)
+    lines.push_back(line);
 
-bool needsLaneOffset(const ArithKernelSpec &spec) {
+  std::ptrdiff_t next = 0;
+  for (std::string_view needle : needles) {
+    while (next < std::ssize(lines) &&
+           lines[next].find(needle) == std::string::npos)
+      ++next;
+    if (next == std::ssize(lines)) {
+      ADD_FAILURE() << "missing or out of order: '" << needle << "' in:\n"
+                    << text;
+      return;
+    }
+    ++next;
+  }
+}
+
+void test::loadKernel(const std::vector<uint8_t> &hsaco, const char *name,
+                      ModulePtr &module, hipFunction_t &function) {
+  hipModule_t rawModule = nullptr;
+  ASSERT_HIP_SUCCESS(hipModuleLoadData(&rawModule, hsaco.data()));
+  module.reset(rawModule);
+  ASSERT_HIP_SUCCESS(hipModuleGetFunction(&function, rawModule, name));
+}
+
+void test::uploadBytes(const void *host, size_t bytes, DevicePtr &buffer) {
+  void *ptr = nullptr;
+  ASSERT_HIP_SUCCESS(hipMalloc(&ptr, bytes));
+  buffer.reset(ptr);
+  if (host == nullptr) {
+    // The sentinel shows any byte the kernel failed to write.
+    ASSERT_HIP_SUCCESS(hipMemset(ptr, 0xff, bytes));
+    return;
+  }
+  ASSERT_HIP_SUCCESS(hipMemcpy(ptr, host, bytes, hipMemcpyHostToDevice));
+}
+
+void test::downloadBytes(const DevicePtr &buffer, void *host, size_t bytes) {
+  ASSERT_HIP_SUCCESS(
+      hipMemcpy(host, buffer.get(), bytes, hipMemcpyDeviceToHost));
+}
+
+void test::launchWithKernarg(hipFunction_t function, dim3 grid, dim3 block,
+                             std::vector<std::byte> &kernarg) {
+  size_t kernargSize = kernarg.size();
+  void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, kernarg.data(),
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargSize,
+                   HIP_LAUNCH_PARAM_END};
+  ASSERT_HIP_SUCCESS(hipModuleLaunchKernel(function, grid.x, grid.y, grid.z,
+                                           block.x, block.y, block.z, 0,
+                                           nullptr, nullptr, extra));
+  ASSERT_HIP_SUCCESS(hipDeviceSynchronize());
+}
+
+void test::launchWithParams(hipFunction_t function, dim3 grid, dim3 block,
+                            void **params) {
+  ASSERT_HIP_SUCCESS(hipModuleLaunchKernel(function, grid.x, grid.y, grid.z,
+                                           block.x, block.y, block.z, 0,
+                                           nullptr, params, nullptr));
+  ASSERT_HIP_SUCCESS(hipDeviceSynchronize());
+}
+
+RegisterRange test::computeGlobalId(Kernel &kernel) {
+  IRBuilder &builder = kernel.builder();
+  RegisterRange globalId = builder.allocateVgpr(1);
+  RegisterRange groupBase = builder.allocateSgpr(1);
+  // The workitem id register packs the x, y and z ids.
+  builder.create<rocisa::VAndB32>(globalId.container(), 0x3ff,
+                                  kernel.workitemId().container());
+  builder.create<rocisa::SMulI32>(groupBase.container(),
+                                  kernel.workgroupIdX().container(),
+                                  kernel.workgroupSize());
+  builder.create<rocisa::VAddU32>(globalId.container(), groupBase.container(),
+                                  globalId.container());
+  return globalId;
+}
+
+static bool needsLaneOffset(const ArithKernelSpec &spec) {
   if (spec.result == RegisterKind::vgpr)
     return true;
   for (InputKind kind : spec.inputs)
@@ -60,7 +150,8 @@ bool needsLaneOffset(const ArithKernelSpec &spec) {
 }
 
 // Declares the output pointer and then one pointer per input.
-std::vector<int> declarePointers(KernelSignature &signature, int inputCount) {
+static std::vector<int> declarePointers(KernelSignature &signature,
+                                        int inputCount) {
   std::vector<int> offsets;
   offsets.push_back(signature.addPointer("out"));
   for (int i = 0; i < inputCount; ++i)
@@ -69,8 +160,8 @@ std::vector<int> declarePointers(KernelSignature &signature, int inputCount) {
 }
 
 // Loads each pointer into its own aligned SGPR pair.
-std::vector<RegisterRange> loadPointers(Kernel &kernel,
-                                        const std::vector<int> &offsets) {
+static std::vector<RegisterRange>
+loadPointers(Kernel &kernel, const std::vector<int> &offsets) {
   IRBuilder &builder = kernel.builder();
   std::vector<RegisterRange> pointers;
   for (int offset : offsets) {
@@ -83,7 +174,7 @@ std::vector<RegisterRange> loadPointers(Kernel &kernel,
   return pointers;
 }
 
-Addressing computeAddressing(Kernel &kernel, bool needsLane) {
+static Addressing computeAddressing(Kernel &kernel, bool needsLane) {
   IRBuilder &builder = kernel.builder();
   Addressing addressing{builder.allocateVgpr(1), builder.allocateSgpr(1),
                         std::nullopt};
@@ -108,7 +199,7 @@ Addressing computeAddressing(Kernel &kernel, bool needsLane) {
   return addressing;
 }
 
-std::vector<RegisterRange>
+static std::vector<RegisterRange>
 loadInputs(Kernel &kernel, const ArithKernelSpec &spec,
            const std::vector<RegisterRange> &pointers,
            const Addressing &addressing) {
@@ -133,9 +224,9 @@ loadInputs(Kernel &kernel, const ArithKernelSpec &spec,
 }
 
 // Lane 0 stores the uniform result to out[workgroupId].
-void storeSgprResult(Kernel &kernel, const RegisterRange &result,
-                     const RegisterRange &outPointer,
-                     const Addressing &addressing) {
+static void storeSgprResult(Kernel &kernel, const RegisterRange &result,
+                            const RegisterRange &outPointer,
+                            const Addressing &addressing) {
   IRBuilder &builder = kernel.builder();
   RegisterRange value = builder.allocateVgpr(1);
   RegisterRange address = builder.allocateVgpr(1);
@@ -150,9 +241,10 @@ void storeSgprResult(Kernel &kernel, const RegisterRange &result,
                                          outPointer.container());
 }
 
-void storeResult(Kernel &kernel, const ArithKernelSpec &spec,
-                 const RegisterRange &result, const RegisterRange &outPointer,
-                 const Addressing &addressing) {
+static void storeResult(Kernel &kernel, const ArithKernelSpec &spec,
+                        const RegisterRange &result,
+                        const RegisterRange &outPointer,
+                        const Addressing &addressing) {
   if (spec.result == RegisterKind::sgpr) {
     storeSgprResult(kernel, result, outPointer, addressing);
     return;
@@ -162,95 +254,68 @@ void storeResult(Kernel &kernel, const ArithKernelSpec &spec,
       outPointer.container());
 }
 
-RegisterRange allocateResult(IRBuilder &builder, RegisterKind kind) {
+static RegisterRange allocateResult(IRBuilder &builder, RegisterKind kind) {
   return kind == RegisterKind::sgpr ? builder.allocateSgpr(1)
                                     : builder.allocateVgpr(1);
 }
 
-std::vector<RegisterRef> refsOf(const std::vector<RegisterRange> &ranges) {
+static std::vector<RegisterRef>
+refsOf(const std::vector<RegisterRange> &ranges) {
   std::vector<RegisterRef> refs;
   for (const RegisterRange &range : ranges)
     refs.push_back(range.ref());
   return refs;
 }
 
-std::string describeWord(uint32_t word) {
+static std::string describeWord(uint32_t word) {
   char buffer[48];
   std::snprintf(buffer, sizeof(buffer), "0x%08x (%d)", word,
                 static_cast<int>(word));
   return buffer;
 }
 
-// Device-side layout of the kernel arguments, shared with the kernel builder.
-struct ArgumentLayout {
-  std::vector<int> pointerOffsets; // out first, then the inputs.
-  int segmentSize;
-};
-
-ArgumentLayout makeLayout(int inputCount) {
+static ArgumentLayout makeLayout(int inputCount) {
   KernelSignature signature;
   std::vector<int> offsets = declarePointers(signature, inputCount);
   return {std::move(offsets), signature.segmentSize()};
 }
 
-std::vector<std::byte> makeKernarg(const ArgumentLayout &layout,
-                                   const std::vector<const void *> &pointers) {
+static std::vector<std::byte>
+makeKernarg(const ArgumentLayout &layout,
+            const std::vector<const void *> &pointers) {
   std::vector<std::byte> kernarg(layout.segmentSize);
   for (int i = 0; i < std::ssize(pointers); ++i)
-    std::memcpy(kernarg.data() + layout.pointerOffsets[i], &pointers[i],
-                sizeof(void *));
+    writeArgument(kernarg, layout.pointerOffsets[i], pointers[i]);
   return kernarg;
-}
-
-void uploadWords(const std::vector<uint32_t> &words,
-                 std::unique_ptr<void, DeviceFree> &buffer) {
-  void *ptr = nullptr;
-  ASSERT_HIP_SUCCESS(hipMalloc(&ptr, words.size() * sizeof(uint32_t)));
-  buffer.reset(ptr);
-  ASSERT_HIP_SUCCESS(hipMemcpy(ptr, words.data(),
-                               words.size() * sizeof(uint32_t),
-                               hipMemcpyHostToDevice));
 }
 
 // Uploads the inputs and a sentinel-filled output, launches the kernel and
 // downloads the output.
-void runKernel(const std::vector<uint8_t> &hsaco, const ArgumentLayout &layout,
-               int workgroupCount,
-               const std::vector<std::vector<uint32_t>> &inputs,
-               std::vector<uint32_t> &output) {
-  hipModule_t rawModule = nullptr;
-  ASSERT_HIP_SUCCESS(hipModuleLoadData(&rawModule, hsaco.data()));
-  ModulePtr module(rawModule);
+static void runKernel(const std::vector<uint8_t> &hsaco,
+                      const ArgumentLayout &layout, int workgroupCount,
+                      const std::vector<std::vector<uint32_t>> &inputs,
+                      std::vector<uint32_t> &output) {
+  ModulePtr module;
   hipFunction_t function = nullptr;
-  ASSERT_HIP_SUCCESS(hipModuleGetFunction(&function, rawModule, kernelName));
-
-  std::vector<std::unique_ptr<void, DeviceFree>> buffers(inputs.size() + 1);
-  uploadWords(output, buffers[0]);
-  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  loadKernel(hsaco, kernelName, module, function);
+  std::vector<DevicePtr> buffers(inputs.size() + 1);
+  upload(output, buffers[0]);
   std::vector<const void *> pointers{buffers[0].get()};
   for (int i = 0; i < std::ssize(inputs); ++i) {
-    uploadWords(inputs[i], buffers[i + 1]);
-    ASSERT_FALSE(testing::Test::HasFatalFailure());
+    upload(inputs[i], buffers[i + 1]);
     pointers.push_back(buffers[i + 1].get());
   }
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
 
   std::vector<std::byte> kernarg = makeKernarg(layout, pointers);
-  size_t kernargSize = kernarg.size();
-  void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, kernarg.data(),
-                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargSize,
-                   HIP_LAUNCH_PARAM_END};
-  ASSERT_HIP_SUCCESS(hipModuleLaunchKernel(function, workgroupCount, 1, 1,
-                                           arithWorkgroupSize, 1, 1, 0, nullptr,
-                                           nullptr, extra));
-  ASSERT_HIP_SUCCESS(hipDeviceSynchronize());
-  ASSERT_HIP_SUCCESS(hipMemcpy(output.data(), buffers[0].get(),
-                               output.size() * sizeof(uint32_t),
-                               hipMemcpyDeviceToHost));
+  launchWithKernarg(function, workgroupCount, arithWorkgroupSize, kernarg);
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  download(buffers[0], output);
 }
 
 // The input word the kernel read for result index.
-uint32_t inputWordFor(const ArithKernelSpec &spec, int input, int index,
-                      const std::vector<uint32_t> &words) {
+static uint32_t inputWordFor(const ArithKernelSpec &spec, int input, int index,
+                             const std::vector<uint32_t> &words) {
   bool lanes = spec.result == RegisterKind::vgpr;
   int group = lanes ? index / arithWorkgroupSize : index;
   if (spec.inputs[input] == InputKind::uniform)
@@ -258,9 +323,9 @@ uint32_t inputWordFor(const ArithKernelSpec &spec, int input, int index,
   return words[lanes ? index : index * arithWorkgroupSize];
 }
 
-void reportMismatch(const ArithKernelSpec &spec, int index, uint32_t actual,
-                    uint32_t expected,
-                    const std::vector<std::vector<uint32_t>> &inputs) {
+static void reportMismatch(const ArithKernelSpec &spec, int index,
+                           uint32_t actual, uint32_t expected,
+                           const std::vector<std::vector<uint32_t>> &inputs) {
   std::ostringstream message;
   message << "result " << index << ": got " << describeWord(actual)
           << ", expected " << describeWord(expected);
@@ -270,10 +335,10 @@ void reportMismatch(const ArithKernelSpec &spec, int index, uint32_t actual,
   ADD_FAILURE() << message.str();
 }
 
-void compareResults(const ArithKernelSpec &spec,
-                    const std::vector<std::vector<uint32_t>> &inputs,
-                    const std::vector<uint32_t> &expected,
-                    const std::vector<uint32_t> &output) {
+static void compareResults(const ArithKernelSpec &spec,
+                           const std::vector<std::vector<uint32_t>> &inputs,
+                           const std::vector<uint32_t> &expected,
+                           const std::vector<uint32_t> &output) {
   int mismatches = 0;
   for (int i = 0; i < std::ssize(expected); ++i) {
     if (output[i] == expected[i])
@@ -292,9 +357,9 @@ void compareResults(const ArithKernelSpec &spec,
     }
 }
 
-void checkInputSizes(const ArithKernelSpec &spec, int workgroupCount,
-                     const std::vector<std::vector<uint32_t>> &inputs,
-                     const std::vector<uint32_t> &expected) {
+static void checkInputSizes(const ArithKernelSpec &spec, int workgroupCount,
+                            const std::vector<std::vector<uint32_t>> &inputs,
+                            const std::vector<uint32_t> &expected) {
   ASSERT_EQ(inputs.size(), spec.inputs.size());
   for (int i = 0; i < std::ssize(inputs); ++i) {
     size_t words =
@@ -310,9 +375,8 @@ void checkInputSizes(const ArithKernelSpec &spec, int workgroupCount,
   ASSERT_EQ(expected.size(), results);
 }
 
-} // namespace
-
-std::string buildArithAssembly(const ArithKernelSpec &spec) {
+// Returns the kernel's assembly.
+static std::string buildArithAssembly(const ArithKernelSpec &spec) {
   Target target = Target::get(archName);
   Kernel kernel(target, kernelName, arithWorkgroupSize);
   std::vector<int> offsets =
@@ -331,9 +395,9 @@ std::string buildArithAssembly(const ArithKernelSpec &spec) {
   return kernel.toAssembly();
 }
 
-void expectArithResults(const ArithKernelSpec &spec, int workgroupCount,
-                        const std::vector<std::vector<uint32_t>> &inputs,
-                        const std::vector<uint32_t> &expected) {
+void test::expectArithResults(const ArithKernelSpec &spec, int workgroupCount,
+                              const std::vector<std::vector<uint32_t>> &inputs,
+                              const std::vector<uint32_t> &expected) {
   std::string assembly = buildArithAssembly(spec);
   SCOPED_TRACE("assembly:\n" + assembly);
   checkInputSizes(spec, workgroupCount, inputs, expected);
@@ -351,16 +415,16 @@ void expectArithResults(const ArithKernelSpec &spec, int workgroupCount,
   compareResults(spec, inputs, expected, output);
 }
 
-std::vector<uint32_t> arithEdgeValues() {
+Words test::arithEdgeValues() {
   return {0,           1,           0xFFFFFFFFu, 2,           0xFFFFFFFEu,
           64,          65,          0xFFFFFFF0u, 0xFFFFFFEFu, 0x80000000u,
           0x80000001u, 0x7FFFFFFFu, 0x7FFFFFFEu, 0xFFFF,      0x10000,
           0x12345678,  0x9E3779B9};
 }
 
-WordPairs makeArithPairs(int randomCount) {
+WordPairs test::makeArithPairs(int randomCount) {
   WordPairs pairs;
-  std::vector<uint32_t> edges = arithEdgeValues();
+  Words edges = arithEdgeValues();
   for (uint32_t a : edges)
     for (uint32_t b : edges) {
       pairs.a.push_back(a);
@@ -378,9 +442,7 @@ WordPairs makeArithPairs(int randomCount) {
   return pairs;
 }
 
-namespace {
-
-std::vector<uint64_t> arithEdgeValues64() {
+static Values arithEdgeValues64() {
   return {0,
           1,
           UINT64_MAX,
@@ -402,23 +464,21 @@ std::vector<uint64_t> arithEdgeValues64() {
           0xFFFFFFFF7FFFFFFF};
 }
 
-void appendQuad(WordQuads &quads, uint64_t a, uint64_t b) {
+static void appendQuad(WordQuads &quads, uint64_t a, uint64_t b) {
   quads.aLo.push_back(static_cast<uint32_t>(a));
   quads.aHi.push_back(static_cast<uint32_t>(a >> 32));
   quads.bLo.push_back(static_cast<uint32_t>(b));
   quads.bHi.push_back(static_cast<uint32_t>(b >> 32));
 }
 
-uint64_t randomWord64(std::mt19937 &engine) {
+static uint64_t randomWord64(std::mt19937 &engine) {
   uint64_t low = engine();
   return low | uint64_t{engine()} << 32;
 }
 
-} // namespace
-
-WordQuads makeArithPairs64(int randomCount) {
+WordQuads test::makeArithPairs64(int randomCount) {
   WordQuads quads;
-  std::vector<uint64_t> edges = arithEdgeValues64();
+  Values edges = arithEdgeValues64();
   for (uint64_t a : edges)
     for (uint64_t b : edges)
       appendQuad(quads, a, b);
@@ -433,8 +493,8 @@ WordQuads makeArithPairs64(int randomCount) {
   return quads;
 }
 
-PairRegisters makePair(IRBuilder &builder, RegisterRef lo, RegisterRef hi,
-                       bool misaligned) {
+PairRegisters test::makePair(IRBuilder &builder, RegisterRef lo, RegisterRef hi,
+                             bool misaligned) {
   int count = misaligned ? 3 : 2;
   RegisterRange range = lo.kind == RegisterKind::sgpr
                             ? builder.allocateSgpr(count, 2)
@@ -444,5 +504,3 @@ PairRegisters makePair(IRBuilder &builder, RegisterRef lo, RegisterRef hi,
   builder.movb32(pair.slice(1), hi);
   return {std::move(range), pair};
 }
-
-} // namespace rocm::tensilelite::codegen::test

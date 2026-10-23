@@ -3,8 +3,7 @@
 
 #include <tensilelite/API/SkinnyGEMM.hpp>
 
-#include "Codegen/BuilderTestSupport.hpp"
-#include "Codegen/ExpectLines.hpp"
+#include "Codegen/TestSupport.hpp"
 
 #include <gtest/gtest.h>
 

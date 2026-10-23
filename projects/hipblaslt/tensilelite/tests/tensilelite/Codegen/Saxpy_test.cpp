@@ -4,8 +4,7 @@
 #include <tensilelite/API/Compiler.hpp>
 #include <tensilelite/Codegen/Kernel.hpp>
 
-#include "ExpectLines.hpp"
-#include "HipTestSupport.hpp"
+#include "TestSupport.hpp"
 
 #include "container.hpp"
 #include "instruction/branch.hpp"
@@ -20,7 +19,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -76,21 +74,6 @@ SaxpyArguments loadArguments(Kernel &kernel, const SaxpyOffsets &offsets) {
       scalars.container(), kernel.kernargSegmentPtr().container(), offsets.a);
   builder.createWaitCnt({.scalarMemory = 0});
   return SaxpyArguments{std::move(pointers), std::move(scalars)};
-}
-
-RegisterRange computeGlobalId(Kernel &kernel) {
-  IRBuilder &builder = kernel.builder();
-  RegisterRange globalId = builder.allocateVgpr(1);
-  RegisterRange groupBase = builder.allocateSgpr(1);
-  // The workitem id register packs the x, y and z ids.
-  builder.create<rocisa::VAndB32>(globalId.container(), 0x3ff,
-                                  kernel.workitemId().container());
-  builder.create<rocisa::SMulI32>(groupBase.container(),
-                                  kernel.workgroupIdX().container(),
-                                  kernel.workgroupSize());
-  builder.create<rocisa::VAddU32>(globalId.container(), groupBase.container(),
-                                  globalId.container());
-  return globalId;
 }
 
 void emitElementUpdate(Kernel &kernel, const SaxpyArguments &args,
@@ -160,56 +143,32 @@ std::vector<float> computeExpected(const std::vector<float> &x,
 std::vector<std::byte> makeKernarg(int segmentSize, const SaxpyOffsets &offsets,
                                    const void *x, const void *y) {
   std::vector<std::byte> kernarg(segmentSize);
-  uint32_t n = static_cast<uint32_t>(elementCount);
-  std::memcpy(kernarg.data() + offsets.x, &x, sizeof(x));
-  std::memcpy(kernarg.data() + offsets.y, &y, sizeof(y));
-  std::memcpy(kernarg.data() + offsets.a, &scale, sizeof(scale));
-  std::memcpy(kernarg.data() + offsets.n, &n, sizeof(n));
+  writeArgument(kernarg, offsets.x, x);
+  writeArgument(kernarg, offsets.y, y);
+  writeArgument(kernarg, offsets.a, scale);
+  writeArgument(kernarg, offsets.n, static_cast<uint32_t>(elementCount));
   return kernarg;
-}
-
-void allocateDevice(int floatCount, std::unique_ptr<void, DeviceFree> &out) {
-  void *ptr = nullptr;
-  ASSERT_HIP_SUCCESS(hipMalloc(&ptr, floatCount * sizeof(float)));
-  out.reset(ptr);
 }
 
 // Uploads the inputs, launches the kernel and downloads y.
 void runSaxpy(const std::vector<uint8_t> &hsaco, const SaxpyOffsets &offsets,
               int segmentSize, const std::vector<float> &x,
               std::vector<float> &y) {
-  hipModule_t rawModule = nullptr;
-  ASSERT_HIP_SUCCESS(hipModuleLoadData(&rawModule, hsaco.data()));
-  ModulePtr module(rawModule);
+  ModulePtr module;
   hipFunction_t function = nullptr;
-  ASSERT_HIP_SUCCESS(hipModuleGetFunction(&function, rawModule, kernelName));
-
-  std::unique_ptr<void, DeviceFree> deviceX;
-  std::unique_ptr<void, DeviceFree> deviceY;
-  allocateDevice(static_cast<int>(std::ssize(x)), deviceX);
+  loadKernel(hsaco, kernelName, module, function);
+  DevicePtr deviceX;
+  DevicePtr deviceY;
+  upload(x, deviceX);
+  upload(y, deviceY);
   ASSERT_FALSE(testing::Test::HasFatalFailure());
-  allocateDevice(static_cast<int>(std::ssize(y)), deviceY);
-  ASSERT_FALSE(testing::Test::HasFatalFailure());
-  ASSERT_HIP_SUCCESS(hipMemcpy(deviceX.get(), x.data(),
-                               x.size() * sizeof(float),
-                               hipMemcpyHostToDevice));
-  ASSERT_HIP_SUCCESS(hipMemcpy(deviceY.get(), y.data(),
-                               y.size() * sizeof(float),
-                               hipMemcpyHostToDevice));
 
   std::vector<std::byte> kernarg =
       makeKernarg(segmentSize, offsets, deviceX.get(), deviceY.get());
-  size_t kernargSize = kernarg.size();
-  void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, kernarg.data(),
-                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargSize,
-                   HIP_LAUNCH_PARAM_END};
   int groups = (elementCount + workgroupSize - 1) / workgroupSize;
-  ASSERT_HIP_SUCCESS(hipModuleLaunchKernel(
-      function, groups, 1, 1, workgroupSize, 1, 1, 0, nullptr, nullptr, extra));
-  ASSERT_HIP_SUCCESS(hipDeviceSynchronize());
-  ASSERT_HIP_SUCCESS(hipMemcpy(y.data(), deviceY.get(),
-                               y.size() * sizeof(float),
-                               hipMemcpyDeviceToHost));
+  launchWithKernarg(function, groups, workgroupSize, kernarg);
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  download(deviceY, y);
 }
 
 TEST(Saxpy, MatchesHostReferenceOnDevice) {

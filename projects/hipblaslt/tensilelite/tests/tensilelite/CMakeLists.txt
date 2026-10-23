@@ -10,12 +10,13 @@ if(TENSILELITE_ENABLE_JIT)
     target_link_libraries(tensilelite-tests PRIVATE roc::tensilelite-jit)
 endif()
 
-if(TENSILELITE_ENABLE_CODEGEN)
+# The codegen tests assemble and launch kernels, so they need the JIT library.
+if(TENSILELITE_ENABLE_CODEGEN AND TENSILELITE_ENABLE_JIT)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMM_test.cpp"
     )
-    # API tests include the shared support headers as Codegen/<name>.hpp.
+    # API tests include the shared support header as Codegen/TestSupport.hpp.
     target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     add_subdirectory(Codegen)
 endif()
