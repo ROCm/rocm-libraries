@@ -311,3 +311,69 @@ TEST(Predicates, MXScaleHostPreSwizzleDefaultsToCompact)
         = std::make_shared<Predicates::Contraction::MXScaleHostPreSwizzle>(false);
     EXPECT_TRUE((*noSwizzleSolution)(p));
 }
+
+namespace
+{
+    // f8 x f8 -> f32, column-major, with D's leading dimension under the caller's
+    // control. This is the geometry the rocRoller custom kernels were measured in.
+    TensileLite::ContractionProblemGemm f8ToF32(size_t m, size_t n, size_t k, size_t ldd)
+    {
+        using namespace TensileLite;
+        return ContractionProblemGemm::GEMM_Strides(false,
+                                                    false,
+                                                    rocisa::DataType::Float8,
+                                                    rocisa::DataType::Float8,
+                                                    rocisa::DataType::Float,
+                                                    rocisa::DataType::Float,
+                                                    m,
+                                                    n,
+                                                    k,
+                                                    /*batchSize=*/1,
+                                                    /*lda=*/m,
+                                                    /*aStride=*/-1,
+                                                    /*ldb=*/k,
+                                                    /*bStride=*/-1,
+                                                    /*ldc=*/ldd,
+                                                    /*cStride=*/-1,
+                                                    /*ldd=*/ldd,
+                                                    /*dStride=*/-1,
+                                                    /*beta=*/0.0);
+    }
+}
+
+// A rocRoller custom kernel sizes one buffer descriptor over the whole tensor
+// with a 32-bit num_records, so a tensor at or past 4 GiB wraps it and the
+// kernel returns zeros instead of failing to launch. Both shapes below were
+// measured on gfx950 with the same RR_GEMM_ kernel.
+TEST(Predicates, BufferAddressingLimitCheck_FourGiBOutput_Rejected)
+{
+    using namespace TensileLite;
+    // D is 32768 x 32768 x 4 bytes, exactly 4 GiB: norm_error 1.
+    static_assert(32768ull * 32768ull * 4 == (1ull << 32), "D lands exactly on the limit");
+
+    auto pred = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
+    EXPECT_FALSE((*pred)(f8ToF32(32768, 32768, 256, 32768)));
+}
+
+TEST(Predicates, BufferAddressingLimitCheck_JustUnderFourGiB_Accepted)
+{
+    using namespace TensileLite;
+    // One tile narrower in N on the same kernel: norm_error 7.7e-5. The
+    // predicate must not cost this shape.
+    static_assert(32768ull * 32640ull * 4 < (1ull << 32), "D stays under the limit");
+
+    auto pred = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
+    EXPECT_TRUE((*pred)(f8ToF32(32768, 32640, 256, 32768)));
+}
+
+TEST(Predicates, BufferAddressingLimitCheck_PaddedLeadingDimension_Rejected)
+{
+    using namespace TensileLite;
+    // M, N and K are small; only ldc/ldd pushes the descriptor over. This is why
+    // the extent is the stride product and not the tight allocated extent, which
+    // for this shape is 3.996 GiB and would have admitted a wrong answer.
+    static_assert(1048576ull * 1024ull * 4 == (1ull << 32), "padding alone reaches the limit");
+
+    auto pred = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
+    EXPECT_FALSE((*pred)(f8ToF32(1024, 1024, 256, 1048576)));
+}

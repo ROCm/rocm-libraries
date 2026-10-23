@@ -1607,6 +1607,85 @@ namespace TensileLite
                 }
             };
 
+            // Every tensor the kernel addresses must fit one buffer descriptor.
+            //
+            // BufferLoad/StoreOffsetLimitCheck bound a tile's extent, because a
+            // generated kernel re-bases its descriptor per workgroup. A kernel that
+            // programs num_records once over the whole tensor has no such bound: at
+            // 4 GiB the 32-bit field wraps, after which loads read back 0 and stores
+            // are dropped, so the launch succeeds and the answer is wrong. The
+            // rocRoller-on path rejects these problems in
+            // RocRollerGemmKernel::exceedsBufferAddressingLimit; this is the same
+            // test for checked-in rocRoller kernels, which the off path reaches
+            // through the solution library instead.
+            //
+            // The extent is max(stride[i] * size[i]), not the tight
+            // totalAllocatedElements: the kernel programs num_records from the
+            // stride product, so leading-dimension padding counts in full. Measured
+            // on gfx950, f8 x f8 -> f32: M=N=1024, K=256 with ldc/ldd 1048576 comes
+            // back wrong, and its stride product is exactly 4 GiB while its tight
+            // allocation is 3.996 GiB and would have been admitted.
+            struct BufferAddressingLimitCheck
+                : public Predicate_CRTP<BufferAddressingLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                BufferAddressingLimitCheck() = default;
+
+                static std::string Type()
+                {
+                    return "BufferAddressingLimitCheck";
+                }
+
+                static constexpr uint64_t MaxBufferBytes = uint64_t(1) << 32; // 4 GiB
+
+                // The scale tensors are empty when the problem is not block-scaled,
+                // which makes their extent 0 and the test vacuous.
+                static uint64_t largestTensorBytes(ContractionProblemGemm const& problem)
+                {
+                    static constexpr ContractionProblemGemm::TENSOR addressed[] = {
+                        ContractionProblemGemm::TENSOR::A,
+                        ContractionProblemGemm::TENSOR::B,
+                        ContractionProblemGemm::TENSOR::C,
+                        ContractionProblemGemm::TENSOR::D,
+                        ContractionProblemGemm::TENSOR::MXSA,
+                        ContractionProblemGemm::TENSOR::MXSB};
+
+                    uint64_t largest = 0;
+                    for(auto which : addressed)
+                    {
+                        auto const& t = problem.tensor(which);
+                        for(size_t i = 0; i < t.sizes().size(); i++)
+                            largest = std::max<uint64_t>(
+                                largest,
+                                multiplyElementSize(t.strides()[i] * t.sizes()[i],
+                                                    t.elementBytes()));
+                    }
+                    return largest;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return largestTensorBytes(problem) < MaxBufferBytes;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "largest_tensor_bytes",
+                                        largestTensorBytes(problem),
+                                        "<",
+                                        "max",
+                                        MaxBufferBytes);
+                }
+            };
+
             struct WorkgroupNumberCheck
                 : public Predicate_CRTP<WorkgroupNumberCheck, ContractionProblemGemm>
             {
