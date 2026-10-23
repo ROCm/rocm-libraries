@@ -2005,6 +2005,44 @@ namespace
     }
 #undef GEN_BENCH_ARG
 
+    // True when the caller's MX scale buffers are already in the gfx950
+    // host-pre-swizzle layout. Block_32_UE8M0_32_8_EXT is exactly that promise
+    // from the caller (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT, whose
+    // doc says "pre-swizzled to match the memory access pattern expected by the
+    // kernel"); every other scaling format hands over a compact row-major array.
+    //
+    // The flag is problem-wide because every shipped MX solution reads the A and B
+    // scale tensors through the same addressing. So it is true when at least one
+    // operand is pre-swizzled and neither is explicitly compact: that covers the
+    // single-operand MX case (the other operand carries no block scale at all)
+    // without claiming a layout for a mixed EXT/plain pair, which no solution can
+    // serve and which stays on the compact side.
+    bool mxScalesAreHostPreSwizzled(const RocblasltContractionProblem& prob)
+    {
+        using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+        auto isPreSwizzled  = [](ScalingFormat f) {
+            return f == ScalingFormat::Block_32_UE8M0_32_8_EXT;
+        };
+        // Any other block format is a compact array. Scalar/Vector/None carry no
+        // block scale at all and say nothing about the layout, which is what lets
+        // a single-operand MX problem still read as pre-swizzled.
+        auto isCompactBlock = [&](ScalingFormat f) {
+            switch(f)
+            {
+            case ScalingFormat::None:
+            case ScalingFormat::Scalar:
+            case ScalingFormat::Vector:
+                return false;
+            default:
+                return !isPreSwizzled(f);
+            }
+        };
+
+        if(isCompactBlock(prob.scaleAType) || isCompactBlock(prob.scaleBType))
+            return false;
+        return isPreSwizzled(prob.scaleAType) || isPreSwizzled(prob.scaleBType);
+    }
+
     bool mxScaleTensorNeedsPaddingFreeDim()
     {
         static std::mutex                    cacheMutex;
@@ -2241,6 +2279,13 @@ namespace
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+        // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
+        // predicate can reject solutions built for the other layout. The switches
+        // below deliberately collapse Block_32_UE8M0 and Block_32_UE8M0_32_8_EXT
+        // onto the same descriptor -- the two buffers have identical extents --
+        // so this flag is the only thing that keeps them apart.
+        tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
         {
@@ -2565,6 +2610,13 @@ namespace
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+        // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
+        // predicate can reject solutions built for the other layout. The switches
+        // below deliberately collapse Block_32_UE8M0 and Block_32_UE8M0_32_8_EXT
+        // onto the same descriptor -- the two buffers have identical extents --
+        // so this flag is the only thing that keeps them apart.
+        tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
         {

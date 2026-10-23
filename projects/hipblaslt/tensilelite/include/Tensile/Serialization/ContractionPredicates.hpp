@@ -95,6 +95,7 @@ namespace TensileLite
                      Base::template Pair<
                          Predicates::Contraction::BufferLoadOffsetLimitCheck_Beta>(),
                      Base::template Pair<Predicates::Contraction::BufferStoreOffsetLimitCheck>(),
+                     Base::template Pair<Predicates::Contraction::BufferAddressingLimitCheck>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupNumberCheck>(),
                      Base::template Pair<Predicates::Contraction::PersistentKernelCheck>(),
                      Base::template Pair<Predicates::Contraction::GlobalSplitUCheckMinK>(),
@@ -137,6 +138,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
+                     Base::template Pair<Predicates::Contraction::MXScaleHostPreSwizzle>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
                      Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
@@ -364,6 +366,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::BufferStoreOffsetLimitCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::BufferStoreOffsetLimitCheck, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::BufferAddressingLimitCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::BufferAddressingLimitCheck, IO>
         {
         };
 
@@ -635,6 +643,11 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleHostPreSwizzle, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleHostPreSwizzle, IO>
         {
         };
     } // namespace Serialization

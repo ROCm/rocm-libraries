@@ -33,7 +33,10 @@ _CA_WGM = "WGM"
 _CA_M = "Tensor_0_size_0"
 _CA_N = "Tensor_2_size_1"
 
-# Order of the eleven hoisted arguments, stable across the gfx950 WGM kernels.
+# The eleven hoisted arguments. This tuple names the complete set and fixes a
+# reference order for test vectors; it is NOT the kernarg layout. Each kernel's
+# .amdgpu_metadata declares its own order (the pure-MXFP4 32x32x128 kernels
+# permute it) and the launcher switches per argument on the semantic.
 WGM_ROLE_ORDER = (
     "RR_QuotientTilesByBlock",
     "RR_MagicMultipleWgmMainBlock",

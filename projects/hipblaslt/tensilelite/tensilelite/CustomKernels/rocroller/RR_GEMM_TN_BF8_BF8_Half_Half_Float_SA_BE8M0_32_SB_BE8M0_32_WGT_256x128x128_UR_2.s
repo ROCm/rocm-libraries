@@ -1,0 +1,4894 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+
+
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
+.set .amdgcn.next_free_vgpr, 0
+.set .amdgcn.next_free_sgpr, 0
+.text
+.globl RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2
+.p2align 8
+.type RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2,@function
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2:
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_exec_begin:
+
+
+s_load_dwordx2 s[20:21], s[0:1], 56 // Load scalar value
+s_load_dwordx2 s[22:23], s[0:1], 64 // Load scalar value
+s_load_dwordx2 s[24:25], s[0:1], 72 // Load scalar value
+s_load_dwordx2 s[26:27], s[0:1], 80 // Load scalar value
+s_load_dwordx2 s[28:29], s[0:1], 88 // Load scalar value
+s_load_dwordx2 s[30:31], s[0:1], 96 // Load scalar value
+s_load_dwordx2 s[32:33], s[0:1], 104 // Load scalar value
+s_load_dwordx2 s[34:35], s[0:1], 112 // Load scalar value
+s_load_dwordx2 s[36:37], s[0:1], 120 // Load scalar value
+
+v_bfe_u32 v1, v0, 0, 10
+v_bfe_u32 v2, v0, 10, 10
+
+
+v_and_b32 v0, 4294967168, v1 // (op 13766) 
+v_and_b32 v3, 15, v1 // (op 13766) 
+v_add_lshl_u32 v4, v0, v3, 7 // (op 13766) 
+
+
+v_and_b32 v0, 48, v1 // (op 13766) 
+v_add_u32 v3, v4, v0 // (op 13766) 
+
+
+v_lshrrev_b32 v0, 6, v1 // (op 13823) 
+v_and_b32 v4, 1, v0 // (op 13823) 
+
+v_and_b32 v0, 15, v1 // (op 13823) 
+v_lshl_add_u32 v5, v4, 6, v0 // (op 13823) 
+
+
+v_and_b32 v0, 48, v1 // (op 13823) 
+v_lshl_add_u32 v4, v5, 7, v0 // (op 13823) 
+
+
+v_and_b32 v0, 4294967168, v1 // (op 13890) 
+v_and_b32 v5, 15, v1 // (op 13890) 
+v_add_lshl_u32 v6, v0, v5, 7 // (op 13890) 
+
+
+v_and_b32 v0, 48, v1 // (op 13890) 
+v_add_u32 v5, v6, v0 // (op 13890) 
+
+
+v_lshrrev_b32 v0, 6, v1 // (op 13934) 
+v_and_b32 v6, 1, v0 // (op 13934) 
+
+v_and_b32 v0, 15, v1 // (op 13934) 
+v_lshl_add_u32 v7, v6, 6, v0 // (op 13934) 
+
+
+v_and_b32 v0, 48, v1 // (op 13934) 
+v_lshl_add_u32 v6, v7, 7, v0 // (op 13934) 
+
+
+v_and_b32 v0, 4294967168, v1 // (op 13705) 
+v_and_b32 v7, 63, v1 // (op 13705) 
+v_lshrrev_b32 v8, 4, v7 // (op 13705) 
+v_lshlrev_b32 v9, 2, v8 // (op 13705) 
+
+v_add_u32 v8, v0, v9 // (op 13705) 
+
+
+v_lshl_add_u32 v0, s16, 8, v8 // (op 13705) 
+
+v_lshrrev_b32 v8, 2, v7 // (op 13705) 
+
+v_and_b32 v7, 3, v8 // (op 13705) 
+
+v_and_b32 v8, 3, v1 // (op 13705) 
+v_lshl_add_u32 v9, v7, 2, v8 // (op 13705) 
+
+
+v_lshrrev_b32 v7, 6, v1 // (op 13705) 
+v_and_b32 v8, 1, v7 // (op 13705) 
+
+v_lshl_add_u32 v7, v8, 6, v9 // (op 13705) 
+
+
+v_lshl_add_u32 v8, s17, 7, v7 // (op 13705) 
+
+v_mul_lo_u32 v7, v8, s2 // (op 13705) 
+
+v_add_lshl_u32 v8, v0, v7, 1 // (op 13705) 
+
+
+v_and_b32 v0, 4294967168, v1 // (op 13844) 
+v_and_b32 v7, 63, v1 // (op 13844) 
+v_lshrrev_b32 v9, 4, v7 // (op 13844) 
+s_mul_i32 s1, s2, s9 // (op 13707) most significant: low of low * high
+s_mul_i32 s18, s3, s8 // (op 13707) most significant: low of high * low
+s_mul_i32 s0, s2, s8 // (op 13707) least significant
+s_mul_hi_u32 s19, s2, s8 // (op 13707) most significant: high of low * low
+s_add_u32 s1, s1, s18 // (op 13707) most significant: sum
+s_add_u32 s1, s1, s19 // (op 13707) most significant: sum
+
+
+s_lshl_b64 s[18:19], s[0:1], 1 // (op 13707) 
+
+v_lshlrev_b32 v10, 2, v9 // (op 13844) 
+
+v_add_u32 v9, v0, v10 // (op 13844) 
+
+
+v_lshl_add_u32 v0, s16, 8, v9 // (op 13844) 
+
+v_lshrrev_b32 v9, 2, v7 // (op 13844) 
+
+v_and_b32 v7, 3, v9 // (op 13844) 
+
+v_and_b32 v9, 3, v1 // (op 13844) 
+v_lshl_add_u32 v10, v7, 2, v9 // (op 13844) 
+
+
+v_lshrrev_b32 v7, 6, v1 // (op 13844) 
+v_and_b32 v9, 1, v7 // (op 13844) 
+
+v_lshl_add_u32 v7, v9, 6, v10 // (op 13844) 
+
+
+v_lshl_add_u32 v9, s17, 7, v7 // (op 13844) 
+
+v_mul_lo_u32 v7, v9, s4 // (op 13844) 
+
+v_add_lshl_u32 v9, v0, v7, 1 // (op 13844) 
+
+
+s_mov_b32 s40, s6 // (op 13707) reg expression
+s_mov_b32 s41, s7 // (op 13707) reg expression
+s_mov_b32 s42, s18 // (op 13707) reg expression
+s_mov_b32 s43, 131072 // (op 13707) call()
+
+s_mul_i32 s1, s4, s9 // (op 13846) most significant: low of low * high
+
+s_mul_i32 s6, s5, s8 // (op 13846) most significant: low of high * low
+s_mul_i32 s0, s4, s8 // (op 13846) least significant
+s_mul_hi_u32 s7, s4, s8 // (op 13846) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13846) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13846) most significant: sum
+
+
+s_lshl_b64 s[6:7], s[0:1], 1 // (op 13846) 
+
+s_mov_b32 s44, s10 // (op 13846) reg expression
+s_mov_b32 s45, s11 // (op 13846) reg expression
+s_mov_b32 s46, s6 // (op 13846) reg expression
+s_mov_b32 s47, 131072 // (op 13846) call()
+
+
+v_mov_b32 v0, s14 // (op 2) Move value
+v_mov_b32 v7, s15 // (op 35) Move value
+
+
+v_accvgpr_write a0, 0.00000 // (op 57) call()
+v_accvgpr_write a1, 0.00000 // (op 57) call()
+v_accvgpr_write a2, 0.00000 // (op 57) call()
+v_accvgpr_write a3, 0.00000 // (op 57) call()
+v_accvgpr_write a4, 0.00000 // (op 281) call()
+v_accvgpr_write a5, 0.00000 // (op 281) call()
+v_accvgpr_write a6, 0.00000 // (op 281) call()
+v_accvgpr_write a7, 0.00000 // (op 281) call()
+v_accvgpr_write a8, 0.00000 // (op 417) call()
+v_accvgpr_write a9, 0.00000 // (op 417) call()
+v_accvgpr_write a10, 0.00000 // (op 417) call()
+v_accvgpr_write a11, 0.00000 // (op 417) call()
+v_accvgpr_write a12, 0.00000 // (op 553) call()
+v_accvgpr_write a13, 0.00000 // (op 553) call()
+v_accvgpr_write a14, 0.00000 // (op 553) call()
+v_accvgpr_write a15, 0.00000 // (op 553) call()
+v_accvgpr_write a16, 0.00000 // (op 777) call()
+v_accvgpr_write a17, 0.00000 // (op 777) call()
+v_accvgpr_write a18, 0.00000 // (op 777) call()
+v_accvgpr_write a19, 0.00000 // (op 777) call()
+v_accvgpr_write a20, 0.00000 // (op 1038) call()
+v_accvgpr_write a21, 0.00000 // (op 1038) call()
+v_accvgpr_write a22, 0.00000 // (op 1038) call()
+v_accvgpr_write a23, 0.00000 // (op 1038) call()
+v_accvgpr_write a24, 0.00000 // (op 1039) call()
+v_accvgpr_write a25, 0.00000 // (op 1039) call()
+v_accvgpr_write a26, 0.00000 // (op 1039) call()
+v_accvgpr_write a27, 0.00000 // (op 1039) call()
+v_accvgpr_write a28, 0.00000 // (op 1040) call()
+v_accvgpr_write a29, 0.00000 // (op 1040) call()
+v_accvgpr_write a30, 0.00000 // (op 1040) call()
+v_accvgpr_write a31, 0.00000 // (op 1040) call()
+v_accvgpr_write a32, 0.00000 // (op 1387) call()
+v_accvgpr_write a33, 0.00000 // (op 1387) call()
+v_accvgpr_write a34, 0.00000 // (op 1387) call()
+v_accvgpr_write a35, 0.00000 // (op 1387) call()
+v_accvgpr_write a36, 0.00000 // (op 1648) call()
+v_accvgpr_write a37, 0.00000 // (op 1648) call()
+v_accvgpr_write a38, 0.00000 // (op 1648) call()
+v_accvgpr_write a39, 0.00000 // (op 1648) call()
+v_accvgpr_write a40, 0.00000 // (op 1649) call()
+v_accvgpr_write a41, 0.00000 // (op 1649) call()
+v_accvgpr_write a42, 0.00000 // (op 1649) call()
+v_accvgpr_write a43, 0.00000 // (op 1649) call()
+v_accvgpr_write a44, 0.00000 // (op 1650) call()
+v_accvgpr_write a45, 0.00000 // (op 1650) call()
+v_accvgpr_write a46, 0.00000 // (op 1650) call()
+v_accvgpr_write a47, 0.00000 // (op 1650) call()
+v_accvgpr_write a48, 0.00000 // (op 1997) call()
+v_accvgpr_write a49, 0.00000 // (op 1997) call()
+v_accvgpr_write a50, 0.00000 // (op 1997) call()
+v_accvgpr_write a51, 0.00000 // (op 1997) call()
+v_accvgpr_write a52, 0.00000 // (op 2258) call()
+v_accvgpr_write a53, 0.00000 // (op 2258) call()
+v_accvgpr_write a54, 0.00000 // (op 2258) call()
+v_accvgpr_write a55, 0.00000 // (op 2258) call()
+v_accvgpr_write a56, 0.00000 // (op 2259) call()
+v_accvgpr_write a57, 0.00000 // (op 2259) call()
+v_accvgpr_write a58, 0.00000 // (op 2259) call()
+v_accvgpr_write a59, 0.00000 // (op 2259) call()
+v_accvgpr_write a60, 0.00000 // (op 2260) call()
+v_accvgpr_write a61, 0.00000 // (op 2260) call()
+v_accvgpr_write a62, 0.00000 // (op 2260) call()
+v_accvgpr_write a63, 0.00000 // (op 2260) call()
+v_accvgpr_write a64, 0.00000 // (op 2607) call()
+v_accvgpr_write a65, 0.00000 // (op 2607) call()
+v_accvgpr_write a66, 0.00000 // (op 2607) call()
+v_accvgpr_write a67, 0.00000 // (op 2607) call()
+v_accvgpr_write a68, 0.00000 // (op 2868) call()
+v_accvgpr_write a69, 0.00000 // (op 2868) call()
+v_accvgpr_write a70, 0.00000 // (op 2868) call()
+v_accvgpr_write a71, 0.00000 // (op 2868) call()
+v_accvgpr_write a72, 0.00000 // (op 2869) call()
+v_accvgpr_write a73, 0.00000 // (op 2869) call()
+v_accvgpr_write a74, 0.00000 // (op 2869) call()
+v_accvgpr_write a75, 0.00000 // (op 2869) call()
+v_accvgpr_write a76, 0.00000 // (op 2870) call()
+v_accvgpr_write a77, 0.00000 // (op 2870) call()
+v_accvgpr_write a78, 0.00000 // (op 2870) call()
+v_accvgpr_write a79, 0.00000 // (op 2870) call()
+v_accvgpr_write a80, 0.00000 // (op 3217) call()
+v_accvgpr_write a81, 0.00000 // (op 3217) call()
+v_accvgpr_write a82, 0.00000 // (op 3217) call()
+v_accvgpr_write a83, 0.00000 // (op 3217) call()
+v_accvgpr_write a84, 0.00000 // (op 3478) call()
+v_accvgpr_write a85, 0.00000 // (op 3478) call()
+v_accvgpr_write a86, 0.00000 // (op 3478) call()
+v_accvgpr_write a87, 0.00000 // (op 3478) call()
+v_accvgpr_write a88, 0.00000 // (op 3479) call()
+v_accvgpr_write a89, 0.00000 // (op 3479) call()
+v_accvgpr_write a90, 0.00000 // (op 3479) call()
+v_accvgpr_write a91, 0.00000 // (op 3479) call()
+v_accvgpr_write a92, 0.00000 // (op 3480) call()
+v_accvgpr_write a93, 0.00000 // (op 3480) call()
+v_accvgpr_write a94, 0.00000 // (op 3480) call()
+v_accvgpr_write a95, 0.00000 // (op 3480) call()
+v_accvgpr_write a96, 0.00000 // (op 3827) call()
+v_accvgpr_write a97, 0.00000 // (op 3827) call()
+v_accvgpr_write a98, 0.00000 // (op 3827) call()
+v_accvgpr_write a99, 0.00000 // (op 3827) call()
+v_accvgpr_write a100, 0.00000 // (op 4088) call()
+v_accvgpr_write a101, 0.00000 // (op 4088) call()
+v_accvgpr_write a102, 0.00000 // (op 4088) call()
+v_accvgpr_write a103, 0.00000 // (op 4088) call()
+v_accvgpr_write a104, 0.00000 // (op 4089) call()
+v_accvgpr_write a105, 0.00000 // (op 4089) call()
+v_accvgpr_write a106, 0.00000 // (op 4089) call()
+v_accvgpr_write a107, 0.00000 // (op 4089) call()
+v_accvgpr_write a108, 0.00000 // (op 4090) call()
+v_accvgpr_write a109, 0.00000 // (op 4090) call()
+v_accvgpr_write a110, 0.00000 // (op 4090) call()
+v_accvgpr_write a111, 0.00000 // (op 4090) call()
+v_accvgpr_write a112, 0.00000 // (op 4437) call()
+v_accvgpr_write a113, 0.00000 // (op 4437) call()
+v_accvgpr_write a114, 0.00000 // (op 4437) call()
+v_accvgpr_write a115, 0.00000 // (op 4437) call()
+v_accvgpr_write a116, 0.00000 // (op 4698) call()
+v_accvgpr_write a117, 0.00000 // (op 4698) call()
+v_accvgpr_write a118, 0.00000 // (op 4698) call()
+v_accvgpr_write a119, 0.00000 // (op 4698) call()
+v_accvgpr_write a120, 0.00000 // (op 4699) call()
+v_accvgpr_write a121, 0.00000 // (op 4699) call()
+v_accvgpr_write a122, 0.00000 // (op 4699) call()
+v_accvgpr_write a123, 0.00000 // (op 4699) call()
+v_accvgpr_write a124, 0.00000 // (op 4700) call()
+v_accvgpr_write a125, 0.00000 // (op 4700) call()
+v_accvgpr_write a126, 0.00000 // (op 4700) call()
+v_accvgpr_write a127, 0.00000 // (op 4700) call()
+v_lshrrev_b32 v10, 3, v1 // (op 13595) 
+v_lshl_add_u32 v11, s16, 8, v10 // (op 13595) 
+
+v_and_b32 v10, -8, v1 // (op 13595) 
+v_sub_u32 v12, v1, v10 // (op 13595) 
+
+v_lshlrev_b32 v10, 4, v12 // (op 13595) 
+
+v_mov_b32 v13, 0 // (op 13595) convert
+v_mov_b32 v12, v10 // (op 13595) convert
+
+v_mul_lo_u32 v15, v11, s13 // (op 13595) most significant: low of low * high
+v_mul_hi_u32 v10, v11, s12 // (op 13595) most significant: high of low * low
+v_mul_lo_u32 v14, v11, s12 // (op 13595) least significant: low of low * low
+v_add_u32 v15, v15, v10 // (op 13595) most significant: sum
+
+v_add_co_u32 v14, s[0:1], v14, v12 // (op 13595) least significant half
+v_addc_co_u32 v15, s[0:1], v15, v13, s[0:1] // (op 13595) most significant half
+
+
+
+
+s_waitcnt lgkmcnt(0)
+s_mul_i32 s1, s12, s23 // (op 13597) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 13597) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 13597) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 13597) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13597) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13597) most significant: sum
+
+
+s_mov_b32 s48, s20 // (op 13597) reg expression
+s_mov_b32 s49, s21 // (op 13597) reg expression
+s_mov_b32 s50, s0 // (op 13597) reg expression
+s_mov_b32 s51, 131072 // (op 13597) call()
+
+v_lshrrev_b32 v10, 3, v1 // (op 13614) 
+v_lshl_add_u32 v11, s16, 8, v10 // (op 13614) 
+
+v_and_b32 v10, -8, v1 // (op 13614) 
+v_sub_u32 v12, v1, v10 // (op 13614) 
+
+v_lshlrev_b32 v10, 4, v12 // (op 13614) 
+
+v_mov_b32 v13, 0 // (op 13614) convert
+v_mov_b32 v12, v10 // (op 13614) convert
+
+v_mul_lo_u32 v17, v11, s13 // (op 13614) most significant: low of low * high
+v_mul_hi_u32 v10, v11, s12 // (op 13614) most significant: high of low * low
+v_mul_lo_u32 v16, v11, s12 // (op 13614) least significant: low of low * low
+v_add_u32 v17, v17, v10 // (op 13614) most significant: sum
+
+v_add_co_u32 v16, s[0:1], v16, v12 // (op 13614) least significant half
+v_addc_co_u32 v17, s[0:1], v17, v13, s[0:1] // (op 13614) most significant half
+
+
+
+s_mul_i32 s1, s12, s23 // (op 13616) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 13616) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 13616) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 13616) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13616) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13616) most significant: sum
+
+
+s_mov_b32 s48, s20 // (op 13616) reg expression
+s_mov_b32 s49, s21 // (op 13616) reg expression
+s_mov_b32 s50, s0 // (op 13616) reg expression
+s_mov_b32 s51, 131072 // (op 13616) call()
+
+v_and_b32 v10, -8, v1 // (op 13659) 
+v_sub_u32 v11, v1, v10 // (op 13659) 
+
+v_lshlrev_b32 v10, 4, v11 // (op 13659) 
+
+v_mov_b32 v13, 0 // (op 13659) convert
+v_mov_b32 v12, v10 // (op 13659) convert
+
+v_lshrrev_b32 v10, 3, v1 // (op 13659) 
+v_lshl_add_u32 v11, s17, 7, v10 // (op 13659) 
+
+v_mul_lo_u32 v19, v11, s25 // (op 13659) most significant: low of low * high
+v_mul_hi_u32 v10, v11, s24 // (op 13659) most significant: high of low * low
+v_mul_lo_u32 v18, v11, s24 // (op 13659) least significant: low of low * low
+v_add_u32 v19, v19, v10 // (op 13659) most significant: sum
+
+
+v_add_co_u32 v10, s[0:1], v12, v18 // (op 13659) least significant half
+v_addc_co_u32 v11, s[0:1], v13, v19, s[0:1] // (op 13659) most significant half
+
+
+
+s_mul_i32 s1, s24, s9 // (op 13661) most significant: low of low * high
+s_mul_i32 s6, s25, s8 // (op 13661) most significant: low of high * low
+s_mul_i32 s0, s24, s8 // (op 13661) least significant
+s_mul_hi_u32 s7, s24, s8 // (op 13661) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13661) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13661) most significant: sum
+
+
+s_mov_b32 s52, s26 // (op 13661) reg expression
+s_mov_b32 s53, s27 // (op 13661) reg expression
+s_mov_b32 s54, s0 // (op 13661) reg expression
+s_mov_b32 s55, 131072 // (op 13661) call()
+
+v_and_b32 v12, -8, v1 // (op 13678) 
+v_sub_u32 v13, v1, v12 // (op 13678) 
+
+v_lshlrev_b32 v12, 4, v13 // (op 13678) 
+
+v_mov_b32 v19, 0 // (op 13678) convert
+v_mov_b32 v18, v12 // (op 13678) convert
+
+v_lshrrev_b32 v12, 3, v1 // (op 13678) 
+v_lshl_add_u32 v13, s17, 7, v12 // (op 13678) 
+
+v_mul_lo_u32 v21, v13, s25 // (op 13678) most significant: low of low * high
+v_mul_hi_u32 v12, v13, s24 // (op 13678) most significant: high of low * low
+v_mul_lo_u32 v20, v13, s24 // (op 13678) least significant: low of low * low
+v_add_u32 v21, v21, v12 // (op 13678) most significant: sum
+
+
+v_add_co_u32 v12, s[0:1], v18, v20 // (op 13678) least significant half
+v_addc_co_u32 v13, s[0:1], v19, v21, s[0:1] // (op 13678) most significant half
+
+
+
+s_mul_i32 s1, s24, s9 // (op 13680) most significant: low of low * high
+s_mul_i32 s6, s25, s8 // (op 13680) most significant: low of high * low
+s_mul_i32 s0, s24, s8 // (op 13680) least significant
+s_mul_hi_u32 s7, s24, s8 // (op 13680) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13680) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13680) most significant: sum
+
+
+s_mov_b32 s52, s26 // (op 13680) reg expression
+s_mov_b32 s53, s27 // (op 13680) reg expression
+s_mov_b32 s54, s0 // (op 13680) reg expression
+s_mov_b32 s55, 131072 // (op 13680) call()
+
+v_and_b32 v18, 63, v1 // (op 13956) 
+v_lshrrev_b32 v19, 4, v18 // (op 13956) 
+v_and_b32 v20, 3, v19 // (op 13956) 
+
+v_and_b32 v19, 15, v1 // (op 13956) 
+v_lshl_add_u32 v21, v20, 4, v19 // (op 13956) 
+
+
+v_and_b32 v19, 4294967168, v1 // (op 13956) 
+v_add_u32 v20, v19, v21 // (op 13956) 
+
+
+v_lshl_add_u32 v19, s16, 8, v20 // (op 13956) 
+
+v_lshrrev_b32 v20, 6, v18 // (op 13956) 
+
+v_lshlrev_b32 v18, 2, v20 // (op 13956) 
+
+v_mul_lo_u32 v20, v19, s28 // (op 13956) 
+v_add_u32 v20, v20, v18 // (op 13956) 
+
+
+s_mul_i32 s1, s28, s23 // (op 13958) most significant: low of low * high
+s_mul_i32 s6, s29, s22 // (op 13958) most significant: low of high * low
+s_mul_i32 s0, s28, s22 // (op 13958) least significant
+s_mul_hi_u32 s7, s28, s22 // (op 13958) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13958) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13958) most significant: sum
+
+
+s_mov_b32 s56, s30 // (op 13958) reg expression
+s_mov_b32 s57, s31 // (op 13958) reg expression
+s_mov_b32 s58, s0 // (op 13958) reg expression
+s_mov_b32 s59, 131072 // (op 13958) call()
+
+v_and_b32 v18, 63, v1 // (op 13977) 
+v_lshrrev_b32 v19, 4, v18 // (op 13977) 
+v_and_b32 v21, 3, v19 // (op 13977) 
+
+v_and_b32 v19, 15, v1 // (op 13977) 
+v_lshl_add_u32 v22, v21, 4, v19 // (op 13977) 
+
+
+v_and_b32 v19, 4294967168, v1 // (op 13977) 
+v_add_u32 v21, v19, v22 // (op 13977) 
+
+
+v_lshl_add_u32 v19, s16, 8, v21 // (op 13977) 
+
+v_lshrrev_b32 v21, 6, v18 // (op 13977) 
+
+v_lshlrev_b32 v18, 2, v21 // (op 13977) 
+
+v_mul_lo_u32 v21, v19, s28 // (op 13977) 
+v_add_u32 v21, v21, v18 // (op 13977) 
+
+
+s_mul_i32 s1, s28, s23 // (op 13979) most significant: low of low * high
+s_mul_i32 s6, s29, s22 // (op 13979) most significant: low of high * low
+s_mul_i32 s0, s28, s22 // (op 13979) least significant
+s_mul_hi_u32 s7, s28, s22 // (op 13979) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13979) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13979) most significant: sum
+
+
+s_mov_b32 s56, s30 // (op 13979) reg expression
+s_mov_b32 s57, s31 // (op 13979) reg expression
+s_mov_b32 s58, s0 // (op 13979) reg expression
+s_mov_b32 s59, 131072 // (op 13979) call()
+
+v_and_b32 v18, 63, v1 // (op 14008) 
+v_lshrrev_b32 v19, 4, v18 // (op 14008) 
+v_and_b32 v22, 3, v19 // (op 14008) 
+
+v_and_b32 v19, 15, v1 // (op 14008) 
+v_lshl_add_u32 v23, v22, 4, v19 // (op 14008) 
+
+
+v_lshrrev_b32 v19, 6, v1 // (op 14008) 
+v_and_b32 v22, 1, v19 // (op 14008) 
+
+v_lshl_add_u32 v19, v22, 6, v23 // (op 14008) 
+
+
+v_lshl_add_u32 v22, s17, 7, v19 // (op 14008) 
+
+v_mul_lo_u32 v19, v22, s32 // (op 14008) 
+
+v_lshrrev_b32 v22, 6, v18 // (op 14008) 
+
+v_lshl_add_u32 v18, v22, 2, v19 // (op 14008) 
+
+
+s_mul_i32 s1, s32, s9 // (op 14010) most significant: low of low * high
+s_mul_i32 s6, s33, s8 // (op 14010) most significant: low of high * low
+s_mul_i32 s0, s32, s8 // (op 14010) least significant
+s_mul_hi_u32 s7, s32, s8 // (op 14010) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 14010) most significant: sum
+s_add_u32 s1, s1, s7 // (op 14010) most significant: sum
+
+
+s_mov_b32 s60, s34 // (op 14010) reg expression
+s_mov_b32 s61, s35 // (op 14010) reg expression
+s_mov_b32 s62, s0 // (op 14010) reg expression
+s_mov_b32 s63, 131072 // (op 14010) call()
+
+v_and_b32 v19, 63, v1 // (op 14029) 
+v_lshrrev_b32 v22, 4, v19 // (op 14029) 
+v_and_b32 v23, 3, v22 // (op 14029) 
+
+v_and_b32 v22, 15, v1 // (op 14029) 
+v_lshl_add_u32 v24, v23, 4, v22 // (op 14029) 
+
+
+v_lshrrev_b32 v22, 6, v1 // (op 14029) 
+v_and_b32 v23, 1, v22 // (op 14029) 
+
+v_lshl_add_u32 v22, v23, 6, v24 // (op 14029) 
+
+
+v_lshl_add_u32 v23, s17, 7, v22 // (op 14029) 
+
+v_mul_lo_u32 v22, v23, s32 // (op 14029) 
+
+v_lshrrev_b32 v23, 6, v19 // (op 14029) 
+
+v_lshl_add_u32 v19, v23, 2, v22 // (op 14029) 
+
+
+s_mul_i32 s1, s32, s9 // (op 14031) most significant: low of low * high
+s_mul_i32 s6, s33, s8 // (op 14031) most significant: low of high * low
+s_mul_i32 s0, s32, s8 // (op 14031) least significant
+s_mul_hi_u32 s7, s32, s8 // (op 14031) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 14031) most significant: sum
+s_add_u32 s1, s1, s7 // (op 14031) most significant: sum
+
+
+s_mov_b32 s60, s34 // (op 14031) reg expression
+s_mov_b32 s61, s35 // (op 14031) reg expression
+s_mov_b32 s62, s0 // (op 14031) reg expression
+s_mov_b32 s63, 131072 // (op 14031) call()
+
+v_and_b32 v22, -8, v1 // (op 13806) 
+v_sub_u32 v23, v1, v22 // (op 13806) 
+
+v_lshlrev_b32 v22, 4, v23 // (op 13806) 
+
+v_lshrrev_b32 v23, 3, v1 // (op 13806) 
+v_lshl_add_u32 v24, v23, 7, v22 // (op 13806) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v24 // (op 13806) Wait state hazard: VALU Write Readlane Hazard
+
+
+s_lshl_b64 s[6:7], s[24:25], 5 // (op 13513) 
+v_mov_b64 v[22:23], s[6:7] // (op 13513) convert
+
+
+v_mov_b64 v[24:25], v[10:11] // (op 13513) 
+s_mov_b32 m0, s0 // (op 13513) reg expression
+buffer_load_dwordx4 v24, s[52:55], 0 offen offset: 0 lds // (op 13513) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13513) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13513) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13513) 
+buffer_load_dwordx4 v24, s[52:55], 0 offen offset: 0 lds // (op 13513) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13513) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13513) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13513) 
+buffer_load_dwordx4 v24, s[52:55], 0 offen offset: 0 lds // (op 13513) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13513) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13513) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13513) 
+buffer_load_dwordx4 v24, s[52:55], 0 offen offset: 0 lds // (op 13513) Load value direct to lds
+
+
+
+v_and_b32 v22, -8, v1 // (op 13749) 
+v_sub_u32 v23, v1, v22 // (op 13749) 
+
+v_lshlrev_b32 v22, 4, v23 // (op 13749) 
+
+v_lshrrev_b32 v23, 3, v1 // (op 13749) 
+v_lshl_add_u32 v24, v23, 7, v22 // (op 13749) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v24 // (op 13749) Wait state hazard: VALU Write Readlane Hazard
+
+
+s_lshl_b64 s[6:7], s[12:13], 5 // (op 13518) 
+v_mov_b64 v[22:23], s[6:7] // (op 13518) convert
+
+
+v_mov_b64 v[24:25], v[14:15] // (op 13518) 
+s_add_u32 s1, 16384, s0 // (op 13518) 
+s_mov_b32 m0, s1 // (op 13518) reg expression
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+v_add_co_u32 v24, s[6:7], v24, v22 // (op 13518) least significant half
+v_addc_co_u32 v25, s[6:7], 0, v25, s[6:7] // (op 13518) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13518) 
+buffer_load_dwordx4 v24, s[48:51], 0 offen offset: 0 lds // (op 13518) Load value direct to lds
+
+
+
+
+
+
+v_mov_b32 v22, v18 // (op 76) reg expression
+
+buffer_load_dwordx2 v[24:25], v22, s[60:63], 0 offen // (op 76) Load value
+
+
+
+
+s_lshl_b32 s0, s28, 6 // (op 2747) 
+v_add_u32 v18, v20, s0 // (op 2747) 
+
+
+buffer_load_dwordx2 v[22:23], v18, s[56:59], 0 offen // (op 2747) Load value
+
+
+
+v_mov_b32 v18, v20 // (op 72) reg expression
+
+buffer_load_dwordx2 v[26:27], v18, s[56:59], 0 offen // (op 72) Load value
+
+
+v_and_b32 v18, -8, v1 // (op 13917) 
+v_sub_u32 v20, v1, v18 // (op 13917) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13917) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13917) 
+v_lshl_add_u32 v28, v20, 7, v18 // (op 13917) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v28 // (op 13917) Wait state hazard: VALU Write Readlane Hazard
+
+
+s_lshl_b64 s[6:7], s[24:25], 5 // (op 13523) 
+v_mov_b64 v[28:29], s[6:7] // (op 13523) convert
+
+
+v_mov_b64 v[30:31], v[10:11] // (op 13523) 
+s_add_u32 s1, 49152, s0 // (op 13523) 
+s_mov_b32 m0, s1 // (op 13523) reg expression
+s_mov_b32 s6, 128 // (op 13523) call()
+buffer_load_dwordx4 v30, s[52:55], s6 offen offset: 0 lds // (op 13523) Load value direct to lds
+v_add_co_u32 v30, s[10:11], v30, v28 // (op 13523) least significant half
+v_addc_co_u32 v31, s[10:11], 0, v31, s[10:11] // (op 13523) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13523) 
+buffer_load_dwordx4 v30, s[52:55], s6 offen offset: 0 lds // (op 13523) Load value direct to lds
+v_add_co_u32 v30, s[10:11], v30, v28 // (op 13523) least significant half
+v_addc_co_u32 v31, s[10:11], 0, v31, s[10:11] // (op 13523) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13523) 
+buffer_load_dwordx4 v30, s[52:55], s6 offen offset: 0 lds // (op 13523) Load value direct to lds
+v_add_co_u32 v30, s[10:11], v30, v28 // (op 13523) least significant half
+v_addc_co_u32 v31, s[10:11], 0, v31, s[10:11] // (op 13523) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13523) 
+buffer_load_dwordx4 v30, s[52:55], s6 offen offset: 0 lds // (op 13523) Load value direct to lds
+
+
+
+
+
+
+v_and_b32 v18, -8, v1 // (op 13873) 
+v_sub_u32 v20, v1, v18 // (op 13873) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13873) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13873) 
+v_lshl_add_u32 v10, v20, 7, v18 // (op 13873) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v10 // (op 13873) Wait state hazard: VALU Write Readlane Hazard
+
+
+s_lshl_b64 s[6:7], s[12:13], 5 // (op 13525) 
+v_mov_b64 v[10:11], s[6:7] // (op 13525) convert
+
+
+v_mov_b64 v[28:29], v[14:15] // (op 13525) 
+s_add_u32 s1, 65536, s0 // (op 13525) 
+s_mov_b32 m0, s1 // (op 13525) reg expression
+s_mov_b32 s6, 128 // (op 13525) call()
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+v_add_co_u32 v28, s[10:11], v28, v10 // (op 13525) least significant half
+v_addc_co_u32 v29, s[10:11], 0, v29, s[10:11] // (op 13525) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13525) 
+buffer_load_dwordx4 v28, s[48:51], s6 offen offset: 0 lds // (op 13525) Load value direct to lds
+
+
+
+
+
+
+s_waitcnt vmcnt(23)
+s_barrier  // (op 14302) 
+
+
+
+ds_read_b128 v[28:31], v4 // (op 13121) Load local data 
+ds_read_b128 v[32:35], v4 offset:64 // (op 13121) Load local data 
+
+
+
+ds_read_b128 v[36:39], v4 offset:2048 // (op 13126) Load local data 
+ds_read_b128 v[40:43], v4 offset:2112 // (op 13126) Load local data 
+
+
+
+ds_read_b128 v[44:47], v4 offset:4096 // (op 13131) Load local data 
+ds_read_b128 v[48:51], v4 offset:4160 // (op 13131) Load local data 
+
+
+
+ds_read_b128 v[52:55], v4 offset:6144 // (op 13136) Load local data 
+ds_read_b128 v[56:59], v4 offset:6208 // (op 13136) Load local data 
+s_waitcnt vmcnt(15)
+s_barrier  // (op 14286) 
+
+
+
+ds_read_b128 v[60:63], v3 offset:16384 // (op 13081) Load local data 
+ds_read_b128 v[64:67], v3 offset:16448 // (op 13081) Load local data 
+
+
+
+ds_read_b128 v[68:71], v3 offset:18432 // (op 13086) Load local data 
+ds_read_b128 v[72:75], v3 offset:18496 // (op 13086) Load local data 
+
+
+
+ds_read_b128 v[76:79], v3 offset:20480 // (op 13091) Load local data 
+ds_read_b128 v[80:83], v3 offset:20544 // (op 13091) Load local data 
+
+
+
+ds_read_b128 v[84:87], v3 offset:22528 // (op 13096) Load local data 
+ds_read_b128 v[88:91], v3 offset:22592 // (op 13096) Load local data 
+
+
+
+ds_read_b128 v[92:95], v3 offset:24576 // (op 13101) Load local data 
+ds_read_b128 v[96:99], v3 offset:24640 // (op 13101) Load local data 
+
+
+
+ds_read_b128 v[100:103], v3 offset:26624 // (op 13106) Load local data 
+ds_read_b128 v[104:107], v3 offset:26688 // (op 13106) Load local data 
+
+
+
+ds_read_b128 v[108:111], v3 offset:28672 // (op 13111) Load local data 
+ds_read_b128 v[112:115], v3 offset:28736 // (op 13111) Load local data 
+
+
+
+ds_read_b128 v[116:119], v3 offset:30720 // (op 13116) Load local data 
+ds_read_b128 v[120:123], v3 offset:30784 // (op 13116) Load local data 
+v_and_b32 v18, -8, v1 // (op 13721) 
+v_sub_u32 v20, v1, v18 // (op 13721) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13721) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13721) 
+v_lshl_add_u32 v10, v20, 7, v18 // (op 13721) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v10 // (op 13721) Wait state hazard: VALU Write Readlane Hazard
+
+v_and_b32 v18, -8, v1 // (op 13778) 
+v_sub_u32 v20, v1, v18 // (op 13778) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13778) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13778) 
+v_lshl_add_u32 v10, v20, 7, v18 // (op 13778) 
+
+
+s_nop 0
+v_readfirstlane_b32 s1, v10 // (op 13778) Wait state hazard: VALU Write Readlane Hazard
+
+v_and_b32 v18, -8, v1 // (op 13858) 
+v_sub_u32 v20, v1, v18 // (op 13858) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13858) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13858) 
+v_lshl_add_u32 v10, v20, 7, v18 // (op 13858) 
+
+
+s_nop 0
+v_readfirstlane_b32 s6, v10 // (op 13858) Wait state hazard: VALU Write Readlane Hazard
+
+v_and_b32 v18, -8, v1 // (op 13902) 
+v_sub_u32 v20, v1, v18 // (op 13902) 
+
+v_lshlrev_b32 v18, 4, v20 // (op 13902) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 13902) 
+v_lshl_add_u32 v10, v20, 7, v18 // (op 13902) 
+
+
+s_nop 0
+v_readfirstlane_b32 s7, v10 // (op 13902) Wait state hazard: VALU Write Readlane Hazard
+
+s_mov_b32 s10, 0 // (op 3300) call()
+s_ashr_i64 s[14:15], s[36:37], 7 // (op 3299) 
+s_mov_b32 s11, s14 // (op 3299) convert
+
+s_and_b32 s14, s11, 4294967294 // (op 3299) 
+
+s_cmp_lt_u32 s10, s14 // (op 3299) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc0 RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoop_3299 // (op 3299) Condition: Top (jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoop_3299 if false)
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoop_3299:
+s_add_u32 s10, s10, 2 // (op 3301) 
+s_waitcnt vmcnt(14)
+v_mov_b32 v10, v24 // (op 13418) reg expression
+s_barrier  // (op 14305) 
+v_mov_b32 v11, v25 // (op 13418) reg expression
+
+s_lshl_b64 s[14:15], s[24:25], 5 // (op 13486) 
+v_mov_b64 v[14:15], s[14:15] // (op 13486) convert
+
+
+v_mov_b64 v[124:125], v[12:13] // (op 13486) 
+v_mov_b64 v[126:127], v[124:125] // (op 13486) 
+s_mov_b32 m0, s1 // (op 13486) reg expression
+s_mov_b32 s11, 256 // (op 13486) call()
+buffer_load_dwordx4 v126, s[52:55], s11 offen offset: 0 lds // (op 13486) Load value direct to lds
+v_add_co_u32 v126, s[14:15], v126, v14 // (op 13486) least significant half
+v_addc_co_u32 v127, s[14:15], 0, v127, s[14:15] // (op 13486) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13486) 
+buffer_load_dwordx4 v126, s[52:55], s11 offen offset: 0 lds // (op 13486) Load value direct to lds
+v_add_co_u32 v126, s[14:15], v126, v14 // (op 13486) least significant half
+v_addc_co_u32 v127, s[14:15], 0, v127, s[14:15] // (op 13486) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13486) 
+buffer_load_dwordx4 v126, s[52:55], s11 offen offset: 0 lds // (op 13486) Load value direct to lds
+v_add_co_u32 v126, s[14:15], v126, v14 // (op 13486) least significant half
+v_addc_co_u32 v127, s[14:15], 0, v127, s[14:15] // (op 13486) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13486) 
+s_waitcnt vmcnt(16)
+v_mov_b32 v128, v22 // (op 13431) reg expression
+v_mov_b32 v129, v23 // (op 13431) reg expression
+s_waitcnt vmcnt(15)
+v_mov_b32 v130, v26 // (op 13444) reg expression
+v_mov_b32 v131, v27 // (op 13444) reg expression
+buffer_load_dwordx4 v126, s[52:55], s11 offen offset: 0 lds // (op 13486) Load value direct to lds
+
+
+
+v_bfe_u32 v132, v130, 0, 8 // (op 12384) 
+v_bfe_u32 v133, v130, 8, 8 // (op 12384) 
+v_bfe_u32 v134, v130, 16, 8 // (op 12384) 
+v_bfe_u32 v135, v130, 24, 8 // (op 12384) 
+v_permlane16_swap_b32 v132, v133 // (op 12384) 
+s_nop 0
+v_permlane16_swap_b32 v134, v135 // (op 12384) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v132, v134 // (op 12384) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v133, v135 // (op 12384) 
+s_waitcnt lgkmcnt(0)
+s_barrier  // (op 14289) 
+
+s_lshl_b64 s[14:15], s[12:13], 5 // (op 13481) 
+v_mov_b64 v[14:15], s[14:15] // (op 13481) convert
+
+
+v_mov_b64 v[126:127], v[16:17] // (op 13481) 
+v_mov_b64 v[136:137], v[126:127] // (op 13481) 
+s_add_u32 s11, 16384, s0 // (op 13481) 
+s_mov_b32 m0, s11 // (op 13481) reg expression
+s_mov_b32 s14, 256 // (op 13481) call()
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13481) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13481) 
+v_bfe_u32 v138, v10, 0, 8 // (op 12511) 
+v_bfe_u32 v139, v10, 8, 8 // (op 12511) 
+v_bfe_u32 v140, v10, 16, 8 // (op 12511) 
+v_bfe_u32 v141, v10, 24, 8 // (op 12511) 
+v_permlane16_swap_b32 v138, v139 // (op 12511) 
+s_nop 0
+v_permlane16_swap_b32 v140, v141 // (op 12511) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v138, v140 // (op 12511) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v139, v141 // (op 12511) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[60:67], v[28:35], a[0:3], v132, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 78) 
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[60:67], v[36:43], a[4:7], v132, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 315) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[8:11], v[60:67], v[44:51], a[8:11], v132, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 451) 
+s_add_u32 m0, m0, 4096 // (op 13481) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[12:15], v[60:67], v[52:59], a[12:15], v132, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 587) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_mfma_scale_f32_16x16x128_f8f6f4 a[16:19], v[68:75], v[28:35], a[16:19], v133, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1007) 
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_mfma_scale_f32_16x16x128_f8f6f4 a[20:23], v[68:75], v[36:43], a[20:23], v133, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 969) 
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[24:27], v[68:75], v[44:51], a[24:27], v133, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 931) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[28:31], v[68:75], v[52:59], a[28:31], v133, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 893) 
+s_add_u32 m0, m0, 4096 // (op 13481) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[32:35], v[76:83], v[28:35], a[32:35], v134, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1617) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_mfma_scale_f32_16x16x128_f8f6f4 a[36:39], v[76:83], v[36:43], a[36:39], v134, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1579) 
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_mfma_scale_f32_16x16x128_f8f6f4 a[40:43], v[76:83], v[44:51], a[40:43], v134, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1541) 
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[44:47], v[76:83], v[52:59], a[44:47], v134, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1503) 
+s_add_u32 m0, m0, 4096 // (op 13481) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[48:51], v[84:91], v[28:35], a[48:51], v135, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2227) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[52:55], v[84:91], v[36:43], a[52:55], v135, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2189) 
+v_bfe_u32 v142, v128, 0, 8 // (op 12415) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[56:59], v[84:91], v[44:51], a[56:59], v135, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2151) 
+v_bfe_u32 v143, v128, 8, 8 // (op 12415) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[60:63], v[84:91], v[52:59], a[60:63], v135, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2113) 
+v_bfe_u32 v144, v128, 16, 8 // (op 12415) 
+
+v_bfe_u32 v145, v128, 24, 8 // (op 12415) 
+v_permlane16_swap_b32 v142, v143 // (op 12415) 
+s_nop 0
+v_permlane16_swap_b32 v144, v145 // (op 12415) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v142, v144 // (op 12415) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v143, v145 // (op 12415) 
+s_waitcnt vmcnt(17)
+s_barrier  // (op 14324) 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[64:67], v[92:99], v[28:35], a[64:67], v142, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2837) 
+ds_read_b128 v[146:149], v6 offset:49152 // (op 216) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[68:71], v[92:99], v[36:43], a[68:71], v142, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2799) 
+ds_read_b128 v[150:153], v6 offset:49216 // (op 216) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[72:75], v[92:99], v[44:51], a[72:75], v142, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2761) 
+ds_read_b128 v[154:157], v6 offset:51200 // (op 324) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[76:79], v[92:99], v[52:59], a[76:79], v142, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2723) 
+ds_read_b128 v[158:161], v6 offset:51264 // (op 324) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[80:83], v[100:107], v[28:35], a[80:83], v143, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3447) 
+ds_read_b128 v[162:165], v6 offset:53248 // (op 460) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[84:87], v[100:107], v[36:43], a[84:87], v143, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3409) 
+ds_read_b128 v[166:169], v6 offset:53312 // (op 460) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[88:91], v[100:107], v[44:51], a[88:91], v143, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3371) 
+ds_read_b128 v[170:173], v6 offset:55296 // (op 596) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[92:95], v[100:107], v[52:59], a[92:95], v143, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3333) 
+ds_read_b128 v[174:177], v6 offset:55360 // (op 596) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[96:99], v[108:115], v[28:35], a[96:99], v144, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4057) 
+s_waitcnt vmcnt(9)
+s_barrier  // (op 14318) 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[100:103], v[108:115], v[36:43], a[100:103], v144, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4019) 
+v_add_u32 v18, 65536, v5 // (op 214) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[104:107], v[108:115], v[44:51], a[104:107], v144, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3981) 
+ds_read_b128 v[60:63], v18 // (op 214) Load local data 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[108:111], v[108:115], v[52:59], a[108:111], v144, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3943) 
+v_add_u32 v18, 65600, v5 // (op 214) 
+ds_read_b128 v[64:67], v18 // (op 214) Load local data 
+
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[112:115], v[116:123], v[28:35], a[112:115], v145, v138 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4667) 
+v_add_u32 v18, 67584, v5 // (op 901) 
+ds_read_b128 v[68:71], v18 // (op 901) Load local data 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[116:119], v[116:123], v[36:43], a[116:119], v145, v139 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4629) 
+v_add_u32 v18, 67648, v5 // (op 901) 
+ds_read_b128 v[72:75], v18 // (op 901) Load local data 
+
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[120:123], v[116:123], v[44:51], a[120:123], v145, v140 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4591) 
+v_add_u32 v18, 69632, v5 // (op 1511) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_mfma_scale_f32_16x16x128_f8f6f4 a[124:127], v[116:123], v[52:59], a[124:127], v145, v141 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4553) 
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+
+
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13481) 
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+v_add_co_u32 v136, s[18:19], v136, v14 // (op 13481) least significant half
+v_addc_co_u32 v137, s[18:19], 0, v137, s[18:19] // (op 13481) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13481) 
+ds_read_b128 v[76:79], v18 // (op 1511) Load local data 
+
+v_add_u32 v18, 69696, v5 // (op 1511) 
+ds_read_b128 v[80:83], v18 // (op 1511) Load local data 
+
+buffer_load_dwordx4 v136, s[48:51], s14 offen offset: 0 lds // (op 13481) Load value direct to lds
+
+
+
+
+
+
+
+
+
+v_add_u32 v18, 71680, v5 // (op 2121) 
+v_mov_b32 v20, v19 // (op 13426) 
+v_add_u32 v14, 8, v20 // (op 13426) 
+
+ds_read_b128 v[84:87], v18 // (op 2121) Load local data 
+
+v_add_u32 v15, 71744, v5 // (op 2121) 
+ds_read_b128 v[88:91], v15 // (op 2121) Load local data 
+
+buffer_load_dwordx2 v[24:25], v14, s[60:63], 0 offen // (op 13426) Load value
+
+
+
+
+
+v_add_u32 v19, 8, v19 // (op 14019) 
+v_add_u32 v18, 73728, v5 // (op 2731) 
+
+
+ds_read_b128 v[92:95], v18 // (op 2731) Load local data 
+
+v_add_u32 v18, 73792, v5 // (op 2731) 
+ds_read_b128 v[96:99], v18 // (op 2731) Load local data 
+
+v_mov_b32 v18, v21 // (op 13439) 
+
+
+
+s_lshl_b32 s11, s28, 6 // (op 13439) 
+s_add_u32 s14, 8, s11 // (op 13439) 
+
+v_add_u32 v20, v18, s14 // (op 13439) 
+
+
+v_add_u32 v14, 75776, v5 // (op 3341) 
+ds_read_b128 v[100:103], v14 // (op 3341) Load local data 
+
+v_add_u32 v14, 75840, v5 // (op 3341) 
+buffer_load_dwordx2 v[22:23], v20, s[56:59], 0 offen // (op 13439) Load value
+
+ds_read_b128 v[104:107], v14 // (op 3341) Load local data 
+
+
+
+
+
+
+v_add_u32 v20, 8, v18 // (op 13452) 
+
+buffer_load_dwordx2 v[26:27], v20, s[56:59], 0 offen // (op 13452) Load value
+
+v_add_u32 v20, 77824, v5 // (op 3951) 
+
+ds_read_b128 v[108:111], v20 // (op 3951) Load local data 
+
+v_add_u32 v21, 8, v21 // (op 13967) 
+v_add_u32 v18, 77888, v5 // (op 3951) 
+ds_read_b128 v[112:115], v18 // (op 3951) Load local data 
+
+
+
+
+v_add_u32 v18, 79872, v5 // (op 4561) 
+ds_read_b128 v[132:135], v18 // (op 4561) Load local data 
+
+v_add_u32 v18, 79936, v5 // (op 4561) 
+ds_read_b128 v[136:139], v18 // (op 4561) Load local data 
+
+v_bfe_u32 v140, v131, 0, 8 // (op 12399) 
+v_bfe_u32 v141, v131, 8, 8 // (op 12399) 
+v_bfe_u32 v142, v131, 16, 8 // (op 12399) 
+v_bfe_u32 v143, v131, 24, 8 // (op 12399) 
+v_permlane16_swap_b32 v140, v141 // (op 12399) 
+s_waitcnt lgkmcnt(15)
+s_barrier  // (op 14328) 
+v_permlane16_swap_b32 v142, v143 // (op 12399) 
+
+s_lshl_b64 s[14:15], s[24:25], 5 // (op 13508) 
+v_mov_b64 v[14:15], s[14:15] // (op 13508) convert
+
+
+v_permlane32_swap_b32 v140, v142 // (op 12399) 
+v_permlane32_swap_b32 v141, v143 // (op 12399) 
+v_mov_b64 v[144:145], v[124:125] // (op 13508) 
+
+s_add_u32 s11, 49152, s7 // (op 13508) 
+s_mov_b32 m0, s11 // (op 13508) reg expression
+s_mov_b32 s14, 384 // (op 13508) call()
+v_bfe_u32 v178, v11, 0, 8 // (op 12526) 
+v_bfe_u32 v179, v11, 8, 8 // (op 12526) 
+v_bfe_u32 v180, v11, 16, 8 // (op 12526) 
+v_bfe_u32 v181, v11, 24, 8 // (op 12526) 
+v_permlane16_swap_b32 v178, v179 // (op 12526) 
+s_nop 0
+v_permlane16_swap_b32 v180, v181 // (op 12526) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v178, v180 // (op 12526) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v179, v181 // (op 12526) 
+buffer_load_dwordx4 v144, s[52:55], s14 offen offset: 0 lds // (op 13508) Load value direct to lds
+
+v_add_co_u32 v144, s[18:19], v144, v14 // (op 13508) least significant half
+s_waitcnt lgkmcnt(14)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[60:67], v[146:153], a[0:3], v140, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 221) 
+v_addc_co_u32 v145, s[18:19], 0, v145, s[18:19] // (op 13508) most significant half
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[60:67], v[154:161], a[4:7], v140, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 316) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[8:11], v[60:67], v[162:169], a[8:11], v140, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 452) 
+s_add_u32 m0, m0, 4096 // (op 13508) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[12:15], v[60:67], v[170:177], a[12:15], v140, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 588) 
+buffer_load_dwordx4 v144, s[52:55], s14 offen offset: 0 lds // (op 13508) Load value direct to lds
+s_waitcnt lgkmcnt(12)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[16:19], v[68:75], v[146:153], a[16:19], v141, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1008) 
+v_add_co_u32 v144, s[18:19], v144, v14 // (op 13508) least significant half
+v_mfma_scale_f32_16x16x128_f8f6f4 a[20:23], v[68:75], v[154:161], a[20:23], v141, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 970) 
+v_addc_co_u32 v145, s[18:19], 0, v145, s[18:19] // (op 13508) most significant half
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[24:27], v[68:75], v[162:169], a[24:27], v141, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 932) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[28:31], v[68:75], v[170:177], a[28:31], v141, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 894) 
+s_add_u32 m0, m0, 4096 // (op 13508) 
+v_bfe_u32 v182, v129, 0, 8 // (op 12430) 
+v_bfe_u32 v183, v129, 8, 8 // (op 12430) 
+s_waitcnt lgkmcnt(10)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[32:35], v[76:83], v[146:153], a[32:35], v142, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1618) 
+v_bfe_u32 v184, v129, 16, 8 // (op 12430) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[36:39], v[76:83], v[154:161], a[36:39], v142, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1580) 
+v_bfe_u32 v185, v129, 24, 8 // (op 12430) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[40:43], v[76:83], v[162:169], a[40:43], v142, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1542) 
+v_permlane16_swap_b32 v182, v183 // (op 12430) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[44:47], v[76:83], v[170:177], a[44:47], v142, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1504) 
+buffer_load_dwordx4 v144, s[52:55], s14 offen offset: 0 lds // (op 13508) Load value direct to lds
+v_permlane16_swap_b32 v184, v185 // (op 12430) 
+v_add_co_u32 v144, s[18:19], v144, v14 // (op 13508) least significant half
+v_addc_co_u32 v145, s[18:19], 0, v145, s[18:19] // (op 13508) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13508) 
+s_waitcnt lgkmcnt(8)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[48:51], v[84:91], v[146:153], a[48:51], v143, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2228) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[52:55], v[84:91], v[154:161], a[52:55], v143, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2190) 
+v_permlane32_swap_b32 v182, v184 // (op 12430) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[56:59], v[84:91], v[162:169], a[56:59], v143, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2152) 
+v_permlane32_swap_b32 v183, v185 // (op 12430) 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[60:63], v[84:91], v[170:177], a[60:63], v143, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2114) 
+s_waitcnt vmcnt(14)
+s_barrier  // (op 14311) 
+
+
+
+
+ds_read_b128 v[28:31], v4 // (op 67) Load local data 
+ds_read_b128 v[32:35], v4 offset:64 // (op 67) Load local data 
+s_waitcnt lgkmcnt(8)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[64:67], v[92:99], v[146:153], a[64:67], v182, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2838) 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[68:71], v[92:99], v[154:161], a[68:71], v182, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2800) 
+ds_read_b128 v[36:39], v4 offset:2048 // (op 312) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[72:75], v[92:99], v[162:169], a[72:75], v182, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2762) 
+ds_read_b128 v[40:43], v4 offset:2112 // (op 312) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[76:79], v[92:99], v[170:177], a[76:79], v182, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2724) 
+ds_read_b128 v[44:47], v4 offset:4096 // (op 448) Load local data 
+ds_read_b128 v[48:51], v4 offset:4160 // (op 448) Load local data 
+
+
+
+s_waitcnt lgkmcnt(10)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[80:83], v[100:107], v[146:153], a[80:83], v183, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3448) 
+ds_read_b128 v[52:55], v4 offset:6144 // (op 584) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[84:87], v[100:107], v[154:161], a[84:87], v183, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3410) 
+ds_read_b128 v[56:59], v4 offset:6208 // (op 584) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[88:91], v[100:107], v[162:169], a[88:91], v183, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3372) 
+s_waitcnt vmcnt(6)
+s_barrier  // (op 14295) 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[92:95], v[100:107], v[170:177], a[92:95], v183, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3334) 
+ds_read_b128 v[60:63], v3 offset:16384 // (op 62) Load local data 
+ds_read_b128 v[64:67], v3 offset:16448 // (op 62) Load local data 
+
+
+
+s_waitcnt lgkmcnt(12)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[96:99], v[108:115], v[146:153], a[96:99], v184, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4058) 
+ds_read_b128 v[68:71], v3 offset:18432 // (op 889) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[100:103], v[108:115], v[154:161], a[100:103], v184, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4020) 
+ds_read_b128 v[72:75], v3 offset:18496 // (op 889) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[104:107], v[108:115], v[162:169], a[104:107], v184, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3982) 
+buffer_load_dwordx4 v144, s[52:55], s14 offen offset: 0 lds // (op 13508) Load value direct to lds
+
+
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[108:111], v[108:115], v[170:177], a[108:111], v184, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3944) 
+v_add_co_u32 v12, vcc, 256, v12 // (op 13670) least significant half
+s_waitcnt lgkmcnt(12)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[112:115], v[132:139], v[146:153], a[112:115], v185, v178 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4668) 
+s_barrier  // (op 14321) 
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[116:119], v[132:139], v[154:161], a[116:119], v185, v179 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4630) 
+v_addc_co_u32 v13, vcc, 0, v13, vcc // (op 13670) most significant half
+
+s_lshl_b64 s[14:15], s[12:13], 5 // (op 13503) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[120:123], v[132:139], v[162:169], a[120:123], v185, v180 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4592) 
+v_mov_b64 v[10:11], s[14:15] // (op 13503) convert
+
+
+
+v_mov_b64 v[14:15], v[126:127] // (op 13503) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[124:127], v[132:139], v[170:177], a[124:127], v185, v181 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4554) 
+s_add_u32 s11, 65536, s6 // (op 13503) 
+
+
+
+
+s_mov_b32 m0, s11 // (op 13503) reg expression
+s_mov_b32 s14, 384 // (op 13503) call()
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+ds_read_b128 v[76:79], v3 offset:20480 // (op 1499) Load local data 
+ds_read_b128 v[80:83], v3 offset:20544 // (op 1499) Load local data 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+
+
+
+ds_read_b128 v[84:87], v3 offset:22528 // (op 2109) Load local data 
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+ds_read_b128 v[88:91], v3 offset:22592 // (op 2109) Load local data 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+
+
+
+ds_read_b128 v[92:95], v3 offset:24576 // (op 2719) Load local data 
+ds_read_b128 v[96:99], v3 offset:24640 // (op 2719) Load local data 
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+
+
+
+ds_read_b128 v[100:103], v3 offset:26624 // (op 3329) Load local data 
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+ds_read_b128 v[104:107], v3 offset:26688 // (op 3329) Load local data 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+
+
+
+ds_read_b128 v[108:111], v3 offset:28672 // (op 3939) Load local data 
+ds_read_b128 v[112:115], v3 offset:28736 // (op 3939) Load local data 
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+
+
+
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+ds_read_b128 v[116:119], v3 offset:30720 // (op 4549) Load local data 
+ds_read_b128 v[120:123], v3 offset:30784 // (op 4549) Load local data 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+v_add_co_u32 v14, s[18:19], v14, v10 // (op 13503) least significant half
+v_addc_co_u32 v15, s[18:19], 0, v15, s[18:19] // (op 13503) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13503) 
+buffer_load_dwordx4 v14, s[48:51], s14 offen offset: 0 lds // (op 13503) Load value direct to lds
+
+
+
+
+
+v_add_co_u32 v16, vcc, 256, v16 // (op 13606) least significant half
+v_addc_co_u32 v17, vcc, 0, v17, vcc // (op 13606) most significant half
+s_ashr_i64 s[14:15], s[36:37], 7 // (op 3299) 
+s_mov_b32 s11, s14 // (op 3299) convert
+
+s_and_b32 s14, s11, 4294967294 // (op 3299) 
+
+s_cmp_lt_u32 s10, s14 // (op 3299) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc1 RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoop_3299 // (op 3299) Condition: Bottom (jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoop_3299 if true)
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoop_3299:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+s_barrier  // (op 14390) 
+v_lshrrev_b32 v10, 3, v1 // (op 13538) 
+s_ashr_i64 s[0:1], s[36:37], 7 // (op 13538) 
+v_lshl_add_u32 v11, s16, 8, v10 // (op 13538) 
+
+s_lshr_b32 s6, s0, 1 // (op 13538) 
+
+v_and_b32 v10, -8, v1 // (op 13538) 
+v_sub_u32 v12, v1, v10 // (op 13538) 
+
+v_lshlrev_b32 v10, 4, v12 // (op 13538) 
+
+v_lshl_add_u32 v12, s6, 8, v10 // (op 13538) 
+
+
+v_mov_b32 v21, 0 // (op 13538) convert
+v_mov_b32 v20, v12 // (op 13538) convert
+
+v_mul_lo_u32 v13, v11, s13 // (op 13538) most significant: low of low * high
+v_mul_hi_u32 v10, v11, s12 // (op 13538) most significant: high of low * low
+v_mul_lo_u32 v12, v11, s12 // (op 13538) least significant: low of low * low
+v_add_u32 v13, v13, v10 // (op 13538) most significant: sum
+
+v_add_co_u32 v12, s[0:1], v12, v20 // (op 13538) least significant half
+v_addc_co_u32 v13, s[0:1], v13, v21, s[0:1] // (op 13538) most significant half
+
+
+
+s_mul_i32 s1, s12, s23 // (op 13540) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 13540) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 13540) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 13540) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13540) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13540) most significant: sum
+
+
+s_mov_b32 s48, s20 // (op 13540) reg expression
+s_mov_b32 s49, s21 // (op 13540) reg expression
+s_mov_b32 s50, s0 // (op 13540) reg expression
+s_mov_b32 s51, 131072 // (op 13540) call()
+
+v_and_b32 v10, -8, v1 // (op 13636) 
+s_ashr_i64 s[0:1], s[36:37], 7 // (op 13636) 
+v_sub_u32 v11, v1, v10 // (op 13636) 
+
+s_lshr_b32 s6, s0, 1 // (op 13636) 
+
+v_lshlrev_b32 v10, 4, v11 // (op 13636) 
+
+v_lshl_add_u32 v11, s6, 8, v10 // (op 13636) 
+
+
+v_mov_b32 v15, 0 // (op 13636) convert
+v_mov_b32 v14, v11 // (op 13636) convert
+
+v_lshrrev_b32 v10, 3, v1 // (op 13636) 
+v_lshl_add_u32 v11, s17, 7, v10 // (op 13636) 
+
+v_mul_lo_u32 v17, v11, s25 // (op 13636) most significant: low of low * high
+v_mul_hi_u32 v10, v11, s24 // (op 13636) most significant: high of low * low
+v_mul_lo_u32 v16, v11, s24 // (op 13636) least significant: low of low * low
+v_add_u32 v17, v17, v10 // (op 13636) most significant: sum
+
+
+v_add_co_u32 v10, s[0:1], v14, v16 // (op 13636) least significant half
+v_addc_co_u32 v11, s[0:1], v15, v17, s[0:1] // (op 13636) most significant half
+
+
+
+s_mul_i32 s1, s24, s9 // (op 13638) most significant: low of low * high
+s_mul_i32 s6, s25, s8 // (op 13638) most significant: low of high * low
+s_mul_i32 s0, s24, s8 // (op 13638) least significant
+s_mul_hi_u32 s7, s24, s8 // (op 13638) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 13638) most significant: sum
+s_add_u32 s1, s1, s7 // (op 13638) most significant: sum
+
+
+s_mov_b32 s52, s26 // (op 13638) reg expression
+s_mov_b32 s53, s27 // (op 13638) reg expression
+s_mov_b32 s54, s0 // (op 13638) reg expression
+s_mov_b32 s55, 131072 // (op 13638) call()
+
+v_and_b32 v14, -8, v1 // (op 13734) 
+v_sub_u32 v15, v1, v14 // (op 13734) 
+
+v_lshlrev_b32 v14, 4, v15 // (op 13734) 
+
+v_lshrrev_b32 v15, 3, v1 // (op 13734) 
+v_lshl_add_u32 v16, v15, 7, v14 // (op 13734) 
+
+
+s_nop 0
+v_readfirstlane_b32 s0, v16 // (op 13734) Wait state hazard: VALU Write Readlane Hazard
+
+v_and_b32 v14, -8, v1 // (op 13791) 
+v_sub_u32 v15, v1, v14 // (op 13791) 
+
+v_lshlrev_b32 v14, 4, v15 // (op 13791) 
+
+v_lshrrev_b32 v15, 3, v1 // (op 13791) 
+v_lshl_add_u32 v16, v15, 7, v14 // (op 13791) 
+
+
+s_nop 0
+v_readfirstlane_b32 s1, v16 // (op 13791) Wait state hazard: VALU Write Readlane Hazard
+
+v_and_b32 v14, 63, v1 // (op 14056) 
+s_ashr_i64 s[6:7], s[36:37], 7 // (op 14056) 
+v_lshrrev_b32 v15, 4, v14 // (op 14056) 
+s_lshr_b32 s10, s6, 1 // (op 14056) 
+
+v_and_b32 v16, 3, v15 // (op 14056) 
+
+v_and_b32 v15, 15, v1 // (op 14056) 
+v_lshl_add_u32 v17, v16, 4, v15 // (op 14056) 
+
+
+v_and_b32 v15, 4294967168, v1 // (op 14056) 
+v_add_u32 v16, v15, v17 // (op 14056) 
+
+
+v_lshl_add_u32 v15, s16, 8, v16 // (op 14056) 
+
+v_lshrrev_b32 v16, 6, v14 // (op 14056) 
+
+v_lshlrev_b32 v14, 2, v16 // (op 14056) 
+
+v_lshl_add_u32 v16, s10, 3, v14 // (op 14056) 
+
+
+v_mul_lo_u32 v14, v15, s28 // (op 14056) 
+v_add_u32 v14, v14, v16 // (op 14056) 
+
+
+s_mul_i32 s7, s28, s23 // (op 14058) most significant: low of low * high
+s_mul_i32 s10, s29, s22 // (op 14058) most significant: low of high * low
+s_mul_i32 s6, s28, s22 // (op 14058) least significant
+s_mul_hi_u32 s11, s28, s22 // (op 14058) most significant: high of low * low
+s_add_u32 s7, s7, s10 // (op 14058) most significant: sum
+s_add_u32 s7, s7, s11 // (op 14058) most significant: sum
+
+
+s_mov_b32 s56, s30 // (op 14058) reg expression
+s_mov_b32 s57, s31 // (op 14058) reg expression
+s_mov_b32 s58, s6 // (op 14058) reg expression
+s_mov_b32 s59, 131072 // (op 14058) call()
+
+v_and_b32 v15, 63, v1 // (op 14083) 
+s_ashr_i64 s[6:7], s[36:37], 7 // (op 14083) 
+v_lshrrev_b32 v16, 6, v15 // (op 14083) 
+s_lshr_b32 s10, s6, 1 // (op 14083) 
+
+v_lshlrev_b32 v17, 2, v16 // (op 14083) 
+
+v_lshl_add_u32 v16, s10, 3, v17 // (op 14083) 
+
+
+v_lshrrev_b32 v17, 4, v15 // (op 14083) 
+
+v_and_b32 v15, 3, v17 // (op 14083) 
+
+v_and_b32 v17, 15, v1 // (op 14083) 
+v_lshl_add_u32 v18, v15, 4, v17 // (op 14083) 
+
+
+v_lshrrev_b32 v15, 6, v1 // (op 14083) 
+v_and_b32 v17, 1, v15 // (op 14083) 
+
+v_lshl_add_u32 v15, v17, 6, v18 // (op 14083) 
+
+
+v_lshl_add_u32 v17, s17, 7, v15 // (op 14083) 
+
+v_mul_lo_u32 v15, v17, s32 // (op 14083) 
+
+v_add_u32 v17, v16, v15 // (op 14083) 
+
+
+s_mul_i32 s7, s32, s9 // (op 14085) most significant: low of low * high
+s_mul_i32 s10, s33, s8 // (op 14085) most significant: low of high * low
+s_mul_i32 s6, s32, s8 // (op 14085) least significant
+s_mul_hi_u32 s11, s32, s8 // (op 14085) most significant: high of low * low
+s_add_u32 s7, s7, s10 // (op 14085) most significant: sum
+s_add_u32 s7, s7, s11 // (op 14085) most significant: sum
+
+
+s_mov_b32 s60, s34 // (op 14085) reg expression
+s_mov_b32 s61, s35 // (op 14085) reg expression
+s_mov_b32 s62, s6 // (op 14085) reg expression
+s_mov_b32 s63, 131072 // (op 14085) call()
+
+s_ashr_i64 s[6:7], s[36:37], 7 // (op 4525) 
+s_and_b32 s10, s6, 4294967294 // (op 4525) 
+
+s_ashr_i64 s[6:7], s[36:37], 7 // (op 4524) 
+s_mov_b32 s11, s6 // (op 4524) convert
+
+s_cmp_lt_u32 s10, s11 // (op 4524) 
+
+
+
+
+
+
+
+
+
+
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before branching into Bottom of TailLoop!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc0 RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoopTail_4524 // (op 4524) Condition: Top (jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoopTail_4524 if false)
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before falling through to TailLoop!
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoopTail_4524:
+s_barrier  // (op 14292) 
+s_add_u32 s10, s10, 1 // (op 4526) 
+
+s_lshl_b64 s[6:7], s[12:13], 5 // (op 13491) 
+v_mov_b64 v[18:19], s[6:7] // (op 13491) convert
+
+
+v_mov_b64 v[20:21], v[12:13] // (op 13491) 
+v_mov_b64 v[22:23], v[20:21] // (op 13491) 
+s_add_u32 s11, 16384, s0 // (op 13491) 
+s_mov_b32 m0, s11 // (op 13491) reg expression
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13491) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13491) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13491) 
+buffer_load_dwordx4 v22, s[48:51], 0 offen offset: 0 lds // (op 13491) Load value direct to lds
+
+
+
+
+v_add_co_u32 v12, vcc, 128, v12 // (op 13528) least significant half
+v_addc_co_u32 v13, vcc, 0, v13, vcc // (op 13528) most significant half
+s_barrier  // (op 14308) 
+
+s_lshl_b64 s[6:7], s[24:25], 5 // (op 13497) 
+v_mov_b64 v[18:19], s[6:7] // (op 13497) convert
+
+
+v_mov_b64 v[20:21], v[10:11] // (op 13497) 
+v_mov_b64 v[22:23], v[20:21] // (op 13497) 
+s_mov_b32 m0, s1 // (op 13497) reg expression
+buffer_load_dwordx4 v22, s[52:55], 0 offen offset: 0 lds // (op 13497) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13497) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13497) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13497) 
+buffer_load_dwordx4 v22, s[52:55], 0 offen offset: 0 lds // (op 13497) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13497) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13497) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13497) 
+buffer_load_dwordx4 v22, s[52:55], 0 offen offset: 0 lds // (op 13497) Load value direct to lds
+v_add_co_u32 v22, s[6:7], v22, v18 // (op 13497) least significant half
+v_addc_co_u32 v23, s[6:7], 0, v23, s[6:7] // (op 13497) most significant half
+
+s_add_u32 m0, m0, 4096 // (op 13497) 
+buffer_load_dwordx4 v22, s[52:55], 0 offen offset: 0 lds // (op 13497) Load value direct to lds
+
+
+
+v_add_co_u32 v10, vcc, 128, v10 // (op 13628) least significant half
+v_addc_co_u32 v11, vcc, 0, v11, vcc // (op 13628) most significant half
+s_waitcnt vmcnt(4)
+s_barrier  // (op 14298) 
+
+
+
+ds_read_b128 v[18:21], v3 offset:16384 // (op 164) Load local data 
+ds_read_b128 v[22:25], v3 offset:16448 // (op 164) Load local data 
+s_waitcnt vmcnt(0)
+s_barrier  // (op 14314) 
+
+
+
+ds_read_b128 v[26:29], v4 // (op 166) Load local data 
+ds_read_b128 v[30:33], v4 offset:64 // (op 166) Load local data 
+
+
+v_mov_b32 v15, v14 // (op 168) 
+v_mov_b32 v16, v15 // (op 168) reg expression
+
+buffer_load_dwordx2 v[34:35], v16, s[56:59], 0 offen // (op 168) Load value
+
+
+
+v_mov_b32 v16, v17 // (op 170) 
+v_mov_b32 v36, v16 // (op 170) reg expression
+
+buffer_load_dwordx2 v[38:39], v36, s[60:63], 0 offen // (op 170) Load value
+
+
+v_add_u32 v17, 4, v17 // (op 14073) 
+s_waitcnt vmcnt(1)
+v_bfe_u32 v40, v34, 0, 8 // (op 12607) 
+
+
+
+v_bfe_u32 v41, v34, 8, 8 // (op 12607) 
+v_bfe_u32 v42, v34, 16, 8 // (op 12607) 
+v_bfe_u32 v43, v34, 24, 8 // (op 12607) 
+v_permlane16_swap_b32 v40, v41 // (op 12607) 
+ds_read_b128 v[44:47], v4 offset:2048 // (op 295) Load local data 
+ds_read_b128 v[48:51], v4 offset:2112 // (op 295) Load local data 
+v_permlane16_swap_b32 v42, v43 // (op 12607) 
+
+
+
+s_nop 1
+v_permlane32_swap_b32 v40, v42 // (op 12607) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v41, v43 // (op 12607) 
+ds_read_b128 v[52:55], v4 offset:4096 // (op 431) Load local data 
+
+ds_read_b128 v[56:59], v4 offset:4160 // (op 431) Load local data 
+
+
+
+ds_read_b128 v[60:63], v4 offset:6144 // (op 567) Load local data 
+s_waitcnt vmcnt(0)
+v_bfe_u32 v34, v38, 0, 8 // (op 12667) 
+v_bfe_u32 v35, v38, 8, 8 // (op 12667) 
+v_bfe_u32 v36, v38, 16, 8 // (op 12667) 
+v_bfe_u32 v37, v38, 24, 8 // (op 12667) 
+v_permlane16_swap_b32 v34, v35 // (op 12667) 
+s_nop 0
+v_permlane16_swap_b32 v36, v37 // (op 12667) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v34, v36 // (op 12667) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v35, v37 // (op 12667) 
+ds_read_b128 v[64:67], v4 offset:6208 // (op 567) Load local data 
+
+
+
+
+s_waitcnt lgkmcnt(6)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[18:25], v[26:33], a[0:3], v40, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 171) 
+ds_read_b128 v[68:71], v3 offset:18432 // (op 789) Load local data 
+s_waitcnt lgkmcnt(5)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[18:25], v[44:51], a[4:7], v40, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 298) 
+ds_read_b128 v[72:75], v3 offset:18496 // (op 789) Load local data 
+
+
+
+s_waitcnt lgkmcnt(4)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[8:11], v[18:25], v[52:59], a[8:11], v40, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 434) 
+ds_read_b128 v[76:79], v3 offset:20480 // (op 1399) Load local data 
+s_waitcnt lgkmcnt(3)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[12:15], v[18:25], v[60:67], a[12:15], v40, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 570) 
+ds_read_b128 v[80:83], v3 offset:20544 // (op 1399) Load local data 
+
+
+
+
+s_waitcnt lgkmcnt(2)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[16:19], v[68:75], v[26:33], a[16:19], v41, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 793) 
+ds_read_b128 v[18:21], v3 offset:22528 // (op 2009) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[24:27], v[68:75], v[52:59], a[24:27], v41, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 847) 
+ds_read_b128 v[22:25], v3 offset:22592 // (op 2009) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[28:31], v[68:75], v[60:67], a[28:31], v41, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 874) 
+ds_read_b128 v[84:87], v3 offset:24576 // (op 2619) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[20:23], v[68:75], v[44:51], a[20:23], v41, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 820) 
+ds_read_b128 v[88:91], v3 offset:24640 // (op 2619) Load local data 
+
+
+
+s_lshl_b32 s11, s28, 6 // (op 2628) 
+v_add_u32 v16, v15, s11 // (op 2628) 
+
+
+buffer_load_dwordx2 v[38:39], v16, s[56:59], 0 offen // (op 2628) Load value
+
+s_waitcnt lgkmcnt(4)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[32:35], v[76:83], v[26:33], a[32:35], v42, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1403) 
+
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[40:43], v[76:83], v[52:59], a[40:43], v42, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1457) 
+v_add_u32 v14, 4, v14 // (op 14046) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[44:47], v[76:83], v[60:67], a[44:47], v42, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1484) 
+s_waitcnt vmcnt(0)
+v_bfe_u32 v68, v38, 0, 8 // (op 12621) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[36:39], v[76:83], v[44:51], a[36:39], v42, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 1430) 
+v_bfe_u32 v69, v38, 8, 8 // (op 12621) 
+
+v_bfe_u32 v70, v38, 16, 8 // (op 12621) 
+v_bfe_u32 v71, v38, 24, 8 // (op 12621) 
+v_permlane16_swap_b32 v68, v69 // (op 12621) 
+s_nop 0
+v_permlane16_swap_b32 v70, v71 // (op 12621) Wait state hazard: VALU Write Readlane Hazard
+s_nop 1
+v_permlane32_swap_b32 v68, v70 // (op 12621) Wait state hazard: VALU Write Readlane Hazard
+v_permlane32_swap_b32 v69, v71 // (op 12621) 
+s_waitcnt lgkmcnt(2)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[48:51], v[18:25], v[26:33], a[48:51], v43, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2013) 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[56:59], v[18:25], v[52:59], a[56:59], v43, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2067) 
+ds_read_b128 v[72:75], v3 offset:26624 // (op 3229) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[60:63], v[18:25], v[60:67], a[60:63], v43, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2094) 
+ds_read_b128 v[76:79], v3 offset:26688 // (op 3229) Load local data 
+
+
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[52:55], v[18:25], v[44:51], a[52:55], v43, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2040) 
+ds_read_b128 v[92:95], v3 offset:28672 // (op 3839) Load local data 
+
+
+ds_read_b128 v[96:99], v3 offset:28736 // (op 3839) Load local data 
+
+
+
+s_waitcnt lgkmcnt(4)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[68:71], v[84:91], v[44:51], a[68:71], v68, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2650) 
+ds_read_b128 v[18:21], v3 offset:30720 // (op 4449) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[64:67], v[84:91], v[26:33], a[64:67], v68, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2623) 
+ds_read_b128 v[22:25], v3 offset:30784 // (op 4449) Load local data 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[72:75], v[84:91], v[52:59], a[72:75], v68, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2677) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[76:79], v[84:91], v[60:67], a[76:79], v68, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 2704) 
+
+s_waitcnt lgkmcnt(4)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[84:87], v[72:79], v[44:51], a[84:87], v69, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3260) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[80:83], v[72:79], v[26:33], a[80:83], v69, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3233) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[88:91], v[72:79], v[52:59], a[88:91], v69, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3287) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[92:95], v[72:79], v[60:67], a[92:95], v69, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3314) 
+
+s_waitcnt lgkmcnt(2)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[100:103], v[92:99], v[44:51], a[100:103], v70, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3870) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[96:99], v[92:99], v[26:33], a[96:99], v70, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3843) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[104:107], v[92:99], v[52:59], a[104:107], v70, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3897) 
+v_mfma_scale_f32_16x16x128_f8f6f4 a[108:111], v[92:99], v[60:67], a[108:111], v70, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 3924) 
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_16x16x128_f8f6f4 a[116:119], v[18:25], v[44:51], a[116:119], v71, v35 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4480) 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[112:115], v[18:25], v[26:33], a[112:115], v71, v34 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4453) 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[120:123], v[18:25], v[52:59], a[120:123], v71, v36 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4507) 
+
+v_mfma_scale_f32_16x16x128_f8f6f4 a[124:127], v[18:25], v[60:67], a[124:127], v71, v37 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b001 blgp:0b001 // (op 4534) 
+
+
+
+
+s_ashr_i64 s[6:7], s[36:37], 7 // (op 4524) 
+s_mov_b32 s11, s6 // (op 4524) convert
+
+s_cmp_lt_u32 s10, s11 // (op 4524) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc1 RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoopTail_4524 // (op 4524) Condition: Bottom (jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopTop_KLoopTail_4524 if true)
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ForLoopBottom_KLoopTail_4524:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+s_barrier  // (op 14412) 
+
+
+
+
+
+v_cmp_eq_f32 vcc, 0.00000, v0 // (op 116) 
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before branching into conditional label!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_vccz RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalFalse_0_beta_116 // (op 116) Condition: False, jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalFalse_0_beta_116
+v_accvgpr_read v10, a0 // (op 42) 
+v_accvgpr_read v11, a1 // (op 42) 
+v_accvgpr_read v12, a2 // (op 42) 
+v_accvgpr_read v13, a3 // (op 42) 
+v_mul_f32 v14, v7, v10 // (op 42) 
+v_mul_f32 v15, v7, v11 // (op 42) 
+v_mul_f32 v16, v7, v12 // (op 42) 
+v_mul_f32 v17, v7, v13 // (op 42) 
+
+v_cvt_f16_f32 v10, v14 // (op 48) 
+v_cvt_f16_f32 v11, v15 // (op 48) 
+v_cvt_f16_f32 v12, v16 // (op 48) 
+v_cvt_f16_f32 v13, v17 // (op 48) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 50) 
+v_pack_b32_f16 v5, v12, v13 // (op 50) 
+
+v_mov_b32 v3, v9 // (op 50) reg expression
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 50) Store value
+
+
+
+v_accvgpr_read v10, a4 // (op 5650) 
+v_accvgpr_read v11, a5 // (op 5650) 
+v_accvgpr_read v12, a6 // (op 5650) 
+v_accvgpr_read v13, a7 // (op 5650) 
+v_mul_f32 v14, v7, v10 // (op 5650) 
+v_mul_f32 v15, v7, v11 // (op 5650) 
+v_mul_f32 v16, v7, v12 // (op 5650) 
+v_mul_f32 v17, v7, v13 // (op 5650) 
+
+v_cvt_f16_f32 v10, v14 // (op 5652) 
+v_cvt_f16_f32 v11, v15 // (op 5652) 
+v_cvt_f16_f32 v12, v16 // (op 5652) 
+v_cvt_f16_f32 v13, v17 // (op 5652) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5653) 
+v_pack_b32_f16 v5, v12, v13 // (op 5653) 
+
+s_lshl_b32 s0, s4, 5 // (op 5653) 
+v_add_u32 v3, v9, s0 // (op 5653) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5653) Store value
+
+
+
+v_accvgpr_read v10, a8 // (op 5664) 
+v_accvgpr_read v11, a9 // (op 5664) 
+v_accvgpr_read v12, a10 // (op 5664) 
+v_accvgpr_read v13, a11 // (op 5664) 
+v_mul_f32 v14, v7, v10 // (op 5664) 
+v_mul_f32 v15, v7, v11 // (op 5664) 
+v_mul_f32 v16, v7, v12 // (op 5664) 
+v_mul_f32 v17, v7, v13 // (op 5664) 
+
+v_cvt_f16_f32 v10, v14 // (op 5666) 
+v_cvt_f16_f32 v11, v15 // (op 5666) 
+v_cvt_f16_f32 v12, v16 // (op 5666) 
+v_cvt_f16_f32 v13, v17 // (op 5666) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5667) 
+v_pack_b32_f16 v5, v12, v13 // (op 5667) 
+
+s_lshl_b32 s0, s4, 6 // (op 5667) 
+v_add_u32 v3, v9, s0 // (op 5667) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5667) Store value
+
+
+
+v_accvgpr_read v10, a12 // (op 5678) 
+v_accvgpr_read v11, a13 // (op 5678) 
+v_accvgpr_read v12, a14 // (op 5678) 
+v_accvgpr_read v13, a15 // (op 5678) 
+v_mul_f32 v14, v7, v10 // (op 5678) 
+v_mul_f32 v15, v7, v11 // (op 5678) 
+v_mul_f32 v16, v7, v12 // (op 5678) 
+v_mul_f32 v17, v7, v13 // (op 5678) 
+
+v_cvt_f16_f32 v10, v14 // (op 5680) 
+v_cvt_f16_f32 v11, v15 // (op 5680) 
+v_cvt_f16_f32 v12, v16 // (op 5680) 
+v_cvt_f16_f32 v13, v17 // (op 5680) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5681) 
+v_pack_b32_f16 v5, v12, v13 // (op 5681) 
+
+s_lshl_b32 s0, s4, 5 // (op 5681) 
+s_mul_i32 s1, 3, s0 // (op 5681) 
+
+v_add_u32 v3, v9, s1 // (op 5681) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5681) Store value
+
+
+
+v_accvgpr_read v10, a16 // (op 5714) 
+v_accvgpr_read v11, a17 // (op 5714) 
+v_accvgpr_read v12, a18 // (op 5714) 
+v_accvgpr_read v13, a19 // (op 5714) 
+v_mul_f32 v14, v7, v10 // (op 5714) 
+v_mul_f32 v15, v7, v11 // (op 5714) 
+v_mul_f32 v16, v7, v12 // (op 5714) 
+v_mul_f32 v17, v7, v13 // (op 5714) 
+
+v_cvt_f16_f32 v10, v14 // (op 5716) 
+v_cvt_f16_f32 v11, v15 // (op 5716) 
+v_cvt_f16_f32 v12, v16 // (op 5716) 
+v_cvt_f16_f32 v13, v17 // (op 5716) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5718) 
+v_pack_b32_f16 v5, v12, v13 // (op 5718) 
+
+v_add_u32 v3, 32, v9 // (op 5718) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5718) Store value
+
+
+
+v_accvgpr_read v10, a20 // (op 5728) 
+v_accvgpr_read v11, a21 // (op 5728) 
+v_accvgpr_read v12, a22 // (op 5728) 
+v_accvgpr_read v13, a23 // (op 5728) 
+v_mul_f32 v14, v7, v10 // (op 5728) 
+v_mul_f32 v15, v7, v11 // (op 5728) 
+v_mul_f32 v16, v7, v12 // (op 5728) 
+v_mul_f32 v17, v7, v13 // (op 5728) 
+
+v_cvt_f16_f32 v10, v14 // (op 5730) 
+v_cvt_f16_f32 v11, v15 // (op 5730) 
+v_cvt_f16_f32 v12, v16 // (op 5730) 
+v_cvt_f16_f32 v13, v17 // (op 5730) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5720) 
+v_pack_b32_f16 v5, v12, v13 // (op 5720) 
+
+s_lshl_b32 s0, s4, 5 // (op 5720) 
+s_add_u32 s0, s0, 32 // (op 5720) 
+v_add_u32 v3, v9, s0 // (op 5720) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5720) Store value
+
+
+
+v_accvgpr_read v10, a24 // (op 5734) 
+v_accvgpr_read v11, a25 // (op 5734) 
+v_accvgpr_read v12, a26 // (op 5734) 
+v_accvgpr_read v13, a27 // (op 5734) 
+v_mul_f32 v14, v7, v10 // (op 5734) 
+v_mul_f32 v15, v7, v11 // (op 5734) 
+v_mul_f32 v16, v7, v12 // (op 5734) 
+v_mul_f32 v17, v7, v13 // (op 5734) 
+
+v_cvt_f16_f32 v10, v14 // (op 5736) 
+v_cvt_f16_f32 v11, v15 // (op 5736) 
+v_cvt_f16_f32 v12, v16 // (op 5736) 
+v_cvt_f16_f32 v13, v17 // (op 5736) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5722) 
+v_pack_b32_f16 v5, v12, v13 // (op 5722) 
+
+s_lshl_b32 s0, s4, 6 // (op 5722) 
+s_add_u32 s0, s0, 32 // (op 5722) 
+v_add_u32 v3, v9, s0 // (op 5722) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5722) Store value
+
+
+
+v_accvgpr_read v10, a28 // (op 5740) 
+v_accvgpr_read v11, a29 // (op 5740) 
+v_accvgpr_read v12, a30 // (op 5740) 
+v_accvgpr_read v13, a31 // (op 5740) 
+v_mul_f32 v14, v7, v10 // (op 5740) 
+v_mul_f32 v15, v7, v11 // (op 5740) 
+v_mul_f32 v16, v7, v12 // (op 5740) 
+v_mul_f32 v17, v7, v13 // (op 5740) 
+
+v_cvt_f16_f32 v10, v14 // (op 5742) 
+v_cvt_f16_f32 v11, v15 // (op 5742) 
+v_cvt_f16_f32 v12, v16 // (op 5742) 
+v_cvt_f16_f32 v13, v17 // (op 5742) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5724) 
+v_pack_b32_f16 v5, v12, v13 // (op 5724) 
+
+s_lshl_b32 s0, s4, 5 // (op 5724) 
+s_mul_i32 s1, 3, s0 // (op 5724) 
+s_add_u32 s1, s1, 32 // (op 5724) 
+
+v_add_u32 v3, v9, s1 // (op 5724) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5724) Store value
+
+
+
+v_accvgpr_read v10, a32 // (op 5790) 
+v_accvgpr_read v11, a33 // (op 5790) 
+v_accvgpr_read v12, a34 // (op 5790) 
+v_accvgpr_read v13, a35 // (op 5790) 
+v_mul_f32 v14, v7, v10 // (op 5790) 
+v_mul_f32 v15, v7, v11 // (op 5790) 
+v_mul_f32 v16, v7, v12 // (op 5790) 
+v_mul_f32 v17, v7, v13 // (op 5790) 
+
+v_cvt_f16_f32 v10, v14 // (op 5792) 
+v_cvt_f16_f32 v11, v15 // (op 5792) 
+v_cvt_f16_f32 v12, v16 // (op 5792) 
+v_cvt_f16_f32 v13, v17 // (op 5792) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5794) 
+v_pack_b32_f16 v5, v12, v13 // (op 5794) 
+
+v_add_u32 v3, 64, v9 // (op 5794) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5794) Store value
+
+
+
+v_accvgpr_read v10, a36 // (op 5804) 
+v_accvgpr_read v11, a37 // (op 5804) 
+v_accvgpr_read v12, a38 // (op 5804) 
+v_accvgpr_read v13, a39 // (op 5804) 
+v_mul_f32 v14, v7, v10 // (op 5804) 
+v_mul_f32 v15, v7, v11 // (op 5804) 
+v_mul_f32 v16, v7, v12 // (op 5804) 
+v_mul_f32 v17, v7, v13 // (op 5804) 
+
+v_cvt_f16_f32 v10, v14 // (op 5806) 
+v_cvt_f16_f32 v11, v15 // (op 5806) 
+v_cvt_f16_f32 v12, v16 // (op 5806) 
+v_cvt_f16_f32 v13, v17 // (op 5806) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5796) 
+v_pack_b32_f16 v5, v12, v13 // (op 5796) 
+
+s_lshl_b32 s0, s4, 5 // (op 5796) 
+s_add_u32 s0, s0, 64 // (op 5796) 
+v_add_u32 v3, v9, s0 // (op 5796) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5796) Store value
+
+
+
+v_accvgpr_read v10, a40 // (op 5810) 
+v_accvgpr_read v11, a41 // (op 5810) 
+v_accvgpr_read v12, a42 // (op 5810) 
+v_accvgpr_read v13, a43 // (op 5810) 
+v_mul_f32 v14, v7, v10 // (op 5810) 
+v_mul_f32 v15, v7, v11 // (op 5810) 
+v_mul_f32 v16, v7, v12 // (op 5810) 
+v_mul_f32 v17, v7, v13 // (op 5810) 
+
+v_cvt_f16_f32 v10, v14 // (op 5812) 
+v_cvt_f16_f32 v11, v15 // (op 5812) 
+v_cvt_f16_f32 v12, v16 // (op 5812) 
+v_cvt_f16_f32 v13, v17 // (op 5812) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5798) 
+v_pack_b32_f16 v5, v12, v13 // (op 5798) 
+
+s_lshl_b32 s0, s4, 6 // (op 5798) 
+s_add_u32 s0, s0, 64 // (op 5798) 
+v_add_u32 v3, v9, s0 // (op 5798) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5798) Store value
+
+
+
+v_accvgpr_read v10, a44 // (op 5816) 
+v_accvgpr_read v11, a45 // (op 5816) 
+v_accvgpr_read v12, a46 // (op 5816) 
+v_accvgpr_read v13, a47 // (op 5816) 
+v_mul_f32 v14, v7, v10 // (op 5816) 
+v_mul_f32 v15, v7, v11 // (op 5816) 
+v_mul_f32 v16, v7, v12 // (op 5816) 
+v_mul_f32 v17, v7, v13 // (op 5816) 
+
+v_cvt_f16_f32 v10, v14 // (op 5818) 
+v_cvt_f16_f32 v11, v15 // (op 5818) 
+v_cvt_f16_f32 v12, v16 // (op 5818) 
+v_cvt_f16_f32 v13, v17 // (op 5818) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5800) 
+v_pack_b32_f16 v5, v12, v13 // (op 5800) 
+
+s_lshl_b32 s0, s4, 5 // (op 5800) 
+s_mul_i32 s1, 3, s0 // (op 5800) 
+s_add_u32 s1, s1, 64 // (op 5800) 
+
+v_add_u32 v3, v9, s1 // (op 5800) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5800) Store value
+
+
+
+v_accvgpr_read v10, a48 // (op 5866) 
+v_accvgpr_read v11, a49 // (op 5866) 
+v_accvgpr_read v12, a50 // (op 5866) 
+v_accvgpr_read v13, a51 // (op 5866) 
+v_mul_f32 v14, v7, v10 // (op 5866) 
+v_mul_f32 v15, v7, v11 // (op 5866) 
+v_mul_f32 v16, v7, v12 // (op 5866) 
+v_mul_f32 v17, v7, v13 // (op 5866) 
+
+v_cvt_f16_f32 v10, v14 // (op 5868) 
+v_cvt_f16_f32 v11, v15 // (op 5868) 
+v_cvt_f16_f32 v12, v16 // (op 5868) 
+v_cvt_f16_f32 v13, v17 // (op 5868) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5870) 
+v_pack_b32_f16 v5, v12, v13 // (op 5870) 
+
+v_add_u32 v3, 96, v9 // (op 5870) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5870) Store value
+
+
+
+v_accvgpr_read v10, a52 // (op 5880) 
+v_accvgpr_read v11, a53 // (op 5880) 
+v_accvgpr_read v12, a54 // (op 5880) 
+v_accvgpr_read v13, a55 // (op 5880) 
+v_mul_f32 v14, v7, v10 // (op 5880) 
+v_mul_f32 v15, v7, v11 // (op 5880) 
+v_mul_f32 v16, v7, v12 // (op 5880) 
+v_mul_f32 v17, v7, v13 // (op 5880) 
+
+v_cvt_f16_f32 v10, v14 // (op 5882) 
+v_cvt_f16_f32 v11, v15 // (op 5882) 
+v_cvt_f16_f32 v12, v16 // (op 5882) 
+v_cvt_f16_f32 v13, v17 // (op 5882) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5872) 
+v_pack_b32_f16 v5, v12, v13 // (op 5872) 
+
+s_lshl_b32 s0, s4, 5 // (op 5872) 
+s_add_u32 s0, s0, 96 // (op 5872) 
+v_add_u32 v3, v9, s0 // (op 5872) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5872) Store value
+
+
+
+v_accvgpr_read v10, a56 // (op 5886) 
+v_accvgpr_read v11, a57 // (op 5886) 
+v_accvgpr_read v12, a58 // (op 5886) 
+v_accvgpr_read v13, a59 // (op 5886) 
+v_mul_f32 v14, v7, v10 // (op 5886) 
+v_mul_f32 v15, v7, v11 // (op 5886) 
+v_mul_f32 v16, v7, v12 // (op 5886) 
+v_mul_f32 v17, v7, v13 // (op 5886) 
+
+v_cvt_f16_f32 v10, v14 // (op 5888) 
+v_cvt_f16_f32 v11, v15 // (op 5888) 
+v_cvt_f16_f32 v12, v16 // (op 5888) 
+v_cvt_f16_f32 v13, v17 // (op 5888) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5874) 
+v_pack_b32_f16 v5, v12, v13 // (op 5874) 
+
+s_lshl_b32 s0, s4, 6 // (op 5874) 
+s_add_u32 s0, s0, 96 // (op 5874) 
+v_add_u32 v3, v9, s0 // (op 5874) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5874) Store value
+
+
+
+v_accvgpr_read v10, a60 // (op 5892) 
+v_accvgpr_read v11, a61 // (op 5892) 
+v_accvgpr_read v12, a62 // (op 5892) 
+v_accvgpr_read v13, a63 // (op 5892) 
+v_mul_f32 v14, v7, v10 // (op 5892) 
+v_mul_f32 v15, v7, v11 // (op 5892) 
+v_mul_f32 v16, v7, v12 // (op 5892) 
+v_mul_f32 v17, v7, v13 // (op 5892) 
+
+v_cvt_f16_f32 v10, v14 // (op 5894) 
+v_cvt_f16_f32 v11, v15 // (op 5894) 
+v_cvt_f16_f32 v12, v16 // (op 5894) 
+v_cvt_f16_f32 v13, v17 // (op 5894) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5876) 
+v_pack_b32_f16 v5, v12, v13 // (op 5876) 
+
+s_lshl_b32 s0, s4, 5 // (op 5876) 
+s_mul_i32 s1, 3, s0 // (op 5876) 
+s_add_u32 s1, s1, 96 // (op 5876) 
+
+v_add_u32 v3, v9, s1 // (op 5876) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5876) Store value
+
+
+
+v_accvgpr_read v10, a64 // (op 5942) 
+v_accvgpr_read v11, a65 // (op 5942) 
+v_accvgpr_read v12, a66 // (op 5942) 
+v_accvgpr_read v13, a67 // (op 5942) 
+v_mul_f32 v14, v7, v10 // (op 5942) 
+v_mul_f32 v15, v7, v11 // (op 5942) 
+v_mul_f32 v16, v7, v12 // (op 5942) 
+v_mul_f32 v17, v7, v13 // (op 5942) 
+
+v_cvt_f16_f32 v10, v14 // (op 5944) 
+v_cvt_f16_f32 v11, v15 // (op 5944) 
+v_cvt_f16_f32 v12, v16 // (op 5944) 
+v_cvt_f16_f32 v13, v17 // (op 5944) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5946) 
+v_pack_b32_f16 v5, v12, v13 // (op 5946) 
+
+v_add_u32 v3, 128, v9 // (op 5946) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5946) Store value
+
+
+
+v_accvgpr_read v10, a68 // (op 5956) 
+v_accvgpr_read v11, a69 // (op 5956) 
+v_accvgpr_read v12, a70 // (op 5956) 
+v_accvgpr_read v13, a71 // (op 5956) 
+v_mul_f32 v14, v7, v10 // (op 5956) 
+v_mul_f32 v15, v7, v11 // (op 5956) 
+v_mul_f32 v16, v7, v12 // (op 5956) 
+v_mul_f32 v17, v7, v13 // (op 5956) 
+
+v_cvt_f16_f32 v10, v14 // (op 5958) 
+v_cvt_f16_f32 v11, v15 // (op 5958) 
+v_cvt_f16_f32 v12, v16 // (op 5958) 
+v_cvt_f16_f32 v13, v17 // (op 5958) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5948) 
+v_pack_b32_f16 v5, v12, v13 // (op 5948) 
+
+s_lshl_b32 s0, s4, 5 // (op 5948) 
+s_add_u32 s0, s0, 128 // (op 5948) 
+v_add_u32 v3, v9, s0 // (op 5948) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5948) Store value
+
+
+
+v_accvgpr_read v10, a72 // (op 5962) 
+v_accvgpr_read v11, a73 // (op 5962) 
+v_accvgpr_read v12, a74 // (op 5962) 
+v_accvgpr_read v13, a75 // (op 5962) 
+v_mul_f32 v14, v7, v10 // (op 5962) 
+v_mul_f32 v15, v7, v11 // (op 5962) 
+v_mul_f32 v16, v7, v12 // (op 5962) 
+v_mul_f32 v17, v7, v13 // (op 5962) 
+
+v_cvt_f16_f32 v10, v14 // (op 5964) 
+v_cvt_f16_f32 v11, v15 // (op 5964) 
+v_cvt_f16_f32 v12, v16 // (op 5964) 
+v_cvt_f16_f32 v13, v17 // (op 5964) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5950) 
+v_pack_b32_f16 v5, v12, v13 // (op 5950) 
+
+s_lshl_b32 s0, s4, 6 // (op 5950) 
+s_add_u32 s0, s0, 128 // (op 5950) 
+v_add_u32 v3, v9, s0 // (op 5950) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5950) Store value
+
+
+
+v_accvgpr_read v10, a76 // (op 5968) 
+v_accvgpr_read v11, a77 // (op 5968) 
+v_accvgpr_read v12, a78 // (op 5968) 
+v_accvgpr_read v13, a79 // (op 5968) 
+v_mul_f32 v14, v7, v10 // (op 5968) 
+v_mul_f32 v15, v7, v11 // (op 5968) 
+v_mul_f32 v16, v7, v12 // (op 5968) 
+v_mul_f32 v17, v7, v13 // (op 5968) 
+
+v_cvt_f16_f32 v10, v14 // (op 5970) 
+v_cvt_f16_f32 v11, v15 // (op 5970) 
+v_cvt_f16_f32 v12, v16 // (op 5970) 
+v_cvt_f16_f32 v13, v17 // (op 5970) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 5952) 
+v_pack_b32_f16 v5, v12, v13 // (op 5952) 
+
+s_lshl_b32 s0, s4, 5 // (op 5952) 
+s_mul_i32 s1, 3, s0 // (op 5952) 
+s_add_u32 s1, s1, 128 // (op 5952) 
+
+v_add_u32 v3, v9, s1 // (op 5952) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 5952) Store value
+
+
+
+v_accvgpr_read v10, a80 // (op 6018) 
+v_accvgpr_read v11, a81 // (op 6018) 
+v_accvgpr_read v12, a82 // (op 6018) 
+v_accvgpr_read v13, a83 // (op 6018) 
+v_mul_f32 v14, v7, v10 // (op 6018) 
+v_mul_f32 v15, v7, v11 // (op 6018) 
+v_mul_f32 v16, v7, v12 // (op 6018) 
+v_mul_f32 v17, v7, v13 // (op 6018) 
+
+v_cvt_f16_f32 v10, v14 // (op 6020) 
+v_cvt_f16_f32 v11, v15 // (op 6020) 
+v_cvt_f16_f32 v12, v16 // (op 6020) 
+v_cvt_f16_f32 v13, v17 // (op 6020) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6022) 
+v_pack_b32_f16 v5, v12, v13 // (op 6022) 
+
+v_add_u32 v3, 160, v9 // (op 6022) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6022) Store value
+
+
+
+v_accvgpr_read v10, a84 // (op 6032) 
+v_accvgpr_read v11, a85 // (op 6032) 
+v_accvgpr_read v12, a86 // (op 6032) 
+v_accvgpr_read v13, a87 // (op 6032) 
+v_mul_f32 v14, v7, v10 // (op 6032) 
+v_mul_f32 v15, v7, v11 // (op 6032) 
+v_mul_f32 v16, v7, v12 // (op 6032) 
+v_mul_f32 v17, v7, v13 // (op 6032) 
+
+v_cvt_f16_f32 v10, v14 // (op 6034) 
+v_cvt_f16_f32 v11, v15 // (op 6034) 
+v_cvt_f16_f32 v12, v16 // (op 6034) 
+v_cvt_f16_f32 v13, v17 // (op 6034) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6024) 
+v_pack_b32_f16 v5, v12, v13 // (op 6024) 
+
+s_lshl_b32 s0, s4, 5 // (op 6024) 
+s_add_u32 s0, s0, 160 // (op 6024) 
+v_add_u32 v3, v9, s0 // (op 6024) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6024) Store value
+
+
+
+v_accvgpr_read v10, a88 // (op 6038) 
+v_accvgpr_read v11, a89 // (op 6038) 
+v_accvgpr_read v12, a90 // (op 6038) 
+v_accvgpr_read v13, a91 // (op 6038) 
+v_mul_f32 v14, v7, v10 // (op 6038) 
+v_mul_f32 v15, v7, v11 // (op 6038) 
+v_mul_f32 v16, v7, v12 // (op 6038) 
+v_mul_f32 v17, v7, v13 // (op 6038) 
+
+v_cvt_f16_f32 v10, v14 // (op 6040) 
+v_cvt_f16_f32 v11, v15 // (op 6040) 
+v_cvt_f16_f32 v12, v16 // (op 6040) 
+v_cvt_f16_f32 v13, v17 // (op 6040) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6026) 
+v_pack_b32_f16 v5, v12, v13 // (op 6026) 
+
+s_lshl_b32 s0, s4, 6 // (op 6026) 
+s_add_u32 s0, s0, 160 // (op 6026) 
+v_add_u32 v3, v9, s0 // (op 6026) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6026) Store value
+
+
+
+v_accvgpr_read v10, a92 // (op 6044) 
+v_accvgpr_read v11, a93 // (op 6044) 
+v_accvgpr_read v12, a94 // (op 6044) 
+v_accvgpr_read v13, a95 // (op 6044) 
+v_mul_f32 v14, v7, v10 // (op 6044) 
+v_mul_f32 v15, v7, v11 // (op 6044) 
+v_mul_f32 v16, v7, v12 // (op 6044) 
+v_mul_f32 v17, v7, v13 // (op 6044) 
+
+v_cvt_f16_f32 v10, v14 // (op 6046) 
+v_cvt_f16_f32 v11, v15 // (op 6046) 
+v_cvt_f16_f32 v12, v16 // (op 6046) 
+v_cvt_f16_f32 v13, v17 // (op 6046) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6028) 
+v_pack_b32_f16 v5, v12, v13 // (op 6028) 
+
+s_lshl_b32 s0, s4, 5 // (op 6028) 
+s_mul_i32 s1, 3, s0 // (op 6028) 
+s_add_u32 s1, s1, 160 // (op 6028) 
+
+v_add_u32 v3, v9, s1 // (op 6028) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6028) Store value
+
+
+
+v_accvgpr_read v10, a96 // (op 6094) 
+v_accvgpr_read v11, a97 // (op 6094) 
+v_accvgpr_read v12, a98 // (op 6094) 
+v_accvgpr_read v13, a99 // (op 6094) 
+v_mul_f32 v14, v7, v10 // (op 6094) 
+v_mul_f32 v15, v7, v11 // (op 6094) 
+v_mul_f32 v16, v7, v12 // (op 6094) 
+v_mul_f32 v17, v7, v13 // (op 6094) 
+
+v_cvt_f16_f32 v10, v14 // (op 6096) 
+v_cvt_f16_f32 v11, v15 // (op 6096) 
+v_cvt_f16_f32 v12, v16 // (op 6096) 
+v_cvt_f16_f32 v13, v17 // (op 6096) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6098) 
+v_pack_b32_f16 v5, v12, v13 // (op 6098) 
+
+v_add_u32 v3, 192, v9 // (op 6098) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6098) Store value
+
+
+
+v_accvgpr_read v10, a100 // (op 6108) 
+v_accvgpr_read v11, a101 // (op 6108) 
+v_accvgpr_read v12, a102 // (op 6108) 
+v_accvgpr_read v13, a103 // (op 6108) 
+v_mul_f32 v14, v7, v10 // (op 6108) 
+v_mul_f32 v15, v7, v11 // (op 6108) 
+v_mul_f32 v16, v7, v12 // (op 6108) 
+v_mul_f32 v17, v7, v13 // (op 6108) 
+
+v_cvt_f16_f32 v10, v14 // (op 6110) 
+v_cvt_f16_f32 v11, v15 // (op 6110) 
+v_cvt_f16_f32 v12, v16 // (op 6110) 
+v_cvt_f16_f32 v13, v17 // (op 6110) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6100) 
+v_pack_b32_f16 v5, v12, v13 // (op 6100) 
+
+s_lshl_b32 s0, s4, 5 // (op 6100) 
+s_add_u32 s0, s0, 192 // (op 6100) 
+v_add_u32 v3, v9, s0 // (op 6100) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6100) Store value
+
+
+
+v_accvgpr_read v10, a104 // (op 6114) 
+v_accvgpr_read v11, a105 // (op 6114) 
+v_accvgpr_read v12, a106 // (op 6114) 
+v_accvgpr_read v13, a107 // (op 6114) 
+v_mul_f32 v14, v7, v10 // (op 6114) 
+v_mul_f32 v15, v7, v11 // (op 6114) 
+v_mul_f32 v16, v7, v12 // (op 6114) 
+v_mul_f32 v17, v7, v13 // (op 6114) 
+
+v_cvt_f16_f32 v10, v14 // (op 6116) 
+v_cvt_f16_f32 v11, v15 // (op 6116) 
+v_cvt_f16_f32 v12, v16 // (op 6116) 
+v_cvt_f16_f32 v13, v17 // (op 6116) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6102) 
+v_pack_b32_f16 v5, v12, v13 // (op 6102) 
+
+s_lshl_b32 s0, s4, 6 // (op 6102) 
+s_add_u32 s0, s0, 192 // (op 6102) 
+v_add_u32 v3, v9, s0 // (op 6102) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6102) Store value
+
+
+
+v_accvgpr_read v10, a108 // (op 6120) 
+v_accvgpr_read v11, a109 // (op 6120) 
+v_accvgpr_read v12, a110 // (op 6120) 
+v_accvgpr_read v13, a111 // (op 6120) 
+v_mul_f32 v14, v7, v10 // (op 6120) 
+v_mul_f32 v15, v7, v11 // (op 6120) 
+v_mul_f32 v16, v7, v12 // (op 6120) 
+v_mul_f32 v17, v7, v13 // (op 6120) 
+
+v_cvt_f16_f32 v10, v14 // (op 6122) 
+v_cvt_f16_f32 v11, v15 // (op 6122) 
+v_cvt_f16_f32 v12, v16 // (op 6122) 
+v_cvt_f16_f32 v13, v17 // (op 6122) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6104) 
+v_pack_b32_f16 v5, v12, v13 // (op 6104) 
+
+s_lshl_b32 s0, s4, 5 // (op 6104) 
+s_mul_i32 s1, 3, s0 // (op 6104) 
+s_add_u32 s1, s1, 192 // (op 6104) 
+
+v_add_u32 v3, v9, s1 // (op 6104) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6104) Store value
+
+
+
+v_accvgpr_read v10, a112 // (op 6170) 
+v_accvgpr_read v11, a113 // (op 6170) 
+v_accvgpr_read v12, a114 // (op 6170) 
+v_accvgpr_read v13, a115 // (op 6170) 
+v_mul_f32 v14, v7, v10 // (op 6170) 
+v_mul_f32 v15, v7, v11 // (op 6170) 
+v_mul_f32 v16, v7, v12 // (op 6170) 
+v_mul_f32 v17, v7, v13 // (op 6170) 
+
+v_cvt_f16_f32 v10, v14 // (op 6172) 
+v_cvt_f16_f32 v11, v15 // (op 6172) 
+v_cvt_f16_f32 v12, v16 // (op 6172) 
+v_cvt_f16_f32 v13, v17 // (op 6172) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6174) 
+v_pack_b32_f16 v5, v12, v13 // (op 6174) 
+
+v_add_u32 v3, 224, v9 // (op 6174) 
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6174) Store value
+
+
+
+v_accvgpr_read v10, a116 // (op 6184) 
+v_accvgpr_read v11, a117 // (op 6184) 
+v_accvgpr_read v12, a118 // (op 6184) 
+v_accvgpr_read v13, a119 // (op 6184) 
+v_mul_f32 v14, v7, v10 // (op 6184) 
+v_mul_f32 v15, v7, v11 // (op 6184) 
+v_mul_f32 v16, v7, v12 // (op 6184) 
+v_mul_f32 v17, v7, v13 // (op 6184) 
+
+v_cvt_f16_f32 v10, v14 // (op 6186) 
+v_cvt_f16_f32 v11, v15 // (op 6186) 
+v_cvt_f16_f32 v12, v16 // (op 6186) 
+v_cvt_f16_f32 v13, v17 // (op 6186) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6176) 
+v_pack_b32_f16 v5, v12, v13 // (op 6176) 
+
+s_lshl_b32 s0, s4, 5 // (op 6176) 
+s_add_u32 s0, s0, 224 // (op 6176) 
+v_add_u32 v3, v9, s0 // (op 6176) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6176) Store value
+
+
+
+v_accvgpr_read v10, a120 // (op 6190) 
+v_accvgpr_read v11, a121 // (op 6190) 
+v_accvgpr_read v12, a122 // (op 6190) 
+v_accvgpr_read v13, a123 // (op 6190) 
+v_mul_f32 v14, v7, v10 // (op 6190) 
+v_mul_f32 v15, v7, v11 // (op 6190) 
+v_mul_f32 v16, v7, v12 // (op 6190) 
+v_mul_f32 v17, v7, v13 // (op 6190) 
+
+v_cvt_f16_f32 v10, v14 // (op 6192) 
+v_cvt_f16_f32 v11, v15 // (op 6192) 
+v_cvt_f16_f32 v12, v16 // (op 6192) 
+v_cvt_f16_f32 v13, v17 // (op 6192) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6178) 
+v_pack_b32_f16 v5, v12, v13 // (op 6178) 
+
+s_lshl_b32 s0, s4, 6 // (op 6178) 
+s_add_u32 s0, s0, 224 // (op 6178) 
+v_add_u32 v3, v9, s0 // (op 6178) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6178) Store value
+
+
+
+v_accvgpr_read v10, a124 // (op 6196) 
+v_accvgpr_read v11, a125 // (op 6196) 
+v_accvgpr_read v12, a126 // (op 6196) 
+v_accvgpr_read v13, a127 // (op 6196) 
+v_mul_f32 v14, v7, v10 // (op 6196) 
+v_mul_f32 v15, v7, v11 // (op 6196) 
+v_mul_f32 v16, v7, v12 // (op 6196) 
+v_mul_f32 v17, v7, v13 // (op 6196) 
+
+v_cvt_f16_f32 v10, v14 // (op 6198) 
+v_cvt_f16_f32 v11, v15 // (op 6198) 
+v_cvt_f16_f32 v12, v16 // (op 6198) 
+v_cvt_f16_f32 v13, v17 // (op 6198) 
+
+
+v_pack_b32_f16 v4, v10, v11 // (op 6180) 
+v_pack_b32_f16 v5, v12, v13 // (op 6180) 
+
+s_lshl_b32 s0, s4, 5 // (op 6180) 
+s_mul_i32 s1, 3, s0 // (op 6180) 
+s_add_u32 s1, s1, 224 // (op 6180) 
+
+v_add_u32 v3, v9, s1 // (op 6180) 
+
+
+buffer_store_dwordx2 v[4:5], v3, s[44:47], 0 offen // (op 6180) Store value
+
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before conditional label!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_branch RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalBottom_0_beta_116 // (op 116) Condition: Done, jump to RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalBottom_0_beta_116
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalFalse_0_beta_116:
+
+
+v_add_u32 v3, 224, v8 // (op 6972) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6972) Load value
+
+v_accvgpr_read v10, a112 // (op 6959) 
+v_accvgpr_read v11, a113 // (op 6959) 
+v_accvgpr_read v12, a114 // (op 6959) 
+v_accvgpr_read v13, a115 // (op 6959) 
+v_mul_f32 v14, v7, v10 // (op 6959) 
+v_mul_f32 v15, v7, v11 // (op 6959) 
+v_mul_f32 v16, v7, v12 // (op 6959) 
+v_mul_f32 v17, v7, v13 // (op 6959) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6971) 
+v_lshrrev_b32 v11, 16, v4 // (op 6971) 
+v_cvt_f32_f16 v11, v11 // (op 6971) 
+v_mul_f32 v18, v0, v10 // (op 6971) 
+v_mul_f32 v19, v0, v11 // (op 6971) 
+v_cvt_f32_f16 v10, v5 // (op 6971) 
+v_lshrrev_b32 v11, 16, v5 // (op 6971) 
+v_cvt_f32_f16 v11, v11 // (op 6971) 
+v_mul_f32 v20, v0, v10 // (op 6971) 
+v_mul_f32 v21, v0, v11 // (op 6971) 
+
+
+v_add_f32 v10, v18, v14 // (op 6960) 
+v_add_f32 v11, v19, v15 // (op 6960) 
+v_add_f32 v12, v20, v16 // (op 6960) 
+v_add_f32 v13, v21, v17 // (op 6960) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6961) 
+v_cvt_f16_f32 v15, v11 // (op 6961) 
+v_cvt_f16_f32 v16, v12 // (op 6961) 
+v_cvt_f16_f32 v17, v13 // (op 6961) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6963) 
+v_pack_b32_f16 v11, v16, v17 // (op 6963) 
+
+v_add_u32 v3, 224, v9 // (op 6963) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6963) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6977) 
+s_add_u32 s0, s0, 224 // (op 6977) 
+v_add_u32 v3, v8, s0 // (op 6977) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6977) Load value
+
+v_accvgpr_read v10, a116 // (op 6989) 
+v_accvgpr_read v11, a117 // (op 6989) 
+v_accvgpr_read v12, a118 // (op 6989) 
+v_accvgpr_read v13, a119 // (op 6989) 
+v_mul_f32 v14, v7, v10 // (op 6989) 
+v_mul_f32 v15, v7, v11 // (op 6989) 
+v_mul_f32 v16, v7, v12 // (op 6989) 
+v_mul_f32 v17, v7, v13 // (op 6989) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6974) 
+v_lshrrev_b32 v11, 16, v4 // (op 6974) 
+v_cvt_f32_f16 v11, v11 // (op 6974) 
+v_mul_f32 v18, v0, v10 // (op 6974) 
+v_mul_f32 v19, v0, v11 // (op 6974) 
+v_cvt_f32_f16 v10, v5 // (op 6974) 
+v_lshrrev_b32 v11, 16, v5 // (op 6974) 
+v_cvt_f32_f16 v11, v11 // (op 6974) 
+v_mul_f32 v20, v0, v10 // (op 6974) 
+v_mul_f32 v21, v0, v11 // (op 6974) 
+
+
+v_add_f32 v10, v18, v14 // (op 6975) 
+v_add_f32 v11, v19, v15 // (op 6975) 
+v_add_f32 v12, v20, v16 // (op 6975) 
+v_add_f32 v13, v21, v17 // (op 6975) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6976) 
+v_cvt_f16_f32 v15, v11 // (op 6976) 
+v_cvt_f16_f32 v16, v12 // (op 6976) 
+v_cvt_f16_f32 v17, v13 // (op 6976) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6965) 
+v_pack_b32_f16 v11, v16, v17 // (op 6965) 
+
+s_lshl_b32 s0, s4, 5 // (op 6965) 
+s_add_u32 s0, s0, 224 // (op 6965) 
+v_add_u32 v3, v9, s0 // (op 6965) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6965) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6982) 
+s_add_u32 s0, s0, 224 // (op 6982) 
+v_add_u32 v3, v8, s0 // (op 6982) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6982) Load value
+
+v_accvgpr_read v10, a120 // (op 6991) 
+v_accvgpr_read v11, a121 // (op 6991) 
+v_accvgpr_read v12, a122 // (op 6991) 
+v_accvgpr_read v13, a123 // (op 6991) 
+v_mul_f32 v14, v7, v10 // (op 6991) 
+v_mul_f32 v15, v7, v11 // (op 6991) 
+v_mul_f32 v16, v7, v12 // (op 6991) 
+v_mul_f32 v17, v7, v13 // (op 6991) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6979) 
+v_lshrrev_b32 v11, 16, v4 // (op 6979) 
+v_cvt_f32_f16 v11, v11 // (op 6979) 
+v_mul_f32 v18, v0, v10 // (op 6979) 
+v_mul_f32 v19, v0, v11 // (op 6979) 
+v_cvt_f32_f16 v10, v5 // (op 6979) 
+v_lshrrev_b32 v11, 16, v5 // (op 6979) 
+v_cvt_f32_f16 v11, v11 // (op 6979) 
+v_mul_f32 v20, v0, v10 // (op 6979) 
+v_mul_f32 v21, v0, v11 // (op 6979) 
+
+
+v_add_f32 v10, v18, v14 // (op 6980) 
+v_add_f32 v11, v19, v15 // (op 6980) 
+v_add_f32 v12, v20, v16 // (op 6980) 
+v_add_f32 v13, v21, v17 // (op 6980) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6981) 
+v_cvt_f16_f32 v15, v11 // (op 6981) 
+v_cvt_f16_f32 v16, v12 // (op 6981) 
+v_cvt_f16_f32 v17, v13 // (op 6981) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6967) 
+v_pack_b32_f16 v11, v16, v17 // (op 6967) 
+
+s_lshl_b32 s0, s4, 6 // (op 6967) 
+s_add_u32 s0, s0, 224 // (op 6967) 
+v_add_u32 v3, v9, s0 // (op 6967) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6967) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6987) 
+s_mul_i32 s1, 3, s0 // (op 6987) 
+s_add_u32 s1, s1, 224 // (op 6987) 
+
+v_add_u32 v3, v8, s1 // (op 6987) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6987) Load value
+
+v_accvgpr_read v10, a124 // (op 6993) 
+v_accvgpr_read v11, a125 // (op 6993) 
+v_accvgpr_read v12, a126 // (op 6993) 
+v_accvgpr_read v13, a127 // (op 6993) 
+v_mul_f32 v14, v7, v10 // (op 6993) 
+v_mul_f32 v15, v7, v11 // (op 6993) 
+v_mul_f32 v16, v7, v12 // (op 6993) 
+v_mul_f32 v17, v7, v13 // (op 6993) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6984) 
+v_lshrrev_b32 v11, 16, v4 // (op 6984) 
+v_cvt_f32_f16 v11, v11 // (op 6984) 
+v_mul_f32 v18, v0, v10 // (op 6984) 
+v_mul_f32 v19, v0, v11 // (op 6984) 
+v_cvt_f32_f16 v10, v5 // (op 6984) 
+v_lshrrev_b32 v11, 16, v5 // (op 6984) 
+v_cvt_f32_f16 v11, v11 // (op 6984) 
+v_mul_f32 v20, v0, v10 // (op 6984) 
+v_mul_f32 v21, v0, v11 // (op 6984) 
+
+
+v_add_f32 v10, v18, v14 // (op 6985) 
+v_add_f32 v11, v19, v15 // (op 6985) 
+v_add_f32 v12, v20, v16 // (op 6985) 
+v_add_f32 v13, v21, v17 // (op 6985) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6986) 
+v_cvt_f16_f32 v15, v11 // (op 6986) 
+v_cvt_f16_f32 v16, v12 // (op 6986) 
+v_cvt_f16_f32 v17, v13 // (op 6986) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6969) 
+v_pack_b32_f16 v11, v16, v17 // (op 6969) 
+
+s_lshl_b32 s0, s4, 5 // (op 6969) 
+s_mul_i32 s1, 3, s0 // (op 6969) 
+s_add_u32 s1, s1, 224 // (op 6969) 
+
+v_add_u32 v3, v9, s1 // (op 6969) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6969) Store value
+
+
+
+
+
+v_add_u32 v3, 160, v8 // (op 6798) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6798) Load value
+
+v_accvgpr_read v10, a80 // (op 6785) 
+v_accvgpr_read v11, a81 // (op 6785) 
+v_accvgpr_read v12, a82 // (op 6785) 
+v_accvgpr_read v13, a83 // (op 6785) 
+v_mul_f32 v14, v7, v10 // (op 6785) 
+v_mul_f32 v15, v7, v11 // (op 6785) 
+v_mul_f32 v16, v7, v12 // (op 6785) 
+v_mul_f32 v17, v7, v13 // (op 6785) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6797) 
+v_lshrrev_b32 v11, 16, v4 // (op 6797) 
+v_cvt_f32_f16 v11, v11 // (op 6797) 
+v_mul_f32 v18, v0, v10 // (op 6797) 
+v_mul_f32 v19, v0, v11 // (op 6797) 
+v_cvt_f32_f16 v10, v5 // (op 6797) 
+v_lshrrev_b32 v11, 16, v5 // (op 6797) 
+v_cvt_f32_f16 v11, v11 // (op 6797) 
+v_mul_f32 v20, v0, v10 // (op 6797) 
+v_mul_f32 v21, v0, v11 // (op 6797) 
+
+
+v_add_f32 v10, v18, v14 // (op 6786) 
+v_add_f32 v11, v19, v15 // (op 6786) 
+v_add_f32 v12, v20, v16 // (op 6786) 
+v_add_f32 v13, v21, v17 // (op 6786) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6787) 
+v_cvt_f16_f32 v15, v11 // (op 6787) 
+v_cvt_f16_f32 v16, v12 // (op 6787) 
+v_cvt_f16_f32 v17, v13 // (op 6787) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6789) 
+v_pack_b32_f16 v11, v16, v17 // (op 6789) 
+
+v_add_u32 v3, 160, v9 // (op 6789) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6789) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6803) 
+s_add_u32 s0, s0, 160 // (op 6803) 
+v_add_u32 v3, v8, s0 // (op 6803) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6803) Load value
+
+v_accvgpr_read v10, a84 // (op 6815) 
+v_accvgpr_read v11, a85 // (op 6815) 
+v_accvgpr_read v12, a86 // (op 6815) 
+v_accvgpr_read v13, a87 // (op 6815) 
+v_mul_f32 v14, v7, v10 // (op 6815) 
+v_mul_f32 v15, v7, v11 // (op 6815) 
+v_mul_f32 v16, v7, v12 // (op 6815) 
+v_mul_f32 v17, v7, v13 // (op 6815) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6800) 
+v_lshrrev_b32 v11, 16, v4 // (op 6800) 
+v_cvt_f32_f16 v11, v11 // (op 6800) 
+v_mul_f32 v18, v0, v10 // (op 6800) 
+v_mul_f32 v19, v0, v11 // (op 6800) 
+v_cvt_f32_f16 v10, v5 // (op 6800) 
+v_lshrrev_b32 v11, 16, v5 // (op 6800) 
+v_cvt_f32_f16 v11, v11 // (op 6800) 
+v_mul_f32 v20, v0, v10 // (op 6800) 
+v_mul_f32 v21, v0, v11 // (op 6800) 
+
+
+v_add_f32 v10, v18, v14 // (op 6801) 
+v_add_f32 v11, v19, v15 // (op 6801) 
+v_add_f32 v12, v20, v16 // (op 6801) 
+v_add_f32 v13, v21, v17 // (op 6801) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6802) 
+v_cvt_f16_f32 v15, v11 // (op 6802) 
+v_cvt_f16_f32 v16, v12 // (op 6802) 
+v_cvt_f16_f32 v17, v13 // (op 6802) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6791) 
+v_pack_b32_f16 v11, v16, v17 // (op 6791) 
+
+s_lshl_b32 s0, s4, 5 // (op 6791) 
+s_add_u32 s0, s0, 160 // (op 6791) 
+v_add_u32 v3, v9, s0 // (op 6791) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6791) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6808) 
+s_add_u32 s0, s0, 160 // (op 6808) 
+v_add_u32 v3, v8, s0 // (op 6808) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6808) Load value
+
+v_accvgpr_read v10, a88 // (op 6817) 
+v_accvgpr_read v11, a89 // (op 6817) 
+v_accvgpr_read v12, a90 // (op 6817) 
+v_accvgpr_read v13, a91 // (op 6817) 
+v_mul_f32 v14, v7, v10 // (op 6817) 
+v_mul_f32 v15, v7, v11 // (op 6817) 
+v_mul_f32 v16, v7, v12 // (op 6817) 
+v_mul_f32 v17, v7, v13 // (op 6817) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6805) 
+v_lshrrev_b32 v11, 16, v4 // (op 6805) 
+v_cvt_f32_f16 v11, v11 // (op 6805) 
+v_mul_f32 v18, v0, v10 // (op 6805) 
+v_mul_f32 v19, v0, v11 // (op 6805) 
+v_cvt_f32_f16 v10, v5 // (op 6805) 
+v_lshrrev_b32 v11, 16, v5 // (op 6805) 
+v_cvt_f32_f16 v11, v11 // (op 6805) 
+v_mul_f32 v20, v0, v10 // (op 6805) 
+v_mul_f32 v21, v0, v11 // (op 6805) 
+
+
+v_add_f32 v10, v18, v14 // (op 6806) 
+v_add_f32 v11, v19, v15 // (op 6806) 
+v_add_f32 v12, v20, v16 // (op 6806) 
+v_add_f32 v13, v21, v17 // (op 6806) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6807) 
+v_cvt_f16_f32 v15, v11 // (op 6807) 
+v_cvt_f16_f32 v16, v12 // (op 6807) 
+v_cvt_f16_f32 v17, v13 // (op 6807) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6793) 
+v_pack_b32_f16 v11, v16, v17 // (op 6793) 
+
+s_lshl_b32 s0, s4, 6 // (op 6793) 
+s_add_u32 s0, s0, 160 // (op 6793) 
+v_add_u32 v3, v9, s0 // (op 6793) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6793) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6813) 
+s_mul_i32 s1, 3, s0 // (op 6813) 
+s_add_u32 s1, s1, 160 // (op 6813) 
+
+v_add_u32 v3, v8, s1 // (op 6813) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6813) Load value
+
+v_accvgpr_read v10, a92 // (op 6819) 
+v_accvgpr_read v11, a93 // (op 6819) 
+v_accvgpr_read v12, a94 // (op 6819) 
+v_accvgpr_read v13, a95 // (op 6819) 
+v_mul_f32 v14, v7, v10 // (op 6819) 
+v_mul_f32 v15, v7, v11 // (op 6819) 
+v_mul_f32 v16, v7, v12 // (op 6819) 
+v_mul_f32 v17, v7, v13 // (op 6819) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6810) 
+v_lshrrev_b32 v11, 16, v4 // (op 6810) 
+v_cvt_f32_f16 v11, v11 // (op 6810) 
+v_mul_f32 v18, v0, v10 // (op 6810) 
+v_mul_f32 v19, v0, v11 // (op 6810) 
+v_cvt_f32_f16 v10, v5 // (op 6810) 
+v_lshrrev_b32 v11, 16, v5 // (op 6810) 
+v_cvt_f32_f16 v11, v11 // (op 6810) 
+v_mul_f32 v20, v0, v10 // (op 6810) 
+v_mul_f32 v21, v0, v11 // (op 6810) 
+
+
+v_add_f32 v10, v18, v14 // (op 6811) 
+v_add_f32 v11, v19, v15 // (op 6811) 
+v_add_f32 v12, v20, v16 // (op 6811) 
+v_add_f32 v13, v21, v17 // (op 6811) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6812) 
+v_cvt_f16_f32 v15, v11 // (op 6812) 
+v_cvt_f16_f32 v16, v12 // (op 6812) 
+v_cvt_f16_f32 v17, v13 // (op 6812) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6795) 
+v_pack_b32_f16 v11, v16, v17 // (op 6795) 
+
+s_lshl_b32 s0, s4, 5 // (op 6795) 
+s_mul_i32 s1, 3, s0 // (op 6795) 
+s_add_u32 s1, s1, 160 // (op 6795) 
+
+v_add_u32 v3, v9, s1 // (op 6795) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6795) Store value
+
+
+
+
+
+v_add_u32 v3, 128, v8 // (op 6711) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6711) Load value
+
+v_accvgpr_read v10, a64 // (op 6698) 
+v_accvgpr_read v11, a65 // (op 6698) 
+v_accvgpr_read v12, a66 // (op 6698) 
+v_accvgpr_read v13, a67 // (op 6698) 
+v_mul_f32 v14, v7, v10 // (op 6698) 
+v_mul_f32 v15, v7, v11 // (op 6698) 
+v_mul_f32 v16, v7, v12 // (op 6698) 
+v_mul_f32 v17, v7, v13 // (op 6698) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6710) 
+v_lshrrev_b32 v11, 16, v4 // (op 6710) 
+v_cvt_f32_f16 v11, v11 // (op 6710) 
+v_mul_f32 v18, v0, v10 // (op 6710) 
+v_mul_f32 v19, v0, v11 // (op 6710) 
+v_cvt_f32_f16 v10, v5 // (op 6710) 
+v_lshrrev_b32 v11, 16, v5 // (op 6710) 
+v_cvt_f32_f16 v11, v11 // (op 6710) 
+v_mul_f32 v20, v0, v10 // (op 6710) 
+v_mul_f32 v21, v0, v11 // (op 6710) 
+
+
+v_add_f32 v10, v18, v14 // (op 6699) 
+v_add_f32 v11, v19, v15 // (op 6699) 
+v_add_f32 v12, v20, v16 // (op 6699) 
+v_add_f32 v13, v21, v17 // (op 6699) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6700) 
+v_cvt_f16_f32 v15, v11 // (op 6700) 
+v_cvt_f16_f32 v16, v12 // (op 6700) 
+v_cvt_f16_f32 v17, v13 // (op 6700) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6702) 
+v_pack_b32_f16 v11, v16, v17 // (op 6702) 
+
+v_add_u32 v3, 128, v9 // (op 6702) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6702) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6716) 
+s_add_u32 s0, s0, 128 // (op 6716) 
+v_add_u32 v3, v8, s0 // (op 6716) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6716) Load value
+
+v_accvgpr_read v10, a68 // (op 6728) 
+v_accvgpr_read v11, a69 // (op 6728) 
+v_accvgpr_read v12, a70 // (op 6728) 
+v_accvgpr_read v13, a71 // (op 6728) 
+v_mul_f32 v14, v7, v10 // (op 6728) 
+v_mul_f32 v15, v7, v11 // (op 6728) 
+v_mul_f32 v16, v7, v12 // (op 6728) 
+v_mul_f32 v17, v7, v13 // (op 6728) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6713) 
+v_lshrrev_b32 v11, 16, v4 // (op 6713) 
+v_cvt_f32_f16 v11, v11 // (op 6713) 
+v_mul_f32 v18, v0, v10 // (op 6713) 
+v_mul_f32 v19, v0, v11 // (op 6713) 
+v_cvt_f32_f16 v10, v5 // (op 6713) 
+v_lshrrev_b32 v11, 16, v5 // (op 6713) 
+v_cvt_f32_f16 v11, v11 // (op 6713) 
+v_mul_f32 v20, v0, v10 // (op 6713) 
+v_mul_f32 v21, v0, v11 // (op 6713) 
+
+
+v_add_f32 v10, v18, v14 // (op 6714) 
+v_add_f32 v11, v19, v15 // (op 6714) 
+v_add_f32 v12, v20, v16 // (op 6714) 
+v_add_f32 v13, v21, v17 // (op 6714) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6715) 
+v_cvt_f16_f32 v15, v11 // (op 6715) 
+v_cvt_f16_f32 v16, v12 // (op 6715) 
+v_cvt_f16_f32 v17, v13 // (op 6715) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6704) 
+v_pack_b32_f16 v11, v16, v17 // (op 6704) 
+
+s_lshl_b32 s0, s4, 5 // (op 6704) 
+s_add_u32 s0, s0, 128 // (op 6704) 
+v_add_u32 v3, v9, s0 // (op 6704) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6704) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6721) 
+s_add_u32 s0, s0, 128 // (op 6721) 
+v_add_u32 v3, v8, s0 // (op 6721) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6721) Load value
+
+v_accvgpr_read v10, a72 // (op 6730) 
+v_accvgpr_read v11, a73 // (op 6730) 
+v_accvgpr_read v12, a74 // (op 6730) 
+v_accvgpr_read v13, a75 // (op 6730) 
+v_mul_f32 v14, v7, v10 // (op 6730) 
+v_mul_f32 v15, v7, v11 // (op 6730) 
+v_mul_f32 v16, v7, v12 // (op 6730) 
+v_mul_f32 v17, v7, v13 // (op 6730) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6718) 
+v_lshrrev_b32 v11, 16, v4 // (op 6718) 
+v_cvt_f32_f16 v11, v11 // (op 6718) 
+v_mul_f32 v18, v0, v10 // (op 6718) 
+v_mul_f32 v19, v0, v11 // (op 6718) 
+v_cvt_f32_f16 v10, v5 // (op 6718) 
+v_lshrrev_b32 v11, 16, v5 // (op 6718) 
+v_cvt_f32_f16 v11, v11 // (op 6718) 
+v_mul_f32 v20, v0, v10 // (op 6718) 
+v_mul_f32 v21, v0, v11 // (op 6718) 
+
+
+v_add_f32 v10, v18, v14 // (op 6719) 
+v_add_f32 v11, v19, v15 // (op 6719) 
+v_add_f32 v12, v20, v16 // (op 6719) 
+v_add_f32 v13, v21, v17 // (op 6719) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6720) 
+v_cvt_f16_f32 v15, v11 // (op 6720) 
+v_cvt_f16_f32 v16, v12 // (op 6720) 
+v_cvt_f16_f32 v17, v13 // (op 6720) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6706) 
+v_pack_b32_f16 v11, v16, v17 // (op 6706) 
+
+s_lshl_b32 s0, s4, 6 // (op 6706) 
+s_add_u32 s0, s0, 128 // (op 6706) 
+v_add_u32 v3, v9, s0 // (op 6706) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6706) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6726) 
+s_mul_i32 s1, 3, s0 // (op 6726) 
+s_add_u32 s1, s1, 128 // (op 6726) 
+
+v_add_u32 v3, v8, s1 // (op 6726) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6726) Load value
+
+v_accvgpr_read v10, a76 // (op 6732) 
+v_accvgpr_read v11, a77 // (op 6732) 
+v_accvgpr_read v12, a78 // (op 6732) 
+v_accvgpr_read v13, a79 // (op 6732) 
+v_mul_f32 v14, v7, v10 // (op 6732) 
+v_mul_f32 v15, v7, v11 // (op 6732) 
+v_mul_f32 v16, v7, v12 // (op 6732) 
+v_mul_f32 v17, v7, v13 // (op 6732) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6723) 
+v_lshrrev_b32 v11, 16, v4 // (op 6723) 
+v_cvt_f32_f16 v11, v11 // (op 6723) 
+v_mul_f32 v18, v0, v10 // (op 6723) 
+v_mul_f32 v19, v0, v11 // (op 6723) 
+v_cvt_f32_f16 v10, v5 // (op 6723) 
+v_lshrrev_b32 v11, 16, v5 // (op 6723) 
+v_cvt_f32_f16 v11, v11 // (op 6723) 
+v_mul_f32 v20, v0, v10 // (op 6723) 
+v_mul_f32 v21, v0, v11 // (op 6723) 
+
+
+v_add_f32 v10, v18, v14 // (op 6724) 
+v_add_f32 v11, v19, v15 // (op 6724) 
+v_add_f32 v12, v20, v16 // (op 6724) 
+v_add_f32 v13, v21, v17 // (op 6724) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6725) 
+v_cvt_f16_f32 v15, v11 // (op 6725) 
+v_cvt_f16_f32 v16, v12 // (op 6725) 
+v_cvt_f16_f32 v17, v13 // (op 6725) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6708) 
+v_pack_b32_f16 v11, v16, v17 // (op 6708) 
+
+s_lshl_b32 s0, s4, 5 // (op 6708) 
+s_mul_i32 s1, 3, s0 // (op 6708) 
+s_add_u32 s1, s1, 128 // (op 6708) 
+
+v_add_u32 v3, v9, s1 // (op 6708) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6708) Store value
+
+
+
+
+
+v_add_u32 v3, 96, v8 // (op 6624) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6624) Load value
+
+v_accvgpr_read v10, a48 // (op 6611) 
+v_accvgpr_read v11, a49 // (op 6611) 
+v_accvgpr_read v12, a50 // (op 6611) 
+v_accvgpr_read v13, a51 // (op 6611) 
+v_mul_f32 v14, v7, v10 // (op 6611) 
+v_mul_f32 v15, v7, v11 // (op 6611) 
+v_mul_f32 v16, v7, v12 // (op 6611) 
+v_mul_f32 v17, v7, v13 // (op 6611) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6623) 
+v_lshrrev_b32 v11, 16, v4 // (op 6623) 
+v_cvt_f32_f16 v11, v11 // (op 6623) 
+v_mul_f32 v18, v0, v10 // (op 6623) 
+v_mul_f32 v19, v0, v11 // (op 6623) 
+v_cvt_f32_f16 v10, v5 // (op 6623) 
+v_lshrrev_b32 v11, 16, v5 // (op 6623) 
+v_cvt_f32_f16 v11, v11 // (op 6623) 
+v_mul_f32 v20, v0, v10 // (op 6623) 
+v_mul_f32 v21, v0, v11 // (op 6623) 
+
+
+v_add_f32 v10, v18, v14 // (op 6612) 
+v_add_f32 v11, v19, v15 // (op 6612) 
+v_add_f32 v12, v20, v16 // (op 6612) 
+v_add_f32 v13, v21, v17 // (op 6612) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6613) 
+v_cvt_f16_f32 v15, v11 // (op 6613) 
+v_cvt_f16_f32 v16, v12 // (op 6613) 
+v_cvt_f16_f32 v17, v13 // (op 6613) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6615) 
+v_pack_b32_f16 v11, v16, v17 // (op 6615) 
+
+v_add_u32 v3, 96, v9 // (op 6615) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6615) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6629) 
+s_add_u32 s0, s0, 96 // (op 6629) 
+v_add_u32 v3, v8, s0 // (op 6629) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6629) Load value
+
+v_accvgpr_read v10, a52 // (op 6641) 
+v_accvgpr_read v11, a53 // (op 6641) 
+v_accvgpr_read v12, a54 // (op 6641) 
+v_accvgpr_read v13, a55 // (op 6641) 
+v_mul_f32 v14, v7, v10 // (op 6641) 
+v_mul_f32 v15, v7, v11 // (op 6641) 
+v_mul_f32 v16, v7, v12 // (op 6641) 
+v_mul_f32 v17, v7, v13 // (op 6641) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6626) 
+v_lshrrev_b32 v11, 16, v4 // (op 6626) 
+v_cvt_f32_f16 v11, v11 // (op 6626) 
+v_mul_f32 v18, v0, v10 // (op 6626) 
+v_mul_f32 v19, v0, v11 // (op 6626) 
+v_cvt_f32_f16 v10, v5 // (op 6626) 
+v_lshrrev_b32 v11, 16, v5 // (op 6626) 
+v_cvt_f32_f16 v11, v11 // (op 6626) 
+v_mul_f32 v20, v0, v10 // (op 6626) 
+v_mul_f32 v21, v0, v11 // (op 6626) 
+
+
+v_add_f32 v10, v18, v14 // (op 6627) 
+v_add_f32 v11, v19, v15 // (op 6627) 
+v_add_f32 v12, v20, v16 // (op 6627) 
+v_add_f32 v13, v21, v17 // (op 6627) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6628) 
+v_cvt_f16_f32 v15, v11 // (op 6628) 
+v_cvt_f16_f32 v16, v12 // (op 6628) 
+v_cvt_f16_f32 v17, v13 // (op 6628) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6617) 
+v_pack_b32_f16 v11, v16, v17 // (op 6617) 
+
+s_lshl_b32 s0, s4, 5 // (op 6617) 
+s_add_u32 s0, s0, 96 // (op 6617) 
+v_add_u32 v3, v9, s0 // (op 6617) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6617) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6634) 
+s_add_u32 s0, s0, 96 // (op 6634) 
+v_add_u32 v3, v8, s0 // (op 6634) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6634) Load value
+
+v_accvgpr_read v10, a56 // (op 6643) 
+v_accvgpr_read v11, a57 // (op 6643) 
+v_accvgpr_read v12, a58 // (op 6643) 
+v_accvgpr_read v13, a59 // (op 6643) 
+v_mul_f32 v14, v7, v10 // (op 6643) 
+v_mul_f32 v15, v7, v11 // (op 6643) 
+v_mul_f32 v16, v7, v12 // (op 6643) 
+v_mul_f32 v17, v7, v13 // (op 6643) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6631) 
+v_lshrrev_b32 v11, 16, v4 // (op 6631) 
+v_cvt_f32_f16 v11, v11 // (op 6631) 
+v_mul_f32 v18, v0, v10 // (op 6631) 
+v_mul_f32 v19, v0, v11 // (op 6631) 
+v_cvt_f32_f16 v10, v5 // (op 6631) 
+v_lshrrev_b32 v11, 16, v5 // (op 6631) 
+v_cvt_f32_f16 v11, v11 // (op 6631) 
+v_mul_f32 v20, v0, v10 // (op 6631) 
+v_mul_f32 v21, v0, v11 // (op 6631) 
+
+
+v_add_f32 v10, v18, v14 // (op 6632) 
+v_add_f32 v11, v19, v15 // (op 6632) 
+v_add_f32 v12, v20, v16 // (op 6632) 
+v_add_f32 v13, v21, v17 // (op 6632) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6633) 
+v_cvt_f16_f32 v15, v11 // (op 6633) 
+v_cvt_f16_f32 v16, v12 // (op 6633) 
+v_cvt_f16_f32 v17, v13 // (op 6633) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6619) 
+v_pack_b32_f16 v11, v16, v17 // (op 6619) 
+
+s_lshl_b32 s0, s4, 6 // (op 6619) 
+s_add_u32 s0, s0, 96 // (op 6619) 
+v_add_u32 v3, v9, s0 // (op 6619) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6619) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6639) 
+s_mul_i32 s1, 3, s0 // (op 6639) 
+s_add_u32 s1, s1, 96 // (op 6639) 
+
+v_add_u32 v3, v8, s1 // (op 6639) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6639) Load value
+
+v_accvgpr_read v10, a60 // (op 6645) 
+v_accvgpr_read v11, a61 // (op 6645) 
+v_accvgpr_read v12, a62 // (op 6645) 
+v_accvgpr_read v13, a63 // (op 6645) 
+v_mul_f32 v14, v7, v10 // (op 6645) 
+v_mul_f32 v15, v7, v11 // (op 6645) 
+v_mul_f32 v16, v7, v12 // (op 6645) 
+v_mul_f32 v17, v7, v13 // (op 6645) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6636) 
+v_lshrrev_b32 v11, 16, v4 // (op 6636) 
+v_cvt_f32_f16 v11, v11 // (op 6636) 
+v_mul_f32 v18, v0, v10 // (op 6636) 
+v_mul_f32 v19, v0, v11 // (op 6636) 
+v_cvt_f32_f16 v10, v5 // (op 6636) 
+v_lshrrev_b32 v11, 16, v5 // (op 6636) 
+v_cvt_f32_f16 v11, v11 // (op 6636) 
+v_mul_f32 v20, v0, v10 // (op 6636) 
+v_mul_f32 v21, v0, v11 // (op 6636) 
+
+
+v_add_f32 v10, v18, v14 // (op 6637) 
+v_add_f32 v11, v19, v15 // (op 6637) 
+v_add_f32 v12, v20, v16 // (op 6637) 
+v_add_f32 v13, v21, v17 // (op 6637) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6638) 
+v_cvt_f16_f32 v15, v11 // (op 6638) 
+v_cvt_f16_f32 v16, v12 // (op 6638) 
+v_cvt_f16_f32 v17, v13 // (op 6638) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6621) 
+v_pack_b32_f16 v11, v16, v17 // (op 6621) 
+
+s_lshl_b32 s0, s4, 5 // (op 6621) 
+s_mul_i32 s1, 3, s0 // (op 6621) 
+s_add_u32 s1, s1, 96 // (op 6621) 
+
+v_add_u32 v3, v9, s1 // (op 6621) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6621) Store value
+
+
+
+
+
+v_add_u32 v3, 64, v8 // (op 6537) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6537) Load value
+
+v_accvgpr_read v10, a32 // (op 6524) 
+v_accvgpr_read v11, a33 // (op 6524) 
+v_accvgpr_read v12, a34 // (op 6524) 
+v_accvgpr_read v13, a35 // (op 6524) 
+v_mul_f32 v14, v7, v10 // (op 6524) 
+v_mul_f32 v15, v7, v11 // (op 6524) 
+v_mul_f32 v16, v7, v12 // (op 6524) 
+v_mul_f32 v17, v7, v13 // (op 6524) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6536) 
+v_lshrrev_b32 v11, 16, v4 // (op 6536) 
+v_cvt_f32_f16 v11, v11 // (op 6536) 
+v_mul_f32 v18, v0, v10 // (op 6536) 
+v_mul_f32 v19, v0, v11 // (op 6536) 
+v_cvt_f32_f16 v10, v5 // (op 6536) 
+v_lshrrev_b32 v11, 16, v5 // (op 6536) 
+v_cvt_f32_f16 v11, v11 // (op 6536) 
+v_mul_f32 v20, v0, v10 // (op 6536) 
+v_mul_f32 v21, v0, v11 // (op 6536) 
+
+
+v_add_f32 v10, v18, v14 // (op 6525) 
+v_add_f32 v11, v19, v15 // (op 6525) 
+v_add_f32 v12, v20, v16 // (op 6525) 
+v_add_f32 v13, v21, v17 // (op 6525) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6526) 
+v_cvt_f16_f32 v15, v11 // (op 6526) 
+v_cvt_f16_f32 v16, v12 // (op 6526) 
+v_cvt_f16_f32 v17, v13 // (op 6526) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6528) 
+v_pack_b32_f16 v11, v16, v17 // (op 6528) 
+
+v_add_u32 v3, 64, v9 // (op 6528) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6528) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6542) 
+s_add_u32 s0, s0, 64 // (op 6542) 
+v_add_u32 v3, v8, s0 // (op 6542) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6542) Load value
+
+v_accvgpr_read v10, a36 // (op 6554) 
+v_accvgpr_read v11, a37 // (op 6554) 
+v_accvgpr_read v12, a38 // (op 6554) 
+v_accvgpr_read v13, a39 // (op 6554) 
+v_mul_f32 v14, v7, v10 // (op 6554) 
+v_mul_f32 v15, v7, v11 // (op 6554) 
+v_mul_f32 v16, v7, v12 // (op 6554) 
+v_mul_f32 v17, v7, v13 // (op 6554) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6539) 
+v_lshrrev_b32 v11, 16, v4 // (op 6539) 
+v_cvt_f32_f16 v11, v11 // (op 6539) 
+v_mul_f32 v18, v0, v10 // (op 6539) 
+v_mul_f32 v19, v0, v11 // (op 6539) 
+v_cvt_f32_f16 v10, v5 // (op 6539) 
+v_lshrrev_b32 v11, 16, v5 // (op 6539) 
+v_cvt_f32_f16 v11, v11 // (op 6539) 
+v_mul_f32 v20, v0, v10 // (op 6539) 
+v_mul_f32 v21, v0, v11 // (op 6539) 
+
+
+v_add_f32 v10, v18, v14 // (op 6540) 
+v_add_f32 v11, v19, v15 // (op 6540) 
+v_add_f32 v12, v20, v16 // (op 6540) 
+v_add_f32 v13, v21, v17 // (op 6540) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6541) 
+v_cvt_f16_f32 v15, v11 // (op 6541) 
+v_cvt_f16_f32 v16, v12 // (op 6541) 
+v_cvt_f16_f32 v17, v13 // (op 6541) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6530) 
+v_pack_b32_f16 v11, v16, v17 // (op 6530) 
+
+s_lshl_b32 s0, s4, 5 // (op 6530) 
+s_add_u32 s0, s0, 64 // (op 6530) 
+v_add_u32 v3, v9, s0 // (op 6530) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6530) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6547) 
+s_add_u32 s0, s0, 64 // (op 6547) 
+v_add_u32 v3, v8, s0 // (op 6547) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6547) Load value
+
+v_accvgpr_read v10, a40 // (op 6556) 
+v_accvgpr_read v11, a41 // (op 6556) 
+v_accvgpr_read v12, a42 // (op 6556) 
+v_accvgpr_read v13, a43 // (op 6556) 
+v_mul_f32 v14, v7, v10 // (op 6556) 
+v_mul_f32 v15, v7, v11 // (op 6556) 
+v_mul_f32 v16, v7, v12 // (op 6556) 
+v_mul_f32 v17, v7, v13 // (op 6556) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6544) 
+v_lshrrev_b32 v11, 16, v4 // (op 6544) 
+v_cvt_f32_f16 v11, v11 // (op 6544) 
+v_mul_f32 v18, v0, v10 // (op 6544) 
+v_mul_f32 v19, v0, v11 // (op 6544) 
+v_cvt_f32_f16 v10, v5 // (op 6544) 
+v_lshrrev_b32 v11, 16, v5 // (op 6544) 
+v_cvt_f32_f16 v11, v11 // (op 6544) 
+v_mul_f32 v20, v0, v10 // (op 6544) 
+v_mul_f32 v21, v0, v11 // (op 6544) 
+
+
+v_add_f32 v10, v18, v14 // (op 6545) 
+v_add_f32 v11, v19, v15 // (op 6545) 
+v_add_f32 v12, v20, v16 // (op 6545) 
+v_add_f32 v13, v21, v17 // (op 6545) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6546) 
+v_cvt_f16_f32 v15, v11 // (op 6546) 
+v_cvt_f16_f32 v16, v12 // (op 6546) 
+v_cvt_f16_f32 v17, v13 // (op 6546) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6532) 
+v_pack_b32_f16 v11, v16, v17 // (op 6532) 
+
+s_lshl_b32 s0, s4, 6 // (op 6532) 
+s_add_u32 s0, s0, 64 // (op 6532) 
+v_add_u32 v3, v9, s0 // (op 6532) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6532) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6552) 
+s_mul_i32 s1, 3, s0 // (op 6552) 
+s_add_u32 s1, s1, 64 // (op 6552) 
+
+v_add_u32 v3, v8, s1 // (op 6552) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6552) Load value
+
+v_accvgpr_read v10, a44 // (op 6558) 
+v_accvgpr_read v11, a45 // (op 6558) 
+v_accvgpr_read v12, a46 // (op 6558) 
+v_accvgpr_read v13, a47 // (op 6558) 
+v_mul_f32 v14, v7, v10 // (op 6558) 
+v_mul_f32 v15, v7, v11 // (op 6558) 
+v_mul_f32 v16, v7, v12 // (op 6558) 
+v_mul_f32 v17, v7, v13 // (op 6558) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6549) 
+v_lshrrev_b32 v11, 16, v4 // (op 6549) 
+v_cvt_f32_f16 v11, v11 // (op 6549) 
+v_mul_f32 v18, v0, v10 // (op 6549) 
+v_mul_f32 v19, v0, v11 // (op 6549) 
+v_cvt_f32_f16 v10, v5 // (op 6549) 
+v_lshrrev_b32 v11, 16, v5 // (op 6549) 
+v_cvt_f32_f16 v11, v11 // (op 6549) 
+v_mul_f32 v20, v0, v10 // (op 6549) 
+v_mul_f32 v21, v0, v11 // (op 6549) 
+
+
+v_add_f32 v10, v18, v14 // (op 6550) 
+v_add_f32 v11, v19, v15 // (op 6550) 
+v_add_f32 v12, v20, v16 // (op 6550) 
+v_add_f32 v13, v21, v17 // (op 6550) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6551) 
+v_cvt_f16_f32 v15, v11 // (op 6551) 
+v_cvt_f16_f32 v16, v12 // (op 6551) 
+v_cvt_f16_f32 v17, v13 // (op 6551) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6534) 
+v_pack_b32_f16 v11, v16, v17 // (op 6534) 
+
+s_lshl_b32 s0, s4, 5 // (op 6534) 
+s_mul_i32 s1, 3, s0 // (op 6534) 
+s_add_u32 s1, s1, 64 // (op 6534) 
+
+v_add_u32 v3, v9, s1 // (op 6534) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6534) Store value
+
+
+
+
+
+v_add_u32 v3, 32, v8 // (op 6450) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6450) Load value
+
+v_accvgpr_read v10, a16 // (op 6437) 
+v_accvgpr_read v11, a17 // (op 6437) 
+v_accvgpr_read v12, a18 // (op 6437) 
+v_accvgpr_read v13, a19 // (op 6437) 
+v_mul_f32 v14, v7, v10 // (op 6437) 
+v_mul_f32 v15, v7, v11 // (op 6437) 
+v_mul_f32 v16, v7, v12 // (op 6437) 
+v_mul_f32 v17, v7, v13 // (op 6437) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6449) 
+v_lshrrev_b32 v11, 16, v4 // (op 6449) 
+v_cvt_f32_f16 v11, v11 // (op 6449) 
+v_mul_f32 v18, v0, v10 // (op 6449) 
+v_mul_f32 v19, v0, v11 // (op 6449) 
+v_cvt_f32_f16 v10, v5 // (op 6449) 
+v_lshrrev_b32 v11, 16, v5 // (op 6449) 
+v_cvt_f32_f16 v11, v11 // (op 6449) 
+v_mul_f32 v20, v0, v10 // (op 6449) 
+v_mul_f32 v21, v0, v11 // (op 6449) 
+
+
+v_add_f32 v10, v18, v14 // (op 6438) 
+v_add_f32 v11, v19, v15 // (op 6438) 
+v_add_f32 v12, v20, v16 // (op 6438) 
+v_add_f32 v13, v21, v17 // (op 6438) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6439) 
+v_cvt_f16_f32 v15, v11 // (op 6439) 
+v_cvt_f16_f32 v16, v12 // (op 6439) 
+v_cvt_f16_f32 v17, v13 // (op 6439) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6441) 
+v_pack_b32_f16 v11, v16, v17 // (op 6441) 
+
+v_add_u32 v3, 32, v9 // (op 6441) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6441) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6455) 
+s_add_u32 s0, s0, 32 // (op 6455) 
+v_add_u32 v3, v8, s0 // (op 6455) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6455) Load value
+
+v_accvgpr_read v10, a20 // (op 6467) 
+v_accvgpr_read v11, a21 // (op 6467) 
+v_accvgpr_read v12, a22 // (op 6467) 
+v_accvgpr_read v13, a23 // (op 6467) 
+v_mul_f32 v14, v7, v10 // (op 6467) 
+v_mul_f32 v15, v7, v11 // (op 6467) 
+v_mul_f32 v16, v7, v12 // (op 6467) 
+v_mul_f32 v17, v7, v13 // (op 6467) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6452) 
+v_lshrrev_b32 v11, 16, v4 // (op 6452) 
+v_cvt_f32_f16 v11, v11 // (op 6452) 
+v_mul_f32 v18, v0, v10 // (op 6452) 
+v_mul_f32 v19, v0, v11 // (op 6452) 
+v_cvt_f32_f16 v10, v5 // (op 6452) 
+v_lshrrev_b32 v11, 16, v5 // (op 6452) 
+v_cvt_f32_f16 v11, v11 // (op 6452) 
+v_mul_f32 v20, v0, v10 // (op 6452) 
+v_mul_f32 v21, v0, v11 // (op 6452) 
+
+
+v_add_f32 v10, v18, v14 // (op 6453) 
+v_add_f32 v11, v19, v15 // (op 6453) 
+v_add_f32 v12, v20, v16 // (op 6453) 
+v_add_f32 v13, v21, v17 // (op 6453) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6454) 
+v_cvt_f16_f32 v15, v11 // (op 6454) 
+v_cvt_f16_f32 v16, v12 // (op 6454) 
+v_cvt_f16_f32 v17, v13 // (op 6454) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6443) 
+v_pack_b32_f16 v11, v16, v17 // (op 6443) 
+
+s_lshl_b32 s0, s4, 5 // (op 6443) 
+s_add_u32 s0, s0, 32 // (op 6443) 
+v_add_u32 v3, v9, s0 // (op 6443) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6443) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6460) 
+s_add_u32 s0, s0, 32 // (op 6460) 
+v_add_u32 v3, v8, s0 // (op 6460) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6460) Load value
+
+v_accvgpr_read v10, a24 // (op 6469) 
+v_accvgpr_read v11, a25 // (op 6469) 
+v_accvgpr_read v12, a26 // (op 6469) 
+v_accvgpr_read v13, a27 // (op 6469) 
+v_mul_f32 v14, v7, v10 // (op 6469) 
+v_mul_f32 v15, v7, v11 // (op 6469) 
+v_mul_f32 v16, v7, v12 // (op 6469) 
+v_mul_f32 v17, v7, v13 // (op 6469) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6457) 
+v_lshrrev_b32 v11, 16, v4 // (op 6457) 
+v_cvt_f32_f16 v11, v11 // (op 6457) 
+v_mul_f32 v18, v0, v10 // (op 6457) 
+v_mul_f32 v19, v0, v11 // (op 6457) 
+v_cvt_f32_f16 v10, v5 // (op 6457) 
+v_lshrrev_b32 v11, 16, v5 // (op 6457) 
+v_cvt_f32_f16 v11, v11 // (op 6457) 
+v_mul_f32 v20, v0, v10 // (op 6457) 
+v_mul_f32 v21, v0, v11 // (op 6457) 
+
+
+v_add_f32 v10, v18, v14 // (op 6458) 
+v_add_f32 v11, v19, v15 // (op 6458) 
+v_add_f32 v12, v20, v16 // (op 6458) 
+v_add_f32 v13, v21, v17 // (op 6458) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6459) 
+v_cvt_f16_f32 v15, v11 // (op 6459) 
+v_cvt_f16_f32 v16, v12 // (op 6459) 
+v_cvt_f16_f32 v17, v13 // (op 6459) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6445) 
+v_pack_b32_f16 v11, v16, v17 // (op 6445) 
+
+s_lshl_b32 s0, s4, 6 // (op 6445) 
+s_add_u32 s0, s0, 32 // (op 6445) 
+v_add_u32 v3, v9, s0 // (op 6445) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6445) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6465) 
+s_mul_i32 s1, 3, s0 // (op 6465) 
+s_add_u32 s1, s1, 32 // (op 6465) 
+
+v_add_u32 v3, v8, s1 // (op 6465) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6465) Load value
+
+v_accvgpr_read v10, a28 // (op 6471) 
+v_accvgpr_read v11, a29 // (op 6471) 
+v_accvgpr_read v12, a30 // (op 6471) 
+v_accvgpr_read v13, a31 // (op 6471) 
+v_mul_f32 v14, v7, v10 // (op 6471) 
+v_mul_f32 v15, v7, v11 // (op 6471) 
+v_mul_f32 v16, v7, v12 // (op 6471) 
+v_mul_f32 v17, v7, v13 // (op 6471) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6462) 
+v_lshrrev_b32 v11, 16, v4 // (op 6462) 
+v_cvt_f32_f16 v11, v11 // (op 6462) 
+v_mul_f32 v18, v0, v10 // (op 6462) 
+v_mul_f32 v19, v0, v11 // (op 6462) 
+v_cvt_f32_f16 v10, v5 // (op 6462) 
+v_lshrrev_b32 v11, 16, v5 // (op 6462) 
+v_cvt_f32_f16 v11, v11 // (op 6462) 
+v_mul_f32 v20, v0, v10 // (op 6462) 
+v_mul_f32 v21, v0, v11 // (op 6462) 
+
+
+v_add_f32 v10, v18, v14 // (op 6463) 
+v_add_f32 v11, v19, v15 // (op 6463) 
+v_add_f32 v12, v20, v16 // (op 6463) 
+v_add_f32 v13, v21, v17 // (op 6463) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6464) 
+v_cvt_f16_f32 v15, v11 // (op 6464) 
+v_cvt_f16_f32 v16, v12 // (op 6464) 
+v_cvt_f16_f32 v17, v13 // (op 6464) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6447) 
+v_pack_b32_f16 v11, v16, v17 // (op 6447) 
+
+s_lshl_b32 s0, s4, 5 // (op 6447) 
+s_mul_i32 s1, 3, s0 // (op 6447) 
+s_add_u32 s1, s1, 32 // (op 6447) 
+
+v_add_u32 v3, v9, s1 // (op 6447) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6447) Store value
+
+
+
+
+
+v_add_u32 v3, 192, v8 // (op 6885) 
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6885) Load value
+
+v_accvgpr_read v10, a96 // (op 6872) 
+v_accvgpr_read v11, a97 // (op 6872) 
+v_accvgpr_read v12, a98 // (op 6872) 
+v_accvgpr_read v13, a99 // (op 6872) 
+v_mul_f32 v14, v7, v10 // (op 6872) 
+v_mul_f32 v15, v7, v11 // (op 6872) 
+v_mul_f32 v16, v7, v12 // (op 6872) 
+v_mul_f32 v17, v7, v13 // (op 6872) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6884) 
+v_lshrrev_b32 v11, 16, v4 // (op 6884) 
+v_cvt_f32_f16 v11, v11 // (op 6884) 
+v_mul_f32 v18, v0, v10 // (op 6884) 
+v_mul_f32 v19, v0, v11 // (op 6884) 
+v_cvt_f32_f16 v10, v5 // (op 6884) 
+v_lshrrev_b32 v11, 16, v5 // (op 6884) 
+v_cvt_f32_f16 v11, v11 // (op 6884) 
+v_mul_f32 v20, v0, v10 // (op 6884) 
+v_mul_f32 v21, v0, v11 // (op 6884) 
+
+
+v_add_f32 v10, v18, v14 // (op 6873) 
+v_add_f32 v11, v19, v15 // (op 6873) 
+v_add_f32 v12, v20, v16 // (op 6873) 
+v_add_f32 v13, v21, v17 // (op 6873) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6874) 
+v_cvt_f16_f32 v15, v11 // (op 6874) 
+v_cvt_f16_f32 v16, v12 // (op 6874) 
+v_cvt_f16_f32 v17, v13 // (op 6874) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6876) 
+v_pack_b32_f16 v11, v16, v17 // (op 6876) 
+
+v_add_u32 v3, 192, v9 // (op 6876) 
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6876) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6890) 
+s_add_u32 s0, s0, 192 // (op 6890) 
+v_add_u32 v3, v8, s0 // (op 6890) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6890) Load value
+
+v_accvgpr_read v10, a100 // (op 6902) 
+v_accvgpr_read v11, a101 // (op 6902) 
+v_accvgpr_read v12, a102 // (op 6902) 
+v_accvgpr_read v13, a103 // (op 6902) 
+v_mul_f32 v14, v7, v10 // (op 6902) 
+v_mul_f32 v15, v7, v11 // (op 6902) 
+v_mul_f32 v16, v7, v12 // (op 6902) 
+v_mul_f32 v17, v7, v13 // (op 6902) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6887) 
+v_lshrrev_b32 v11, 16, v4 // (op 6887) 
+v_cvt_f32_f16 v11, v11 // (op 6887) 
+v_mul_f32 v18, v0, v10 // (op 6887) 
+v_mul_f32 v19, v0, v11 // (op 6887) 
+v_cvt_f32_f16 v10, v5 // (op 6887) 
+v_lshrrev_b32 v11, 16, v5 // (op 6887) 
+v_cvt_f32_f16 v11, v11 // (op 6887) 
+v_mul_f32 v20, v0, v10 // (op 6887) 
+v_mul_f32 v21, v0, v11 // (op 6887) 
+
+
+v_add_f32 v10, v18, v14 // (op 6888) 
+v_add_f32 v11, v19, v15 // (op 6888) 
+v_add_f32 v12, v20, v16 // (op 6888) 
+v_add_f32 v13, v21, v17 // (op 6888) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6889) 
+v_cvt_f16_f32 v15, v11 // (op 6889) 
+v_cvt_f16_f32 v16, v12 // (op 6889) 
+v_cvt_f16_f32 v17, v13 // (op 6889) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6878) 
+v_pack_b32_f16 v11, v16, v17 // (op 6878) 
+
+s_lshl_b32 s0, s4, 5 // (op 6878) 
+s_add_u32 s0, s0, 192 // (op 6878) 
+v_add_u32 v3, v9, s0 // (op 6878) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6878) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6895) 
+s_add_u32 s0, s0, 192 // (op 6895) 
+v_add_u32 v3, v8, s0 // (op 6895) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6895) Load value
+
+v_accvgpr_read v10, a104 // (op 6904) 
+v_accvgpr_read v11, a105 // (op 6904) 
+v_accvgpr_read v12, a106 // (op 6904) 
+v_accvgpr_read v13, a107 // (op 6904) 
+v_mul_f32 v14, v7, v10 // (op 6904) 
+v_mul_f32 v15, v7, v11 // (op 6904) 
+v_mul_f32 v16, v7, v12 // (op 6904) 
+v_mul_f32 v17, v7, v13 // (op 6904) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6892) 
+v_lshrrev_b32 v11, 16, v4 // (op 6892) 
+v_cvt_f32_f16 v11, v11 // (op 6892) 
+v_mul_f32 v18, v0, v10 // (op 6892) 
+v_mul_f32 v19, v0, v11 // (op 6892) 
+v_cvt_f32_f16 v10, v5 // (op 6892) 
+v_lshrrev_b32 v11, 16, v5 // (op 6892) 
+v_cvt_f32_f16 v11, v11 // (op 6892) 
+v_mul_f32 v20, v0, v10 // (op 6892) 
+v_mul_f32 v21, v0, v11 // (op 6892) 
+
+
+v_add_f32 v10, v18, v14 // (op 6893) 
+v_add_f32 v11, v19, v15 // (op 6893) 
+v_add_f32 v12, v20, v16 // (op 6893) 
+v_add_f32 v13, v21, v17 // (op 6893) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6894) 
+v_cvt_f16_f32 v15, v11 // (op 6894) 
+v_cvt_f16_f32 v16, v12 // (op 6894) 
+v_cvt_f16_f32 v17, v13 // (op 6894) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6880) 
+v_pack_b32_f16 v11, v16, v17 // (op 6880) 
+
+s_lshl_b32 s0, s4, 6 // (op 6880) 
+s_add_u32 s0, s0, 192 // (op 6880) 
+v_add_u32 v3, v9, s0 // (op 6880) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6880) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6900) 
+s_mul_i32 s1, 3, s0 // (op 6900) 
+s_add_u32 s1, s1, 192 // (op 6900) 
+
+v_add_u32 v3, v8, s1 // (op 6900) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6900) Load value
+
+v_accvgpr_read v10, a108 // (op 6906) 
+v_accvgpr_read v11, a109 // (op 6906) 
+v_accvgpr_read v12, a110 // (op 6906) 
+v_accvgpr_read v13, a111 // (op 6906) 
+v_mul_f32 v14, v7, v10 // (op 6906) 
+v_mul_f32 v15, v7, v11 // (op 6906) 
+v_mul_f32 v16, v7, v12 // (op 6906) 
+v_mul_f32 v17, v7, v13 // (op 6906) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6897) 
+v_lshrrev_b32 v11, 16, v4 // (op 6897) 
+v_cvt_f32_f16 v11, v11 // (op 6897) 
+v_mul_f32 v18, v0, v10 // (op 6897) 
+v_mul_f32 v19, v0, v11 // (op 6897) 
+v_cvt_f32_f16 v10, v5 // (op 6897) 
+v_lshrrev_b32 v11, 16, v5 // (op 6897) 
+v_cvt_f32_f16 v11, v11 // (op 6897) 
+v_mul_f32 v20, v0, v10 // (op 6897) 
+v_mul_f32 v21, v0, v11 // (op 6897) 
+
+
+v_add_f32 v10, v18, v14 // (op 6898) 
+v_add_f32 v11, v19, v15 // (op 6898) 
+v_add_f32 v12, v20, v16 // (op 6898) 
+v_add_f32 v13, v21, v17 // (op 6898) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6899) 
+v_cvt_f16_f32 v15, v11 // (op 6899) 
+v_cvt_f16_f32 v16, v12 // (op 6899) 
+v_cvt_f16_f32 v17, v13 // (op 6899) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6882) 
+v_pack_b32_f16 v11, v16, v17 // (op 6882) 
+
+s_lshl_b32 s0, s4, 5 // (op 6882) 
+s_mul_i32 s1, 3, s0 // (op 6882) 
+s_add_u32 s1, s1, 192 // (op 6882) 
+
+v_add_u32 v3, v9, s1 // (op 6882) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6882) Store value
+
+
+
+
+
+v_mov_b32 v3, v8 // (op 129) reg expression
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 129) Load value
+
+v_accvgpr_read v10, a0 // (op 125) 
+v_accvgpr_read v11, a1 // (op 125) 
+v_accvgpr_read v12, a2 // (op 125) 
+v_accvgpr_read v13, a3 // (op 125) 
+v_mul_f32 v14, v7, v10 // (op 125) 
+v_mul_f32 v15, v7, v11 // (op 125) 
+v_mul_f32 v16, v7, v12 // (op 125) 
+v_mul_f32 v17, v7, v13 // (op 125) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 130) 
+v_lshrrev_b32 v11, 16, v4 // (op 130) 
+v_cvt_f32_f16 v11, v11 // (op 130) 
+v_mul_f32 v18, v0, v10 // (op 130) 
+v_mul_f32 v19, v0, v11 // (op 130) 
+v_cvt_f32_f16 v10, v5 // (op 130) 
+v_lshrrev_b32 v11, 16, v5 // (op 130) 
+v_cvt_f32_f16 v11, v11 // (op 130) 
+v_mul_f32 v20, v0, v10 // (op 130) 
+v_mul_f32 v21, v0, v11 // (op 130) 
+
+
+v_add_f32 v10, v18, v14 // (op 126) 
+v_add_f32 v11, v19, v15 // (op 126) 
+v_add_f32 v12, v20, v16 // (op 126) 
+v_add_f32 v13, v21, v17 // (op 126) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 127) 
+v_cvt_f16_f32 v15, v11 // (op 127) 
+v_cvt_f16_f32 v16, v12 // (op 127) 
+v_cvt_f16_f32 v17, v13 // (op 127) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 128) 
+v_pack_b32_f16 v11, v16, v17 // (op 128) 
+
+v_mov_b32 v3, v9 // (op 128) reg expression
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 128) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6358) 
+v_add_u32 v3, v8, s0 // (op 6358) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6358) Load value
+
+v_accvgpr_read v10, a4 // (op 6354) 
+v_accvgpr_read v11, a5 // (op 6354) 
+v_accvgpr_read v12, a6 // (op 6354) 
+v_accvgpr_read v13, a7 // (op 6354) 
+v_mul_f32 v14, v7, v10 // (op 6354) 
+v_mul_f32 v15, v7, v11 // (op 6354) 
+v_mul_f32 v16, v7, v12 // (op 6354) 
+v_mul_f32 v17, v7, v13 // (op 6354) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6359) 
+v_lshrrev_b32 v11, 16, v4 // (op 6359) 
+v_cvt_f32_f16 v11, v11 // (op 6359) 
+v_mul_f32 v18, v0, v10 // (op 6359) 
+v_mul_f32 v19, v0, v11 // (op 6359) 
+v_cvt_f32_f16 v10, v5 // (op 6359) 
+v_lshrrev_b32 v11, 16, v5 // (op 6359) 
+v_cvt_f32_f16 v11, v11 // (op 6359) 
+v_mul_f32 v20, v0, v10 // (op 6359) 
+v_mul_f32 v21, v0, v11 // (op 6359) 
+
+
+v_add_f32 v10, v18, v14 // (op 6355) 
+v_add_f32 v11, v19, v15 // (op 6355) 
+v_add_f32 v12, v20, v16 // (op 6355) 
+v_add_f32 v13, v21, v17 // (op 6355) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6356) 
+v_cvt_f16_f32 v15, v11 // (op 6356) 
+v_cvt_f16_f32 v16, v12 // (op 6356) 
+v_cvt_f16_f32 v17, v13 // (op 6356) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6357) 
+v_pack_b32_f16 v11, v16, v17 // (op 6357) 
+
+s_lshl_b32 s0, s4, 5 // (op 6357) 
+v_add_u32 v3, v9, s0 // (op 6357) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6357) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 6 // (op 6372) 
+v_add_u32 v3, v8, s0 // (op 6372) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6372) Load value
+
+v_accvgpr_read v10, a8 // (op 6368) 
+v_accvgpr_read v11, a9 // (op 6368) 
+v_accvgpr_read v12, a10 // (op 6368) 
+v_accvgpr_read v13, a11 // (op 6368) 
+v_mul_f32 v14, v7, v10 // (op 6368) 
+v_mul_f32 v15, v7, v11 // (op 6368) 
+v_mul_f32 v16, v7, v12 // (op 6368) 
+v_mul_f32 v17, v7, v13 // (op 6368) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6373) 
+v_lshrrev_b32 v11, 16, v4 // (op 6373) 
+v_cvt_f32_f16 v11, v11 // (op 6373) 
+v_mul_f32 v18, v0, v10 // (op 6373) 
+v_mul_f32 v19, v0, v11 // (op 6373) 
+v_cvt_f32_f16 v10, v5 // (op 6373) 
+v_lshrrev_b32 v11, 16, v5 // (op 6373) 
+v_cvt_f32_f16 v11, v11 // (op 6373) 
+v_mul_f32 v20, v0, v10 // (op 6373) 
+v_mul_f32 v21, v0, v11 // (op 6373) 
+
+
+v_add_f32 v10, v18, v14 // (op 6369) 
+v_add_f32 v11, v19, v15 // (op 6369) 
+v_add_f32 v12, v20, v16 // (op 6369) 
+v_add_f32 v13, v21, v17 // (op 6369) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6370) 
+v_cvt_f16_f32 v15, v11 // (op 6370) 
+v_cvt_f16_f32 v16, v12 // (op 6370) 
+v_cvt_f16_f32 v17, v13 // (op 6370) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6371) 
+v_pack_b32_f16 v11, v16, v17 // (op 6371) 
+
+s_lshl_b32 s0, s4, 6 // (op 6371) 
+v_add_u32 v3, v9, s0 // (op 6371) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6371) Store value
+
+
+
+
+
+s_lshl_b32 s0, s2, 5 // (op 6386) 
+s_mul_i32 s1, 3, s0 // (op 6386) 
+
+v_add_u32 v3, v8, s1 // (op 6386) 
+
+
+buffer_load_dwordx2 v[4:5], v3, s[40:43], 0 offen // (op 6386) Load value
+
+v_accvgpr_read v10, a12 // (op 6382) 
+v_accvgpr_read v11, a13 // (op 6382) 
+v_accvgpr_read v12, a14 // (op 6382) 
+v_accvgpr_read v13, a15 // (op 6382) 
+v_mul_f32 v14, v7, v10 // (op 6382) 
+v_mul_f32 v15, v7, v11 // (op 6382) 
+v_mul_f32 v16, v7, v12 // (op 6382) 
+v_mul_f32 v17, v7, v13 // (op 6382) 
+
+s_waitcnt vmcnt(0)
+v_cvt_f32_f16 v10, v4 // (op 6387) 
+v_lshrrev_b32 v11, 16, v4 // (op 6387) 
+v_cvt_f32_f16 v11, v11 // (op 6387) 
+v_mul_f32 v18, v0, v10 // (op 6387) 
+v_mul_f32 v19, v0, v11 // (op 6387) 
+v_cvt_f32_f16 v10, v5 // (op 6387) 
+v_lshrrev_b32 v11, 16, v5 // (op 6387) 
+v_cvt_f32_f16 v11, v11 // (op 6387) 
+v_mul_f32 v20, v0, v10 // (op 6387) 
+v_mul_f32 v21, v0, v11 // (op 6387) 
+
+
+v_add_f32 v10, v18, v14 // (op 6383) 
+v_add_f32 v11, v19, v15 // (op 6383) 
+v_add_f32 v12, v20, v16 // (op 6383) 
+v_add_f32 v13, v21, v17 // (op 6383) 
+
+
+v_cvt_f16_f32 v14, v10 // (op 6384) 
+v_cvt_f16_f32 v15, v11 // (op 6384) 
+v_cvt_f16_f32 v16, v12 // (op 6384) 
+v_cvt_f16_f32 v17, v13 // (op 6384) 
+
+
+v_pack_b32_f16 v10, v14, v15 // (op 6385) 
+v_pack_b32_f16 v11, v16, v17 // (op 6385) 
+
+s_lshl_b32 s0, s4, 5 // (op 6385) 
+s_mul_i32 s1, 3, s0 // (op 6385) 
+
+v_add_u32 v3, v9, s1 // (op 6385) 
+
+
+buffer_store_dwordx2 v[10:11], v3, s[44:47], 0 offen // (op 6385) Store value
+
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before conditional label!
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_ConditionalBottom_0_beta_116:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+s_endpgm  // End of RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2
+.LRR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_end:
+.size RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2, .LRR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_end-RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2
+.rodata
+.p2align 6
+.amdhsa_kernel RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2
+  .amdhsa_next_free_vgpr 316
+  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+  .amdhsa_group_segment_fixed_size 98304 // lds bytes
+  .amdhsa_accum_offset 188
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_kernarg_preload_length 14
+  .amdhsa_user_sgpr_kernarg_preload_offset 0
+.amdhsa_system_sgpr_workgroup_id_x 1
+.amdhsa_system_sgpr_workgroup_id_y 1
+.amdhsa_system_sgpr_workgroup_id_z 0
+.amdhsa_system_sgpr_workgroup_info 0
+.amdhsa_system_vgpr_workitem_id 1
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+custom.config:
+  Source:
+    Origin: rocroller
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  ProblemType:
+    OperationType: GEMM
+    DataType: B8
+    DataTypeA: B8
+    DataTypeB: B8
+    DestDataType: h
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: True
+    TransposeB: False
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+    MXBlockA: 32
+    MXBlockB: 32
+  CustomKernel:
+    args: [ { type: int64, semantic: StrideC0 },
+            { type: int64, semantic: StrideD0 },
+            { type: address, semantic: AddressC },
+            { type: int64, semantic: SizeFree1 },
+            { type: address, semantic: AddressD },
+            { type: int64, semantic: StrideA0 },
+            { type: float32, semantic: Beta },
+            { type: float32, semantic: Alpha },
+            { type: address, semantic: AddressA },
+            { type: int64, semantic: SizeFree0 },
+            { type: int64, semantic: StrideB0 },
+            { type: address, semantic: AddressB },
+            { type: int64, semantic: StrideScaleA0 },
+            { type: address, semantic: AddressMXScaleA },
+            { type: int64, semantic: StrideScaleB0 },
+            { type: address, semantic: AddressMXScaleB },
+            { type: int64, semantic: SizeSum } ]
+    macrotile: [256, 128, 128]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, Batch]
+  MatrixInstruction: [16, 16, 128, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [8, 4]
+  StaggerU: 0
+  WavefrontSize: 64
+amdhsa.version: [1, 2]
+amdhsa.kernels:
+  - .name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2
+    .symbol: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2.kd
+    .kernarg_segment_size: 128
+    .group_segment_fixed_size: 98304
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .sgpr_count: 64
+    .vgpr_count: 186
+    .agpr_count: 128
+    .max_flat_workgroup_size: 256
+    .workgroup_size: [256, 1, 1]
+    .kernel_dimensions: 2
+    .wavefront_size: 64
+    .workitem_count: [{type: Multiply, lhs: {type: Convert, arg: {type: ArithmeticShiftR, lhs: {type: Subtract, lhs: {type: Add, lhs: {type: Kernel Argument, name: Tensor_0_size_0_1, variableType: {dataType: Int64, pointerType: Value}, dataDirection: read_only, expression: {type: CommandArgument, size: 8, offset: 8, name: Tensor_0_size_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}, offset: 8, size: 8}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 256}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 8}}, dataType: Int32}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 256}}, {type: Multiply, lhs: {type: Convert, arg: {type: ArithmeticShiftR, lhs: {type: Subtract, lhs: {type: Add, lhs: {type: Kernel Argument, name: Tensor_2_size_1_4, variableType: {dataType: Int64, pointerType: Value}, dataDirection: read_only, expression: {type: CommandArgument, size: 8, offset: 56, name: Tensor_2_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}, offset: 32, size: 8}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 128}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 7}}, dataType: Int32}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, {is-null: true}]
+    .dynamic_sharedmemory_bytes: {type: LiteralValue.UInt32, dataType: UInt32, value: 0}
+    .args:
+      - .name: Tensor_10_stride_1_10
+        .size: 8
+        .offset: 0
+        .expression: {type: CommandArgument, size: 8, offset: 192, name: Tensor_10_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_21_stride_1_16
+        .size: 8
+        .offset: 8
+        .expression: {type: CommandArgument, size: 8, offset: 240, name: Tensor_21_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_10_pointer
+        .size: 8
+        .offset: 16
+        .expression: {type: CommandArgument, size: 8, offset: 160, name: Tensor_10_pointer, variableType: {dataType: Half, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: Half, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_2_size_1_4
+        .size: 8
+        .offset: 24
+        .expression: {type: CommandArgument, size: 8, offset: 56, name: Tensor_2_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_21_pointer
+        .size: 8
+        .offset: 32
+        .expression: {type: CommandArgument, size: 8, offset: 208, name: Tensor_21_pointer, variableType: {dataType: Half, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: Half, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_0_stride_0_0
+        .size: 8
+        .offset: 40
+        .expression: {type: CommandArgument, size: 8, offset: 24, name: Tensor_0_stride_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: user_Float_Value_14
+        .size: 4
+        .offset: 48
+        .expression: {type: CommandArgument, size: 4, offset: 204, name: user_Float_Value_14, variableType: {dataType: Float, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Float, pointerType: Value}
+        .value_kind: by_value
+      - .name: user_Float_Value_12
+        .size: 4
+        .offset: 52
+        .expression: {type: CommandArgument, size: 4, offset: 200, name: user_Float_Value_12, variableType: {dataType: Float, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Float, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_0_pointer
+        .size: 8
+        .offset: 56
+        .expression: {type: CommandArgument, size: 8, offset: 0, name: Tensor_0_pointer, variableType: {dataType: BF8, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: BF8, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_0_size_0_1
+        .size: 8
+        .offset: 64
+        .expression: {type: CommandArgument, size: 8, offset: 8, name: Tensor_0_size_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_2_stride_1_3
+        .size: 8
+        .offset: 72
+        .expression: {type: CommandArgument, size: 8, offset: 72, name: Tensor_2_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_2_pointer
+        .size: 8
+        .offset: 80
+        .expression: {type: CommandArgument, size: 8, offset: 40, name: Tensor_2_pointer, variableType: {dataType: BF8, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: BF8, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_4_stride_0_6
+        .size: 8
+        .offset: 88
+        .expression: {type: CommandArgument, size: 8, offset: 104, name: Tensor_4_stride_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_4_pointer
+        .size: 8
+        .offset: 96
+        .expression: {type: CommandArgument, size: 8, offset: 80, name: Tensor_4_pointer, variableType: {dataType: E8M0, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: E8M0, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_7_stride_1_8
+        .size: 8
+        .offset: 104
+        .expression: {type: CommandArgument, size: 8, offset: 152, name: Tensor_7_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+      - .name: Tensor_7_pointer
+        .size: 8
+        .offset: 112
+        .expression: {type: CommandArgument, size: 8, offset: 120, name: Tensor_7_pointer, variableType: {dataType: E8M0, pointerType: PointerGlobal}, direction: read_write}
+        .variableType: {dataType: E8M0, pointerType: PointerGlobal}
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_0_size_1_14
+        .size: 8
+        .offset: 120
+        .expression: {type: CommandArgument, size: 8, offset: 16, name: Tensor_0_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
+        .variableType: {dataType: Int64, pointerType: Value}
+        .value_kind: by_value
+...
+
+.end_amdgpu_metadata
+

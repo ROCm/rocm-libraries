@@ -311,3 +311,107 @@ def test_must_keep_indices_follow_removed_solutions(monkeypatch):
     assert analyzer.exactWinners[size][0] == 0
     assert analyzer.solutions == [solutions[2]]
     assert list(analyzer.data) == [3.0]
+
+
+def _pureMxSolutions(pair, withWgmSmall=False):
+    """The checked-in pure-MX tile family: A and B the same MX type."""
+    tiles = [(pair, "32x32x64"), (pair, "16x16x128")]
+    if withWgmSmall:
+        tiles.append((pair, "32x32x128_WGM"))
+    tiles.append((pair, "256x128x128"))
+    tiles.append((pair, "256x256x128_WGM"))
+    return _names(*tiles)
+
+
+def test_pure_mx_same_type_pair_walks_the_whole_ladder():
+    # FP8_FP8 / BF8_BF8 / FP4_FP4 are same-type pairs, so _SIX_BIT_PAIR_RE never
+    # matches and _sixBitPair() is False for the entire family.
+    solutions = _pureMxSolutions("FP8_FP8_Half_Half_Float")
+    small, mid, big, wgm = solutions
+
+    assert preferredExactCustomKernel(64, 64, 128, solutions) is small
+    assert preferredExactCustomKernel(128, 128, 128, solutions) is small
+    assert preferredExactCustomKernel(256, 256, 256, solutions) is mid
+    # 1040 = 16*65 and 528 = 16*33, so 256x128 does not divide it and MN is
+    # below the big-tile bound either way.
+    assert preferredExactCustomKernel(1040, 528, 1024, solutions) is mid
+    assert preferredExactCustomKernel(2560, 16384, 2560, solutions) is big
+    assert preferredExactCustomKernel(4096, 4096, 16384, solutions) is wgm
+
+
+def test_big_plain_tile_needs_both_size_and_divisibility():
+    solutions = _pureMxSolutions("BF8_BF8_Float_Float_Float")
+    mid, big = solutions[1], solutions[2]
+
+    # Big enough and 256x128 divides it.
+    assert preferredExactCustomKernel(2560, 16384, 2560, solutions) is big
+    assert preferredExactCustomKernel(1024, 1024, 2560, solutions) is big
+    # Big enough but 256 does not divide M.
+    assert preferredExactCustomKernel(1040, 1024, 2560, solutions) is mid
+    # Divides, but MN is below the bound: 256x256x256 keeps 16x16x128.
+    assert preferredExactCustomKernel(512, 512, 256, solutions) is mid
+
+
+def test_small_mn_wgm_prefers_32x32x128():
+    solutions = _pureMxSolutions("FP4_FP4_Half_Half_Float", withWgmSmall=True)
+    wgmSmall, wgmBig = solutions[2], solutions[4]
+
+    # K == _ROCROLLER_WGM_K turns workgroup mapping on; 512x512 is below the
+    # 128x128 / 256x256 duopoly and has its own tile.
+    assert preferredExactCustomKernel(512, 512, 4096, solutions) is wgmSmall
+    # Just above the small-MN bound the duopoly takes over again.
+    assert preferredExactCustomKernel(1024, 1024, 4096, solutions) is wgmBig
+    # K below the threshold is not a WGM problem at all.
+    assert preferredExactCustomKernel(512, 512, 2048, solutions) is solutions[1]
+
+
+def test_pure_mx_3072_pins_to_256x256():
+    """Regression pin.
+
+    FP8xFP8 at 3072x3072x16384 lands on 256x256 only because the pure-MX family
+    ships no 128x128 WGM kernel: want256 is False (not a six-bit pair, M and N
+    are under 4096), so find(128, 128) is tried first and returns None. Adding a
+    128x128 WGM kernel to this family would silently flip the pick. If this
+    assert fails, that is what happened - decide deliberately, do not retune it.
+    """
+    pair = "FP8_FP8_Half_Half_Float"
+    solutions = _pureMxSolutions(pair)
+    assert preferredExactCustomKernel(3072, 3072, 16384, solutions) is solutions[3]
+
+    withSmallWgm = _names(
+        (pair, "32x32x64"),
+        (pair, "128x128x128_WGM"),
+        (pair, "256x256x128_WGM"),
+    )
+    assert preferredExactCustomKernel(3072, 3072, 16384, withSmallWgm) is withSmallWgm[1]
+
+
+def test_pure_mx_adds_its_two_extra_exact_rows():
+    solutions = _pureMxSolutions("FP4_FP4_Float_Float_Float", withWgmSmall=True)
+    size64 = (64, 64, 1, 128, 64, 64, 128, 128)
+    analyzer = _analyzer(
+        solutions,
+        exactWinners={size64: [0, 1000.0]},
+        exactScores={size64: {idx: 1000.0 for idx in range(len(solutions))}},
+    )
+    analyzer._retainTiedExactCustomKernels()
+
+    bigPlain = (2560, 16384, 1, 2560, 2560, 16384, 2560, 2560)
+    wgmSmall = (512, 512, 1, 4096, 512, 512, 4096, 4096)
+    assert analyzer.exactWinners[bigPlain][0] == 3    # 256x128x128
+    assert analyzer.exactWinners[wgmSmall][0] == 2    # 32x32x128_WGM
+
+
+def test_f6_library_does_not_grow_the_pure_mx_rows():
+    f6 = "FP6_FP6_Half_Half_Float"
+    solutions = _names((f6, "32x32x64"), (f6, "128x128x128_WGM"), (f6, "256x256x128_WGM"))
+    size64 = (64, 64, 1, 128, 64, 64, 128, 128)
+    analyzer = _analyzer(
+        solutions,
+        exactWinners={size64: [0, 1000.0]},
+        exactScores={size64: {0: 1000.0, 1: 1000.0, 2: 1000.0}},
+    )
+    analyzer._retainTiedExactCustomKernels()
+
+    assert (2560, 16384, 1, 2560, 2560, 16384, 2560, 2560) not in analyzer.exactWinners
+    assert (512, 512, 1, 4096, 512, 512, 4096, 4096) not in analyzer.exactWinners
