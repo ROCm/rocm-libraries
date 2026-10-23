@@ -64,6 +64,7 @@ nanobind_add_module(stinkytofu_python
     src/python_bindings.cpp
     src/logical_count.cpp
     src/HardwareCaps.cpp
+    src/stir_api.cpp
 )
 
 # Restore global compile options
