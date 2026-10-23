@@ -19,6 +19,19 @@
 namespace hipdnn_test_sdk::detail
 {
 
+/// Stats may be rank-3 [B, H, Sq] (as in the checked-in backward bundles) or rank-4 [B, H, Sq, 1];
+/// the reference reads rank-4, so a rank-3 tensor gets a trailing unit dim.
+inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT
+    withTrailingUnitDim(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT attrs)
+{
+    if(attrs.dims.size() == 3)
+    {
+        attrs.dims.push_back(1);
+        attrs.strides.push_back(1);
+    }
+    return attrs;
+}
+
 struct SdpaBwdParams
 {
     SdpaBwdParams(
@@ -44,7 +57,7 @@ struct SdpaBwdParams
         , vTensor(unpackTensorAttributes(vAttributes))
         , oTensor(unpackTensorAttributes(oAttributes))
         , doTensor(unpackTensorAttributes(doAttributes))
-        , statsTensor(unpackTensorAttributes(statsAttributes))
+        , statsTensor(withTrailingUnitDim(unpackTensorAttributes(statsAttributes)))
         , dqTensor(unpackTensorAttributes(dqAttributes))
         , dkTensor(unpackTensorAttributes(dkAttributes))
         , dvTensor(unpackTensorAttributes(dvAttributes))
@@ -239,6 +252,17 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->o_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->do_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid());
+        // Stats: FLOAT, rank-3 [B, H, Sq] or rank-4 [B, H, Sq, 1].
+        {
+            const auto* stats = tensorMap.at(nodeAttributes->stats_tensor_uid());
+            const auto* statsDims = stats->dims();
+            if(stats->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+               || statsDims == nullptr
+               || (statsDims->size() != 3 && !(statsDims->size() == 4 && statsDims->Get(3) == 1)))
+            {
+                return false;
+            }
+        }
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dq_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dk_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dv_tensor_uid());

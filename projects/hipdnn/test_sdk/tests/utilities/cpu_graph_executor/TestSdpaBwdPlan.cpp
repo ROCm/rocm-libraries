@@ -53,7 +53,9 @@ struct RawDbiasSpec
 flatbuffers::FlatBufferBuilder
     makeRawSdpaBwdGraph(SdpaBackwardAttributesT attrs,
                         std::optional<DataType> maskDataType = std::nullopt,
-                        const std::optional<RawDbiasSpec>& dBias = std::nullopt)
+                        const std::optional<RawDbiasSpec>& dBias = std::nullopt,
+                        const std::vector<int64_t>& statsDims = {1, 2, 4, 1},
+                        DataType statsDataType = DataType::FLOAT)
 {
     constexpr int64_t DBIAS_UID = 11;
     constexpr int64_t Q_UID = 1;
@@ -68,7 +70,6 @@ flatbuffers::FlatBufferBuilder
     constexpr int64_t MASK_UID = 10;
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    const std::vector<int64_t> statsDims = {1, 2, 4, 1};
     const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
     const std::vector<int64_t> maskDims = {1, 1, 4, 4};
     const auto maskStrides = hipdnn_data_sdk::utilities::generateStrides(maskDims);
@@ -102,7 +103,7 @@ flatbuffers::FlatBufferBuilder
     addTensor(V_UID, "V", DataType::FLOAT, strides, dims);
     addTensor(O_UID, "O", DataType::FLOAT, strides, dims);
     addTensor(DO_UID, "dO", DataType::FLOAT, strides, dims);
-    addTensor(STATS_UID, "Stats", DataType::FLOAT, statsStrides, statsDims);
+    addTensor(STATS_UID, "Stats", statsDataType, statsStrides, statsDims);
     addTensor(DQ_UID, "dQ", DataType::FLOAT, strides, dims);
     addTensor(DK_UID, "dK", DataType::FLOAT, strides, dims);
     addTensor(DV_UID, "dV", DataType::FLOAT, strides, dims);
@@ -697,6 +698,69 @@ TEST(TestSdpaBwdPlanDbias, ExecuteMatchesDirectReference)
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(dBias, dBiasRef));
     EXPECT_TRUE(exactValidation.allClose(dQ, dQRef));
+}
+
+// Stats may be rank-3 [B, H, Sq] (the checked-in backward bundles use it) or rank-4
+// [B, H, Sq, 1]; both give identical gradients. Stats must be FLOAT.
+TEST(TestSdpaBwdPlanStats, Rank3StatsEqualRank4)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> dO(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> stats({1, 2, 4, 1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 61);
+    k.fillWithRandomValues(-1.0F, 1.0F, 62);
+    v.fillWithRandomValues(-1.0F, 1.0F, 63);
+    dO.fillWithRandomValues(-1.0F, 1.0F, 64);
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, -1, -1, true, &stats);
+
+    std::vector<hipdnn_data_sdk::utilities::Tensor<float>> grads;
+    for(const auto& statsDims : {std::vector<int64_t>{1, 2, 4, 1}, std::vector<int64_t>{1, 2, 4}})
+    {
+        auto graphBuilder
+            = makeRawSdpaBwdGraph(SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims);
+        grads.emplace_back(dims);
+        grads.emplace_back(dims);
+        grads.emplace_back(dims);
+        const auto n = grads.size();
+        const std::unordered_map<int64_t, void*> variantPack
+            = {{1, q.memory().hostData()},
+               {2, k.memory().hostData()},
+               {3, v.memory().hostData()},
+               {4, o.memory().hostData()},
+               {5, dO.memory().hostData()},
+               {6, stats.memory().hostData()},
+               {7, grads[n - 3].memory().hostData()},
+               {8, grads[n - 2].memory().hostData()},
+               {9, grads[n - 1].memory().hostData()}};
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+        executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+    }
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    for(size_t i = 0; i < 3; ++i)
+    {
+        EXPECT_TRUE(exactValidation.allClose(grads[i], grads[i + 3])) << "gradient " << i;
+    }
+}
+
+TEST(TestSdpaBwdPlanStats, NonFloatOrBadShapeIsNotApplicable)
+{
+    CpuReferenceGraphExecutor executor;
+    for(const auto& [statsDims, type] :
+        {std::pair{std::vector<int64_t>{1, 2, 4, 1}, DataType::HALF},
+         std::pair{std::vector<int64_t>{1, 2, 4, 2}, DataType::FLOAT},
+         std::pair{std::vector<int64_t>{8}, DataType::FLOAT}})
+    {
+        auto graphBuilder = makeRawSdpaBwdGraph(
+            SdpaBackwardAttributesT{}, std::nullopt, std::nullopt, statsDims, type);
+        EXPECT_FALSE(
+            executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    }
 }
 
 TEST(TestSdpaBwdPlanMask, DanglingMaskUidIsNotApplicable)
