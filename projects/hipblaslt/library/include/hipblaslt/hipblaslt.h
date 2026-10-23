@@ -88,10 +88,13 @@
  *  \details
  *  Used with ``hipblasLtEmulationDescSetAttribute`` and
  *  ``hipblasLtEmulationDescGetAttribute`` to configure per-matmul
- *  FP64/FP32 emulation settings.  Emulation is enabled simply by attaching
- *  the descriptor to a matmul descriptor via
- *  ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``; detach (set to NULL) to
- *  disable via the public API.
+ *  FP64/FP32 emulation settings.  Attach the descriptor to a matmul
+ *  descriptor via ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``; detach (set
+ *  to NULL) to fall back to env-var / built-in defaults.  Attaching it does
+ *  not enable emulation: emulation is requested by the compute type
+ *  (``HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT``) or, for plain
+ *  ``HIPBLAS_COMPUTE_{64F,32F}``, by setting the environment variable
+ *  ``HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1``.
  */
 typedef enum {
     HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate. Default: ``DEFAULT``. */
@@ -1620,7 +1623,9 @@ hipblasStatus_t hipblasLtEmulationDescGetAttribute(hipblasLtEmulationDesc_t     
  *
  *  @param[in]  handle           hipBLASLt handle (provides device selection).
  *  @param[in]  matmulDesc       Matmul descriptor carrying emulation settings
- *                               (reads ``HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT``
+ *                               (reads its compute type, the emulation
+ *                               descriptor attached via
+ *                               ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``,
  *                               and ``HIPBLASLT_MATMUL_DESC_TRANSA`` /
  *                               ``HIPBLASLT_MATMUL_DESC_TRANSB``).  May be NULL
  *                               to use env-var / built-in defaults and

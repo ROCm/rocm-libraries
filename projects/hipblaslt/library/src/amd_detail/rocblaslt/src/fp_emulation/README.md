@@ -1,3 +1,6 @@
+<!-- Copyright Advanced Micro Devices, Inc., or its affiliates. -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # FP32/FP64 Fixed-Point Emulation
 
 This directory implements FP32/FP64 GEMM emulation via **Ozaki Scheme II**
@@ -66,27 +69,89 @@ internal entry points directly.  `emulation.cpp` must be compiled as HIP.
 
 ## Configuration
 
-Emulation can be enabled and tuned two ways:
+### Requesting emulation
 
-**1. Environment variables** (process-wide default):
+Emulation is requested through the **compute type** of the matmul descriptor:
 
-```bash
-export HIPBLASLT_EMULATE_DOUBLE_PRECISION=1   # enable FP64 emulation
-export HIPBLASLT_EMULATE_SINGLE_PRECISION=1   # enable FP32 emulation
-```
+| Compute type | Behaviour |
+| --- | --- |
+| `HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT` | FP64 GEMM requested to use fixed-point emulation (A/B/C/D and scale type `HIP_R_64F`). |
+| `HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT` | FP32 GEMM requested to use fixed-point emulation (A/B/C/D and scale type `HIP_R_32F`). |
+| `HIPBLAS_COMPUTE_64F` / `HIPBLAS_COMPUTE_32F` | Native GEMM, unless `HIPBLASLT_EMULATE_DOUBLE_PRECISION=1` / `HIPBLASLT_EMULATE_SINGLE_PRECISION=1` is set ("transparent mode"). |
 
-**2. Per-matmul descriptor attributes** (per call; take precedence over the
-env vars for that specific matmul):
+An emulated compute type *requests* emulation. Whether a call is actually
+emulated still depends on the strategy, device support, `batch_count = 1`,
+the epilogue, and the input data; otherwise it runs as a native GEMM.
+
+Internally the compute types map to `rocblaslt_compute_f64_emulated_fixedpoint`
+(200) and `rocblaslt_compute_f32_emulated_fixedpoint` (201), whose values must
+match the `hipblasComputeType_t` enumerators.
+
+### Environment variables (process-wide defaults)
+
+| Variable | Values | Meaning |
+| --- | --- | --- |
+| `HIPBLASLT_EMULATE_DOUBLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_64F` GEMMs. |
+| `HIPBLASLT_EMULATE_SINGLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_32F` GEMMs. |
+| `HIPBLASLT_EMULATION_STRATEGY` | `performant` (default) / `eager` | `performant` emulates only when the performance model predicts a speedup; `eager` always emulates when supported. |
+| `HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK` | hex bitmask, default `0x3` | Bit 0 = detect Inf, bit 1 = detect NaN. `0` skips detection (unsupported values silently corrupt the output). |
+| `HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | ADP precision target for FP64. Fewer bits mean fewer moduli and faster execution. |
+| `HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. |
+| `HIPBLASLT_EMULATION_NUM_MODULI` | `2`..`20` | **Testing only.** Overrides the ADP-selected moduli count; accuracy is not guaranteed below the ADP choice. |
+| `HIPBLASLT_EMULATION_PROFILE` | file path | Append per-call profiling CSV rows to this file. |
+
+### Per-matmul settings (emulation descriptor)
+
+Per-matmul settings live in a separate `hipblasLtEmulationDesc_t`, attached to
+the matmul descriptor with `HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR`.
+Attaching it does **not** enable emulation; it only tunes GEMMs that are already
+emulated through the compute type or the env vars.
 
 ```c
-int32_t v = emulation_enabled ? 1 : 0;
+hipblasLtEmulationDesc_t emul;
+hipblasLtEmulationDescCreate(&emul);
+
+int32_t strategy = HIPBLAS_EMULATION_STRATEGY_EAGER;
+hipblasLtEmulationDescSetAttribute(
+    emul, HIPBLASLT_EMULATION_DESC_STRATEGY, &strategy, sizeof(strategy));
+
+int32_t bits = 26; /* ~1e-8 relative accuracy */
+hipblasLtEmulationDescSetAttribute(
+    emul, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT, &bits, sizeof(bits));
+
 hipblasLtMatmulDescSetAttribute(
-    desc, HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT, &v, sizeof(v));
+    matmul_desc, HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR, &emul, sizeof(emul));
+
+/* ... hipblasLtMatmul(...) ... */
+
+hipblasLtEmulationDescDestroy(emul); /* only after all matmuls using matmul_desc */
 ```
 
-Other per-call knobs (strategy, precision target, special-values mask) are also
-available as `HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT` attributes.
+Emulation descriptor attributes (`hipblasLtEmulationDescAttributes_t`):
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `HIPBLASLT_EMULATION_DESC_STRATEGY` | `int32_t` (`hipblasEmulationStrategy_t`) | `DEFAULT` (0) = inherit env var, `PERFORMANT` (1), `EAGER` (2). |
+| `HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT` | `int32_t` (`hipEmulationSpecialValuesSupport_t`) | `DEFAULT` (0) = Inf+NaN, `NONE` (1), `INFINITY` (2), `NAN` (3). |
+| `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT` | `int32_t` | ADP precision target in mantissa bits; `0` = inherit env var. |
+| `..._FIXEDPOINT_MANTISSA_CONTROL`, `..._FIXEDPOINT_MANTISSA_BIT_OFFSET`, `..._FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER` | — | Not used at the moment; setting them returns an error. |
+
+The matmul descriptor stores only a pointer to the emulation descriptor, so the
+emulation descriptor must outlive every matmul call that uses it. Set the
+attribute to `NULL` to detach it.
+
+### Setting precedence
+
+Emulation descriptor attributes > environment variables > built-in defaults.
+A `DEFAULT` / `0` value on an emulation descriptor attribute falls back to the
+corresponding environment variable. See `fixedPointEmulationDecision()` in
+`emulation.cpp` for the full resolution logic.
+
+### Workspace
+
+Query the required workspace with `hipblasLtEmulationWorkspaceSize()` and pass
+it as `HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES`. It returns `0` when emulation
+is not applicable (unsupported device or type, or `batch_count != 1`).
 
 See [`docs/how-to/fp-emulation.rst`](../../../../../../docs/how-to/fp-emulation.rst)
-for the full list of settings, the setting-precedence rules, and workspace
-requirements.
+for the complete user-facing guide and `hipblaslt-bench` examples.

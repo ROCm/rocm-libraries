@@ -1498,9 +1498,10 @@ catch(...)
 }
 
 /* =========================================================================
- * Emulation API — per-matmul settings via HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT
- * See hipblasLtMatmulDescSetAttribute / hipblasLtMatmulDescGetAttribute.
- * The old handle-level setters have been removed; use matmul desc attributes.
+ * Emulation API — per-matmul settings live in a hipblasLtEmulationDesc_t
+ * (hipblasLtEmulationDescCreate / ...SetAttribute with HIPBLASLT_EMULATION_DESC_*),
+ * attached to a matmul descriptor via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+ * The old handle-level setters have been removed.
  * ========================================================================= */
 
 /* Forward declarations: emulation descriptor helpers (rocblaslt_auxiliary.cpp,
