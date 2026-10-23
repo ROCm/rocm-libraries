@@ -606,7 +606,8 @@ INSTANTIATE_TEST_SUITE_P(
     TestSdpaBwdPlanUnsupportedAttribute,
     Values(UnsupportedBwdAttributeCase{"AlibiMask",
                                        [](SdpaBackwardAttributesT& a) { a.alibi_mask = true; }},
-           UnsupportedBwdAttributeCase{"PaddingMask",
+           // cuDNN: padding_mask requires both seq_len tensors.
+           UnsupportedBwdAttributeCase{"PaddingMaskWithoutSeqLens",
                                        [](SdpaBackwardAttributesT& a) { a.padding_mask = true; }},
            // Only the probability is set: no seed/offset/mask tensors accompany it.
            UnsupportedBwdAttributeCase{

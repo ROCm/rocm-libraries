@@ -259,8 +259,8 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps()
     // written down.
     //
     // Note the CPU reference already handles fp8 (CPU SdpaFwdPlan registers
-    // FP8_E4M3 -> BFLOAT16), so none of the fp8 entries below apply to it. It
-    // shares the variable-sequence-length gap and also declines ragged tensors.
+    // FP8_E4M3 -> BFLOAT16) and variable sequence lengths, so none of the fp8 or
+    // group entries below apply to it. It declines ragged tensors.
     static const std::vector<KnownReferenceGap> s_gaps = {
         {ReferenceExecutorType::GPU,
          "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
@@ -277,19 +277,9 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps()
         {ReferenceExecutorType::GPU,
          "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small",
          "no FP8 plan: the registry has no FP8_E4M3 tuple and descales are rejected"},
-        // CPU declines only variable sequence lengths and ragged tensors (CPU
-        // SdpaFwdPlan.hpp). It handles fp8 fine, which is why the fp8 batch
-        // bundles above are GPU-only entries and the fp8 *group* bundle appears
-        // for both references.
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_bf16_hd128_nomask_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
-        {ReferenceExecutorType::CPU,
-         "quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
-         "variable sequence lengths (seq_len_q/kv) are not implemented"},
+        // CPU declines only ragged tensors (CPU SdpaFwdPlan.hpp). It handles fp8
+        // and variable sequence lengths (seq_len_q/kv padding), which is why the
+        // fp8 and group bundles above are GPU-only entries.
         {ReferenceExecutorType::CPU,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
          "ragged tensors (ragged_offset_tensor_uid) are not implemented"},

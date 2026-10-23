@@ -129,9 +129,10 @@ dimension must be reduced.
 | Feature | SDPA Forward | SDPA Backward |
 |---------|--------------|---------------|
 | Log-sum-exp `stats` output | Supported | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`) | Not supported | Not supported |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Supported (same rules) |
 | Dropout (including `dropout_probability` alone) | Not supported | Not supported |
-| ALiBi / padding mask | Not supported | Not supported |
+| ALiBi | Not supported | Not supported |
+| `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache, block-sparse attention | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | - |
