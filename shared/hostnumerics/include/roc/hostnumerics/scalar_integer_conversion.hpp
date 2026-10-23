@@ -87,32 +87,35 @@ inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestinatio
     return signedDestination ? signedIntegerMinimumRaw(bits) - 1 : integerMask(bits);
 }
 
-// Round to an integral floating-point value without choosing an integer width.
+// Round without choosing an integer width. The rounding policy must be valid.
 // TowardZero maps -3.75 to -3; NearestEven maps 2.5 to 2 and 3.5 to 4 regardless
-// of the host rounding mode. An unsupported policy returns InvalidRounding.
+// of the host rounding mode.
+template <typename Floating>
+Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) noexcept {
+    static_assert(std::is_floating_point_v<Floating>);
+    assert((rounding == IntegerRounding::TowardZero || rounding == IntegerRounding::NearestEven) &&
+           "Integer rounding policy must be valid.");
+    if (rounding == IntegerRounding::TowardZero) return std::trunc(value);
+
+    Floating integral = 0;
+    const Floating fraction = std::modf(value, &integral);
+    const Floating magnitude = std::fabs(fraction);
+    if (magnitude < Floating{0.5}) return integral;
+
+    const Floating direction = std::signbit(fraction) ? Floating{-1} : Floating{1};
+    if (magnitude > Floating{0.5}) return integral + direction;
+
+    const Floating parity = std::fmod(std::fabs(integral), Floating{2});
+    return parity == Floating{0} ? integral : integral + direction;
+}
+
+// Checked rounding: an unsupported policy returns InvalidRounding.
 template <typename Floating>
 Expected<Floating, ConversionFailure> getRoundForIntegerConversion(
     Floating value, IntegerRounding rounding) noexcept {
-    static_assert(std::is_floating_point_v<Floating>);
-    switch (rounding) {
-        case IntegerRounding::TowardZero:
-            return std::trunc(value);
-        case IntegerRounding::NearestEven: {
-            Floating integral = 0;
-            const Floating fraction = std::modf(value, &integral);
-            const Floating magnitude = std::fabs(fraction);
-            if (magnitude < Floating{0.5}) return integral;
-
-            const Floating direction = std::signbit(fraction) ? Floating{-1} : Floating{1};
-            if (magnitude > Floating{0.5}) return integral + direction;
-
-            const Floating parity = std::fmod(std::fabs(integral), Floating{2});
-            return parity == Floating{0} ? integral : integral + direction;
-        }
-        case IntegerRounding::Count:
-            break;
-    }
-    return Unexpected(ConversionFailure{ConversionError::InvalidRounding});
+    if (rounding != IntegerRounding::TowardZero && rounding != IntegerRounding::NearestEven)
+        return Unexpected(ConversionFailure{ConversionError::InvalidRounding});
+    return roundForIntegerConversion(value, rounding);
 }
 
 // Test representability before applying an overflow policy. Width is in [1, 64].
@@ -154,6 +157,11 @@ Expected<uint64_t, ConversionFailure> getConvertIntegralToIntegerBits(
     const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_integral_v<Integral>);
     assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
+    if (options.integerOverflow != IntegerOverflow::Reject &&
+        options.integerOverflow != IntegerOverflow::Saturate &&
+        options.integerOverflow != IntegerOverflow::ModuloWrap)
+        return Unexpected(
+            ConversionFailure{ConversionError::InvalidOverflow, bits, signedDestination});
     const uint64_t mask = integerMask(bits);
     if (integralFitsIntegerDestination(value, bits, signedDestination)) {
         if (signedDestination) return static_cast<uint64_t>(static_cast<int64_t>(value)) & mask;
@@ -185,6 +193,11 @@ Expected<uint64_t, ConversionFailure> getConvertFloatingToIntegerBits(
     const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
     assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
+    if (options.integerOverflow != IntegerOverflow::Reject &&
+        options.integerOverflow != IntegerOverflow::Saturate &&
+        options.integerOverflow != IntegerOverflow::ModuloWrap)
+        return Unexpected(
+            ConversionFailure{ConversionError::InvalidOverflow, bits, signedDestination});
     if (std::isnan(value)) {
         return Unexpected(ConversionFailure{ConversionError::NaN, bits, signedDestination});
     }
@@ -202,9 +215,7 @@ Expected<uint64_t, ConversionFailure> getConvertFloatingToIntegerBits(
         return Unexpected(
             ConversionFailure{ConversionError::InvalidRounding, bits, signedDestination});
     }
-    const auto roundedResult = getRoundForIntegerConversion(value, options.integerRounding);
-    if (!roundedResult) return Unexpected(roundedResult.error());
-    const Floating rounded = *roundedResult;
+    const Floating rounded = roundForIntegerConversion(value, options.integerRounding);
     const int rangeExponent =
         signedDestination ? static_cast<int>(bits) - 1 : static_cast<int>(bits);
     const Floating upperExclusive = std::ldexp(Floating{1}, rangeExponent);
@@ -269,20 +280,94 @@ template <typename Target>
 Target integerFromBits(uint64_t raw) noexcept {
     using Value = std::remove_cv_t<Target>;
     static_assert(std::is_integral_v<Value> && !std::is_same_v<Value, bool>);
-    using Unsigned = std::make_unsigned_t<Value>;
-    constexpr uint32_t bits = std::numeric_limits<Unsigned>::digits;
-    static_assert(bits > 0 && bits <= 64);
-    raw &= integerMask(bits);
+    // C++20 integral conversion is modulo 2^N, including signed destinations.
+    return static_cast<Value>(raw);
+}
 
-    if constexpr (std::is_unsigned_v<Value>) {
-        return static_cast<Value>(raw);
+// Convert to bits without a failure result. Width and overflow policy must be
+// valid; under Reject, the input must fit. For signed eight-bit output,
+// ModuloWrap maps 128 to 0x80 and Saturate maps it to 0x7f.
+template <typename Integral>
+uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signedDestination,
+                                      const ScalarConversionOptions& options) noexcept {
+    static_assert(std::is_integral_v<Integral>);
+    assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
+    assert((options.integerOverflow == IntegerOverflow::Reject ||
+            options.integerOverflow == IntegerOverflow::Saturate ||
+            options.integerOverflow == IntegerOverflow::ModuloWrap) &&
+           "Integer overflow policy must be valid.");
+    if (options.integerOverflow == IntegerOverflow::Saturate &&
+        !integralFitsIntegerDestination(value, bits, signedDestination)) {
+        return integralIsBelowIntegerDestination(value, bits, signedDestination)
+                   ? (signedDestination ? signedIntegerMinimumRaw(bits) : 0)
+                   : integerMaximumRaw(bits, signedDestination);
+    }
+    assert((options.integerOverflow != IntegerOverflow::Reject ||
+            integralFitsIntegerDestination(value, bits, signedDestination)) &&
+           "Reject conversion requires a representable value.");
+    return static_cast<uint64_t>(value) & integerMask(bits);
+}
+
+// Round and convert without a failure result. Width and policies must be valid.
+// NaN is outside the domain; infinity is permitted only under Saturate. Reject
+// requires the rounded value to fit. NearestEven maps 2.5 to 2 and 3.5 to 4.
+template <typename Floating>
+uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signedDestination,
+                                      const ScalarConversionOptions& options) noexcept {
+    static_assert(std::is_floating_point_v<Floating>);
+    assert((bits > 0 && bits <= 64) && "Integer width must be between 1 and 64 bits.");
+    assert(!std::isnan(value) && "Integer conversion requires a non-NaN value.");
+    assert((options.integerOverflow == IntegerOverflow::Reject ||
+            options.integerOverflow == IntegerOverflow::Saturate ||
+            options.integerOverflow == IntegerOverflow::ModuloWrap) &&
+           "Integer overflow policy must be valid.");
+    assert((std::isfinite(value) || options.integerOverflow == IntegerOverflow::Saturate) &&
+           "Infinity requires saturating integer conversion.");
+    const Floating rounded = roundForIntegerConversion(value, options.integerRounding);
+    const int rangeExponent =
+        signedDestination ? static_cast<int>(bits) - 1 : static_cast<int>(bits);
+    const Floating upperExclusive = std::ldexp(Floating{1}, rangeExponent);
+    const Floating lowerInclusive = signedDestination ? -upperExclusive : Floating{0};
+    if (options.integerOverflow == IntegerOverflow::Saturate) {
+        if (rounded < lowerInclusive) return signedDestination ? signedIntegerMinimumRaw(bits) : 0;
+        if (rounded >= upperExclusive) return integerMaximumRaw(bits, signedDestination);
+    } else if (options.integerOverflow == IntegerOverflow::ModuloWrap &&
+               !(rounded >= lowerInclusive && rounded < upperExclusive)) {
+        const Floating modulus = std::ldexp(Floating{1}, static_cast<int>(bits));
+        const Floating remainder = std::fmod(std::fabs(rounded), modulus);
+        uint64_t raw = static_cast<uint64_t>(remainder);
+        if (std::signbit(rounded)) raw = uint64_t{0} - raw;
+        return raw & integerMask(bits);
+    }
+    assert((rounded >= lowerInclusive && rounded < upperExclusive) &&
+           "Reject conversion requires a representable rounded value.");
+    if (signedDestination)
+        return static_cast<uint64_t>(static_cast<int64_t>(rounded)) & integerMask(bits);
+    return static_cast<uint64_t>(rounded) & integerMask(bits);
+}
+
+// Numeric-source adapter for value-returning integer conversion. Complex inputs
+// must be real: (2, 0) converts like 2; (2, 1) violates the precondition.
+template <typename Source>
+uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestination,
+                              const ScalarConversionOptions& options) noexcept {
+    using Value = std::remove_cvref_t<Source>;
+    if constexpr (RuntimeIsComplexV<Value>) {
+        assert(source.imag() == typename Value::value_type{0} &&
+               "Complex-to-real conversion requires a zero imaginary component.");
+        return convertToIntegerBits(source.real(), bits, signedDestination, options);
+    } else if constexpr (std::is_same_v<Value, bool>) {
+        return convertIntegralToIntegerBits(static_cast<uint8_t>(source), bits, signedDestination,
+                                            options);
+    } else if constexpr (std::is_enum_v<Value>) {
+        return convertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
+                                    signedDestination, options);
+    } else if constexpr (std::is_integral_v<Value>) {
+        return convertIntegralToIntegerBits(source, bits, signedDestination, options);
+    } else if constexpr (std::is_floating_point_v<Value>) {
+        return convertFloatingToIntegerBits(source, bits, signedDestination, options);
     } else {
-        const uint64_t sign = signedIntegerMinimumRaw(bits);
-        if ((raw & sign) == 0) return static_cast<Value>(raw);
-
-        const uint64_t magnitude = (uint64_t{0} - raw) & integerMask(bits);
-        if (magnitude == sign) return std::numeric_limits<Value>::min();
-        return static_cast<Value>(-static_cast<int64_t>(magnitude));
+        static_assert(AlwaysFalseV<Value>, "Scalar integer conversion requires a numeric source.");
     }
 }
 
@@ -303,8 +388,8 @@ Expected<Target, ConversionFailure> getConvertToInteger(
 // Checked native conversion, applying integer policies when needed. Converting
 // 1.5 to complex<double> gives (1.5, 0); converting (2, 1) to double returns Nonreal.
 template <typename Target, typename Source>
-Expected<Target, ConversionFailure> getConvertScalarValue(Source source,
-                                                          const ScalarConversionOptions& options) {
+Expected<Target, ConversionFailure> getConvertScalarValue(
+    Source source, const ScalarConversionOptions& options) noexcept {
     using Destination = std::remove_cv_t<Target>;
     using Value = std::remove_cvref_t<Source>;
     static_assert(!std::is_reference_v<Target>);
@@ -322,14 +407,20 @@ Expected<Target, ConversionFailure> getConvertScalarValue(Source source,
             return Destination(*real, Component{0});
         }
     } else if constexpr (RuntimeIsComplexV<Value>) {
+        if constexpr (std::is_integral_v<Destination> && !std::is_same_v<Destination, bool>) {
+            return getConvertToInteger<Destination>(source, options);
+        }
         if (source.imag() != typename Value::value_type{0})
             return Unexpected(ConversionFailure{ConversionError::Nonreal});
         return getConvertScalarValue<Destination>(source.real(), options);
     } else if constexpr (std::is_same_v<Destination, bool>) {
+        static_assert(std::is_arithmetic_v<Value> || std::is_enum_v<Value>);
         return source != Value{0};
     } else if constexpr (std::is_integral_v<Destination>) {
         return getConvertToInteger<Destination>(source, options);
     } else {
+        static_assert(std::is_floating_point_v<Destination> &&
+                      (std::is_arithmetic_v<Value> || std::is_enum_v<Value>));
         return static_cast<Destination>(source);
     }
 }

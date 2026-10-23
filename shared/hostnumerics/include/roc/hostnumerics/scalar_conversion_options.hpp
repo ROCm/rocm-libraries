@@ -13,6 +13,7 @@ enum class IntegerRounding : uint8_t {
 };
 
 enum class IntegerOverflow : uint8_t {
+    // Require representability for value-returning casts; checked casts report failure.
     Reject,
     Saturate,
     // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.
@@ -21,7 +22,7 @@ enum class IntegerOverflow : uint8_t {
 };
 
 struct ScalarConversionOptions {
-    // Explicit options reject integer overflow by default.
+    // Explicit options require representability unless another policy is selected.
     IntegerRounding integerRounding = IntegerRounding::TowardZero;
     IntegerOverflow integerOverflow = IntegerOverflow::Reject;
 };

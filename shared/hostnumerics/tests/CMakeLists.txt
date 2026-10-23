@@ -14,7 +14,7 @@ gtest_discover_tests(
 
 include(HostNumericsExpectedParity)
 
-# This integer leaf must compile without the throwing convenience adapters.
+# Both the ordinary scalar API and checked integer leaf must compile without exceptions.
 add_executable(hostnumerics-integer-conversion-no-exceptions-tests
     integer_conversion_no_exceptions_test.cpp)
 target_link_libraries(hostnumerics-integer-conversion-no-exceptions-tests
