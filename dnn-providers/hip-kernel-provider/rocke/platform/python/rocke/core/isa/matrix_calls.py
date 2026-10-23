@@ -290,6 +290,25 @@ _GFX12_16BIT_OUT_ARGS = (
     Imm(I1, 0),
 )
 
+
+def _gfx11_16bit_out_wmma(intrinsic: str, register: VectorType) -> MatrixCall:
+    """A gfx11 16-bit-output WMMA: ``(A, B, C, op_sel)`` with A, B, C and the
+    result all in the ``<16 x 16-bit>`` ``register``.
+
+    The instruction keeps its eight results per lane in the even 16-bit halves
+    of that register when op_sel is 0, so the accumulator and the result are
+    the eight logical values (:class:`EvenHalves`) and op_sel is always 0.
+    """
+    return MatrixCall(
+        intrinsic=f"llvm.amdgcn.{intrinsic}",
+        args=(MatrixOperand.A, MatrixOperand.B, MatrixOperand.C, Imm(I1, 0)),
+        a=AsIs(register),
+        b=AsIs(register),
+        c=EvenHalves(register),
+        result=EvenHalves(register),
+    )
+
+
 # Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
 # same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use).
 _FP8_X8 = FlavorType(VectorType(I32, 2), ((LLVM_FLAVOR_LLVM22, I64),))
@@ -352,6 +371,15 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
                 _GFX11_INTEGER_WMMA_ARGS,
                 "wmma.i32.16x16x16.iu4",
             ),
+        ),
+        # gfx11 f16 -> f16 and bf16 -> bf16: sixteen 16-bit values of A and of
+        # B per lane, eight logical results in the even halves of the 16-slot
+        # register; the bf16 form takes and returns them as i16.
+        "wmma_f16_16x16x16_f16": _gfx11_16bit_out_wmma(
+            "wmma.f16.16x16x16.f16.v16f16.v16f16", VectorType(F16, 16)
+        ),
+        "wmma_bf16_16x16x16_bf16": _gfx11_16bit_out_wmma(
+            "wmma.bf16.16x16x16.bf16.v16i16.v16i16", VectorType(I16, 16)
         ),
         # gfx12 fp8 / bf8 -> f32: eight 8-bit values per lane in two words.
         "wmma_gfx12_f32_16x16x16_fp8_fp8": _wmma(
