@@ -126,6 +126,15 @@ namespace
 // and 7 (KV) and wired into attrs; `includeKv = false` adds only the Q one.
 // When `sink` is engaged, a sink tensor with that dtype and dims is added under uid 10 (the caller
 // sets attrs.sink_token_tensor_uid).
+// Any additional tensor (uid, name, dtype, dims); the caller wires the uid into attrs.
+struct RawExtraTensor
+{
+    int64_t uid;
+    const char* name;
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
 struct RawSinkSpec
 {
     DataType dataType;
@@ -143,7 +152,8 @@ flatbuffers::FlatBufferBuilder
     makeRawSdpaFwdGraph(SdpaAttributesT attrs,
                         std::optional<DataType> maskDataType = std::nullopt,
                         const std::optional<RawSeqLenSpec>& seqLens = std::nullopt,
-                        const std::optional<RawSinkSpec>& sink = std::nullopt)
+                        const std::optional<RawSinkSpec>& sink = std::nullopt,
+                        const std::vector<RawExtraTensor>& extras = {})
 {
     constexpr int64_t SEQ_LEN_Q_UID = 6;
     constexpr int64_t SEQ_LEN_KV_UID = 7;
@@ -206,6 +216,15 @@ flatbuffers::FlatBufferBuilder
         sinkStrides = hipdnn_data_sdk::utilities::generateStrides(sink->dims);
         tensors.push_back(CreateTensorAttributesDirect(
             builder, 10, "Sink", sink->dataType, &sinkStrides, &sink->dims));
+    }
+
+    std::vector<std::vector<int64_t>> extraStrides;
+    extraStrides.reserve(extras.size());
+    for(const auto& extra : extras)
+    {
+        extraStrides.push_back(hipdnn_data_sdk::utilities::generateStrides(extra.dims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, extra.uid, extra.name, extra.dataType, &extraStrides.back(), &extra.dims));
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
@@ -964,6 +983,102 @@ TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
     EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1}));
     EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1}));
     EXPECT_FALSE(applicable(DataType::FLOAT, {2}));
+}
+
+// Dropout: cuDNN's explicit-mask form (FLOAT mask [B|1, H|1, Sq, Skv] + one-element FLOAT
+// dropout_scale) is supported; Philox dropout, RNG_DUMP, a mask without a scale, or a non-FLOAT
+// mask are declined. The raw graph is [1, 2, 4, 8] with Sq = Skv = 4; mask uid 20, scale uid 21.
+TEST(TestSdpaFwdPlanDropout, Applicability)
+{
+    const auto applicable = [](SdpaAttributesT attrs, const std::vector<RawExtraTensor>& extras) {
+        auto graphBuilder
+            = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    SdpaAttributesT withMask;
+    withMask.dropout_mask_tensor_uid = 20;
+    withMask.dropout_scale_tensor_uid = 21;
+    const RawExtraTensor mask{20, "DropoutMask", DataType::FLOAT, {1, 1, 4, 4}};
+    const RawExtraTensor scale{21, "DropoutScale", DataType::FLOAT, {1}};
+    EXPECT_TRUE(applicable(withMask, {mask, scale}));
+    EXPECT_TRUE(applicable(withMask, {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}}, scale}));
+    EXPECT_FALSE(applicable(withMask, {{20, "DropoutMask", DataType::HALF, {1, 1, 4, 4}}, scale}));
+    EXPECT_FALSE(applicable(withMask, {{20, "DropoutMask", DataType::FLOAT, {1, 1, 4, 3}}, scale}));
+
+    SdpaAttributesT maskOnly;
+    maskOnly.dropout_mask_tensor_uid = 20;
+    EXPECT_FALSE(applicable(maskOnly, {mask}));
+
+    SdpaAttributesT philox = withMask;
+    philox.dropout_probability = 0.1F;
+    EXPECT_FALSE(applicable(philox, {mask, scale}));
+
+    SdpaAttributesT rngDump = withMask;
+    rngDump.rng_dump_tensor_uid = 22;
+    EXPECT_FALSE(applicable(rngDump, {mask, scale}));
+}
+
+// A dropout graph runs through the executor and equals the reference called directly.
+TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
+{
+    SdpaAttributesT attrs;
+    attrs.dropout_mask_tensor_uid = 20;
+    attrs.dropout_scale_tensor_uid = 21;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            std::nullopt,
+                                            {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}},
+                                             {21, "DropoutScale", DataType::FLOAT, {1}}});
+
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_data_sdk::utilities::Tensor<float> q(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> k(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> v(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> o(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> keepMask({1, 2, 4, 4});
+    hipdnn_data_sdk::utilities::Tensor<float> scale({1});
+    q.fillWithRandomValues(-1.0F, 1.0F, 71);
+    k.fillWithRandomValues(-1.0F, 1.0F, 72);
+    v.fillWithRandomValues(-1.0F, 1.0F, 73);
+    for(size_t i = 0; i < keepMask.elementCount(); ++i)
+    {
+        keepMask.memory().hostData()[i] = (i % 3 == 0) ? 0.0F : 1.0F;
+    }
+    scale.fillWithValue(1.5F);
+
+    const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                            {2, k.memory().hostData()},
+                                                            {3, v.memory().hostData()},
+                                                            {4, o.memory().hostData()},
+                                                            {20, keepMask.memory().hostData()},
+                                                            {21, scale.memory().hostData()}};
+    CpuReferenceGraphExecutor executor;
+    executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+
+    hipdnn_data_sdk::utilities::Tensor<float> oRef(dims);
+    const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oRef,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &keepMask,
+                                1.5F);
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(o, oRef));
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
