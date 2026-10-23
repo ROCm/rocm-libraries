@@ -75,13 +75,11 @@ class TestCkTileMultiReduceOutputTails : public ::testing::Test
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         y.FromDevice(output.data());
 
-        int wrong   = 0;
         int touched = 0;
         for(int i = 0; i < rows; ++i)
-            wrong += type_convert<double>(output[i]) != cols;
+            EXPECT_EQ(type_convert<double>(output[i]), cols) << "row=" << i;
         for(int i = rows; i < static_cast<int>(output.size()); ++i)
             touched += std::memcmp(&output[i], &guard, sizeof(Y)) != 0;
-        EXPECT_EQ(wrong, 0);
         EXPECT_EQ(touched, 0);
     }
 };
