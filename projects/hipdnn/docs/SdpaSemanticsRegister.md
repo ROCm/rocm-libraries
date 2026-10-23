@@ -98,6 +98,30 @@ batch when `seq_len_q/kv` are set).
 - **Open:** whether the frontend should set `padding_mask` automatically when seq_len tensors are given, which
   would make hipDNN graphs cuDNN-valid as well.
 
+### SEM-009: Paged KV cache
+
+- **Status:** Aligned (CPU reference); GPU reference not yet.
+- **cuDNN:** K/V are containers `[num_blocks, H, block_size, D]` with arbitrary strides; page tables are INT32
+  `[B, 1, table_size, 1]`; logical key `j` of batch `b` is `container[page_table[b, 0, j / block_size, 0], h,
+  j % block_size, :]`. Paging requires padding (both seq_len tensors). `max_seq_len_kv` gives the logical key
+  extent and is rejected without paging; a bias's last dim must equal it (cudnn-frontend
+  `node/sdpa_support_surface.h:275-315`, `samples/cpp/sdpa/fp16_fwd_with_paged_caches.cpp`).
+- **vLLM:** `key_cache` / `value_cache` per layer with one shared `block_table [B, max_blocks]` int32; NHD layout
+  `[num_blocks, block_size, H, D]` (or HND); unused table entries point at the null block 0; block sizes are not
+  limited to powers of two (Qwen3-Next uses 544/784/1056).
+- **Conversion:** vLLM's caches map to containers by strides alone (NHD strides `{bs*H*D, D, H*D, 1}`); its block
+  table becomes both page tables, reshaped `[B, 1, max_blocks, 1]`; `seq_lens` becomes `seq_len_kv`.
+- **hipDNN today:** the CPU forward reference gathers each paged container into a dense tensor, reading only keys
+  below `seq_len_kv`, then runs the padded dense path. Pinned by `TestCpuFpReferenceSdpaPropertyPaged` (block sizes
+  1/3/4, NHD strides, shuffled blocks, NaN in the null block and unused slots).
+- **Frontend:** `SdpaFwdNode` validation no longer compares a paged container's leading dim with Q's batch or its
+  dim 2 with the other side's key length; it requires each page table's first dim to be Q's batch and, when
+  `max_seq_len_kv` is set, a bias's last dim to match it. Paging support (and its padding requirement) is left to
+  the engines. Pinned by `TestSdpaFwdNode.*Paged*` and an end-to-end frontend-built paged graph run on the CPU
+  reference.
+- **Not covered:** no external paged oracle exists (all external references de-page the same way), so paged
+  correctness rests on the gather being an exact rearrangement of the validated dense padded path.
+
 ### SEM-007: Boolean attention masks
 
 - **Status:** Adapter.

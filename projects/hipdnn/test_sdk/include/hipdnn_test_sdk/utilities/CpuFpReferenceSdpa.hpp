@@ -30,6 +30,77 @@ struct NonDeduced
 class CpuFpReferenceSdpa
 {
 public:
+    /// Paged KV cache (cuDNN): gathers a paged K or V container into a dense
+    /// [B, H, maxSeqKv, D] tensor that forward() consumes with seq_len padding.
+    ///
+    /// The container is [numBlocks, H, blockSize, D] with arbitrary strides (so vLLM's NHD and
+    /// HND cache layouts are both just strides). The page table is INT32 [B, 1, tableSize, 1]:
+    /// logical key j of batch b lives in block pageTable[b, 0, j / blockSize, 0] at slot
+    /// j % blockSize. Only keys below seqLenKv[b] are read, so unused table entries and unused
+    /// slots (which may hold any value, including NaN) are never touched. Positions past
+    /// seqLenKv[b] in the result are left at zero; forward() never reads them under padding.
+    template <class T>
+    static hipdnn_data_sdk::utilities::Tensor<T>
+        gatherPagedKv(const hipdnn_data_sdk::utilities::TensorBase<T>& container,
+                      const hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTable,
+                      const hipdnn_data_sdk::utilities::TensorBase<int32_t>& seqLenKv,
+                      int64_t maxSeqKv)
+    {
+        const auto& cDims = container.dims();
+        const auto& tDims = pageTable.dims();
+        if(cDims.size() != 4)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::gatherPagedKv: container must be rank-4 [blocks, H, bs, D]");
+        }
+        if(tDims.size() != 4 || tDims[1] != 1 || tDims[3] != 1)
+        {
+            throw std::invalid_argument(
+                "CpuFpReferenceSdpa::gatherPagedKv: page table must be [B, 1, tableSize, 1]");
+        }
+        const auto numBlocks = cDims[0];
+        const auto heads = cDims[1];
+        const auto blockSize = cDims[2];
+        const auto headDim = cDims[3];
+        const auto batch = tDims[0];
+        const auto tableSize = tDims[2];
+        if(maxSeqKv <= 0 || maxSeqKv > tableSize * blockSize)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa::gatherPagedKv: maxSeqKv must be in "
+                                        "[1, tableSize * blockSize]");
+        }
+        const auto lens = resolveSeqLens(&seqLenKv, &seqLenKv, batch, maxSeqKv, "seqLenKv");
+
+        hipdnn_data_sdk::utilities::Tensor<T> dense({batch, heads, maxSeqKv, headDim});
+        dense.fillWithValue(hipdnn_test_sdk::detail::safeConvert<T>(0.0F));
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t j = 0; j < lens[static_cast<size_t>(b)]; ++j)
+            {
+                const auto block = static_cast<int64_t>(
+                    pageTable.getHostValue(std::vector<int64_t>{b, 0, j / blockSize, 0}));
+                if(block < 0 || block >= numBlocks)
+                {
+                    throw std::invalid_argument(
+                        "CpuFpReferenceSdpa::gatherPagedKv: page table entry "
+                        + std::to_string(block) + " for batch " + std::to_string(b)
+                        + " is outside [0, " + std::to_string(numBlocks) + ")");
+                }
+                const auto slot = j % blockSize;
+                for(int64_t h = 0; h < heads; ++h)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        dense.setHostValue(
+                            container.getHostValue(std::vector<int64_t>{block, h, slot, d}),
+                            std::vector<int64_t>{b, h, j, d});
+                    }
+                }
+            }
+        }
+        return dense;
+    }
+
     /// SDPA forward: O = softmax(Q @ K^T * scale) @ V
     ///
     /// Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.

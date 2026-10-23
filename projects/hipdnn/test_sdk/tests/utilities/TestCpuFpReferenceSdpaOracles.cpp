@@ -748,3 +748,135 @@ TEST(TestCpuFpReferenceSdpaClosedForm, SeqLenValidation)
     EXPECT_THROW(fwd(&lenOk, &lenTooLong), std::invalid_argument);
     EXPECT_NO_THROW(fwd(&lenOk, &lenOk));
 }
+
+// ---------------------------------------------------------------------------
+// Paged KV cache
+// ---------------------------------------------------------------------------
+
+// A paged cache holding the same keys as a dense padded K/V gives the same output. The cache
+// uses vLLM's NHD layout ([blocks, blockSize, H, D] in memory, so container strides
+// {bs*H*D, D, H*D, 1}), the blocks are shuffled, unused page-table entries point at block 0 (the
+// "null block"), and block 0 plus every unused slot holds NaN: none of it may be read.
+class TestCpuFpReferenceSdpaPropertyPaged : public ::testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestCpuFpReferenceSdpaPropertyPaged, EqualsDensePadded)
+{
+    const int64_t blockSize = GetParam();
+    constexpr int64_t BATCH = 3;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 4;
+    constexpr int64_t MAX_KV = 10;
+    constexpr int64_t D = 8;
+    const std::vector<int32_t> lensQ = {4, 1, 4};
+    const std::vector<int32_t> lensKv = {10, 3, 7};
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    SdpaRun dense({BATCH, H, SQ, D}, {BATCH, H, MAX_KV, D}, {BATCH, H, MAX_KV, D});
+    dense.q.fillWithRandomValues(-1.0F, 1.0F, 121);
+    dense.k.fillWithRandomValues(-1.0F, 1.0F, 122);
+    dense.v.fillWithRandomValues(-1.0F, 1.0F, 123);
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        seqLenQ.setHostValue(lensQ[static_cast<size_t>(b)], b, 0, 0, 0);
+        seqLenKv.setHostValue(lensKv[static_cast<size_t>(b)], b, 0, 0, 0);
+    }
+
+    // Page tables: block ids handed out in a shuffled order starting at 1 (0 is the null block).
+    const int64_t tableSize = (MAX_KV + blockSize - 1) / blockSize;
+    const int64_t numBlocks = 1 + BATCH * tableSize;
+    std::vector<int32_t> ids;
+    for(int64_t i = 1; i < numBlocks; ++i)
+    {
+        ids.push_back(static_cast<int32_t>((i * 7) % (numBlocks - 1) + 1));
+    }
+    Tensor<int32_t> pageTable({BATCH, 1, tableSize, 1});
+    const std::vector<int64_t> cDims = {numBlocks, H, blockSize, D};
+    const std::vector<int64_t> nhdStrides = {blockSize * H * D, D, H * D, 1};
+    Tensor<float> kCache(cDims, nhdStrides);
+    Tensor<float> vCache(cDims, nhdStrides);
+    kCache.fillWithValue(nan);
+    vCache.fillWithValue(nan);
+    size_t next = 0;
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        const int64_t usedBlocks = (lensKv[static_cast<size_t>(b)] + blockSize - 1) / blockSize;
+        for(int64_t t = 0; t < tableSize; ++t)
+        {
+            pageTable.setHostValue(t < usedBlocks ? ids[next++] : 0, b, 0, t, 0);
+        }
+        for(int64_t j = 0; j < lensKv[static_cast<size_t>(b)]; ++j)
+        {
+            const int64_t block = pageTable.getHostValue(b, 0, j / blockSize, 0);
+            for(int64_t h = 0; h < H; ++h)
+            {
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    kCache.setHostValue(
+                        dense.k.getHostValue(b, h, j, d), block, h, j % blockSize, d);
+                    vCache.setHostValue(
+                        dense.v.getHostValue(b, h, j, d), block, h, j % blockSize, d);
+                }
+            }
+        }
+    }
+
+    auto kPaged = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
+    auto vPaged = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
+    Tensor<float> oPaged({BATCH, H, SQ, D});
+    Tensor<float> lsePaged({BATCH, H, SQ, 1});
+    for(const bool paged : {false, true})
+    {
+        CpuFpReferenceSdpa::forward(dense.q,
+                                    paged ? static_cast<const TensorBase<float>&>(kPaged) : dense.k,
+                                    paged ? static_cast<const TensorBase<float>&>(vPaged) : dense.v,
+                                    paged ? oPaged : dense.o,
+                                    0.5F,
+                                    nullptr,
+                                    -1,
+                                    0,
+                                    false,
+                                    paged ? &lsePaged : &dense.lse,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    &seqLenQ,
+                                    &seqLenKv);
+    }
+    expectAllNear(oPaged, dense.o, 0.0F, "O");
+    forEachIndex(lsePaged.dims(), [&](const std::vector<int64_t>& i) {
+        EXPECT_EQ(lsePaged.getHostValue(i), dense.lse.getHostValue(i));
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestCpuFpReferenceSdpaPropertyPaged,
+                         ::testing::Values(1, 3, 4),
+                         [](const ::testing::TestParamInfo<int64_t>& info) {
+                             return "BlockSize" + std::to_string(info.param);
+                         });
+
+// Page-table entries outside the container, and tables of the wrong shape, are rejected.
+TEST(TestCpuFpReferenceSdpaClosedForm, PagedGatherValidation)
+{
+    Tensor<float> cache({2, 1, 4, 2});
+    cache.fillWithValue(1.0F);
+    Tensor<int32_t> seqLenKv({1, 1, 1, 1});
+    seqLenKv.fillWithValue(5);
+    Tensor<int32_t> table({1, 1, 2, 1});
+    table.setHostValue(1, 0, 0, 0, 0);
+    table.setHostValue(2, 0, 0, 1, 0); // block 2 does not exist
+    EXPECT_THROW(CpuFpReferenceSdpa::gatherPagedKv(cache, table, seqLenKv, 8),
+                 std::invalid_argument);
+    table.setHostValue(0, 0, 0, 1, 0);
+    EXPECT_NO_THROW(CpuFpReferenceSdpa::gatherPagedKv(cache, table, seqLenKv, 8));
+    // maxSeqKv beyond tableSize * blockSize.
+    EXPECT_THROW(CpuFpReferenceSdpa::gatherPagedKv(cache, table, seqLenKv, 9),
+                 std::invalid_argument);
+    const Tensor<int32_t> flatTable({1, 2});
+    EXPECT_THROW(CpuFpReferenceSdpa::gatherPagedKv(cache, flatTable, seqLenKv, 8),
+                 std::invalid_argument);
+}

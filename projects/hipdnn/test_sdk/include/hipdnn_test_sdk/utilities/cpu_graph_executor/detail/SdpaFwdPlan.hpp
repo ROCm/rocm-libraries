@@ -37,7 +37,12 @@ struct SdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenQAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableKAttributes
+        = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVAttributes
+        = nullptr,
+        int64_t pagedMaxSeqKv = 0)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -67,6 +72,13 @@ struct SdpaFwdParams
         , seqLenKvTensor(seqLenKvAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*seqLenKvAttributes))
                              : std::nullopt)
+        , pageTableKTensor(pageTableKAttributes != nullptr
+                               ? std::make_optional(unpackTensorAttributes(*pageTableKAttributes))
+                               : std::nullopt)
+        , pageTableVTensor(pageTableVAttributes != nullptr
+                               ? std::make_optional(unpackTensorAttributes(*pageTableVAttributes))
+                               : std::nullopt)
+        , pagedMaxSeqKv(pagedMaxSeqKv)
     {
     }
 
@@ -85,6 +97,10 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
+    // Paged KV cache: page tables for K and/or V and the logical key extent (0 = not paged).
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
+    int64_t pagedMaxSeqKv;
 };
 
 template <typename QDataType,
@@ -166,6 +182,33 @@ public:
                 *_params.seqLenKvTensor, variantPack.at(_params.seqLenKvTensor->uid));
         }
 
+        // Paged KV cache: gather each paged container into a dense [B, H, maxSeqKv, D] tensor
+        // through its page table, then run the dense padded reference on it.
+        std::optional<hipdnn_data_sdk::utilities::Tensor<KDataType>> denseK;
+        std::optional<hipdnn_data_sdk::utilities::Tensor<VDataType>> denseV;
+        if(_params.pageTableKTensor.has_value())
+        {
+            auto table = createShallowTensor<int32_t>(
+                *_params.pageTableKTensor, variantPack.at(_params.pageTableKTensor->uid));
+            denseK.emplace(utilities::CpuFpReferenceSdpa::gatherPagedKv(
+                *shallowKTensor, *table, *shallowSeqLenKv, _params.pagedMaxSeqKv));
+        }
+        if(_params.pageTableVTensor.has_value())
+        {
+            auto table = createShallowTensor<int32_t>(
+                *_params.pageTableVTensor, variantPack.at(_params.pageTableVTensor->uid));
+            denseV.emplace(utilities::CpuFpReferenceSdpa::gatherPagedKv(
+                *shallowVTensor, *table, *shallowSeqLenKv, _params.pagedMaxSeqKv));
+        }
+        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& kForRef
+            = denseK.has_value()
+                  ? static_cast<const hipdnn_data_sdk::utilities::TensorBase<KDataType>&>(*denseK)
+                  : *shallowKTensor;
+        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& vForRef
+            = denseV.has_value()
+                  ? static_cast<const hipdnn_data_sdk::utilities::TensorBase<VDataType>&>(*denseV)
+                  : *shallowVTensor;
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
@@ -178,8 +221,8 @@ public:
         utilities::CpuFpReferenceSdpa::
             forward<QDataType, KDataType, VDataType, ODataType, float, Mask>(
                 *shallowQTensor,
-                *shallowKTensor,
-                *shallowVTensor,
+                kForRef,
+                vForRef,
                 *shallowOTensor,
                 effectiveScale,
                 shallowAttnMaskTensor.get(),
@@ -278,9 +321,8 @@ public:
             return false;
         }
 
-        // Unsupported: paged KV cache
-        if(nodeAttributes->page_table_k_tensor_uid().has_value()
-           || nodeAttributes->page_table_v_tensor_uid().has_value())
+        // Paged KV cache: cuDNN layout, which needs padding; see sdpaPagedMaxSeqKv.
+        if(sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap) < 0)
         {
             return false;
         }
@@ -407,7 +449,14 @@ public:
                               : nullptr,
                           nodeAttributes->seq_len_kv_tensor_uid().has_value()
                               ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
-                              : nullptr));
+                              : nullptr,
+                          nodeAttributes->page_table_k_tensor_uid().has_value()
+                              ? tensorMap.at(nodeAttributes->page_table_k_tensor_uid().value())
+                              : nullptr,
+                          nodeAttributes->page_table_v_tensor_uid().has_value()
+                              ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
+                              : nullptr,
+                          sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap)));
     }
 };
 
