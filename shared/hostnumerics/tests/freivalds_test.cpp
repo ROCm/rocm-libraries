@@ -127,6 +127,99 @@ TEST(Freivalds, ImmutableInputsAndSingleAndCancellingErrors) {
     EXPECT_EQ(plan.check(d).status, VerificationStatus::Mismatch);
 }
 
+TEST(Freivalds, BoundedAccumulationRetainsExactDefaultAndDetectsCorruption) {
+    // GFX11 DOT2 can return 2^-23 for -2 + 1*1 + 1*1. See rocm-systems#12056.
+    Tensor a(ScalarType::Float32, Shape{1, 4}), b(ScalarType::Float32, Shape{4, 1});
+    a.storeFrom({0, 0}, -2);
+    a.storeFrom({0, 2}, 1);
+    a.storeFrom({0, 3}, 1);
+    for (size_t k = 0; k < 4; ++k) b.storeFrom({k, 0}, 1);
+    constexpr size_t budget = 4;
+    const FreivaldsCheckOptions options{.maximumAbsoluteComputationError = 0x1p-20};
+    for (const auto type : {ScalarType::Float32, ScalarType::Float16, ScalarType::BFloat16}) {
+        const auto plan =
+            requirePlan(prepareFreivalds(a, b, MatmulOptions{}, EpilogueOptions{}, type));
+        Tensor d(type, Shape{1, 1});
+        d.storeFrom({0, 0}, 0x1p-23);
+        EXPECT_EQ(plan.check(d).status, VerificationStatus::Mismatch);
+        const auto check = plan.check(d, budget, options);
+        EXPECT_EQ(check.status, VerificationStatus::Passed);
+        EXPECT_EQ(check.recomputedElements, 1);
+        EXPECT_EQ(plan.check(d, 0, options).status, VerificationStatus::Incomplete);
+        d.storeFrom({0, 0}, 1);
+        EXPECT_EQ(plan.check(d, budget, options).status, VerificationStatus::Mismatch);
+        d.storeFrom({0, 0}, 0x1p-8);
+        EXPECT_EQ(plan.check(d, budget, options).status, VerificationStatus::Mismatch);
+        d.storeFrom({0, 0}, std::numeric_limits<double>::quiet_NaN());
+        EXPECT_EQ(plan.check(d, budget, options).status, VerificationStatus::Mismatch);
+        d.storeFrom({0, 0}, std::numeric_limits<double>::infinity());
+        EXPECT_EQ(plan.check(d, budget, options).status, VerificationStatus::Mismatch);
+        for (const double invalid : {-1.0, 0.5, std::numeric_limits<double>::infinity(),
+                                     std::numeric_limits<double>::quiet_NaN()})
+            EXPECT_EQ(plan.check(d, budget, {invalid}).status, VerificationStatus::Unsupported);
+    }
+}
+
+TEST(Freivalds, ComputationBoundIncludesOutputRoundingTies) {
+    Tensor a(ScalarType::Float32, Shape{2, 1}), b(ScalarType::Float32, Shape{1, 1});
+    b.storeFrom({0, 0}, 1);
+    // The perturbation survives the F32 conversion preceding F16/BF16 encoding.
+    const FreivaldsCheckOptions options{.maximumAbsoluteComputationError = 0x1p-8};
+    for (const auto type : {ScalarType::Float16, ScalarType::BFloat16}) {
+        const int midpoint = type == ScalarType::Float16 ? 2049 : 257;
+        a.storeFrom({0, 0}, midpoint);
+        a.storeFrom({1, 0}, -midpoint);
+        const auto plan =
+            requirePlan(prepareFreivalds(a, b, MatmulOptions{}, EpilogueOptions{}, type));
+        Tensor d(type, Shape{2, 1});
+        d.storeFrom({0, 0}, midpoint + 1);
+        d.storeFrom({1, 0}, -midpoint - 1);
+        EXPECT_EQ(plan.check(d).status, VerificationStatus::Mismatch);
+        EXPECT_EQ(plan.check(d, 2, options).status, VerificationStatus::Passed);
+        d.storeFrom({0, 0}, midpoint + 3);
+        EXPECT_EQ(plan.check(d, 2, options).status, VerificationStatus::Mismatch);
+    }
+}
+
+TEST(Freivalds, ComputationBoundCannotCrossConsecutiveIntegerBoundary) {
+    const FreivaldsCheckOptions options{.maximumAbsoluteComputationError =
+                                            std::nextafter(0.5, 0.0)};
+    for (const auto type : {ScalarType::Float64, ScalarType::Float32, ScalarType::Float16,
+                            ScalarType::BFloat16, ScalarType::Int32, ScalarType::Int8}) {
+        SCOPED_TRACE(scalarTypeInfo(type).name);
+        const double limit = type == ScalarType::Float16    ? 0x1p11
+                             : type == ScalarType::BFloat16 ? 0x1p8
+                             : type == ScalarType::Int8     ? 128
+                                                            : 0x1p24;
+        Tensor a(ScalarType::Float32, Shape{2, 1}), b(ScalarType::Float32, Shape{1, 1});
+        a.storeFrom({0, 0}, limit - 1);
+        a.storeFrom({1, 0}, -limit + 1);
+        b.storeFrom({0, 0}, 1);
+        const auto plan =
+            requirePlan(prepareFreivalds(a, b, MatmulOptions{}, EpilogueOptions{}, type));
+        Tensor d(type, Shape{2, 1});
+        d.storeFrom({0, 0}, limit - 1);
+        d.storeFrom({1, 0}, -limit + 1);
+        EXPECT_EQ(plan.check(d, 2, options).status, VerificationStatus::Passed);
+        d.storeFrom({1, 0}, -limit);
+        EXPECT_EQ(plan.check(d, 2, options).status, VerificationStatus::Mismatch);
+        if (type != ScalarType::Int8) {
+            d.storeFrom({0, 0}, limit);
+            EXPECT_EQ(plan.check(d, 2, options).status, VerificationStatus::Mismatch);
+        }
+    }
+    Tensor a(ScalarType::Float64, Shape{1, 1}), b(ScalarType::Float64, Shape{1, 1});
+    a.storeFrom({0, 0}, 0x1p50);
+    b.storeFrom({0, 0}, 1);
+    const auto plan =
+        requirePlan(prepareFreivalds(a, b, MatmulOptions(ScalarType::Float64),
+                                     EpilogueOptions(ScalarType::Float64), ScalarType::Float64));
+    Tensor d(ScalarType::Float64, Shape{1, 1});
+    d.storeFrom({0, 0}, 0x1p50);
+    EXPECT_EQ(plan.check(d).status, VerificationStatus::Passed);
+    EXPECT_EQ(plan.check(d, 1, {0x1p-20}).status, VerificationStatus::Unsupported);
+}
+
 TEST(Freivalds, ExportedTensorsCannotMutatePlanState) {
     Tensor a(ScalarType::Float32, Shape{2, 1}), b(ScalarType::Float32, Shape{1, 2});
     a.storeFrom({0, 0}, 1);

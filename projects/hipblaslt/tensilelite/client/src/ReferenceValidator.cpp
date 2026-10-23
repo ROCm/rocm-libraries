@@ -29,6 +29,7 @@
 #include "TimingInstrumentation.hpp"
 #include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <hipblaslt/client/FreivaldsCheck.hpp>
 #include <hipblaslt/client/FreivaldsDevice.hpp>
 
 #include <TensileLite/Client/hostnumerics/Reference.hpp>
@@ -37,6 +38,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
+#include <limits>
 #include <sstream>
 
 namespace TensileLite
@@ -250,6 +252,10 @@ namespace TensileLite
         bool ReferenceValidator::validateFreivalds(const ProblemInputs& inputs)
         {
             using namespace roc::hostnumerics;
+            int             device = 0;
+            hipDeviceProp_t properties{};
+            HIP_CHECK_EXC(hipGetDevice(&device));
+            HIP_CHECK_EXC(hipGetDeviceProperties(&properties, device));
             bool   passed          = true;
             size_t checkedElements = 0, readbackBytes = 0;
             bool   fallback = false;
@@ -263,8 +269,18 @@ namespace TensileLite
                     const auto& [plan, layout] = m_freivaldsPlans[gemm][batch];
                     auto observation           = hipblaslt::client::observeFreivalds(
                         plan.copyRequest(), data, layout, m_stream);
+                    const auto options = hipblaslt::client::freivaldsCheckOptions(
+                        properties.major,
+                        plan,
+                        problem.boundSize(0),
+                        toHostNumericsScalarType(problem.a().dataType()),
+                        toHostNumericsScalarType(problem.b().dataType()),
+                        toHostNumericsScalarType(problem.computeType()));
                     const auto result = std::visit(
-                        [&](const auto& value) { return plan.check(value); }, observation.output);
+                        [&](const auto& value) {
+                            return plan.check(value, std::numeric_limits<size_t>::max(), options);
+                        },
+                        observation.output);
                     checkedElements += result.checkedElements;
                     readbackBytes += observation.readbackBytes;
                     fallback |= std::holds_alternative<Tensor>(observation.output);
