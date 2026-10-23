@@ -41,17 +41,32 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
-if(WIN32)
-    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
-endif()
-
 # Embed a Windows VERSIONINFO resource into a DLL target (ROCM-20937). No resource-compiler
 # availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
 # usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
+#
+#   target            DLL target to attach the resource to.
+#   file_description  VERSIONINFO FileDescription field.
+#   internal_name     VERSIONINFO InternalName; also names the generated .rc and is used verbatim
+#                     for OriginalFilename as "${internal_name}.dll". Callers that override a
+#                     target's OUTPUT_NAME must pass a matching internal_name or the recorded
+#                     OriginalFilename will be wrong.
+#
+# Callable from any directory: add_custom_command(TARGET) below resolves in the caller's scope,
+# which is where ${target} is defined.
 function(miopen_embed_version_resource target file_description internal_name)
     if(NOT WIN32)
         return()
     endif()
+    # Derived here rather than at directory scope so the function is self-contained and renders the
+    # same copyright year regardless of which directory calls it.
+    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
+    # rocm_setup_version leaves MIOpen_VERSION_TWEAK as "<short-sha>[-dirty]". Carrying the commit
+    # hash in the StringFileInfo strings is deliberate and matches hipDNN (RFC 0005); the binary
+    # FILEVERSION/PRODUCTVERSION fields are four 16-bit integers and keep 0. The "-dirty" marker is
+    # dropped so the DLL's bytes do not depend on working-tree cleanliness, which would make builds
+    # non-reproducible and could ship "-dirty" in a release artifact's metadata.
+    string(REGEX REPLACE "-dirty$" "" MIOPEN_RC_VERSION_TWEAK "${MIOpen_VERSION_TWEAK}")
     set(MIOPEN_RC_FILE_DESCRIPTION "${file_description}")
     set(MIOPEN_RC_INTERNAL_NAME "${internal_name}")
     set(MIOPEN_RC_ORIGINAL_FILENAME "${internal_name}.dll")
@@ -61,6 +76,22 @@ function(miopen_embed_version_resource target file_description internal_name)
         @ONLY
     )
     target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc")
+
+    # Verify the resource actually landed in the linked DLL. Done at build time rather than as a
+    # test so it also covers BUILD_TESTING=OFF release builds and rides along on the existing
+    # Windows build job without needing a GPU test machine. The target only exists when
+    # MIOPEN_VALIDATE_VERSIONINFO is ON and we are not cross-compiling (see the top-level
+    # CMakeLists.txt), so this guard carries that gating without repeating it.
+    if(TARGET win_versioninfo_check)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND win_versioninfo_check
+                    "${MIOpen_VERSION_MAJOR}.${MIOpen_VERSION_MINOR}.${MIOpen_VERSION_PATCH}"
+                    "$<TARGET_FILE:${target}>"
+            COMMENT "Verifying VERSIONINFO in $<TARGET_FILE_NAME:${target}>"
+            VERBATIM
+        )
+        add_dependencies(${target} win_versioninfo_check)
+    endif()
 endfunction()
 
 # Generate source that embeds the given kernel files as initializer data.

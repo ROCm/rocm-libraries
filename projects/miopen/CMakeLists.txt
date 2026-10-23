@@ -152,6 +152,11 @@ option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
+# Windows-only (ROCM-20937). Verifies the embedded VERSIONINFO resource after each DLL links, so a
+# DLL that loses its metadata fails the build rather than shipping. Turn OFF to bypass if the
+# check ever misfires on an unusual toolchain.
+option(MIOPEN_VALIDATE_VERSIONINFO
+       "Verify embedded Windows VERSIONINFO metadata after linking each DLL" ON)
 
 # Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
 # as a thin public wrapper forwarding to a private implementation library
@@ -959,6 +964,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
+endif()
+# Must precede add_subdirectory(src): miopen_embed_version_resource() attaches a POST_BUILD rule
+# that invokes this tool, and the target has to exist by then. Skipped when cross-compiling, where
+# the tool would be built for the target and could not run on the build host.
+if(WIN32 AND MIOPEN_VALIDATE_VERSIONINFO AND NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tools/win_versioninfo_check)
 endif()
 add_subdirectory(addkernels)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/MiopenCkCompileDefs.cmake)
