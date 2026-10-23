@@ -1,0 +1,826 @@
+{
+  "version": "1.0",
+  "id": "99bc28cb-3c98-451f-b919-487c6daca45d",
+  "name": "hipkernel:gfx950_conv_fwd_aot_bf16_compv3_unroll",
+  "matchers": [
+    "82b9c4b0-88ef-4fd1-bbd5-81b2f6db5802"
+  ],
+  "engine": "d6033042-074a-426b-b900-3fc9167871f2",
+  "dispatch": "db8d26f2-5df6-46fa-9b3e-7460cc8f13ea",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "d6033042-074a-426b-b900-3fc9167871f2",
+          "kmd_id": "a7f1a7a4-8e1d-4278-9d85-f94026809691",
+          "metadata_fields": [
+            "dtype",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "wave_size",
+            "pipeline",
+            "epilogue",
+            "vector_size_a",
+            "vector_size_b",
+            "vector_size_c",
+            "unroll_k",
+            "async_dma",
+            "async_chunk_a",
+            "async_chunk_b",
+            "grouped",
+            "instance_id",
+            "layout",
+            "kernel_family",
+            "direct_variant",
+            "filter_h",
+            "filter_w",
+            "stride_h",
+            "stride_w",
+            "pad_h",
+            "pad_w",
+            "dilation_h",
+            "dilation_w",
+            "block_w",
+            "block_waves",
+            "block_h",
+            "unroll_rows",
+            "block_q",
+            "block_groups",
+            "double_buffer",
+            "cpg",
+            "kpg",
+            "tile_h",
+            "tile_w",
+            "tile_k_out",
+            "ck",
+            "waves_m",
+            "waves_n",
+            "atom",
+            "swizzle_wgm",
+            "iglp",
+            "waves_per_eu"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "tile_m": {
+              "field": "tile_m"
+            },
+            "tile_n": {
+              "field": "tile_n"
+            },
+            "tile_k": {
+              "field": "tile_k"
+            },
+            "warp_m": {
+              "field": "warp_m"
+            },
+            "warp_n": {
+              "field": "warp_n"
+            },
+            "warp_tile_m": {
+              "field": "warp_tile_m"
+            },
+            "warp_tile_n": {
+              "field": "warp_tile_n"
+            },
+            "warp_tile_k": {
+              "field": "warp_tile_k"
+            },
+            "wave_size": {
+              "field": "wave_size"
+            },
+            "pipeline": {
+              "field": "pipeline"
+            },
+            "epilogue": {
+              "field": "epilogue"
+            },
+            "vector_size_a": {
+              "field": "vector_size_a"
+            },
+            "vector_size_b": {
+              "field": "vector_size_b"
+            },
+            "vector_size_c": {
+              "field": "vector_size_c"
+            },
+            "unroll_k": {
+              "field": "unroll_k"
+            },
+            "async_dma": {
+              "field": "async_dma"
+            },
+            "async_chunk_a": {
+              "field": "async_chunk_a"
+            },
+            "async_chunk_b": {
+              "field": "async_chunk_b"
+            },
+            "grouped": {
+              "field": "grouped"
+            },
+            "instance_id": {
+              "field": "instance_id"
+            },
+            "layout": {
+              "field": "layout"
+            },
+            "kernel_family": {
+              "field": "kernel_family"
+            },
+            "direct_variant": {
+              "field": "direct_variant"
+            },
+            "filter_h": {
+              "field": "filter_h"
+            },
+            "filter_w": {
+              "field": "filter_w"
+            },
+            "stride_h": {
+              "field": "stride_h"
+            },
+            "stride_w": {
+              "field": "stride_w"
+            },
+            "pad_h": {
+              "field": "pad_h"
+            },
+            "pad_w": {
+              "field": "pad_w"
+            },
+            "dilation_h": {
+              "field": "dilation_h"
+            },
+            "dilation_w": {
+              "field": "dilation_w"
+            },
+            "block_w": {
+              "field": "block_w"
+            },
+            "block_waves": {
+              "field": "block_waves"
+            },
+            "block_h": {
+              "field": "block_h"
+            },
+            "unroll_rows": {
+              "field": "unroll_rows"
+            },
+            "block_q": {
+              "field": "block_q"
+            },
+            "block_groups": {
+              "field": "block_groups"
+            },
+            "double_buffer": {
+              "field": "double_buffer"
+            },
+            "cpg": {
+              "field": "cpg"
+            },
+            "kpg": {
+              "field": "kpg"
+            },
+            "tile_h": {
+              "field": "tile_h"
+            },
+            "tile_w": {
+              "field": "tile_w"
+            },
+            "tile_k_out": {
+              "field": "tile_k_out"
+            },
+            "ck": {
+              "field": "ck"
+            },
+            "waves_m": {
+              "field": "waves_m"
+            },
+            "waves_n": {
+              "field": "waves_n"
+            },
+            "atom": {
+              "field": "atom"
+            },
+            "swizzle_wgm": {
+              "field": "swizzle_wgm"
+            },
+            "iglp": {
+              "field": "iglp"
+            },
+            "waves_per_eu": {
+              "field": "waves_per_eu"
+            }
+          },
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "bf728c0d-1168-5548-a9b7-c237af4ba49e",
+      "name": "gfx950_conv_fwd_aot_bf16_2b854fe28a730063f2c8d7691fd09291eb7d5659",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 32,
+          "tile_n": 32,
+          "tile_k": 64,
+          "warp_m": 2,
+          "warp_n": 2,
+          "warp_tile_m": 16,
+          "warp_tile_n": 16,
+          "warp_tile_k": 32,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "2b854fe28a730063f2c8d7691fd09291eb7d5659",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 32,
+        "tile_n": 32,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 2,
+        "warp_tile_m": 16,
+        "warp_tile_n": 16,
+        "warp_tile_k": 32,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "2b854fe28a730063f2c8d7691fd09291eb7d5659",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8eac6db7-232d-5219-85ea-2c085773dad7",
+      "name": "gfx950_conv_fwd_aot_bf16_2e1414804604573e8dde30c12ff3c07a232a2a32",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 128,
+          "tile_n": 256,
+          "tile_k": 64,
+          "warp_m": 2,
+          "warp_n": 4,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "2e1414804604573e8dde30c12ff3c07a232a2a32",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 128,
+        "tile_n": 256,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 4,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "2e1414804604573e8dde30c12ff3c07a232a2a32",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "78d016e0-8fc8-5c62-b4d5-843e58133a3b",
+      "name": "gfx950_conv_fwd_aot_bf16_369c8dd7c2baf71e6f7b5c53d619270d5203505e",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 256,
+          "tile_n": 256,
+          "tile_k": 64,
+          "warp_m": 4,
+          "warp_n": 2,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "369c8dd7c2baf71e6f7b5c53d619270d5203505e",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 256,
+        "tile_n": 256,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 2,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "369c8dd7c2baf71e6f7b5c53d619270d5203505e",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2f3a1f60-e6df-50eb-a02f-69fddba91a01",
+      "name": "gfx950_conv_fwd_aot_bf16_65803bf385680a42d91a06eae3d9c323ccd03c07",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 256,
+          "tile_n": 256,
+          "tile_k": 64,
+          "warp_m": 2,
+          "warp_n": 4,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "65803bf385680a42d91a06eae3d9c323ccd03c07",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 256,
+        "tile_n": 256,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 4,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "65803bf385680a42d91a06eae3d9c323ccd03c07",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "79caca3d-7224-5644-8877-e4b2966454db",
+      "name": "gfx950_conv_fwd_aot_bf16_8892b892a0b4a8c9f845fd7c3c0ca76e56be96c5",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 128,
+          "tile_n": 128,
+          "tile_k": 64,
+          "warp_m": 4,
+          "warp_n": 4,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "8892b892a0b4a8c9f845fd7c3c0ca76e56be96c5",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 128,
+        "tile_n": 128,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 4,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "8892b892a0b4a8c9f845fd7c3c0ca76e56be96c5",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f620df07-65d1-56e3-ba38-a1782198da82",
+      "name": "gfx950_conv_fwd_aot_bf16_90b52f6affe263fa4f969519f49d1ec86139e36f",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 128,
+          "tile_n": 256,
+          "tile_k": 64,
+          "warp_m": 4,
+          "warp_n": 4,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "90b52f6affe263fa4f969519f49d1ec86139e36f",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 128,
+        "tile_n": 256,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 4,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "90b52f6affe263fa4f969519f49d1ec86139e36f",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8100e277-a68a-5575-bd2e-6a5d7bc1e4df",
+      "name": "gfx950_conv_fwd_aot_bf16_9dd2981f9869fe8ecc4e1bb8d7886bb9a5477a26",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 16,
+          "tile_n": 16,
+          "tile_k": 64,
+          "warp_m": 1,
+          "warp_n": 1,
+          "warp_tile_m": 16,
+          "warp_tile_n": 16,
+          "warp_tile_k": 32,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "9dd2981f9869fe8ecc4e1bb8d7886bb9a5477a26",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 16,
+        "tile_n": 16,
+        "tile_k": 64,
+        "warp_m": 1,
+        "warp_n": 1,
+        "warp_tile_m": 16,
+        "warp_tile_n": 16,
+        "warp_tile_k": 32,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "9dd2981f9869fe8ecc4e1bb8d7886bb9a5477a26",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "658f0169-588b-5101-8059-8b2abb4c7df8",
+      "name": "gfx950_conv_fwd_aot_bf16_b011c3dd94b14100b29fc9b154ae352efe240523",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 64,
+          "tile_n": 16,
+          "tile_k": 64,
+          "warp_m": 2,
+          "warp_n": 1,
+          "warp_tile_m": 16,
+          "warp_tile_n": 16,
+          "warp_tile_k": 32,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "default",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 1,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "b011c3dd94b14100b29fc9b154ae352efe240523",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 16,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 1,
+        "warp_tile_m": 16,
+        "warp_tile_n": 16,
+        "warp_tile_k": 32,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "default",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 1,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "b011c3dd94b14100b29fc9b154ae352efe240523",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "80760a01-feb1-59e6-a740-65e778804eea",
+      "name": "gfx950_conv_fwd_aot_bf16_b64927023774751648eec25bc383c8a7728366cb",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 128,
+          "tile_n": 128,
+          "tile_k": 64,
+          "warp_m": 4,
+          "warp_n": 2,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "b64927023774751648eec25bc383c8a7728366cb",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 128,
+        "tile_n": 128,
+        "tile_k": 64,
+        "warp_m": 4,
+        "warp_n": 2,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "b64927023774751648eec25bc383c8a7728366cb",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "64a95dd9-a27a-5183-9936-08b130c88284",
+      "name": "gfx950_conv_fwd_aot_bf16_f422e6435e61563531c136de6b2d9746b757e5b4",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "builders/common/convolution_forward.py",
+        "builder": "build_gfx950_conv_fwd_aot",
+        "spec": {
+          "dtype": "bf16",
+          "tile_m": 128,
+          "tile_n": 128,
+          "tile_k": 64,
+          "warp_m": 2,
+          "warp_n": 4,
+          "warp_tile_m": 32,
+          "warp_tile_n": 32,
+          "warp_tile_k": 16,
+          "wave_size": 64,
+          "pipeline": "compv3",
+          "epilogue": "cshuffle",
+          "vector_size_a": 8,
+          "vector_size_b": 8,
+          "vector_size_c": 8,
+          "unroll_k": 1,
+          "async_dma": 0,
+          "async_chunk_a": 0,
+          "async_chunk_b": 0,
+          "grouped": 1,
+          "instance_id": "f422e6435e61563531c136de6b2d9746b757e5b4",
+          "layout": "NHWC"
+        }
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "tile_m": 128,
+        "tile_n": 128,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 4,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "wave_size": 64,
+        "pipeline": "compv3",
+        "epilogue": "cshuffle",
+        "vector_size_a": 8,
+        "vector_size_b": 8,
+        "vector_size_c": 8,
+        "unroll_k": 1,
+        "async_dma": 0,
+        "async_chunk_a": 0,
+        "async_chunk_b": 0,
+        "grouped": 1,
+        "instance_id": "f422e6435e61563531c136de6b2d9746b757e5b4",
+        "layout": "NHWC"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx950"
+  ]
+}
