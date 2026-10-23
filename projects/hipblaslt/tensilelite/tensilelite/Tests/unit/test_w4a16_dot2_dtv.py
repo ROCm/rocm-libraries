@@ -86,7 +86,6 @@ def test_valid(toolchain, pgr, zeroPoint):
 @pytest.mark.parametrize(
     "kw",
     [
-        {"glvwA": 16},                         # one load no longer covers the lane's K block
         {"WorkGroup": [1, 2, 32]},             # A rows would be split across N-waves
         {"pgr": 2},                            # would need a third A register set
         {"InnerUnroll": 2},
@@ -134,3 +133,60 @@ def test_dequant_waits_for_its_load(toolchain):
         lastLoad = before.rfind("buffer_load")
         lastWait = before.rfind("wait for global read before writing to local")
         assert lastWait > lastLoad, "dequant reads A before its load is waited for"
+
+
+def _loopBody(src):
+    begin = src.index("label_LoopBeginL:")
+    return src[begin:src.index("label_LoopEndL", begin)]
+
+
+def test_slots_valid(toolchain):
+    """Several A loads per lane ("slots") along K: 4 x 8 int4 at DepthU 1024."""
+    sol = _solution(toolchain, pgr=0, glvwA=8)
+    assert sol.get("Valid") is True
+    assert sol["NumLoadsCoalescedA"] == 4
+
+
+def test_slots_dequant_behind_own_wait(toolchain):
+    """PGR0 consumes A slots in issue order: each slot waits only for itself, with
+    the later slots still in flight, and B is not held back by A."""
+    sol = _solution(toolchain, pgr=0, glvwA=8, ThreadTile=[1, 1])
+    body = _loopBody(_emit_solution(toolchain, sol)[1])
+    waits = [int(n) for n in re.findall(r"s_waitcnt vmcnt\((\d+)\)\s+// A slot \d+ loaded", body)]
+    assert waits == [3, 2, 1, 0]
+    # B's LDS store leaves the four A loads outstanding.
+    assert re.search(r"s_waitcnt vmcnt\(4\)\s+// 5wait for global read B", body)
+    # Scales are issued before A, so an A slot's wait does not cover later A loads.
+    kinds = re.findall(r"buffer_load_\w+ v\[vgpr(G2LScaleA|G2LA)\b", body)
+    assert kinds.index("G2LA") > max(i for i, k in enumerate(kinds) if k == "G2LScaleA")
+
+
+def _dtvb(**kw):
+    kw.setdefault("pgr", 0)
+    kw.setdefault("glvwA", 8)
+    kw.setdefault("ThreadTile", [1, 1])
+    kw.setdefault("GlobalReadVectorWidthB", kw["glvwA"])
+    return dict(kw, DirectToVgprDot2B=True)
+
+
+def test_dtvb_valid(toolchain):
+    assert _solution(toolchain, **_dtvb()).get("Valid") is True
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"WorkGroup": [2, 1, 32]},   # B would be spread over two row groups
+        {"pgr": 1},
+        {"GlobalReadVectorWidthB": 4},
+    ],
+)
+def test_dtvb_rejects_unsupported(toolchain, kw):
+    assert _solution(toolchain, **_dtvb(**kw)).get("Valid") is not True
+
+
+def test_dtvb_no_lds(toolchain):
+    body = _loopBody(_emit_solution(toolchain, _solution(toolchain, **_dtvb()))[1])
+    assert not re.search(r"\bds_(store|load|write|read)", body)
+    dots = re.findall(r"v_dot2_f32_f16 \S+, v\[vgprG2LA\+\d+\], v\[vgprG2LB\+\d+\]", body)
+    assert len(dots) == 16

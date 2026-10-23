@@ -1393,6 +1393,7 @@
     'DirectToVgprA',
     'DirectToVgprB',
     'DirectToVgprDot2A',
+    'DirectToVgprDot2B',
     'DirectToVgprMXSA',
     'DirectToVgprMXSB',
     'DirectToVgprSparseMetadata',
@@ -1803,6 +1804,14 @@
       'type': 'list',
     }),
     'DirectToVgprDot2A': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprDot2B': dict({
       'head': list([
         False,
         True,

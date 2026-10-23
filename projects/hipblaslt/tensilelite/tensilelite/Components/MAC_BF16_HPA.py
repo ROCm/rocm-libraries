@@ -160,7 +160,10 @@ class FMA_BF16_HPA_DOT2(MAC):
                         aStr = writer.dot2DirectToVgprAReg(kernel, vars["blockA"], unrollIdx)
                     else:
                         aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
-                    bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
+                    if kernel["DirectToVgprDot2B"]:
+                        bStr = writer.dot2DirectToVgprBReg(kernel, vars["blockB"], unrollIdx)
+                    else:
+                        bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
                     if instruction == VDot2F32BF16:
                         module.add(instruction(dst=vgpr(cStr), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr), \
                                             comment="ValuC[%u] iui=%u" % (cidx, vars["iui"])))

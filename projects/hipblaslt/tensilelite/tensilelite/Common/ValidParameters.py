@@ -558,6 +558,8 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprB": [False, True],
     # dot2 WaveSplitK only: v_dot2 reads A from its global-read registers; only B uses LDS.
     "DirectToVgprDot2A": [False, True],
+    # With DirectToVgprDot2A and one row group per workgroup, B also feeds v_dot2 from its registers.
+    "DirectToVgprDot2B": [False, True],
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
