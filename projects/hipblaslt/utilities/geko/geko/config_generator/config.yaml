@@ -68,9 +68,9 @@ Sizes:
 # CMS: True                # CMS optimization (default True for gfx950, False for gfx942*)
 # CMS_PRIORITY: True       # Prioritize CMS tiles (same ARCH rule as CMS)
 # MI_FILTER: 2             # MI filtering aggressiveness (0=none, 1=moderate, 2=aggressive)
-# BUILDABLE_MIS: True      # MI Designer takes candidate MIs from the buildable-MI list for this ARCH and GEMM type
+# BUILDABLE_MIS: False     # True: MI Designer takes candidate MIs from the buildable-MI list for this ARCH and GEMM type
                            #   (geko/config_generator/mi_lists/, made by scripts/generate_buildable_mis.py) when
-                           #   one exists; not applied to subtile kernels. False: every candidate MI.
+                           #   one exists; not applied to subtile kernels. False (default): every candidate MI.
 # EPILOGUES: True          # Include epilogues in tuning
 # CLUSTER: 0               # 0=all-in-one, 1=cluster by top MI
 # MAX_NUM_KERNELS_PER_CONFIG: 180000000  # Kernel cap per config (heuristic only; ignored for generic search space)

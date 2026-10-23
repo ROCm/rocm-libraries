@@ -58,6 +58,7 @@ def _mi9(m: mid.MFMA) -> tuple:
 def test_load_candidate_mfmas_uses_override_outside_allowlist(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
     cfg = _config()
+    cfg["BUILDABLE_MIS"] = True
     cfg["MFMA"] = [16, 16, 16, 1]
     _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
     d = mid.MIDesign(tmp_path, cfg)
@@ -71,6 +72,7 @@ def test_load_candidate_mfmas_uses_override_outside_allowlist(monkeypatch, tmp_p
 def test_load_candidate_mfmas_reads_buildable_list(monkeypatch, tmp_path: Path, search_space) -> None:
     monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
     cfg = _config()
+    cfg["BUILDABLE_MIS"] = True
     cfg["search_space"] = search_space                         # one list for every non-subtile search space
     listed = [(32, 32, 16, 1, 1, 1, 1, 4, 1), (16, 16, 32, 1, 1, 2, 3, 2, 2)]
     _write_list(cfg, listed)
@@ -86,6 +88,7 @@ def test_load_candidate_mfmas_reads_buildable_list(monkeypatch, tmp_path: Path, 
 def test_load_candidate_mfmas_ignores_list_for_subtile(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
     cfg = _config()
+    cfg["BUILDABLE_MIS"] = True
     cfg["search_space"] = "subtile"
     _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
     valid, _, _ = mid.MIDesign(tmp_path, cfg, subtile_enabled=True).load_candidate_mfmas()
@@ -93,17 +96,24 @@ def test_load_candidate_mfmas_ignores_list_for_subtile(monkeypatch, tmp_path: Pa
     assert [_mi9(m) for m in valid] == mi_candidates.enumerate_candidate_mis("gfx950", "H", "subtile")
 
 
-def test_load_candidate_mfmas_enumerates_without_list_or_when_disabled(monkeypatch, tmp_path: Path) -> None:
+def test_load_candidate_mfmas_enumerates_by_default_without_list_or_when_disabled(monkeypatch, tmp_path: Path, caplog) -> None:
     monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
     cfg = _config()
     every = mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
-    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
-    assert [_mi9(m) for m in valid] == every                   # no list for this GEMM type
-
     _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every                   # lists are opt-in: unset means every MI
+
     cfg["BUILDABLE_MIS"] = False
     valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
     assert [_mi9(m) for m in valid] == every                   # list ignored when disabled
+
+    cfg["BUILDABLE_MIS"] = True
+    mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name).unlink()
+    with caplog.at_level("WARNING", logger="GEKO"):
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every                   # enabled but no list for this GEMM type
+    assert "generate_buildable_mis.py --arch gfx950 --types H:H:S --layouts NN" in caplog.text
 
 
 def test_buildable_list_path_is_per_compiler_target(tmp_path: Path) -> None:

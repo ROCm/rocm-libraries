@@ -92,7 +92,7 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |
-| `BUILDABLE_MIS` | `True` (default): MI Designer takes its candidate MIs from the buildable-MI list for this ARCH and GEMM type when one exists (see [Buildable-MI lists](#buildable-mi-lists)); not applied to subtile kernels. `False`: every MI geko's tiling rules allow |
+| `BUILDABLE_MIS` | `False` (default): every MI geko's tiling rules allow. `True`: MI Designer takes its candidate MIs from the buildable-MI list for this ARCH and GEMM type when one exists (see [Buildable-MI lists](#buildable-mi-lists)); not applied to subtile kernels |
 | `EPILOGUES` | Include epilogues |
 | `MX` | `True` = MX block scaling on the arch's default block (32) with E8 scales. `F4` is always MX; only `F4` and `F8` take MX |
 | `MX_BLOCK` | MX block size, 16 or 32; setting it turns MX on. `0` forces plain non-MX, which `F4` and `MX: True` reject. MXFP8 is `F8` with 32, NVFP4 is `F4` with 16 |
@@ -134,16 +134,17 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 MI Designer's candidate MatrixInstructions come from geko's tiling rules
 ([`mi_candidates.enumerate_candidate_mis`](mi_candidates.py)), which do not know whether TensileLite can
 build a kernel for an MI: large tiles often overflow registers or LDS for every parameter setting, and a
-tuning run then spends its budget on kernels that fail code generation. For GEMM types with a list in
-[`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
+tuning run then spends its budget on kernels that fail code generation. With `BUILDABLE_MIS: True`, for GEMM types
+with a list in [`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
 TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
 search space's fork ranges. One list serves generic (GA) and heuristic runs: it is computed for the generic
 space, and the heuristic space (the older exhaustive search, rarely used) offers only a few values generic does
 not, e.g. FP32 DepthU 16, so a heuristic run can miss the rare MI that builds only with one of them. Subtile kernels (the subtile search space and
 gfx950 MX) are not covered and keep every candidate. Lists are generated with StreamK off: the persistent
 StreamK kernels need slightly more VGPRs, so the StreamK-off list holds every MI the StreamK-on one does
-plus a few tiles at the register limit, and one list serves runs with either setting. Without a list MI
-Designer enumerates every MI and logs a warning.
+plus a few tiles at the register limit, and one list serves runs with either setting. The lists are opt-in
+(`BUILDABLE_MIS: True`); by default MI Designer enumerates every MI as before. With the option on but no list
+for the GEMM type, MI Designer enumerates every MI and logs a warning with the command that generates the list.
 
 The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
 (search described in [`buildability.py`](buildability.py)). Code generation and fork ranges change, so

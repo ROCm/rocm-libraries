@@ -158,12 +158,12 @@ class MIDesign:
   def load_candidate_mfmas(self) -> Tuple[List[MFMA], int, int]:
       """Candidate MatrixInstructions for the active GEMM type and ARCH.
 
-      With BUILDABLE_MIS (default) and a buildable-MI list for this GEMM type
-      (see mi_candidates.buildable_list_path), the candidates are the list's MIs:
+      With BUILDABLE_MIS: True (off by default) and a buildable-MI list for this GEMM
+      type (see mi_candidates.buildable_list_path), the candidates are the list's MIs:
       the ones TensileLite code generation can build within the generic (GA)
       search space's fork-parameter ranges. Subtile kernels (subtile search space,
-      gfx950 MX) are not covered by the lists. Otherwise, every MI geko's tiling
-      rules allow (mi_candidates.enumerate_candidate_mis), buildable or not.
+      gfx950 MX) are not covered by the lists. Otherwise (the default), every MI
+      geko's tiling rules allow (mi_candidates.enumerate_candidate_mis), buildable or not.
 
       Returns:
           (candidate_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA). The smallest
@@ -178,13 +178,17 @@ class MIDesign:
       smallest_M_in_MFMA, smallest_N_in_MFMA = smallest_mfma_dims(allowable)
 
       mis = None
-      if self.config.get("BUILDABLE_MIS", True) and not self._subtile_enabled:
+      if self.config.get("BUILDABLE_MIS", False) and not self._subtile_enabled:
           gemm_name = self.config["GemmProblem"].name
           path = buildable_list_path(arch, gemm_name)
           if not path.exists():
+              gt = self.config["GemmProblem"].gemm_type
+              layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
               logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
-                             "TensileLite cannot build. Generate one with scripts/generate_buildable_mis.py.",
-                             gemm_name, arch)
+                             "TensileLite cannot build. Generate it (CPU only) with: python3 "
+                             "scripts/generate_buildable_mis.py --arch %s --types %s:%s:%s --layouts %s",
+                             gemm_name, arch, library_logic_architecture(arch), gt.data_type,
+                             gt.dest_data_type, gt.compute_data_type, layout)
           elif override is not None and list(override) not in allowable_mfmas(arch, data_type):
               logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
                           "using every candidate MI.", override, path.name)
