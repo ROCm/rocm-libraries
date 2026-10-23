@@ -42,13 +42,6 @@ Definitions:
 
 Tests:
 # Quick
-
-# pre_checkin covers block_dim <=8, <=16, and <=32, both directions, both
-# bases, and both analysis policies. block_dim > 32 is the general kernel on
-# wavefront 64. The M=1 case keeps max_nnzb <= 32 so the unrolled 2_8 kernel
-# is selected. The tunedavg 200 case is dense in blocks (max_nnzb = 50), which
-# is the non-unrolled 2_8 kernel on wavefront 64. The zero matrix is not in
-# pre_checkin.
 - name: bsric0
   category: quick
   function: bsric0
