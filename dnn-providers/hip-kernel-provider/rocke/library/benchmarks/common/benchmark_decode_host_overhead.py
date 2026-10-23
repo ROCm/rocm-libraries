@@ -106,6 +106,15 @@ def measure(call, *, stream, warmup, iters, samples):
     }
 
 
+def kernel_llvm_hashes(spec, *, arch):
+    from rocke import lower_kernel_to_llvm
+
+    return [
+        hashlib.sha256(lower_kernel_to_llvm(kernel, arch=arch).encode()).hexdigest()
+        for kernel in spec.build(arch)
+    ]
+
+
 def run_case(case, *, arch, mode, timing):
     import torch
     from dispatch.attention import (
@@ -115,7 +124,6 @@ def run_case(case, *, arch, mode, timing):
     )
     from kernels import UnifiedAttentionProblem
     from kernels.common import attention_unified as au
-    from rocke import lower_kernel_to_llvm
     from rocke.runtime import wait_stream_and_release
 
     b, sk = int(case["batch"]), int(case["kv_length"])
@@ -216,10 +224,7 @@ def run_case(case, *, arch, mode, timing):
     }
     hashes = {
         "hsaco": [hashlib.sha256(compiled[i]).hexdigest() for i in (0, 2)],
-        "llvm": [
-            hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
-            for kernel in specs[0].build(arch)
-        ],
+        "llvm": kernel_llvm_hashes(specs[0], arch=arch),
     }
     result = measure(call, stream=stream, **timing)
     # Poison output before a fresh launch so the post-check proves GPU writes.

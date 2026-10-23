@@ -73,3 +73,26 @@ def test_failed_host_batch_drains_before_propagating(monkeypatch):
     with pytest.raises(RuntimeError, match="partial submission"):
         bench.measure(fail, stream=17, warmup=0, iters=1, samples=2)
     assert drained == [17, 17]
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_saved_spec_provenance_lowers_with_explicit_target(arch, monkeypatch):
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
+
+    monkeypatch.setenv("ROCKE_BACKEND", "python")
+    request = AttentionRequest(
+        batch=1,
+        nhead_q=8,
+        nhead_k=1,
+        seqlen_q=1,
+        seqlen_k=65,
+        hdim_q=64,
+        hdim_v=64,
+        arch=arch,
+        dtype="bf16",
+        kv_block_size=16,
+    )
+    spec = attention_tuning_spec(request, f"{arch}_u3d_splitkv_seg128_t1xb")
+    hashes = bench.kernel_llvm_hashes(spec, arch=arch)
+    assert len(hashes) == 2 and hashes[0] != hashes[1]
+    assert all(len(value) == 64 for value in hashes)
