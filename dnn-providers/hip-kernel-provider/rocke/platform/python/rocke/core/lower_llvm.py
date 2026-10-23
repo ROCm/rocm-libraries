@@ -45,6 +45,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     BF16,
     F32,
     F16,
@@ -6950,8 +6951,12 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering.
+        unrolled (straight-line) or normal (loop) lowering. Both refuse a
+        loop that carries a buffer descriptor.
         """
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 

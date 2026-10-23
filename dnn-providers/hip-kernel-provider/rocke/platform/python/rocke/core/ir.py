@@ -753,6 +753,59 @@ def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> No
         )
 
 
+def _is_buffer_descriptor(value: "Value") -> bool:
+    """True when ``value`` is a buffer descriptor: the result of a
+    ``tile.buffer_rsrc`` op.
+
+    A descriptor is a ``<4 x i32>`` in the IR but an opaque
+    ``ptr addrspace(8)`` (HIP ``rsrc_t``) once lowered, so a value of that
+    vector type that does not come from ``tile.buffer_rsrc`` is not one.
+    """
+    return value.op is not None and value.op.name == "tile.buffer_rsrc"
+
+
+def _loop_carried_descriptor_message(index: int) -> str:
+    """The refusal for a buffer descriptor as ``scf.for`` iter_arg ``index``,
+    either as its initial value or as the value a loop iteration yields to it.
+
+    A loop cannot carry a descriptor: the phi (LLVM) or the ``i32x4`` variable
+    (HIP) that holds a loop-carried value cannot hold the lowered descriptor,
+    and the compiler refuses the module. Carrying one is never needed either:
+    no op edits an existing descriptor, so a loop can only use the one built
+    before it (advancing the offset it passes to each access) or build a new
+    one in its body.
+    """
+    return (
+        f"scf.for iter_arg {index} is a buffer descriptor, which a loop cannot "
+        "carry; build the descriptor before the loop and advance the offset, or "
+        "rebuild it inside the loop body"
+    )
+
+
+def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
+    """The refusal for the ``scf.for`` ``op`` when it carries a buffer
+    descriptor, or None when it does not.
+
+    It checks each iter_arg's initial value (the operands after lower, upper
+    and step) and each value an ``scf.yield`` directly in the loop body yields.
+    It only slices the operand and region lists, so it accepts any counts:
+    serialized IR reaches the verifier and the lowerings without passing the
+    builder. The verifier and every lowering of ``scf.for`` use it, and the C++
+    engine reports the same text (``rocke_i_scf_for_carried_descriptor_error``).
+    """
+    for index, init in enumerate(op.operands[3:]):
+        if _is_buffer_descriptor(init):
+            return _loop_carried_descriptor_message(index)
+    for body in op.regions[:1]:
+        for body_op in body.ops:
+            if body_op.name != "scf.yield":
+                continue
+            for index, value in enumerate(body_op.operands):
+                if _is_buffer_descriptor(value):
+                    return _loop_carried_descriptor_message(index)
+    return None
+
+
 # ----------------------------- Values / Ops ------------------------------
 
 
@@ -5794,7 +5847,13 @@ class IRBuilder:
         elide_trailing_barrier: Phase 4 optimization (default: True)
         - True: automatically elide trailing sync() in non-final iterations
         - False: preserve all barriers (for manually optimized kernels)
+
+        No init may be a buffer descriptor (see
+        :func:`_loop_carried_descriptor_message`).
         """
+        for index, (_, init) in enumerate(iter_args):
+            if _is_buffer_descriptor(init):
+                raise ValueError(_loop_carried_descriptor_message(index))
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []
@@ -5829,7 +5888,32 @@ class IRBuilder:
         return _ForBuilder(self, op, iv, body, iter_vars)
 
     def scf_yield(self, *values: Value) -> None:
+        """End the current region by yielding ``values`` to its owner.
+
+        In an ``scf.for`` body they become the next iteration's iter_args, so
+        none may be a buffer descriptor (see
+        :func:`_loop_carried_descriptor_message`).
+        """
+        if self._current_region_is_loop_body():
+            for index, value in enumerate(values):
+                if _is_buffer_descriptor(value):
+                    raise ValueError(_loop_carried_descriptor_message(index))
         self._op("scf.yield", list(values), [], attrs={"num": len(values)})
+
+    def _current_region_is_loop_body(self) -> bool:
+        """True while the builder is emitting into an ``scf.for`` body.
+
+        The loop op is the last op of the region that encloses its body: it was
+        emitted there before its body was entered, and every op since went into
+        the body.
+        """
+        if len(self._region_stack) < 2:
+            return False
+        enclosing = self._region_stack[-2].ops
+        if not enclosing or enclosing[-1].name != "scf.for":
+            return False
+        loop_regions = enclosing[-1].regions
+        return bool(loop_regions) and loop_regions[0] is self._region_stack[-1]
 
     def static_if(
         self,
