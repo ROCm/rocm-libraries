@@ -156,8 +156,8 @@ namespace
                                              rbd,
                                              cbd,
                                              base,
-                                             rocsparse_ut::scalar<T>(2.0f),
-                                             rocsparse_ut::scalar<T>(-0.5f),
+                                             case_scalar<T>(2.0f, 0.0f),
+                                             case_scalar<T>(-0.5f, 1.0f),
                                              device);
                             if(::testing::Test::HasFailure())
                                 return;
@@ -488,10 +488,8 @@ namespace
                             c.masked = masked != 0;
                             c.device = ((bd + bpr + d + masked) % 3) == 0;
                             c.base   = (bd + masked) & 1;
-                            check_bsrxmv<T>(handle,
-                                            c,
-                                            rocsparse_ut::scalar<T>(1.5f),
-                                            rocsparse_ut::scalar<T>(0.25f));
+                            check_bsrxmv<T>(
+                                handle, c, case_scalar<T>(1.5f, 0.0f), case_scalar<T>(0.25f, 1.0f));
                             if(::testing::Test::HasFailure())
                                 return;
                         }
@@ -520,8 +518,8 @@ namespace
                         c.base   = (bd + d) & 1;
                         check_bsrmv<T>(handle,
                                        c,
-                                       rocsparse_ut::scalar<T>(2.0f),
-                                       rocsparse_ut::scalar<T>(-1.0f),
+                                       case_scalar<T>(2.0f, 0.0f),
+                                       case_scalar<T>(-1.0f, 1.0f),
                                        with_analysis);
                         if(::testing::Test::HasFailure())
                             return;

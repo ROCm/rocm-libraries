@@ -795,12 +795,12 @@ namespace level2
     }
 
     // alpha / beta of a test case: a complex scalar gets a non zero imaginary part
-    // unless the real part is the neutral value (`neutral`) that is special-cased
-    // by the library.
+    // unless the real part is 0 or the neutral value (`neutral`), both of which are
+    // special-cased by the library.
     template <typename T>
     inline T case_scalar(float re, float neutral)
     {
-        return scalar_of<T>(re, re != neutral ? 0.25f : 0.0f);
+        return scalar_of<T>(re, (re != neutral && re != 0.0f) ? 0.25f : 0.0f);
     }
 
     // The operations of the products.
