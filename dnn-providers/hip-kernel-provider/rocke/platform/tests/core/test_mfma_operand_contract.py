@@ -13,6 +13,7 @@ from rocke.core.ir import (
     BF16,
     F16,
     F32,
+    F64,
     FP8E4M3,
     I8,
     I16,
@@ -206,7 +207,7 @@ def test_mfma_llvm_rejects_actual_ssa_types(case, flavor, concrete, role, kind, 
     # Some packed dtype/scalar alternatives are legitimate equal-width carriers.
     if role in ("src0", "src1") and case[4] is not None and kind == "dtype":
         return
-    if role in ("src0", "src1") and case[2] == F32 and kind == "scalar":
+    if role in ("src0", "src1") and case[2] == F32 and kind in ("scalar", "short"):
         return
     kernel, op = _kernel(case, concrete=concrete)
     _corrupt_type(kernel, op, role, _bad_type(case, role, kind))
@@ -262,7 +263,7 @@ def test_mfma_supported_hip_handlers(case, concrete, role, kind):
         return
     if role in ("src0", "src1") and (
         (case[4] is not None and kind == "dtype")
-        or (case[2] == F32 and kind == "scalar")
+        or (case[2] == F32 and kind in ("scalar", "short"))
     ):
         return
     kernel, op = _kernel(case, concrete=concrete, use_result=kind == "valid")
@@ -293,6 +294,7 @@ PACKED_CARRIERS = (
         (CASES[-4], ty)
         for ty in (
             I64,
+            F64,
             VectorType(I32, 2),
             VectorType(I16, 4),
             VectorType(F32, 2),
@@ -308,6 +310,7 @@ PACKED_CARRIERS = (
         for case in CASES[-2:]
         for ty in (
             VectorType(I64, 4),
+            VectorType(F64, 4),
             VectorType(I32, 8),
             VectorType(I8, 32),
             VectorType(F16, 16),

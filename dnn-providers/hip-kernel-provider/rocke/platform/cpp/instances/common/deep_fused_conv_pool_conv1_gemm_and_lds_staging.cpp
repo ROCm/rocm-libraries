@@ -44,15 +44,14 @@
  *     constructs the ImplicitGemmConvSpec with warp_tile_k=self.warp_tile_k, so
  *     the two are equal by construction and spec is the non-opaque handle here.
  */
-#include "rocke/instance_deep_fused_conv_pool_internal.h"
+#include <stddef.h>
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_*_layout, layout coord */
 #include "rocke/helper_rocke.helpers.epilogues.h" /* rocke_warp_grid_t accessors */
 #include "rocke/helper_rocke.helpers.loads.h" /* CoalescedTileLoader */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* make_lds_view, rocke_tensor_view_t */
+#include "rocke/instance_deep_fused_conv_pool_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
-
-#include <stddef.h>
 
 /* ------------------------------------------------------------------ *
  * Peer forward declaration (link-resolved; see PEER NOTES).

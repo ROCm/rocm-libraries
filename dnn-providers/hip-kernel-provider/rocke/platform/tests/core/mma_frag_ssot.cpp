@@ -32,13 +32,17 @@ static int g_failures = 0;
         }                                                                     \
     } while(0)
 
-/* Emit rocke_b_mma(op_id) and assert the result is a vec<expect_elem x
- * expect_frag>. expect_int selects i32 vs f32 for the accumulator element. */
-static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+/* Emit rocke_b_mma(op_id) on the given operands and assert the result is a
+ * vec<expect_elem x expect_frag>. expect_int selects i32 vs f32 for the
+ * accumulator element. */
+static void check_atom_on(rocke_ir_builder_t* b,
+                          const char* op_id,
+                          rocke_value_t* a,
+                          rocke_value_t* bb,
+                          rocke_value_t* c,
+                          int expect_frag,
+                          bool expect_int)
 {
-    rocke_value_t* a = rocke_b_const_i32(b, 0);
-    rocke_value_t* bb = rocke_b_const_i32(b, 0);
-    rocke_value_t* c = rocke_b_const_i32(b, 0);
     rocke_value_t* r = rocke_b_mma(b, op_id, a, bb, c, NULL, 0);
 
     CHECK(r != NULL, op_id);
@@ -60,6 +64,29 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
     }
 }
 
+/* Placeholder scalar operands: this check is about the result's fragment, not the
+ * operands, which an ordinary atom's builder does not inspect. */
+static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+{
+    rocke_value_t* a = rocke_b_const_i32(b, 0);
+    rocke_value_t* bb = rocke_b_const_i32(b, 0);
+    rocke_value_t* c = rocke_b_const_i32(b, 0);
+    check_atom_on(b, op_id, a, bb, c, expect_frag, expect_int);
+}
+
+/* An emulated TF32 atom is verified on the way in: its operands are vec<tf32xN>
+ * (an fp32 payload wrapped by a bitcast) and its accumulator a vec<f32xM>. N and M
+ * are the physical atom's fragment lengths, which the atom borrows. */
+static void check_emulated_atom(rocke_ir_builder_t* b, const char* op_id, int ab_len, int c_len)
+{
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    const rocke_type_t* tf32_vec = rocke_vector_type(b, rocke_tf32(), ab_len);
+    rocke_value_t* a = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* bb = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* c = rocke_b_vector_splat(b, zero, c_len);
+    check_atom_on(b, op_id, a, bb, c, c_len, false);
+}
+
 static void check_catalog_fragments(const rocke_mma_catalog_t* catalog,
                                     const char* op_id,
                                     int scale_block_size)
@@ -76,11 +103,19 @@ static void check_catalog_fragments(const rocke_mma_catalog_t* catalog,
     CHECK(op->dst.frag_len == 8, op_id);
     for(int i = 0; i < 2; ++i)
     {
-        CHECK(strcmp(op->srcs[i].dtype, "fp8e4m3") == 0, op_id);
+        const char* dtype = op->srcs[i].dtype;
+        CHECK(dtype
+                  && (strcmp(dtype, "fp8e4m3") == 0 || strcmp(dtype, "bf8e5m2") == 0
+                      || strcmp(dtype, "fp6e2m3") == 0 || strcmp(dtype, "fp6e3m2") == 0
+                      || strcmp(dtype, "fp4e2m1") == 0),
+              op_id);
         CHECK(op->srcs[i].scale_dtype != NULL, op_id);
         if(op->srcs[i].scale_dtype)
         {
-            CHECK(strcmp(op->srcs[i].scale_dtype, "e8m0") == 0, op_id);
+            CHECK(strcmp(op->srcs[i].scale_dtype, "e8m0") == 0
+                      || strcmp(op->srcs[i].scale_dtype, "e5m3") == 0
+                      || strcmp(op->srcs[i].scale_dtype, "e4m3") == 0,
+                  op_id);
         }
         CHECK(op->srcs[i].scale_block_size == scale_block_size, op_id);
     }
@@ -184,6 +219,31 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+    /* Emulated TF32 atoms have no frag-table row of their own; the logical op_id
+     * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
+    check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
+    check_emulated_atom(&b, "mfma_f32_32x32x16_xf32", 8, 16);
+
+    /* No catalog row (fragment information only): accumulates in fp32. */
+    CHECK(rocke_arch_mma_op_id_dst_dtype("mfma_f32_4x4x4_f16") == NULL,
+          "mfma_f32_4x4x4_f16 has no catalog row");
+    check_atom(&b, "mfma_f32_4x4x4_f16", 4, false);
+
+    /* Every catalog accumulator has an IR type, and the op_id lookup rocke_b_mma
+     * uses returns the row's accumulator dtype. */
+    int num_arches = 0;
+    const char* const* arches = rocke_known_arches(&num_arches);
+    for(int i = 0; i < num_arches; ++i)
+    {
+        const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(arches[i]);
+        for(int j = 0; arch && j < arch->mma.num_ops; ++j)
+        {
+            const rocke_mma_op_t* op = &arch->mma.ops[j];
+            const char* c_dtype = rocke_arch_mma_op_id_dst_dtype(op->op_id);
+            CHECK(rocke_dtype_to_ir_type(op->dst.dtype) != NULL, op->op_id);
+            CHECK(c_dtype != NULL && strcmp(c_dtype, op->dst.dtype) == 0, op->op_id);
+        }
+    }
 
     /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
      * matrix operands are <16 x i32>, so fragment length is 16 elements, not
@@ -196,6 +256,17 @@ int main(void)
             &gfx1250->mma, "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32", 32);
         check_catalog_fragments(
             &gfx1250->mma, "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16", 16);
+        int scaled = 0;
+        for(int i = 0; i < gfx1250->mma.num_ops; ++i)
+        {
+            const auto& op = gfx1250->mma.ops[i];
+            if(strcmp(op.family, "wmma_scaled") != 0)
+                continue;
+            check_catalog_fragments(&gfx1250->mma, op.op_id, op.srcs[0].scale_block_size);
+            check_atom(&b, op.op_id, 8, false);
+            ++scaled;
+        }
+        CHECK(scaled == 86, "all scaled atoms must have accumulator metadata");
     }
 
     /* Unknown op_id must be rejected. The engine's error path either returns

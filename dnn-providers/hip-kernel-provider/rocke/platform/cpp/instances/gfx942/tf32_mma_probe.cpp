@@ -1,13 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Spec-driven native mirror of instances/gfx942/tf32_mma_probe.py. */
+#include <stdio.h>
+#include <string.h>
+
 #include "rocke/error_boundary.hpp"
 #include "rocke/helper_rocke.helpers.mma_io.h"
 #include "rocke/instance_tf32_mma_probe.h"
 #include "rocke/ir_internal.h"
 #include "tf32_mma_probe_internal.h"
-#include <stdio.h>
-#include <string.h>
 
 rocke_kernel_def_t* rocke_build_tf32_mma_probe(rocke_ir_builder_t* b, int m, const char* mode)
 {

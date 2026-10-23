@@ -220,6 +220,19 @@ def test_wmma_llvm_rejects_multiplicands(case, flavor, role, kind, engine):
     op.operands[role].type = bad_type
     next(p for p in kernel.params if p.name == ("a", "b")[role]).type = bad_type
     error = f"unscaled WMMA requires src{role} to be {VectorType(elem, width).name}"
+    if elem == I32:
+        from rocke.core.arch import ArchTarget
+        from rocke.core.mma_operand import mma_operand_needs_reinterpret
+
+        with pytest.raises(ValueError) as bridge:
+            mma_operand_needs_reinterpret(
+                case[1],
+                "a" if role == 0 else "b",
+                bad_type,
+                VectorType(elem, width),
+                ArchTarget.from_gfx(case[0]),
+            )
+        error = str(bridge.value)
     _assert_llvm_rejects(kernel, case[0], flavor, error, engine)
 
 
@@ -244,6 +257,19 @@ def test_wmma_hip_rejects_multiplicands(case, concrete, role, kind):
     op.operands[role].type = bad_type
     next(p for p in kernel.params if p.name == ("a", "b")[role]).type = bad_type
     error = f"unscaled WMMA requires src{role} to be {VectorType(elem, width).name}"
+    if elem == I32:
+        from rocke.core.arch import ArchTarget
+        from rocke.core.mma_operand import mma_operand_needs_reinterpret
+
+        with pytest.raises(ValueError) as bridge:
+            mma_operand_needs_reinterpret(
+                case[1],
+                "a" if role == 0 else "b",
+                bad_type,
+                VectorType(elem, width),
+                ArchTarget.from_gfx(case[0]),
+            )
+        error = str(bridge.value)
     for candidate in (kernel, parse(serialize(kernel))):
         _assert_python_rejects(
             lambda: lower_kernel_to_hip(candidate, arch=case[0]), error

@@ -44,6 +44,7 @@ _CARRIER_BITS = {
     "f16": 16,
     "bf16": 16,
     "f32": 32,
+    "f64": 64,
     "fp8e4m3": 8,
     "bf8e5m2": 8,
 }
@@ -88,7 +89,10 @@ def validate_mfma(op: Op) -> None:
                 for v in op.operands[:2]
             )
         else:
-            valid = all(v.type == source for v in op.operands[:2])
+            valid = all(
+                v.type == source or (source == F32 and v.type == VectorType(F32, 1))
+                for v in op.operands[:2]
+            )
         if not valid:
             raise ValueError(f"MFMA requires src0 and src1 to be {source.name}")
     count = 16 if op_id.startswith("mfma_f32_32x32") else 4

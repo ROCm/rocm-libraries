@@ -43,6 +43,7 @@ static inline int rocke_mfma_carrier_bits(const rocke_type_t* type)
     case ROCKE_SCALAR_F32:
         bits = 32;
         break;
+    case ROCKE_SCALAR_F64:
     case ROCKE_SCALAR_I64:
         bits = 64;
         break;
@@ -86,6 +87,8 @@ static inline int rocke_mfma_type_matches(const rocke_type_t* type, const char* 
         return type->kind == ROCKE_TYPE_VECTOR && type->count == count && type->elem
                && type->elem->kind == ROCKE_TYPE_SCALAR
                && rocke_type_eq(type->elem, rocke_scalar_by_name(element));
+    if(strcmp(expected, "f32") == 0 && type->kind == ROCKE_TYPE_VECTOR && type->count == 1)
+        return rocke_type_eq(type->elem, rocke_f32());
     return type->kind == ROCKE_TYPE_SCALAR && rocke_type_eq(type, rocke_scalar_by_name(expected));
 }
 

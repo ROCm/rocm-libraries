@@ -23,7 +23,8 @@
 #
 # Usage:
 #   python rocke/platform/tools/run_portable_ir_gates.py
-#       [--build-root DIR] [--log-dir DIR] [--lib PATH] [--arch gfx950,gfx942]
+#       [--build-root DIR] [--log-dir DIR] [--lib PATH] [--cli PATH]
+#       [--arch gfx950,gfx942]
 #       [--expect-points N] [--skip-tests] [--no-hsaco]
 
 from __future__ import annotations
@@ -43,6 +44,12 @@ ROCKE = PLATFORM.parent  # platform -> rocke
 PYROOT = PLATFORM / "python"
 LIBRARY = ROCKE / "library"
 
+# Explicit rather than relying on sys.path[0]: that only holds while this file
+# is the entry point, and the helper is needed whether it is run or imported.
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+from _hostcaps import available_cpus
+
 # The rolled gate verifies one parametric recipe per axis at several values,
 # sampled and held out. Pinning the count here rather than in the CI workflow
 # keeps one source of truth: an axis that quietly stops rolling then fails
@@ -50,7 +57,9 @@ LIBRARY = ROCKE / "library"
 EXPECT_POINTS = 22
 
 
-def _env(lib: Optional[Path], extra: Optional[dict] = None) -> dict:
+def _env(
+    lib: Optional[Path], replay_cli: Optional[Path], extra: Optional[dict] = None
+) -> dict:
     env = dict(os.environ)
     parts = [str(PYROOT), str(LIBRARY)]
     if env.get("PYTHONPATH"):
@@ -58,6 +67,10 @@ def _env(lib: Optional[Path], extra: Optional[dict] = None) -> dict:
     env["PYTHONPATH"] = os.pathsep.join(parts)
     if lib is not None:
         env["ROCKE_ONLINE_LIB"] = str(lib)
+    if replay_cli is not None:
+        env["ROCKE_REPLAY_CLI"] = str(replay_cli)
+    else:
+        env.pop("ROCKE_REPLAY_CLI", None)
     env.update(extra or {})
     return env
 
@@ -90,8 +103,19 @@ def _stream(cmd: List[str], env: dict, log: Optional[Path]) -> int:
             fh.close()
 
 
-def build_shared_engine(build_root: Path) -> Optional[Path]:
-    """Configure and build librocke.so. Returns its path, or None on failure."""
+def _built_file(
+    build_root: Path, config: str, relative_names: tuple[str, ...]
+) -> Path | None:
+    for relative in relative_names:
+        for root in (build_root, build_root / config):
+            candidate = root / relative
+            if candidate.is_file():
+                return candidate.resolve()
+    return None
+
+
+def build_shared_engine(build_root: Path) -> tuple[Path, Path] | None:
+    """Configure and build one source-matched library/CLI artifact bundle."""
     print("== building the shared engine ==")
     print(f"   source : {PLATFORM}")
     print(f"   build  : {build_root}")
@@ -103,6 +127,7 @@ def build_shared_engine(build_root: Path) -> Optional[Path]:
         str(build_root),
         "-DCMAKE_BUILD_TYPE=Release",
         "-DROCKE_BUILD_SHARED_ENGINE=ON",
+        "-DBUILD_TESTING=ON",
     ]
     # Ninja if it is available and this build tree has not already been
     # configured with something else, since generators cannot be swapped.
@@ -118,10 +143,17 @@ def build_shared_engine(build_root: Path) -> Optional[Path]:
                 "cmake",
                 "--build",
                 str(build_root),
+                "--config",
+                "Release",
                 "--target",
                 "rocke_shared",
+                "rocke_portable_ir_replay_cli",
                 "-j",
-                str(os.cpu_count() or 1),
+                # This process's share, not the machine's size -- same reason
+                # the probe gates size from this helper. A scheduler-pinned
+                # host reports 384 against an allocation of 2, where `-j384`
+                # is an OOM rather than a fast build.
+                str(available_cpus()),
             ],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -130,15 +162,33 @@ def build_shared_engine(build_root: Path) -> Optional[Path]:
         print(f"FATAL: could not build the shared engine: {e}", file=sys.stderr)
         return None
 
-    lib = build_root / "librocke.so"
-    if not lib.exists():
-        print(f"FATAL: shared engine not produced: {lib}", file=sys.stderr)
+    lib = _built_file(
+        build_root,
+        "Release",
+        ("librocke.so", "librocke.dylib", "rocke.dll"),
+    )
+    replay_cli = _built_file(
+        build_root,
+        "Release",
+        (
+            "tests/rocke_portable_ir_replay_cli",
+            "tests/rocke_portable_ir_replay_cli.exe",
+            "tests/Release/rocke_portable_ir_replay_cli",
+            "tests/Release/rocke_portable_ir_replay_cli.exe",
+        ),
+    )
+    if lib is None or replay_cli is None:
+        print(
+            f"FATAL: portable-IR artifacts not produced under {build_root}",
+            file=sys.stderr,
+        )
         return None
     print(f"   library: {lib}")
-    return lib
+    print(f"   replay : {replay_cli}")
+    return lib, replay_cli
 
 
-def describe_environment(lib: Path) -> None:
+def describe_environment(lib: Path, replay_cli: Path | None) -> None:
     """Print what will actually do the work.
 
     Which comgr compiles the IR decides the LLVM flavor both engines must emit,
@@ -159,7 +209,7 @@ def describe_environment(lib: Path) -> None:
     )
     print("== environment ==")
     print(f"   python          : {sys.version.split()[0]}")
-    rc = _stream([sys.executable, "-c", probe], _env(lib), None)
+    rc = _stream([sys.executable, "-c", probe], _env(lib, replay_cli), None)
     if rc != 0:
         print("   (probe failed; the gates below will report the real error)")
 
@@ -174,8 +224,9 @@ def main() -> int:
     ap.add_argument(
         "--lib",
         default="",
-        help="use an existing librocke.so instead of building one",
+        help="use an existing shared engine instead of building one",
     )
+    ap.add_argument("--cli", default="", help="replay CLI paired with --lib")
     ap.add_argument("--log-dir", default="", help="write a log per gate here")
     ap.add_argument("--arch", default="gfx950,gfx942", help="arches for the HSACO gate")
     ap.add_argument(
@@ -204,14 +255,18 @@ def main() -> int:
         if not lib.exists():
             print(f"FATAL: --lib does not exist: {lib}", file=sys.stderr)
             return 1
+        replay_cli = Path(args.cli).resolve() if args.cli else None
+        if replay_cli is not None and not replay_cli.exists():
+            print(f"FATAL: --cli does not exist: {replay_cli}", file=sys.stderr)
+            return 1
         print(f"== using the shared engine at {lib} ==")
     else:
         built = build_shared_engine(Path(args.build_root))
         if built is None:
             return 1
-        lib = built
+        lib, replay_cli = built
 
-    describe_environment(lib)
+    describe_environment(lib, replay_cli)
 
     steps: List[Tuple[str, List[str], dict]] = []
     if not args.skip_tests:
@@ -275,7 +330,7 @@ def main() -> int:
         print(f"\n{'=' * 78}\n== {name}\n{'=' * 78}")
         t0 = time.perf_counter()
         log = (log_dir / f"{name}.log") if log_dir else None
-        rc = _stream(cmd, _env(lib, extra), log)
+        rc = _stream(cmd, _env(lib, replay_cli, extra), log)
         dt = time.perf_counter() - t0
         results.append((name, rc, dt))
         if rc != 0 and name == "unit_tests":

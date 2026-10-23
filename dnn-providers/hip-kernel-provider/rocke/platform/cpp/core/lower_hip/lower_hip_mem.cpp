@@ -12,7 +12,7 @@
  *
  * Binds strictly to rocke/ir.h (frozen IR) and the shared helpers declared in
  * rocke/lower_hip_internal.h (defined in bucket 0). Shared helpers (rocke_h_emit*,
- * rocke_h_name, rocke_h_type_to_hip, rocke_h_hip_scalar, rocke_h_vec_prefix,
+ * rocke_h_name, rocke_h_type_to_hip, rocke_h_require_hip_scalar, rocke_h_vec_prefix,
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
 #include "rocke/dtypes.h"
@@ -126,14 +126,7 @@ static rocke_status_t _op_tile_smem_alloc(rocke_h_lowerer_t* lw, const rocke_op_
         return rocke_h_fail(lw, ROCKE_ERR_TYPE, "tile.smem_alloc: result is not an smem type");
     }
 
-    elem = rocke_h_hip_scalar(st->elem ? st->elem->name : "");
-    if(!elem)
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.smem_alloc: no HIP type for elem '%s'",
-                            st->elem ? st->elem->name : "(null)");
-    }
+    elem = rocke_h_require_hip_scalar(lw, st->elem ? st->elem->name : NULL);
     nice = rocke_h_name(lw, res);
 
     /* dims = "][".join(str(d) for d in st.shape) */
@@ -759,6 +752,129 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
                   rocke_h_name(lw, ptr),
                   rocke_h_name(lw, idx),
                   rocke_h_name(lw, val));
+    return lw->status;
+}
+
+/* ir._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_hip_sync_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_hip_fence_orderings[]
+    = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_hip_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+/* Python ir._sync_attr: the lowerer may run on unverified IR, so a missing or
+ * unknown scope / ordering is rejected rather than defaulted. */
+static const char* hip_sync_attr(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* key,
+                                 const char* const* allowed)
+{
+    const char* s = rocke_attr_get_str(&op->attrs, key);
+    if(!s)
+    {
+        rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "%s: %s attribute missing or not a string", op->name, key);
+    }
+    for(const char* const* a = allowed; *a; ++a)
+    {
+        if(!strcmp(s, *a))
+        {
+            return s;
+        }
+    }
+    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: unknown %s '%s'", op->name, key, s);
+}
+
+/* Python _HIP_ATOMIC_ORDER / _HIP_FENCE_SCOPE / _HIP_MEMORY_SCOPE, applied to
+ * values hip_sync_attr already accepted. */
+static const char* hip_atomic_order(const char* o)
+{
+    if(!strcmp(o, "monotonic"))
+        return "__ATOMIC_RELAXED";
+    if(!strcmp(o, "acquire"))
+        return "__ATOMIC_ACQUIRE";
+    if(!strcmp(o, "release"))
+        return "__ATOMIC_RELEASE";
+    if(!strcmp(o, "acq_rel"))
+        return "__ATOMIC_ACQ_REL";
+    return "__ATOMIC_SEQ_CST";
+}
+
+static const char* hip_fence_scope(const char* s)
+{
+    if(!strcmp(s, "workgroup"))
+        return "workgroup";
+    if(!strcmp(s, "agent"))
+        return "agent";
+    return "";
+}
+
+static const char* hip_memory_scope(const char* s)
+{
+    if(!strcmp(s, "workgroup"))
+        return "__HIP_MEMORY_SCOPE_WORKGROUP";
+    if(!strcmp(s, "agent"))
+        return "__HIP_MEMORY_SCOPE_AGENT";
+    return "__HIP_MEMORY_SCOPE_SYSTEM";
+}
+
+/* Python _op_memref_fence */
+static rocke_status_t _op_memref_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char *scp, *ord;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_fence_orderings);
+    rocke_h_emitf(
+        lw, "__builtin_amdgcn_fence(%s, \"%s\");", hip_atomic_order(ord), hip_fence_scope(scp));
+    return lw->status;
+}
+
+/* Python _op_memref_global_flag_store */
+static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char *scp, *ord;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_store: too few operands");
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_flag_store_orderings);
+    rocke_h_emitf(lw,
+                  "__hip_atomic_store(&%s[%s], %s, %s, %s);",
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]),
+                  hip_atomic_order(ord),
+                  hip_memory_scope(scp));
+    return lw->status;
+}
+
+/* Python _op_memref_global_flag_wait_eq */
+static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char* scp;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    rocke_h_emitf(lw,
+                  "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  hip_memory_scope(scp),
+                  rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
 
@@ -1582,6 +1698,9 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, _op_memref_global_atomic_add_f32},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, _op_memref_global_atomic_add_pk_bf16},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16, _op_memref_global_atomic_add_pk_f16},
+           {ROCKE_OP_MEMREF_FENCE, _op_memref_fence},
+           {ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, _op_memref_global_flag_store},
+           {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, _op_memref_global_flag_wait_eq},
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},

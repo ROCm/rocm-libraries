@@ -13,9 +13,8 @@
  * helper-namespace home, mirroring the Python module surface.
  */
 
-#include "rocke/helper_rocke.core.arch.h"
-
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.core.arch.h"
 #include "rocke/ir.h"
 
 /* ============================== MmaOp ================================== */

@@ -14,5 +14,5 @@ rocke_kernel_def_t* build_tf32_mma_probe(rocke_ir_builder_t* b,
                                          int m,
                                          const char* preparation,
                                          const rocke_mma_catalog_t* catalog);
-}
+} // namespace ckc
 #endif

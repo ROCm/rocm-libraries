@@ -28,13 +28,12 @@
  * the internal header.
  */
 
-#include "rocke/instance_gfx1151_deep_fused_conv_pool_internal.h"
-
 #include "rocke/arch_target.h" /* rocke_mma_op_t fields + rocke_mma_op_*_layout */
 #include "rocke/helper_rocke.helpers.epilogues.h" /* rocke_warp_grid_t + warp_*_off / mfmas_per_warp_* */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_layout_map_coord (via arch_target.h) */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_schedule_policy_t + ROCKE_SCHED_DS_READ/MFMA */
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_emit_frag_smem_load (peer _emit_frag_smem_load) */
+#include "rocke/instance_gfx1151_deep_fused_conv_pool_internal.h"
 
 /* ------------------------------------------------------------------ *
  * Module-pinned geometry constants (Python module-level names).
@@ -586,8 +585,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct_int(rocke_gfx1151_dfcp_build_ctx_
         for(int mi = 0; mi < mfmas_m; ++mi)
             for(int ni = 0; ni < mfmas_n; ++ni)
             {
-                if(reorient)
-                    /* Swap operands: W0 -> A (row=k0), footprint -> B (col=m). */
+                if(reorient) /* Swap operands: W0 -> A (row=k0), footprint -> B (col=m). */
                     out_accs[flat] = dfcp_mma(b, op, b_cols[ni], a_rows[mi], out_accs[flat]);
                 else
                     out_accs[flat] = dfcp_mma(b, op, a_rows[mi], b_cols[ni], out_accs[flat]);

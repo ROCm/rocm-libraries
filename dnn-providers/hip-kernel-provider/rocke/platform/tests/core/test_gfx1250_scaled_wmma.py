@@ -174,7 +174,7 @@ def test_scaled_lowering_rejects_arity(scale16, concrete, arity, engine):
 
 
 class TestGfx1250ScaledWmma(unittest.TestCase):
-    def test_backend_rejects_unsupported_scale_type_on_either_input(self):
+    def test_backend_selects_scale_type_independently_on_either_input(self):
         catalog = ArchTarget.from_gfx("gfx1250").mma
         for field in ("a_scale_dtype", "b_scale_dtype"):
             atom = _scaled_atom()
@@ -187,7 +187,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             with (
                 self.subTest(field=field),
                 mock.patch.object(catalog, "by_op_id", return_value=atom),
-                self.assertRaisesRegex(ValueError, "unsupported scaled WMMA"),
+                self.assertRaisesRegex(ValueError, "matrix/scale format combination"),
             ):
                 gfx1250_scaled_wmma(atom.op_id)
 

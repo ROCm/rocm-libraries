@@ -23,7 +23,21 @@ def validate_unscaled_wmma(
         raise ValueError(f"unscaled WMMA requires src2 and dst to be {expected.name}")
     source = VectorType(source_elem, source_count)
     for role in (0, 1):
-        if op.operands[role].type != source:
+        # Integer/FP8 entry points render the same-width register bridge.
+        if source_elem == I32:
+            from .mma_operand import mma_operand_needs_reinterpret
+            from .arch import ArchTarget
+
+            op_id = op.attrs.get("op_id", op.name.removeprefix("tile."))
+            gfx = "gfx1250" if "gfx1250" in op_id else "gfx1151"
+            mma_operand_needs_reinterpret(
+                op_id,
+                "a" if role == 0 else "b",
+                op.operands[role].type,
+                source,
+                ArchTarget.from_gfx(gfx),
+            )
+        elif op.operands[role].type != source:
             raise ValueError(f"unscaled WMMA requires src{role} to be {source.name}")
 
 
@@ -35,6 +49,6 @@ def validate_scaled_wmma_sources(op: Op, words: tuple[int, int], scale: Type) ->
             raise ValueError(f"scaled WMMA requires src{role} to be {expected.name}")
     if op.operands[3].type != scale or op.operands[4].type != scale:
         raise ValueError(
-            f"{op.name} expects {scale.name} scale operands, got "
+            f"tile.{op.attrs.get('op_id', op.name.removeprefix('tile.'))} expects {scale.name} scale operands, got "
             f"{op.operands[3].type.name}/{op.operands[4].type.name}"
         )

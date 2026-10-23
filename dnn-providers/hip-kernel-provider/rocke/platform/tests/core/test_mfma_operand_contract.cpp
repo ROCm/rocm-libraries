@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 /* Native MFMA lowering admission: the fixed instruction ABI must agree with
  * each actual SSA source/result, independently of catalog result metadata. */
-#include "rocke/ir.h"
-#include "rocke/lower_hip.h"
-#include "rocke/lower_llvm.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "rocke/ir.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
 
 #define CHECK(expr)                                            \
     do                                                         \
@@ -201,8 +201,8 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
             CHECK(strstr(hip.data, "__builtin_amdgcn_mfma_"));
     }
     else if(strcmp(spec->source, "i64") == 0 && spec->source_count > 1)
-        // The HIP signature rejects this LLVM-only packed carrier first.
-        CHECK(status == ROCKE_ERR_KEY);
+        // HIP refuses this LLVM-only packed carrier as an unsupported type.
+        CHECK(status == ROCKE_ERR_NOTIMPL);
     else
         CHECK(status == ROCKE_ERR_NOTIMPL);
     rocke_strbuf_free(&hip);
@@ -212,8 +212,8 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
 
 static int check_packed_carriers()
 {
-    const char* carriers[] = {"i8", "i16", "f16", "bf16", "i32", "f32", "i64"};
-    const int widths[] = {8, 16, 16, 16, 32, 32, 64};
+    const char* carriers[] = {"i8", "i16", "f16", "bf16", "i32", "f32", "i64", "f64"};
+    const int widths[] = {8, 16, 16, 16, 32, 32, 64, 64};
     for(const auto& base : cases)
     {
         if(!base.packed_bits)

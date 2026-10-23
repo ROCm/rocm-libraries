@@ -1,0 +1,44 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# A synthetic engine manifest: a controlled input to `launch_surface.py --check`. See
+# README.md in this directory.
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: block_size
+    type: int
+
+#: `python_source` paths resolve under `<provider_root>/rocke/library`; every path
+#: below is written by the test under a temporary check root.
+provider_root: provider
+
+launch_surface:
+  - name: grid
+    python_source: kernels/mirror.py:grid_fn
+    cpp_mirror: provider/Mirror.cpp:Handler::prepare
+    kmd_fields: [block_size]
+    guard: prepare() rejects a block size the kernel signature cannot bind
+    test: tests/test_mirror.py
+  - name: applicability
+    python_source: kernels/mirror.py:is_valid_fn
+    cpp_mirror: provider/Mirror.cpp:matches
+    kmd_fields: [dtype]
+    guard: matches compares the descriptor's dtype against the graph's
+    test: tests/test_mirror.py
+  # `guard: none` / `test: none` are written out so an unguarded surface is a visible
+  # choice.
+  - name: kernargs
+    python_source: kernels/mirror.py:build_fn
+    cpp_mirror: provider/Mirror.cpp:signature
+    kmd_fields: []
+    guard: none
+    test: none
+  # A prose locator: `prepare()` is not a bare identifier, so the symbol check skips it.
+  - name: spec_resolution
+    python_source: kernels/mirror.py:resolve_fn
+    cpp_mirror: provider/Mirror.cpp:prepare() trusts the KMD's own numbers
+    kmd_fields: []
+    guard: none
+    test: none
