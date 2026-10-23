@@ -40,7 +40,6 @@ target_sources(tensilelite-codegen
         "${CMAKE_CURRENT_SOURCE_DIR}/SkinnyGEMMTiles.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SplitKReduce.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Target.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/WaitTracker.cpp"
 )
 
 target_include_directories(tensilelite-codegen PUBLIC "${PROJECT_SOURCE_DIR}/include")
