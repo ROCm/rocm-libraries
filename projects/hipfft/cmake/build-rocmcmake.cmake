@@ -30,7 +30,8 @@ set(ROCM_CMAKE_SRC_URL
   
 FetchContent_Declare( rocm_cmake_local
   GIT_REPOSITORY ${ROCM_CMAKE_SRC_URL}
-  GIT_TAG therock-10.1
+  GIT_TAG 10155d7272ea1bf79f6b5a9dbc339657af1aa372
+  #GIT_TAG therock-10.1
   GIT_SHALLOW ON
 )
 
