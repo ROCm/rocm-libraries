@@ -141,7 +141,7 @@ def test_gemm_problem_for_solution(
 
     library = load_library_metadata(output / "library", target="gfx942")
     assert len(library.indices) == 1
-    problem = library.get_problem(library.indices[0])
+    problem = library.choose_single_problem(library.indices[0])
     assert (problem.m, problem.n, problem.k) == (16, 16, 8 * 32 * split)
     config = tmp_path / "regular.yaml"
     config.write_text(bench_yaml([problem]))

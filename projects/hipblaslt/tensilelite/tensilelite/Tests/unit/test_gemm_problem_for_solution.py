@@ -50,7 +50,7 @@ def write_shard(directory, records, name="TensileLibrary_test_gfx942.dat"):
 def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split):
     write_shard(tmp_path, [solution(trans_a=trans_a, trans_b=trans_b, split=split)])
     library = load_library_metadata(tmp_path, target="gfx942")
-    problem = library.get_problem(17)
+    problem = library.choose_single_problem(17)
     assert (problem.m, problem.n, problem.k) == (128, 96, 256 * split)
     (row,) = yaml.safe_load(bench_yaml([problem]))
     assert [row[key] for key in ("lda", "ldb", "ldc", "ldd")] == [
@@ -73,7 +73,7 @@ def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split)
     # Generation reuses the loaded records, independent of the files afterward.
     for path in tmp_path.iterdir():
         path.unlink()
-    assert library.get_problem(17) == problem
+    assert library.choose_single_problem(17) == problem
 
 
 @pytest.mark.parametrize("library_format", ["msgpack", "msgpack-indexed"])
@@ -92,7 +92,7 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
         path.unlink()
     library = load_library_metadata(tmp_path, target="gfx942", solution_indices=[17])
     assert library.indices == (17,)
-    p = library.get_problem(17)
+    p = library.choose_single_problem(17)
     assert (p.solution_name, p.kernel_name, p.library_directory, p.target) == (
         "solution-name",
         "kernel-name",
@@ -100,7 +100,7 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
         "gfx942",
     )
     with pytest.raises(KeyError):
-        library.get_problem(9)
+        library.choose_single_problem(9)
     with pytest.raises(ValueError, match="same library"):
         bench_yaml([p, replace(p, target="gfx950")])
 
@@ -123,12 +123,12 @@ def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key,
     write_shard(tmp_path, [record])
     if key in {"tileProcessingStrategy", "adaptiveGemmGSUA"} or value == -1:
         with pytest.raises(UnsupportedSolution) as caught:
-            load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+            load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
         assert caught.value.solution_index == 17
         assert caught.value.reasons
     else:
         with pytest.raises(ValueError):
-            load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+            load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
 @pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
@@ -138,7 +138,7 @@ def test_zero_split_for_deferred_scheduling_is_unsupported(tmp_path, strategy):
     record["sizeMapping"]["tileProcessingStrategy"] = strategy
     write_shard(tmp_path, [record])
     with pytest.raises(UnsupportedSolution) as caught:
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
 
 
@@ -158,7 +158,7 @@ def test_invalid_execution_policy_is_an_error(tmp_path, mapping):
     record["sizeMapping"].update(mapping)
     write_shard(tmp_path, [record])
     with pytest.raises(ValueError, match="Solution 17"):
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
 @pytest.mark.parametrize(
@@ -170,7 +170,7 @@ def test_legacy_persistent_scheduling_is_unsupported(tmp_path, mode, force, stra
     record["sizeMapping"].update(streamK=mode, streamKForceDPOnly=force)
     write_shard(tmp_path, [record])
     with pytest.raises(UnsupportedSolution) as caught:
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert caught.value.reasons == (f"tileProcessingStrategy={strategy}",)
 
 
@@ -190,7 +190,7 @@ def test_rejects_unsupported_problem_features(tmp_path, key, value):
     record["problemType"][key] = value
     write_shard(tmp_path, [record])
     with pytest.raises(UnsupportedSolution) as caught:
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert caught.value.solution_index == 17
     assert caught.value.reasons
 
@@ -220,7 +220,7 @@ def test_catalog_retains_only_problem_construction_metadata(tmp_path):
     write_shard(tmp_path, [record])
     library = load_library_metadata(tmp_path, target="gfx942")
     assert set(library._records[17]) == {"name", "kernelName", "problemType", "sizeMapping"}
-    assert library.get_problem(17).k == 256
+    assert library.choose_single_problem(17).k == 256
 
 
 @pytest.mark.parametrize(
@@ -242,7 +242,7 @@ def test_storage_and_compute_types(tmp_path, dtype, bench_type):
         record["problemType"].update(cType="Int32", dType="Int32", computeType="Int32")
     write_shard(tmp_path, [record])
     (row,) = yaml.safe_load(
-        bench_yaml([load_library_metadata(tmp_path, target="gfx942").get_problem(17)])
+        bench_yaml([load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)])
     )
     assert row["a_type"] == row["b_type"] == bench_type
     assert row["compute_type"] == ("c_i32_r" if dtype == "Int8" else "c_f32_r")
@@ -253,14 +253,16 @@ def test_storage_and_compute_types(tmp_path, dtype, bench_type):
 def test_reduction_work_is_configurable(tmp_path, blocks):
     write_shard(tmp_path, [solution(split=4)])
     library = load_library_metadata(tmp_path, target="gfx942")
-    assert library.get_problem(17, reduction_blocks=blocks).k == blocks * 32 * 4
+    assert library.choose_single_problem(17, reduction_blocks=blocks).k == blocks * 32 * 4
 
 
 @pytest.mark.parametrize("blocks", [0, -1, True, 8.0])
 def test_invalid_reduction_blocks_are_errors(tmp_path, blocks):
     write_shard(tmp_path, [solution()])
     with pytest.raises(ValueError, match="reduction_blocks"):
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17, reduction_blocks=blocks)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+            17, reduction_blocks=blocks
+        )
 
 
 @pytest.mark.parametrize("target", ["gfx90a", "gfx942", "gfx950", "gfx1250-strict"])
@@ -277,7 +279,7 @@ def test_ordinary_types_and_architectures(tmp_path, target, dtype, bench_name, c
     record["problemType"].update({f"{key}Type": dtype for key in "abcd"})
     record["problemType"]["computeType"] = dtype
     write_shard(tmp_path, [record], f"TensileLibrary_test_{target}.dat")
-    problem = load_library_metadata(tmp_path, target=target).get_problem(17)
+    problem = load_library_metadata(tmp_path, target=target).choose_single_problem(17)
     assert problem.a_type == problem.compute_type == dtype
     (row,) = yaml.safe_load(bench_yaml([problem]))
     assert row["a_type"] == row["d_type"] == row["scale_type"] == bench_name
@@ -291,7 +293,7 @@ def test_descriptor_support_is_independent_of_bench_adapter(tmp_path, dtype):
     record = solution()
     record["problemType"].update(aType=dtype, bType=dtype, computeType=dtype)
     write_shard(tmp_path, [record])
-    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert problem.a_type == dtype
     with pytest.raises(UnsupportedBenchProblem) as caught:
         bench_yaml([problem])
@@ -305,7 +307,7 @@ def test_complex_conjugate_transpose(tmp_path):
         computeType="ComplexFloat", operationIdentifier="Contraction_l_AlikC_Bljk_Cijk_Dijk"
     )
     write_shard(tmp_path, [record])
-    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert problem.conjugate_a and problem.trans_a
     (row,) = yaml.safe_load(bench_yaml([problem]))
     assert row["transA"] == "C"
@@ -319,7 +321,7 @@ def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
     executed, gaps = [], {}
     for index in library.indices:
         try:
-            executed.append(library.get_problem(index))
+            executed.append(library.choose_single_problem(index))
         except UnsupportedSolution as error:
             gaps[error.solution_index] = error.reasons
     assert [p.solution_index for p in executed] == [17]
@@ -329,7 +331,7 @@ def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
     del broken["sizeMapping"]["depthU"]
     write_shard(tmp_path, [broken])
     with pytest.raises(KeyError, match="depthU"):
-        load_library_metadata(tmp_path, target="gfx942").get_problem(0)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(0)
 
 
 def test_unknown_metadata_type_is_an_error(tmp_path):
@@ -337,7 +339,7 @@ def test_unknown_metadata_type_is_an_error(tmp_path):
     record["problemType"]["aType"] = "typo"
     write_shard(tmp_path, [record])
     with pytest.raises(ValueError, match="unknown metadata datatype"):
-        load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
 @pytest.mark.parametrize("per_operand", [False, True])
@@ -359,7 +361,7 @@ def test_mixed_fp8_compute_inputs(tmp_path, per_operand, pair, a_type, b_type):
     else:
         problem_type["computeInputType"] = pair
     write_shard(tmp_path, [record])
-    problem = load_library_metadata(tmp_path, target="gfx942").get_problem(17)
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
     assert (problem.compute_input_a, problem.compute_input_b) == (a_type, b_type)
     (row,) = yaml.safe_load(bench_yaml([problem]))
     assert row["compute_input_typeA"] == row["a_type"]
