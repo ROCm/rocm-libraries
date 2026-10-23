@@ -135,6 +135,7 @@ dimension must be reduced.
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Bias gradient (`dbias` output) | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported | - |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | - |
 | Block-sparse attention | Not supported | - |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Ragged tensors | - | Rejected |

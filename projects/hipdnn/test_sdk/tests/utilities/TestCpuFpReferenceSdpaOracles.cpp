@@ -880,3 +880,130 @@ TEST(TestCpuFpReferenceSdpaClosedForm, PagedGatherValidation)
     EXPECT_THROW(CpuFpReferenceSdpa::gatherPagedKv(cache, flatTable, seqLenKv, 8),
                  std::invalid_argument);
 }
+
+// ---------------------------------------------------------------------------
+// Attention sink (cuDNN sink_token)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+void runWithSink(SdpaRun& r, const Tensor<float>& sink, const TensorBase<float>* bias = nullptr)
+{
+    CpuFpReferenceSdpa::forward(r.q,
+                                r.k,
+                                r.v,
+                                r.o,
+                                0.5F,
+                                bias,
+                                -1,
+                                -1,
+                                true,
+                                &r.lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &sink);
+}
+} // namespace
+
+// Q = 0 gives n equal zero scores; with sink s the row's LSE is ln(n + e^s) and O is the mean of V
+// scaled by n / (n + e^s).
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkWithUniformScores)
+{
+    constexpr int64_t SKV = 6;
+    SdpaRun r({1, 2, 2, 4}, {1, 2, SKV, 4}, {1, 2, SKV, 3});
+    r.q.fillWithValue(0.0F);
+    r.k.fillWithRandomValues(-1.0F, 1.0F, 131);
+    r.v.fillWithRandomValues(-1.0F, 1.0F, 132);
+    Tensor<float> sink({1, 2, 1, 1});
+    sink.setHostValue(0.7F, 0, 0, 0, 0);
+    sink.setHostValue(-1.3F, 0, 1, 0, 0);
+    runWithSink(r, sink);
+
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        const float s = sink.getHostValue(0, h, 0, 0);
+        const float denom = static_cast<float>(SKV) + std::exp(s);
+        for(int64_t sq = 0; sq < 2; ++sq)
+        {
+            EXPECT_NEAR(r.lse.getHostValue(0, h, sq, 0), std::log(denom), TOL);
+            for(int64_t dv = 0; dv < 3; ++dv)
+            {
+                float sum = 0.0F;
+                for(int64_t j = 0; j < SKV; ++j)
+                {
+                    sum += r.v.getHostValue(0, h, j, dv);
+                }
+                EXPECT_NEAR(r.o.getHostValue(0, h, sq, dv), sum / denom, TOL);
+            }
+        }
+    }
+}
+
+// A row with no live key but a finite sink: O = 0 and LSE = the sink logit (cuDNN), not -inf.
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkOnFullyMaskedRow)
+{
+    SdpaRun r({1, 1, 2, 4}, {1, 1, 3, 4}, {1, 1, 3, 4});
+    r.q.fillWithRandomValues(-1.0F, 1.0F, 141);
+    r.k.fillWithRandomValues(-1.0F, 1.0F, 142);
+    r.v.fillWithRandomValues(-1.0F, 1.0F, 143);
+    Tensor<float> bias({2, 3});
+    bias.fillWithValue(0.0F);
+    for(int64_t j = 0; j < 3; ++j)
+    {
+        bias.setHostValue(NEG_INF, 0, j);
+    }
+    Tensor<float> sink({1, 1, 1, 1});
+    sink.fillWithValue(0.4F);
+    runWithSink(r, sink, &bias);
+
+    EXPECT_FLOAT_EQ(r.lse.getHostValue(0, 0, 0, 0), 0.4F);
+    for(int64_t d = 0; d < 4; ++d)
+    {
+        EXPECT_EQ(r.o.getHostValue(0, 0, 0, d), 0.0F);
+    }
+    EXPECT_TRUE(std::isfinite(r.lse.getHostValue(0, 0, 1, 0)));
+}
+
+// A sink is exactly one more key whose score is the sink logit and whose value row is zero:
+// append a zero key (score 0) with bias = sink and a zero V row.
+TEST(TestCpuFpReferenceSdpaProperty, SinkEqualsExtraZeroValueKey)
+{
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 3;
+    constexpr int64_t SKV = 5;
+    constexpr int64_t D = 4;
+    SdpaRun withSink({2, H, SQ, D}, {2, H, SKV, D}, {2, H, SKV, D});
+    withSink.q.fillWithRandomValues(-1.0F, 1.0F, 151);
+    withSink.k.fillWithRandomValues(-1.0F, 1.0F, 152);
+    withSink.v.fillWithRandomValues(-1.0F, 1.0F, 153);
+    Tensor<float> sink({1, H, 1, 1});
+    sink.setHostValue(0.9F, 0, 0, 0, 0);
+    sink.setHostValue(-0.2F, 0, 1, 0, 0);
+    runWithSink(withSink, sink);
+
+    SdpaRun extra({2, H, SQ, D}, {2, H, SKV + 1, D}, {2, H, SKV + 1, D});
+    Tensor<float> bias({1, H, SQ, SKV + 1});
+    bias.fillWithValue(0.0F);
+    forEachIndex(extra.q.dims(), [&](const std::vector<int64_t>& i) {
+        extra.q.setHostValue(withSink.q.getHostValue(i), i);
+    });
+    forEachIndex(extra.k.dims(), [&](const std::vector<int64_t>& i) {
+        const bool sinkKey = i[2] == SKV;
+        extra.k.setHostValue(sinkKey ? 0.0F : withSink.k.getHostValue(i), i);
+        extra.v.setHostValue(sinkKey ? 0.0F : withSink.v.getHostValue(i), i);
+    });
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t sq = 0; sq < SQ; ++sq)
+        {
+            bias.setHostValue(sink.getHostValue(0, h, 0, 0), 0, h, sq, SKV);
+        }
+    }
+    extra.run(0.5F, &bias);
+
+    expectAllNear(withSink.o, extra.o, TOL, "O");
+    expectAllNear(withSink.lse, extra.lse, TOL, "LSE");
+}

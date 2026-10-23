@@ -124,6 +124,14 @@ namespace
 // (no tensor behind it).
 // When `seqLens` is engaged, seq_len tensors with that dtype and dims are added under uids 6 (Q)
 // and 7 (KV) and wired into attrs; `includeKv = false` adds only the Q one.
+// When `sink` is engaged, a sink tensor with that dtype and dims is added under uid 10 (the caller
+// sets attrs.sink_token_tensor_uid).
+struct RawSinkSpec
+{
+    DataType dataType;
+    std::vector<int64_t> dims;
+};
+
 struct RawSeqLenSpec
 {
     DataType dataType;
@@ -134,7 +142,8 @@ struct RawSeqLenSpec
 flatbuffers::FlatBufferBuilder
     makeRawSdpaFwdGraph(SdpaAttributesT attrs,
                         std::optional<DataType> maskDataType = std::nullopt,
-                        const std::optional<RawSeqLenSpec>& seqLens = std::nullopt)
+                        const std::optional<RawSeqLenSpec>& seqLens = std::nullopt,
+                        const std::optional<RawSinkSpec>& sink = std::nullopt)
 {
     constexpr int64_t SEQ_LEN_Q_UID = 6;
     constexpr int64_t SEQ_LEN_KV_UID = 7;
@@ -189,6 +198,14 @@ flatbuffers::FlatBufferBuilder
                                                            &seqLenStrides,
                                                            &seqLens->dims));
         }
+    }
+
+    std::vector<int64_t> sinkStrides;
+    if(sink.has_value())
+    {
+        sinkStrides = hipdnn_data_sdk::utilities::generateStrides(sink->dims);
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, 10, "Sink", sink->dataType, &sinkStrides, &sink->dims));
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
@@ -930,6 +947,23 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
                                 &seqLenKv);
     const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
     EXPECT_TRUE(exactValidation.allClose(oT, oRef));
+}
+
+// Attention sink: FLOAT [1, H, 1, 1] (cuDNN). The raw graph has H = 2.
+TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
+{
+    const auto applicable = [](DataType type, const std::vector<int64_t>& dims) {
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = 10;
+        auto graphBuilder
+            = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, RawSinkSpec{type, dims});
+        CpuReferenceGraphExecutor executor;
+        return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    };
+    EXPECT_TRUE(applicable(DataType::FLOAT, {1, 2, 1, 1}));
+    EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1}));
+    EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1}));
+    EXPECT_FALSE(applicable(DataType::FLOAT, {2}));
 }
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
