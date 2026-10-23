@@ -63,7 +63,7 @@ from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A, usesBlockDequantZeroPointA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
-from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered
+from .SolutionStructs.Validators.DirectToVgprDot2 import dot2DtvADoubleBuffered, dot2DtvASlotPipelined
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -4610,12 +4610,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # if not prefetch global, localWrite before mac's
     if not kernel["PrefetchGlobalRead"]:
       # unrolled loop: local write A, B
-      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "5wait for global read"))
+      # Slot-pipelined DirectToVgprDot2A: A is issued after B and stays in flight.
+      slotsA = dot2DtvASlotPipelined(kernel)
+      numAInFlight = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"] if slotsA else 0
+      if slotsA:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "5wait for global read B",
+                              skipGlobalReadInst=numAInFlight))
+      else:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "5wait for global read"))
       module.add(self._syncThreads(kernel, "PGR=0, prior iter done reading lds, LW wait LR, sync"))
       if not kernel["NoLdsWriteCode"]:
-        module.addComment1("local write a")
-        tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
-        module.add(tempLWCodeModA)
+        if not slotsA:
+          module.addComment1("local write a")
+          tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
+          module.add(tempLWCodeModA)
         if "MX" in tensorParametersA:
           module.addComment1("local write mxsa")
           tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
@@ -5175,6 +5183,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             "wait for prior local read local write")
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
+      if dot2DtvASlotPipelined(kernel):
+        macIterCode.add(self.dot2DtvADequantSlot(kernel, tensorParametersA, u))
       if kernel["EnableMatrixInstruction"]:
         mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u)
         if kernel["UseCustomMainLoopSchedule"]:
@@ -10461,7 +10471,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.numReadsPerIterA = numA
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.numReadsPerIterMXSA = numMXSA
-    if not kernel["DirectToVgprB"]:
+    if not (kernel["DirectToVgprB"] or kernel["DirectToVgprDot2B"]):
       self.states.numReadsPerIterB = numB
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.numReadsPerIterMXSB = numMXSB
