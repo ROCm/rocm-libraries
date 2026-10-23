@@ -232,8 +232,7 @@ namespace Tensile
                 {
                     IOTraits<IO>::setError(io,
                                            concatenate("invalid array<T, ", N, "> index ", index));
-                    throw std::out_of_range(
-                        concatenate("invalid array<T, ", N, "> index ", index));
+                    throw std::out_of_range(concatenate("invalid array<T, ", N, "> index ", index));
                 }
 
                 return v[index];
