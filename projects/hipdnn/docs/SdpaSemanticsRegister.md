@@ -177,12 +177,15 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-012: Softmax probability precision in the reference
 
-- **Status:** Diverges between the CPU and GPU references.
+- **Status:** Aligned.
 - **cuDNN Python reference:** fp32 P.
-- **hipDNN today:** for bf16 Q/K/V, the GPU references round P to bf16 (RTNE) before P@V, to mirror the AITER
-  kernel (`GpuSdpaFwdPlan.hpp` `sdpaProbabilityMode`). The CPU reference keeps fp32 P.
-- **Contract:** to be decided. Recommendation: fp32 P by default so the CPU and GPU references agree, with
-  provider rounding available only as an opt-in emulation mode.
+- **hipDNN today:** the CPU reference and the GPU graph plans (dense and ragged) compute P in fp32, so the GPU
+  reference is an independent oracle for bf16 as well. Rounding P to bf16 before P@V (what the AITER kernel does) is
+  available only as an explicit opt-in emulation mode (`GpuFpReferenceSdpa::fprop`'s `probabilityMode`,
+  `providerSdpaProbabilityMode`). Decided 2026-10-23 (decision C2).
+- **Contract:** fp32 P in every reference by default.
+- **Watch:** provider engines checked against the GPU reference in bf16 lose the matching P rounding; the difference
+  is expected inside bf16 tolerances but needs one targeted run on gfx942/gfx950 before push.
 
 ### SEM-013: Default scale
 

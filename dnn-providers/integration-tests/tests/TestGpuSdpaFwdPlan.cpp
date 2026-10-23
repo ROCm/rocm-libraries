@@ -306,7 +306,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
         << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
 }
 
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
+// The graph plan computes P in fp32 (an independent oracle, SEM-012), not with the provider's
+// bf16 P rounding, which stays available only through fprop's explicit probabilityMode.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -376,7 +378,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
 
     ASSERT_NE(static_cast<float>(oProviderMode.memory().hostData()[0]),
               static_cast<float>(oFloatMode.memory().hostData()[0]));
-    EXPECT_EQ(static_cast<float>(oProviderMode.memory().hostData()[0]),
+    EXPECT_EQ(static_cast<float>(oFloatMode.memory().hostData()[0]),
               static_cast<float>(oPlan.memory().hostData()[0]));
 }
 
@@ -501,22 +503,24 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
 // Regression guard for the provider P->bf16 rounding gate. The cast is a property
 // of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
 // bf16-in/fp32-out config must still round P before P@V. Compile-time because
-// sdpaProbabilityMode is constexpr; no device required.
+// providerSdpaProbabilityMode is constexpr; no device required.
 TEST(TestGpuSdpaFwdPlanBuilder, ProbabilityModeKeyedOnInputsNotOutput)
 {
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
 
-    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
+    static_assert(REFERENCE_SDPA_PROBABILITY_MODE == SdpaSoftmaxProbabilityMode::FLOAT,
+                  "the graph plans must use fp32 softmax probabilities");
+    static_assert(providerSdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
                       == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "all-bf16 must round softmax probabilities to bf16 before P@V");
-    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
+    static_assert(providerSdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
                       == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "bf16 inputs with fp32 output must still round P to bf16 before P@V");
-    static_assert(sdpaProbabilityMode<float, float, float, float>()
+    static_assert(providerSdpaProbabilityMode<float, float, float, float>()
                       == SdpaSoftmaxProbabilityMode::FLOAT,
                   "fp32 inputs must not round the softmax probabilities");
-    static_assert(sdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
+    static_assert(providerSdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
                       == SdpaSoftmaxProbabilityMode::FLOAT,
                   "a non-bf16 P@V input must not select the bf16 P-storage cast");
 
