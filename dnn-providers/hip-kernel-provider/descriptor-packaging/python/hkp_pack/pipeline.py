@@ -1753,13 +1753,19 @@ def _check_launch_sets(flat, inter):
     beside a multi-launch one (whose set is empty), needs a KDP whose UDD names a
     handler of its own. The check sees the entries that ship in this shard, since a
     standalone UKD may be referenced by several KDPs.
+
+    A KDP whose `dispatch` names no UDD of the root has no handler to share (the
+    loader refuses such a pack outright), so it is held to one launch set on its own.
     """
     udds = flat.generic_by_id()
     by_handler = {}
     for kdp in inter.kdps:
-        # Validation resolved every KDP's dispatch reference inside this root.
-        symbol = udds[canonical_id(kdp.header["dispatch"])].doc["dispatch_symbol"]
-        by_set = by_handler.setdefault(symbol, {})
+        udd = udds.get(canonical_id(kdp.header["dispatch"]))
+        if udd is not None:
+            scope = f"dispatch handler '{udd.doc['dispatch_symbol']}'"
+        else:
+            scope = f"KDP '{kdp.id}', whose dispatch names no UDD in this root,"
+        by_set = by_handler.setdefault(scope, {})
         for entry in kdp.entries:
             if isinstance(entry, str):
                 ident = entry
@@ -1769,7 +1775,7 @@ def _check_launch_sets(flat, inter):
                 ident = entry.id
             by_kdp = by_set.setdefault(_launch_set(inter, entry), {})
             by_kdp.setdefault((kdp.id, kdp.filename), []).append(ident)
-    for symbol, by_set in by_handler.items():
+    for scope, by_set in by_handler.items():
         if len(by_set) > 1:
             detail = "; ".join(
                 ", ".join(
@@ -1782,9 +1788,9 @@ def _check_launch_sets(flat, inter):
                 )
             )
             raise HkpPackError(
-                f"dispatch handler '{symbol}' serves kernels that name different "
-                f"launch sets ({detail}); one dispatch handler declares one launch set, "
-                "so give each launch set a KDP whose UDD names a handler of its own"
+                f"{scope} serves kernels that name different launch sets ({detail}); "
+                "one dispatch handler declares one launch set, so give each launch set "
+                "a KDP whose UDD names a handler of its own"
             )
 
 

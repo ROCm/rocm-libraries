@@ -1523,7 +1523,7 @@ def _udds(inter, symbols=None):
     """The input holding one UDD per dispatch the shard's KDPs name. Each UDD names
     the handler `handler.<udd id>` unless `symbols` maps its id to another."""
     symbols = symbols or {}
-    ids = sorted({kdp.header["dispatch"] for kdp in inter.kdps})
+    ids = sorted({kdp.header["dispatch"] for kdp in inter.kdps} - {None})
     return FlatInput(
         descriptors=[
             Descriptor(
@@ -1633,3 +1633,20 @@ class TestOneLaunchSetPerDispatchHandler:
                 standalone=[shared],
             )
         )
+
+    def test_a_kdp_naming_no_udd_is_held_to_one_launch_set_on_its_own(self):
+        unbound = _kdp_of("kdp-a", _inline("ukd-a", ["a", "b"]), _inline("ukd-b", []))
+        unbound.header["dispatch"] = None
+        with pytest.raises(
+            HkpPackError,
+            match=r"KDP 'kdp-a', whose dispatch names no UDD in this root,",
+        ):
+            _check(_shard(unbound))
+
+    def test_kdps_naming_no_udd_share_no_handler(self):
+        # No UDD resolves, so there is no handler for them to share; each answers for
+        # itself, as a KDP whose dispatch the loader cannot resolve is refused whole.
+        first = _kdp_of("kdp-a", _inline("ukd-a", ["a", "b"]))
+        second = _kdp_of("kdp-b", _inline("ukd-b", []))
+        first.header["dispatch"] = second.header["dispatch"] = None
+        _check(_shard(first, second))
