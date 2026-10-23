@@ -220,7 +220,7 @@ namespace
                                    nullptr),
                   rocsparse_status_success);
 
-        int64_t          pivot = -1;
+        int64_t          pivot = -2;
         rocsparse_status pivot_status
             = rocsparse_sptrsv_get_output(handle,
                                           descr,
@@ -228,8 +228,8 @@ namespace
                                           &pivot,
                                           sizeof(pivot),
                                           nullptr);
-        ASSERT_TRUE(pivot_status == rocsparse_status_success
-                    || pivot_status == rocsparse_status_zero_pivot);
+        ASSERT_EQ(pivot_status,
+                  pivot == -1 ? rocsparse_status_success : rocsparse_status_zero_pivot);
         *analysis_pivot = pivot;
 
         const void* alpha_ptr = &alpha;
@@ -259,15 +259,15 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        pivot        = -1;
+        pivot        = -2;
         pivot_status = rocsparse_sptrsv_get_output(handle,
                                                    descr,
                                                    rocsparse_sptrsv_output_zero_pivot_position,
                                                    &pivot,
                                                    sizeof(pivot),
                                                    nullptr);
-        ASSERT_TRUE(pivot_status == rocsparse_status_success
-                    || pivot_status == rocsparse_status_zero_pivot);
+        ASSERT_EQ(pivot_status,
+                  pivot == -1 ? rocsparse_status_success : rocsparse_status_zero_pivot);
         *solve_pivot = pivot;
 
         EXPECT_EQ(rocsparse_destroy_sptrsv_descr(descr), rocsparse_status_success);
