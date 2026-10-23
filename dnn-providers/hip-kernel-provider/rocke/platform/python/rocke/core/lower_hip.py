@@ -34,6 +34,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
@@ -828,6 +829,13 @@ class _Lowerer:
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
@@ -1722,6 +1730,7 @@ class _Lowerer:
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
         # u8 -> f32: a uint8_t converts exactly.
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
