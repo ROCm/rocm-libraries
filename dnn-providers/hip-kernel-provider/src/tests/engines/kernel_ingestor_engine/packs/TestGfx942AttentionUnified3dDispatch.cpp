@@ -22,12 +22,14 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "TestDescriptorRoot.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dTestGraphs.hpp"
@@ -115,19 +117,36 @@ bool isGfx942(const hipdnn_plugin_sdk::ingestor::DeviceProperties& properties)
 }
 
 /// The shipped kernel named @p name, as the engine's catalog for @p context hands it to
-/// dispatch (the state manager discovery built for the shipped set); nullopt if the
-/// catalog for this graph and device does not hold it.
-/// @throws std::runtime_error the shipped set was not discovered.
+/// dispatch; nullopt if the catalog for this graph and device does not hold it.
+///
+/// Loads the shipped descriptor tree itself, resolved from this binary the way
+/// integration_tests/main.cpp resolves it. Process-wide discovery cannot serve: this
+/// binary's main() points HIPDNN_DESCRIPTOR_DIR at the unit test set, which replaces the
+/// provider tree, and discovery is memoized for the process. Loading here keeps the
+/// shipped set out of every other unit test's discovery.
+/// @throws std::runtime_error the shipped tree is absent or holds no set for this engine.
 std::optional<KernelDefinition> shippedKernel(const MatchContext& context, const std::string& name)
 {
-    const auto& set = loadedSet(PACK.engineName);
-    rediscoverStateManagersForTesting();
-    const auto stateManager = takeDiscoveredStateManager(set.engine.id);
-    if(stateManager == nullptr)
+    const auto root = hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
+    if(const auto unusable = hip_kernel_provider::testing::describeUnusableDescriptorRoot(root);
+       !unusable.empty())
     {
-        throw std::runtime_error("no state manager for the shipped set");
+        throw std::runtime_error(unusable);
     }
-    for(auto& kernel : stateManager->unsortedDefinitions(context))
+
+    // Validation drops a set whose native symbols are not registered yet.
+    registerNativeIngestorSymbols();
+    auto validated = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(root);
+    const auto shipped = std::find_if(validated.begin(), validated.end(), [](const auto& entry) {
+        return entry.set.engine.name == PACK.engineName;
+    });
+    if(shipped == validated.end())
+    {
+        throw std::runtime_error("no descriptor set for engine '" + std::string(PACK.engineName)
+                                 + "' under '" + root.string() + "'");
+    }
+    for(auto& kernel : shipped->stateManager->unsortedDefinitions(context))
     {
         if(kernel.name == name)
         {
