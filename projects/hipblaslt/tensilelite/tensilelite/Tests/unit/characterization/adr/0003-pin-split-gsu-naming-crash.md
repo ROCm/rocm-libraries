@@ -1,6 +1,6 @@
 # ADR 0003: Pin the split-GSU naming crash
 
-Status:  Accepted
+Status:  Superseded by adr/0035
 Defect:  AIHPBLAS-4297
 Commit:  f5c0ffd (PR #10021) — https://github.com/ROCm/rocm-libraries/commit/f5c0ffda72bd554e4544a3b0a343cea58d98708e (pinned the crash + drafted this ADR) and https://github.com/ROCm/rocm-libraries/commit/cce9e4cefafe9c07bf8ddf702343815616e50a19 (linked the AIHPBLAS-4297 defect) — landed on develop via PR #10021's squash merge, 44b93a0
 

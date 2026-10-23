@@ -24,6 +24,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     F32,
+    F64,
     I32,
     _int_add_wrap_error,
     KernelDef,
@@ -34,6 +35,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
@@ -167,7 +169,7 @@ _ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 
 _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
-_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);
+_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
@@ -771,6 +773,24 @@ class _Lowerer:
             return f"__builtin_bit_cast({_type_to_hip(register_type)}, {_name(value)})"
         return _name(value)
 
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_16x16x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x4 {_name(op.result)} = __builtin_amdgcn_mfma_f64_16x16x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_4x4x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x1 {_name(op.result)} = {{__builtin_amdgcn_mfma_f64_4x4x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}[0], 0, 0, 0)}};"
+        )
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
         op_id = "mfma_f32_16x16x4_f32"
         a = self._mma_operand(op, op_id, "a", F32)
@@ -828,6 +848,13 @@ class _Lowerer:
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
@@ -1722,6 +1749,7 @@ class _Lowerer:
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
         # u8 -> f32: a uint8_t converts exactly.
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
