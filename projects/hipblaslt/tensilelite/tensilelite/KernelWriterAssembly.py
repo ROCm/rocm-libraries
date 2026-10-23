@@ -235,17 +235,32 @@ class KernelWriterAssembly(KernelWriter):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
-    multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
-    maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
+    if self.states.version[0] == 12:
+      # TODO: gfx12 keeps the legacy wave64-based (256) divisor for historic reasons; it should
+      # use the wave-size-aware divisor below (wavefront * 4 SIMDs = 128 for wave32) once gfx12
+      # occupancy has been benchmarked.
+      wavesPerSimdPerWorkgroup = int(ceil(max(numThreads, 256) / 256.0))
+    else:
+      # A workgroup's waves spread over the 4 SIMDs of a CU (CDNA) / WGP (RDNA).
+      wavesPerSimdPerWorkgroup = int(ceil(numThreads / float(self.states.kernel["WavefrontSize"] * 4)))
+    maxWorkgroups = self.states.archCaps["MaxWavesPerSimd"]//wavesPerSimdPerWorkgroup
 
-    vgprAllocateAligned = 4    if not doubleVgpr else 8
-    totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+    if self.states.version[0] == 12 and self.states.version[1] == 5:
+      # gfx1250: keep the legacy MaxVgpr*2 occupancy model pending its own
+      # benchmarking.
+      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+      vgprAllocateAligned = 4 if not doubleVgpr else 8
+    else:
+      # doubleVgpr is set for ArchAccUnifiedRegs or wave32; only wave64 halves the file.
+      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"] if doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]//2
+      # The per-SIMD VGPR file splits into 64 allocation blocks.
+      vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
-    vgprsAligned *= multiplier
+    vgprsAligned *= wavesPerSimdPerWorkgroup
 
     if   vgprsAligned > totalVgprs:  return 0
-    elif vgprsAligned < 1:           return maxOccupancy
-    occupancy = min(totalVgprs//vgprsAligned, maxOccupancy)
+    elif vgprsAligned < 1:           return maxWorkgroups
+    occupancy = min(totalVgprs//vgprsAligned, maxWorkgroups)
 
     #print("vgprs = ", vgprs, "vgprsAligned = ", vgprsAligned, "unifiedVgprRegs = " ,unifiedVgprRegs, "Occupancy = ", occupancy)
 
@@ -17049,12 +17064,26 @@ class KernelWriterAssembly(KernelWriter):
     requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
     maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
-    # Set occupancy limit for register pools
-    # TODO: Support gfx12 and gfx117x
-    if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
-      self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], self.states.regCaps["PhysicalMaxVgpr"] // occupancy)
-      self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
+    self.setOccupancyLimits(kernel, maxVgprs, occupancy)
     return maxVgprs, occupancy
+
+  def setOccupancyLimits(self, kernel, maxVgprs, occupancy):
+    """Cap register-pool growth so codegen cannot drop below the modeled occupancy."""
+    # TODO: Support gfx12 and gfx117x
+    if kernel["ISA"][0] == 12 or kernel["ISA"][:2] == (11, 7):
+      return
+    # gfx11 occupancy counts workgroups, each taking several waves per SIMD, so
+    # PhysicalMaxVgpr // occupancy over-allows; cap at the model's per-wave budget.
+    # If even the current allocation does not fit, keep the legacy (non-binding) limit.
+    # TODO: CDNA has the same over-allowance for >256-thread workgroups (and ignores the
+    # allocation granule); move it to maxVgprs too once its codegen change is benchmarked.
+    if kernel["ISA"][0] == 11 and \
+       self.getVgprOccupancy(kernel["NumThreads"], maxVgprs, self.states.doubleVgpr) > 0:
+      vgprLimit = maxVgprs
+    else:
+      vgprLimit = self.states.regCaps["PhysicalMaxVgpr"] // occupancy
+    self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], vgprLimit)
+    self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
 
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
                       gwvw, maxVgprs, ss, beta=False, edge=False):
