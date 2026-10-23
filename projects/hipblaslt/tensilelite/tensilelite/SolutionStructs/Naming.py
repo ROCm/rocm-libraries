@@ -258,6 +258,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    # LdsXorSwizzle=False is the default layout; naming it would rename every kernel.
+    if state.get("LdsXorSwizzle", False):
+      requiredParametersTemp.add("LdsXorSwizzle")
+    else:
+      requiredParametersTemp.discard("LdsXorSwizzle")
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")

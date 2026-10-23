@@ -8670,6 +8670,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["MXBlockB"] and kernel["DirectToVgprMXSB"]:
         self.states.mxsb.numVgprLocalReadAddr = 0
 
+      # LdsXorSwizzle: LocalReadAddr+c holds the read base of 16 B chunk c (slot 0 becomes base 0).
+      if kernel["LdsXorSwizzle"]:
+        self.states.ldsXorSwzExtraBases = self.ldsXorSwzGeometry(kernel)[0] - 1
+        for tcState in (self.states.a, self.states.b):
+          if tcState.numVgprLocalReadAddr > 0:
+            assert tcState.numVgprLocalReadAddr == 1, "LdsXorSwizzle: LDS > 64KB unsupported"
+            tcState.numVgprLocalReadAddr += self.states.ldsXorSwzExtraBases
 
       # do not allocate local write address register if DirectToVgpr is enabled
       if kernel["DirectToVgprA"] or kernel["DirectToLdsA"]:
@@ -10826,6 +10833,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def lwaUnrollAssignment(self, kernel, tP):
     return ""
+
+  ##############################################################################
+  # LdsXorSwizzle geometry: 16 B chunk c of an LDS row is stored at chunk
+  # c ^ ((addr >> keyShift) & (nChunk-1)). gfx11 serves ds_load_b128 as 8 lanes
+  # x 16 B = 128 B (32 banks) per cycle, so keyShift >= 7 indexes 128 B lines and
+  # 8 consecutive rows reading the same chunk hit distinct bank groups (measured
+  # with SQC_LDS_BANK_CONFLICT). Returns (nChunk, keyShift).
+  ##############################################################################
+  def ldsXorSwzGeometry(self, kernel):
+    rowBytes = int(kernel["DepthU"] * kernel["ProblemType"]["DataType"].numBytes())
+    return rowBytes // 16, max(7, log2(rowBytes))
 
   ##############################################################################
   # Local Write Addresses: First Offset A/B

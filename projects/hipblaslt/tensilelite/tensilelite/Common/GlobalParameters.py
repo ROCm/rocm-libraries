@@ -502,6 +502,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
     {"LdsBlockSizePerPadMetadata": [-1]},
+    {"LdsXorSwizzle": [False]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [64]},
