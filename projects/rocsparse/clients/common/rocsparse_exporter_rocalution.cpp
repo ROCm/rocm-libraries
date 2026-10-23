@@ -179,35 +179,29 @@ rocsparse_status rocsparse_exporter_rocalution::write_sparse_csx(rocsparse_direc
         }
     };
 
-    ptr_mem = nullptr;
     if(!ptr_same && (base_ != rocsparse_index_base_zero))
     {
         if(rocsparse_hipHostMalloc(&ptr_mem, sizeof(int) * (m + 1)) != hipSuccess)
         {
-            ptr_mem = nullptr;
             free_host_buffers();
             return rocsparse_status_memory_error;
         }
     }
 
-    ind_mem = nullptr;
     if(!ind_same && (base_ != rocsparse_index_base_zero))
     {
         if(rocsparse_hipHostMalloc(&ind_mem, sizeof(int) * nnz) != hipSuccess)
         {
-            ind_mem = nullptr;
             free_host_buffers();
             return rocsparse_status_memory_error;
         }
     }
 
-    val_mem = nullptr;
     if(!val_same)
     {
         if(rocsparse_hipHostMalloc(&val_mem, sizeof(double) * (is_T_complex ? (2 * nnz) : nnz))
            != hipSuccess)
         {
-            val_mem = nullptr;
             free_host_buffers();
             return rocsparse_status_memory_error;
         }
