@@ -1152,11 +1152,11 @@ namespace
         using F = mat_format;
         std::vector<sptrsm_case> v{{F::csr, op_c, op_n, col, col, 0, reuse, false, true},
                                    {F::coo, op_t, op_t, row, row, 2, reuse},
-                                   {F::coo, op_t, op_n, row, col, 0, reuse},
-                                   {F::coo, op_t, op_t, row, row, 0, force},
+                                   {F::coo, op_t, op_n, row, col, 3, reuse},
+                                   {F::coo, op_t, op_t, row, row, 3, force},
                                    {F::csc, op_n, op_t, col, col, 2, reuse},
                                    {F::csc, op_c, op_c, row, col, 2, force, false, true},
-                                   {F::csc, op_t, op_n, row, col, 0, reuse}};
+                                   {F::csc, op_t, op_n, row, col, 3, reuse}};
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         v.push_back({F::csr, op_n, op_n, col, col, 2, force, true});
 #endif
