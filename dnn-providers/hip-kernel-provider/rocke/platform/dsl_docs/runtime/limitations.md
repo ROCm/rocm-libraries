@@ -268,4 +268,5 @@ See `development/extending.md` for recipes.
 - "Optimized" kernel slower than baseline → increased VGPR / LDS dropped occupancy; check `analyze_hsaco().resources`.
 - HIP debug output looks fine but LLVM build fails → HIP backend dispatches a different op handler; LLVM is canonical.
 - Manifest works but launcher misbehaves → pack order / element vs byte mismatch; print the packed bytes and compare to the expected `struct.pack` layout.
-- Attention max_abs spikes on a specific scenario → segment count too low/high for that scenario; check `select_3d_config` choice.
+- Attention max_abs spikes on a specific scenario → segment count too low/high for that scenario; check `select_3d_config` choice (for decode on gfx942/gfx950, the decode split rule: [gfx950](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule), [gfx942](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)).
+- The 3D split-KV knobs have no effect on one GQA ratio → on gfx942/gfx950 `supports_tiled_3d` rejects a `num_queries_per_kv` outside 1…16 or one that does not divide `BLOCK_M = 16` (for example 5 query heads per KV head), so the scalar kernels run; the support gate's reason string says so.

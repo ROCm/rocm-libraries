@@ -20,11 +20,13 @@ including padding, with these bounds:
 - contiguous Q and output `[B, Hq, D]`, on the same device as KV and metadata.
 
 The selected segment and reducer must each fit the target's LDS capacity.
-Admission uses the resolved tile dimensions and LDS allocation dtypes. In
-particular, automatic gfx942 D256/block64 selection requires 74,752 bytes,
-exceeding its 65,536-byte capacity, and is rejected before compilation. An
-explicit smaller tile is checked using its actual footprint; selection does
-not silently resize it. gfx950 D256/block64 fits its target capacity.
+Admission uses the resolved tile dimensions and LDS allocation dtypes (the
+segment kernel keeps Q, two K tiles and one V tile in LDS; P stays in
+registers). In particular, automatic gfx942 D256/block64 selection uses a
+32-token tile and fits its 65,536-byte capacity, while an explicit block-sized
+64-token tile there exceeds it and is rejected before compilation. An explicit
+tile is checked using its actual footprint; selection does not silently resize
+it. gfx950 D256/block64 fits its target capacity.
 
 Capacity need not be a page or tile multiple. Device `seqused_k` is contiguous
 int32 `[B]`, with each value in `[0, problem.max_seqlen_k]`, and
@@ -64,6 +66,11 @@ run_unified_attention_torch(
 For registry consumers, set `AttentionRequest.kv_layout="strided"`; the
 [candidate](../library/dispatch/attention/strided_decode.py) provides spec building
 and `bind_torch`. Direct and dispatched launches share the same spec policy.
+Automatic strided selection applies the same decode policy as paged decode: the split
+rule ([gfx950](../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule),
+[gfx942](../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)),
+the gfx950 tile override, the all-decode grid and the K/V cache policy. It leaves the
+K/V LDS swizzle off; an explicit kernel spec may enable it for fp16/bf16 K/V.
 A non-`None` `problem.clamp_arch` must match the selected target (the active device
 at launch).
 The binding accepts only `softmax_scale` and `stream` keyword overrides; it

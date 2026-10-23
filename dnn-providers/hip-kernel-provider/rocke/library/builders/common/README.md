@@ -114,14 +114,15 @@ registers, so no page-table load sits on the KV loop's critical path. Paged
 fp16/bf16 K/V. Selected by `_wave_page_id_load_3d`; the decode split rule in
 `_num_segments` assumes it where both apply.
 
-**`use_decode_grid`** (3D) — One CTA per sequence along grid x when every
+**`use_decode_grid`** (3D) — One workgroup per sequence along grid x when every
 sequence has one query token, instead of the prefill upper bound and a search
 over `query_start_len`. Derived from the problem by `_use_decode_grid`, not a
 tuning knob; it stays a spec field because the binary and the launch grid differ.
 
 **`tile_size_override`** (gfx950 3D) — A multiple of the page size: each loop
 iteration gathers several pages. `_gfx950_3d_tile_size_override` uses it for
-decode with too few CTAs to fill the device, together with the K/V LDS swizzle.
+decode with too few workgroups to fill the device, together with the K/V LDS
+swizzle (paged K/V; strided K/V takes the tile without it).
 
 **`use_transposed_half_local_pv`** — Rewrites the PV phase of the transposed
 32x32 kernel so each 32-lane warp-half reads only the P rows it owns,
