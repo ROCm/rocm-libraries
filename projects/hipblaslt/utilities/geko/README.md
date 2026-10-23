@@ -597,6 +597,8 @@ invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 
 `TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
 
+`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. `TensileMergeLibrary` matches `SolutionNameMin`: an existing Equality solution keeps its UID and the new one is ignored, and a new name (the Origami copy) is merged with the fresh UID so it does not duplicate the Origami file.
+
 **Verify:**
 ```bash
 "${HIPBLASLT_PATH}/build/release/clients/staging/hipblaslt-bench" \

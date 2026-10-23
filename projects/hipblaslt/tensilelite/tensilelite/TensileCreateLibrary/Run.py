@@ -1610,7 +1610,7 @@ def run():
 
         archUidMapping = uidMappingPerArch.get(archName, {})
         if archUidMapping:
-            archDir = libraryDir(outputPath, outArchNames.get(archName, archName))
+            archDir = libraryDir(outputPath, outDir)
             archUidMappingFile = os.path.join(
                 archDir, "TensileLiteLibrary_lazy_" + archName + "_UidMapping"
             )
