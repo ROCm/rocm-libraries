@@ -46,7 +46,7 @@ def _assert_phantom_completion(src):
     # Subtile epilogues can put store bodies after loop close. Every entry
     # reference must remain in the guarded completion interval, and loop close
     # must jump over those bodies rather than falling through into them.
-    deferred = list(re.finditer(r"^(label_GW_\w+_Deferred):\n", code, re.M))
+    deferred = list(re.finditer(r"^(label_(?:GW|Fixup)_\w+_Deferred):\n", code, re.M))
     kernel_end = code.index("\nlabel_KernelEnd:")
     if deferred:
         assert close < deferred[0].start() < kernel_end
@@ -193,10 +193,10 @@ def test_ordinary_streamk_tree_reduction_still_assembles(tmp_path):
         assert "global_wb" in src and "global_inv" in src
 
 
-@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+@pytest.mark.parametrize("strategy,tree", [("DataParallel", 0), ("StreamK", 0), ("StreamK", 1)])
 @pytest.mark.parametrize("feature", ["subtile", "subtile_pgr0", "subtile_pgr2",
                                      "sparse_a", "sparse_b", "store_remap"])
-def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy, feature):
+def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy, tree, feature):
     """The same DP input modes must emit complete SK partial/fixup kernels."""
     from Tensile import __file__ as tensile_file
     from config_harness import derive_states
@@ -215,7 +215,7 @@ def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy
               for key, value in entry.items()}
     values.update(TileProcessingStrategy=[strategy], WorkAssignment=["StaticGrid"],
                   ClusterDim=[[2, 2]], PrefetchAcrossPersistent=[0], GlobalSplitU=[0],
-                  StreamKFixupTreeReduction=[int(strategy == "StreamK")])
+                  StreamKFixupTreeReduction=[tree])
     if feature.startswith("subtile_pgr"):
         values["PrefetchGlobalRead"] = [int(feature[-1])]
     if feature == "store_remap":
@@ -247,4 +247,4 @@ def test_non_pap_multicast_compute_and_store_parity_assembles(tmp_path, strategy
             assert "s[sgprMulticastMaskMetadata]" in src
         if strategy == "StreamK":
             assert "physical partial slot = cluster * peers + peer" in src
-            assert "Tree reduction" in src
+            assert ("Tree reduction" in src) == bool(tree)
