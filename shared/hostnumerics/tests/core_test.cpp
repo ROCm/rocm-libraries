@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/output_selection.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
@@ -426,6 +427,49 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
+}
+
+TEST(OutputSelectionCpp, DefaultConstruction) {
+    const OutputSelection selection;
+    EXPECT_EQ(selection.indices(4), (std::vector<size_t>{0, 1, 2, 3}));
+    EXPECT_EQ(selection.selectedCount(4), 4);
+}
+
+TEST(OutputSelectionCpp, OwnsSpanOrdersAndIndices) {
+    auto selections = [] {
+        std::array<size_t, 3> order{2, 1, 0};
+        std::vector<size_t> indices{7, 1, 7};
+        std::array<OutputSelection, 4> result{OutputSelection::all(order),
+                                              OutputSelection::strided(0, 2, 3, order),
+                                              OutputSelection::explicitIndices(indices, order),
+                                              OutputSelection::primeStride(24, 24, 5, order)};
+        order[0] = 9;
+        indices[0] = 99;
+        return result;
+    }();
+    for (const auto& selection : selections) {
+        const auto order = selection.indexOrder();
+        static_assert(std::is_same_v<decltype(selection.indexOrder()), std::span<const size_t>>);
+        EXPECT_EQ((std::vector<size_t>(order.begin(), order.end())),
+                  (std::vector<size_t>{2, 1, 0}));
+    }
+    auto copied = selections[2];
+    selections[2] = OutputSelection::all();
+    EXPECT_EQ(copied.indices(8), (std::vector<size_t>{1, 7}));
+    const auto moved = std::move(copied);
+    EXPECT_EQ(moved.indices(8), (std::vector<size_t>{1, 7}));
+    EXPECT_EQ((std::vector<size_t>(moved.indexOrder().begin(), moved.indexOrder().end())),
+              (std::vector<size_t>{2, 1, 0}));
+}
+
+TEST(OutputSelectionCpp, SizeBoundaries) {
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    EXPECT_EQ(OutputSelection::strided(0, 1).selectedCount(maximum), maximum);
+    EXPECT_EQ(OutputSelection::strided(maximum - 2, 3).indices(maximum),
+              (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(OutputSelection::strided(1, maximum - 2).indices(maximum),
+              (std::vector<size_t>{1, maximum - 1}));
+    EXPECT_THROW(OutputSelection::primeStride(2, maximum, 1), std::runtime_error);
 }
 
 }  // namespace
