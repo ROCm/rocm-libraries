@@ -507,10 +507,9 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    // perf-db stores only kernel_id; a DB-restored config has use_tf32=false, so recompute
-    // TF32 from the problem (it is part of the problem key) to avoid a silent FP32 fallback.
-    const bool use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
-    return loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, config.kernel_id, use_tf32);
+    // perf-db stores only kernel_id; recompute TF32 from the problem with the same tf32->fp32
+    // availability fallback the config build used (see GetSolutionTf32Aware).
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

@@ -110,6 +110,17 @@ public:
                 const std::string& kernel_id,
                 bool use_tf32) const;
 
+    /// Build the solution when only kernel_id is trustworthy (e.g. a perf-db-restored config, whose
+    /// use_tf32 was dropped in serialization). Recomputes TF32 from the problem, then gates it on
+    /// this kernel actually supporting TF32 -- the same tf32->fp32 availability fallback the config
+    /// build used -- so a kernel selected via the FP32 fallback is not forced into a missing TF32
+    /// build.
+    MIOPEN_INTERNALS_EXPORT ConvSolution
+    GetSolutionTf32Aware(CKSolverType solver,
+                         const ExecutionContext& ctx,
+                         const miopen::conv::ProblemDescription& problem,
+                         const std::string& kernel_id) const;
+
     MIOPEN_INTERNALS_EXPORT std::vector<std::string>
     GetAllKernelTypeStrings(CKSolverType solver) const;
 

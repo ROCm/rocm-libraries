@@ -547,6 +547,21 @@ ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
     return ExtractSolution(status, ptr, "get_solution");
 }
 
+ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
+                                                   const ExecutionContext& ctx,
+                                                   const conv::ProblemDescription& problem,
+                                                   const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    bool use_tf32    = (dtype == miopenFloat) && problem.UseTF32();
+    // The kernel_id may have been chosen via the FP32 fallback (no TF32 instance for this problem);
+    // forcing TF32 there would build a nonexistent instance, so drop to FP32 when this kernel has
+    // no TF32 variant -- matching FillValidKernelsWithTf32Fallback.
+    if(use_tf32 && !IsArgsSupported(solver, problem, kernel_id, dtype, true))
+        use_tf32 = false;
+    return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
+}
+
 std::vector<std::string> CkImplLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const
 {
     if(!IsLoaded())

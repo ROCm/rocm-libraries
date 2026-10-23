@@ -103,6 +103,8 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
         auto conv_desc_fp32 = conv_desc;
         conv_desc_fp32.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
         auto problem_fp32 = MakeProblem(conv_desc_fp32);
+        problem_fp32.SetupComputeType(
+            ctx); // keeps workspace/solution sizing consistent (stays FP32)
 
         if(solv.MayNeedWorkspace())
             wspace.resize(std::max(solv.GetWorkspaceSize(ctx, problem_tf32),
@@ -159,8 +161,8 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
 
         auto run = [&](const auto& prob, const auto& perf_cfg, tensor<float>& result) {
             auto sol = solv.GetSolution(ctx, prob, perf_cfg);
-            EXPECT_TRUE(sol.Succeeded());
-            EXPECT_TRUE(sol.invoker_factory);
+            ASSERT_TRUE(sol.Succeeded());
+            ASSERT_TRUE(sol.invoker_factory); // guard the deref below
             const auto invoker =
                 handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
             (invoker)(handle, invoke_params);
