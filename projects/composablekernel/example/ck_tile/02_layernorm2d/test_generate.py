@@ -5,6 +5,9 @@
 
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -92,6 +95,106 @@ class InstanceFilterTests(unittest.TestCase):
             ).get_blobs(self.args)[0]
             for instance in excluded.instance_list:
                 self.assertNotIn(instance.call_name, api)
+
+
+class CMakeInstanceFilterTests(unittest.TestCase):
+    def setUp(self):
+        if not shutil.which("cmake"):
+            self.skipTest("cmake is required")
+        directory = tempfile.TemporaryDirectory(prefix="ck-instance-filters-")
+        self.addCleanup(directory.cleanup)
+        self.work = Path(directory.name)
+
+    def run_command(self, command, succeeds=True):
+        result = subprocess.run(command, text=True, capture_output=True)
+        output = result.stdout + result.stderr
+        if succeeds:
+            self.assertEqual(result.returncode, 0, output)
+        else:
+            self.assertNotEqual(result.returncode, 0, output)
+        return output
+
+    def cmake_fixture(self, example, target):
+        source = self.work / "fixture"
+        source.mkdir()
+        for path in example.glob("*.cpp"):
+            shutil.copyfile(path, source / path.name)
+        # Include the real example CMake in a small project. Only generation and
+        # source selection are exercised, so no HIP compiler or GPU is needed.
+        (source / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.16)\n"
+            "project(instance_filters LANGUAGES CXX)\n"
+            f'set(Python3_EXECUTABLE "{Path(sys.executable).as_posix()}")\n'
+            "set(GPU_TARGETS gfx942)\n"
+            f'include("{example.as_posix()}/CMakeLists.txt")\n'
+            f"get_target_property(sources {target} SOURCES)\n"
+            'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/sources.txt" '
+            'CONTENT "$<JOIN:${sources},\\n>\\n")\n'
+            "if(LAYERNORM2D_FWD_GEN_BLOBS)\n"
+            "  add_custom_target(generate_instances DEPENDS ${LAYERNORM2D_FWD_GEN_BLOBS})\n"
+            "endif()\n"
+        )
+        return source, self.work / "build"
+
+    def configure(self, source, build, variable, pattern, succeeds=True):
+        return self.run_command(
+            [
+                "cmake",
+                "-S",
+                str(source),
+                "-B",
+                str(build),
+                f"-D{variable}={pattern}",
+            ],
+            succeeds,
+        )
+
+    def test_gemm_cmake_source_selection_and_reset(self):
+        example = Path(__file__).resolve().parent.parent / "38_block_scale_gemm"
+        source, build = self.cmake_fixture(example, "tile_example_gemm_quant")
+        variable = "GEMM_QUANT_INSTANCE_FILTER"
+        self.configure(source, build, variable, "")
+        default_sources = (build / "sources.txt").read_text().splitlines()
+        self.assertGreater(len(default_sources), 3)
+        self.configure(source, build, variable, "^gemm_bquant_quantgrouped_fp8$")
+        self.assertEqual(
+            set((build / "sources.txt").read_text().splitlines()),
+            {"gemm_quant.cpp", "gemm_bquant_quantgrouped_fp8.cpp"},
+        )
+        self.configure(source, build, variable, "^gemm_bquant_quantgrouped_(fp8|bf8)$")
+        self.assertEqual(
+            set((build / "sources.txt").read_text().splitlines()),
+            {
+                "gemm_quant.cpp",
+                "gemm_bquant_quantgrouped_fp8.cpp",
+                "gemm_bquant_quantgrouped_bf8.cpp",
+            },
+        )
+        self.configure(source, build, variable, "")
+        self.assertEqual(
+            (build / "sources.txt").read_text().splitlines(), default_sources
+        )
+        output = self.configure(
+            source, build, variable, "no_such_source", succeeds=False
+        )
+        self.assertIn("matched no instance sources", output)
+
+    def test_layernorm_cmake_regenerates_dispatcher_when_reusing_filter(self):
+        example = Path(__file__).resolve().parent
+        source, build = self.cmake_fixture(example, "tile_example_layernorm2d_fwd")
+        for size in (256, 512, 256):
+            self.configure(
+                source,
+                build,
+                "LAYERNORM2D_FWD_INSTANCE_FILTER",
+                f"layernorm2d_fwd_fp16_n{size}",
+            )
+            self.run_command(
+                ["cmake", "--build", str(build), "--target", "generate_instances"]
+            )
+            dispatcher = (build / "layernorm2d_fwd_api.cpp").read_text()
+            self.assertIn(f"a.n <= {size}", dispatcher)
+            self.assertNotIn(f"a.n <= {768 - size}", dispatcher)
 
 
 if __name__ == "__main__":
