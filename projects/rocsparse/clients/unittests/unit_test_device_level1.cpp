@@ -50,14 +50,6 @@ namespace
 {
     constexpr uint32_t BS = 256; // block size (all test cases use nnz <= BS, one block)
 
-// Each launch check clears any error left pending by an earlier test first.
-#define CHECK_HIP(cmd)                                                \
-    do                                                                \
-    {                                                                 \
-        hipError_t status_ = (cmd);                                   \
-        ASSERT_EQ(status_, hipSuccess) << hipGetErrorString(status_); \
-    } while(0)
-
     // Wrapper kernels for the ROCSPARSE_DEVICE_ILF functions (which are meant to
     // be called from within a kernel). This exercises the exact device code.
     template <typename T, typename I>
@@ -110,8 +102,8 @@ TEST(device_level1_axpyi, basic)
                        d_xind.ptr,
                        d_y.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got = rocsparse_ut::to_host(d_y);
     const std::vector<T> exp{21, 1, 41, 1, 61};
@@ -145,8 +137,8 @@ TEST(device_level1_gthr, basic)
                        d_xval.ptr,
                        d_xind.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got = rocsparse_ut::to_host(d_xval);
     const std::vector<T> exp{9, 5, 7};
@@ -178,8 +170,8 @@ TEST(device_level1_gthr, index_base_one)
                        d_xval.ptr,
                        d_xind.ptr,
                        rocsparse_index_base_one);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got = rocsparse_ut::to_host(d_xval);
     const std::vector<T> exp{9, 5, 7};
@@ -212,8 +204,8 @@ TEST(device_level1_gthrz, basic)
                        d_xval.ptr,
                        d_xind.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got_xval = rocsparse_ut::to_host(d_xval);
     const std::vector<T> got_y    = rocsparse_ut::to_host(d_y);
@@ -248,8 +240,8 @@ TEST(device_level1_sctr, basic)
                        d_xind.ptr,
                        d_y.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got = rocsparse_ut::to_host(d_y);
     const std::vector<T> exp{11, 0, 0, 22, 0};
@@ -287,8 +279,8 @@ TEST(device_level1_roti, rotation_90deg)
                        (T)0,
                        (T)1,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     const std::vector<T> got_xval = rocsparse_ut::to_host(d_xval);
     const std::vector<T> got_y    = rocsparse_ut::to_host(d_y);
@@ -331,8 +323,8 @@ TEST(device_level1_roti, grid_stride)
                        (T)2,
                        (T)1,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     std::vector<T> want_xval(nnz);
     std::vector<T> want_y(nnz);
@@ -372,8 +364,8 @@ TEST(device_level1_roti, identity)
                        (T)1,
                        (T)0,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipGetLastError());
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     EXPECT_EQ(rocsparse_ut::to_host(d_xval), (std::vector<T>{3, 4}));
     EXPECT_EQ(rocsparse_ut::to_host(d_y), (std::vector<T>{0, 7, 0, 0, 8}));
