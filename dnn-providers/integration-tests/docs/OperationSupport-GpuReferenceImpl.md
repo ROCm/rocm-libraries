@@ -63,7 +63,7 @@ The following table lists the operations currently executable through the GPU gr
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
-| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv. No dropout, ALiBi, ragged |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv, explicit-mask dropout. No Philox dropout, sinks, ALiBi, ragged |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 
@@ -117,6 +117,7 @@ but are not reachable through graph-level verification.
 | Reduction | `GpuReductionPlanBuilder` | `GpuReductionSignatureKey` | Reduction over the requested dimensions |
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
+| SDPA Backward | `GpuSdpaBwdPlanBuilder` | `GpuSdpaBwdSignatureKey` | Scaled dot-product attention gradients (dQ, dK, dV, dBias) |
 
 ### Pointwise Operations
 
@@ -151,13 +152,13 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Log-sum-exp `stats` output | Supported | Supported (must be `FP32`; packed when an `INT32` ragged offset is used) |
 | Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
 | FP8 (descale) inputs | Not supported; no FP8 tuple registered | `FP8_E4M3` with `BFP16` output; Q/K/V descales only |
-| Dropout | Not supported | Not supported |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V addressed through INT32 page tables | Not supported |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported |
 | Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Not supported |
-| Philox dropout (`dropout_probability`, seed, offset) and RNG_DUMP | Not supported | Not supported |
+| Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference (forward and backward follow the CPU table) | Not supported |
 | Block-sparse attention | Not supported | Not supported |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
