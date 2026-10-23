@@ -28,7 +28,7 @@
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
 
-#include _THRUST_STD_INCLUDE(__bit/countl.h)
+#include _THRUST_STD_INCLUDE(bit)
 #include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
 #include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(type_traits)
