@@ -454,9 +454,12 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         EXPECT_EQ(moved, original);
         // Layout moves reset the source to a scalar with zero offset.
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(copied, Layout{});
+        EXPECT_TRUE(copied == Layout{});
         EXPECT_EQ(copied.shape().elementCount(), 1);
         EXPECT_TRUE(copied.strides().empty());
+        const auto copiedOffset = copied.elementOffset({});
+        ASSERT_TRUE(copiedOffset);
+        EXPECT_EQ(*copiedOffset, 0);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Layout assigned;
@@ -466,9 +469,12 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         moveAssigned = std::move(assigned);
         EXPECT_EQ(moveAssigned, original);
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(assigned, Layout{});
+        EXPECT_TRUE(assigned == Layout{});
         EXPECT_EQ(assigned.shape().elementCount(), 1);
         EXPECT_TRUE(assigned.strides().empty());
+        const auto assignedOffset = assigned.elementOffset({});
+        ASSERT_TRUE(assignedOffset);
+        EXPECT_EQ(*assignedOffset, 0);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
         Layout& self = moveAssigned;
         moveAssigned = std::move(self);
