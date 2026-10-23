@@ -814,11 +814,11 @@ private:
             uint64_t tailNs = 0;
             std::vector<std::vector<double>> rows;
             rows.reserve(catalog.entries.size());
-            for(const auto& entry : catalog.entries)
+            for(const KernelDefinition* entry : catalog.entries)
             {
                 const auto tailStart = Clock::now();
                 ctx.clearKernelVars();
-                ctx.bindKernelVars(detail::kernelVarsFrom(entry));
+                ctx.bindKernelVars(detail::kernelVarsFrom(*entry));
 
                 _extractor->extractKernelInto(ctx, features);
                 tailNs += elapsedNs(tailStart);
@@ -843,7 +843,7 @@ private:
             for(size_t index = 0; index < catalog.entries.size(); ++index)
             {
                 scored.push_back(
-                    {scoreFromRaw(raw[index]), &catalog.entries[index], groupOf(rows[index])});
+                    {scoreFromRaw(raw[index]), catalog.entries[index], groupOf(rows[index])});
             }
 
             _timing.tailNs.fetch_add(tailNs, std::memory_order_relaxed);

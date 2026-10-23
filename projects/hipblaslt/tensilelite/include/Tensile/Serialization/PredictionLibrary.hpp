@@ -151,6 +151,8 @@ namespace TensileLite
                                     .wave_group_m         = solution->sizeMapping.waveGroup[0],
                                     .wave_group_n         = solution->sizeMapping.waveGroup[1],
                                     .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
+                                    .buffer_load          = solution->sizeMapping.BufferLoad,
+                                    .buffer_store         = solution->sizeMapping.BufferStore,
                                     .source_swap          = solution->sizeMapping.SourceSwap,
                                 },
                             };

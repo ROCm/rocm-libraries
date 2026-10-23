@@ -17,6 +17,7 @@ endif()
 add_executable(
     hip_kernel_provider_tests
     main.cpp
+    core/TestApplicabilityManager.cpp
     core/TestContainer.cpp
     core/TestHandle.cpp
     core/TestContext.cpp
