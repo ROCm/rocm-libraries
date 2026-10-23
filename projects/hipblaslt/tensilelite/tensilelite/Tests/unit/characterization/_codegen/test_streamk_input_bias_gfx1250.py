@@ -15,7 +15,7 @@ from Tensile import __file__ as tensile_file
 pytestmark = pytest.mark.unit
 
 
-def _input_bias_config(strategy, source, feature=None):
+def _input_bias_config(strategy, source, feature=None, tree=None):
     root = Path(tensile_file).parent
     config = yaml.safe_load((root / "Tests/common/gradient/gfx1250/hhs_bgrada_gfx1250.yaml").read_text())
     config["BenchmarkProblems"] = config["BenchmarkProblems"][:1]
@@ -23,7 +23,7 @@ def _input_bias_config(strategy, source, feature=None):
     problem["BiasSrc"] = source
     values = {key: value[:1] for entry in group["ForkParameters"] for key, value in entry.items()}
     values.update(TileProcessingStrategy=[strategy], WorkAssignment=["StaticGrid"],
-                  StreamKFixupTreeReduction=[int(strategy == "StreamK")], GlobalSplitU=[0],
+                  StreamKFixupTreeReduction=[int(strategy == "StreamK") if tree is None else tree], GlobalSplitU=[0],
                   PrefetchAcrossPersistent=[0], ClusterDim=[[2, 2]], StaggerU=[0],
                   ForceDisableShadowInit=[True], ScheduleIterAlg=[0], DepthU=[64])
     if feature == "sav":
@@ -94,11 +94,11 @@ def _assert_alpha_zero_tdm_inputs(assembly, source):
     assert f"alpha-zero unused {unused}: tensor_dim0 low = 0" in tail
 
 
-@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+@pytest.mark.parametrize("strategy,tree", [("DataParallel", 0), ("StreamK", 0), ("StreamK", 1)])
 @pytest.mark.parametrize("source", ["A", "B"])
-def test_input_bias_gradient_completion_assembles(tmp_path, strategy, source):
+def test_input_bias_gradient_completion_assembles(tmp_path, strategy, tree, source):
     path = tmp_path / "input_bias.yaml"
-    path.write_text(yaml.safe_dump(_input_bias_config(strategy, source)))
+    path.write_text(yaml.safe_dump(_input_bias_config(strategy, source, tree=tree)))
     results = emit_kernels_from_config(str(path), limit=1, arch="gfx1250", canonical=False)
     assert len(results) == 1
     for name, assembly, error in results:
@@ -127,7 +127,10 @@ def test_input_bias_gradient_completion_assembles(tmp_path, strategy, source):
             continue
         reduction = assembly.index("accumulate peer input bias partial")
         assert assembly.index("phantom tiles skip the store") < reduction < bias_store
-        owner_gate = assembly.rfind("does wg start tile?", reduction, bias_store)
+        # Linear fixup sends nonowners to partial publication before reduction;
+        # tree fixup makes that decision after reducing the worker's subtree.
+        owner_gate = (assembly.rfind("does wg start tile?", reduction, bias_store) if tree
+                      else assembly.rfind("does wg start tile?", 0, reduction))
         assert owner_gate != -1
         assert "label_SK_Partials" in assembly[owner_gate:bias_store]
         publication = assembly.index("publish input bias partial before ready flag")
@@ -211,7 +214,20 @@ def test_alpha_zero_hardware_config_assembles_all_variants(tmp_path, source):
         (root / f"persistent_input_bias_alpha0_nan_{unused.lower()}.yaml").read_text())
     # NaN and pointer-array inputs change runtime coverage, not kernel variants.
     # Keep those numerical fixtures aligned without compiling each kernel twice.
-    assert nan_config["BenchmarkProblems"] == config["BenchmarkProblems"]
+    assert len(nan_config["BenchmarkProblems"]) == len(config["BenchmarkProblems"]) == 1
+    problem, group = config["BenchmarkProblems"][0]
+    nan_problem, *nan_groups = nan_config["BenchmarkProblems"][0]
+    assert nan_problem == problem
+    final = group["BenchmarkFinalParameters"]
+    sizes = final[0]["ProblemSizes"]
+    # Each pointer-array shape runs in a fresh client, with identical kernels
+    # and bias types. Preserve every shape while changing only the grouping.
+    assert len(nan_groups) == len(sizes)
+    for nan_group, size in zip(nan_groups, sizes):
+        assert nan_group == {
+            **group,
+            "BenchmarkFinalParameters": [{"ProblemSizes": [size]}, *final[1:]],
+        }
     runtime_only = {"BatchMode", "DataInitTypeA", "DataInitTypeB"}
     assert {k: v for k, v in nan_config["GlobalParameters"].items() if k not in runtime_only} == {
         k: v for k, v in config["GlobalParameters"].items() if k not in runtime_only}
@@ -275,7 +291,7 @@ def test_alpha_zero_input_bias_load_variants(tmp_path, source, variant):
         elif variant in ("buffer", "buffer_stagger"):
             loop = re.search(r"^label_LoopBeginL:$(.*?)^label_LoopEndL:", assembly, re.M | re.S)
             assert loop and "Alpha" not in loop[1]
-            assert f"buffer_load" in loop[1]
+            assert "buffer_load" in loop[1]
             # Both setup and tail must clear every packed bound bit and the
             # shadow; otherwise an increment or tail rewind can reopen reads.
             guards = re.findall(

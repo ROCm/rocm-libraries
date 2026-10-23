@@ -1584,7 +1584,7 @@ class StreamK(TileProcessingStrategy):
                 and TileProcessingStrategy.needsInputBiasReduction(kernel))
 
     def inputBiasPartials(self, writer, kernel, logicalProducer, *, reduce=False):
-        """Publish or accumulate the input-bias LDS payload in the tree handshake.
+        """Publish or accumulate the input-bias LDS payload during in-kernel fixup.
 
         The payload keeps SumUnroll's lane sums intact. The final tile owner
         uses the ordinary bias epilogue to reduce lanes and convert the result.
