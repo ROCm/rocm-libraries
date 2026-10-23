@@ -42,7 +42,7 @@ TEST(RegisterAllocationConfigTest, AKernelDefaultsToOffWithBothClassesAndTheChai
     EXPECT_EQ(config.mode, Mode::Off);
     EXPECT_EQ(config.options.allocate, RegClassSet::all());
     EXPECT_EQ(config.options.allocator,
-              "greedy-compact-program+greedy-compact-largest+greedy-compact");
+              "greedy-compact+greedy-compact-largest+greedy-compact-program");
     EXPECT_EQ(config.options.unbankableOperands, Unbankable::Auto);
     EXPECT_EQ(config.options.quadrant, Quadrant::Any);
     EXPECT_FALSE(config.options.applyToOperands);
@@ -149,8 +149,8 @@ TEST(RegisterAllocationConfigTest, TheToolRefusesModeOff) {
 
 TEST(RegisterAllocationConfigTest, CanonicalSpellingDropsDefaultsAndUsesTheDigit) {
     EXPECT_EQ(canonical("apply"), "2");
-    EXPECT_EQ(canonical("2,classes=vs,allocator=greedy-compact-program+greedy-compact-largest+"
-                        "greedy-compact"),
+    EXPECT_EQ(canonical("2,classes=vs,allocator=greedy-compact+greedy-compact-largest+"
+                        "greedy-compact-program"),
               "2");
     EXPECT_EQ(canonical("2,classes=s"), "2,classes=s");
     EXPECT_EQ(canonical("mode=apply,allocator=greedy-compact,unbankable=auto,quadrant=any"),
@@ -202,7 +202,7 @@ TEST(RegisterAllocationConfigTest, AKernelTakesItsModeFromTheNumber) {
     ASSERT_FALSE(config.hasError());
     EXPECT_EQ(config->options.allocate, RegClassSet::all());
     EXPECT_EQ(config->options.allocator,
-              "greedy-compact-program+greedy-compact-largest+greedy-compact");
+              "greedy-compact+greedy-compact-largest+greedy-compact-program");
 
     EXPECT_TRUE(kernelRegisterAllocationConfig(2, "bogus").hasError());
 }

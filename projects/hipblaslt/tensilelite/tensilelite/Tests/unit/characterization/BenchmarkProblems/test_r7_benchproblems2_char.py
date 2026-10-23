@@ -452,9 +452,9 @@ class TestGenerateForkedSolutions:
         assembler, iim = toolchain
         const = _make_constant_params()
         perms = [
-            {"StinkyTofuRegisterAllocation": "2,classes=s"},
-            {"StinkyTofuRegisterAllocation": "apply"},
             {"StinkyTofuRegisterAllocation": "2,classes=vs"},
+            {"StinkyTofuRegisterAllocation": "apply"},
+            {"StinkyTofuRegisterAllocation": "2,classes=s"},
         ]
 
         with _isolated_globals_with_isa(iim):
@@ -466,7 +466,7 @@ class TestGenerateForkedSolutions:
         warnings = [line for line in capsys.readouterr().out.splitlines()
                     if "StinkyTofuRegisterAllocation" in line]
         assert len(warnings) == 1
-        assert "'2,classes=vs' is not built for 1 kernel(s)" in warnings[0]
+        assert "'2,classes=s' is not built for 1 kernel(s)" in warnings[0]
         assert "Benchmark it in a separate run." in warnings[0]
 
 

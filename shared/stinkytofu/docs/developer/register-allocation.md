@@ -179,12 +179,12 @@ Where all of it lives, under both `include/stinkytofu/` and `src/`:
 --RegisterAllocationPass=allocator=greedy-compact,classes=v,regionEnd=C,apply,report
 ```
 
-The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by the same parser; section 12.2 covers the grammar and how the two callers differ. Three defaults differ between them. The tool keeps the ones it always had, `shadow`, `classes=v` and `allocator=greedy`; a kernel's configuration (TensileLite and the pipeline) defaults to `off`, `classes=vs` and `allocator=greedy-compact-program+greedy-compact-largest+greedy-compact`. The table gives both where they differ.
+The list is the one TensileLite's `StinkyTofuRegisterAllocation` takes, read by the same parser; section 12.2 covers the grammar and how the two callers differ. Three defaults differ between them. The tool keeps the ones it always had, `shadow`, `classes=v` and `allocator=greedy`; a kernel's configuration (TensileLite and the pipeline) defaults to `off`, `classes=vs` and `allocator=greedy-compact+greedy-compact-largest+greedy-compact-program`. The table gives both where they differ.
 
 | Option | Meaning |
 |---|---|
 | `shadow`, `apply`, `force`, or `0`..`3` | the mode, also spelled `mode=<word>`. `apply` and `force` write the colouring through `destroyAttachedSSA`; `shadow` colours without writing. Default: `shadow` in the tool, `off` in a kernel |
-| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact-program+greedy-compact-largest+greedy-compact` in a kernel |
+| `allocator=<name>` | `greedy`, `greedy-compact`, `greedy-compact-freedom`, `greedy-compact-program`, `greedy-compact-largest`, `legacy`. Several joined with `+` are tried in turn, and the first that colours the function is applied. Default: `greedy` in the tool, `greedy-compact+greedy-compact-largest+greedy-compact-program` in a kernel |
 | `classes=<vs>` | class axis of allocation scope; see section 3. Default: `v` in the tool, `s` in a kernel |
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
 | `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key, or join with `+`, for disjoint runs |
@@ -629,7 +629,7 @@ They constrain each other only when they appear together in one operand.
 
 | Name | Class | Summary |
 |---|---|---|
-| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default of `RegisterAllocationOptions` and `stinkytofu-opt`. A kernel's configuration defaults to the chain `greedy-compact-program+greedy-compact-largest+greedy-compact` |
+| `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default of `RegisterAllocationOptions` and `stinkytofu-opt`. A kernel's configuration defaults to the chain `greedy-compact+greedy-compact-largest+greedy-compact-program` |
 | `greedy-compact` | `CompactingGreedyAllocator` | the same, with hints off, so placement packs from the bottom |
 | `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | the same again, but ordering blocks by how few legal bases they have rather than by how hot they are |
 | `greedy-compact-program` | `ProgramOrderedGreedyAllocator` | packing from the bottom in program order: the block that becomes live first goes first |
@@ -996,7 +996,7 @@ The words may come in any order:
 |---|---|---|---|
 | mode | `off`, `shadow`, `apply`, `force`, or `0`..`3`, bare or as `mode=` | `off` | 1 colours and reports; 2 and 3 also rewrite. TensileLite reads 3 as apply that may re-judge an over-budget kernel |
 | `classes=` | `s`, `v`, `vs` | `vs` | what to lift and allocate; any other class keeps the producer's registers |
-| `allocator=` | a registered name, or several joined with `+` | `greedy-compact-program+greedy-compact-largest+greedy-compact` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
+| `allocator=` | a registered name, or several joined with `+` | `greedy-compact+greedy-compact-largest+greedy-compact-program` | the policy (section 9). A chain is tried in order, and the first that colours the function is applied |
 | `unbankable=` | `auto`, `allocate`, `hold` | `auto` | operands that cannot name a VGPR bank; see below |
 | `quadrant=` | `any`, `prefer` | `any` | `prefer` searches the producer's 256-register bank for each block before the rest of the file |
 | `rules=`, `noRule=`, `noRules`, `ruleAudit` | as in section 2.1 | none | force rule statuses (section 14) |

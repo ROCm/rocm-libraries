@@ -39,7 +39,7 @@ enum class RegisterAllocationMode : int {
 enum class RegisterAllocationDialect {
     /// A kernel's StinkyTofuRegisterAllocation value, as the pipeline runs it.
     /// Defaults: mode off, classes vs, allocator
-    /// greedy-compact-program+greedy-compact-largest+greedy-compact. The keys that
+    /// greedy-compact+greedy-compact-largest+greedy-compact-program. The keys that
     /// only shape diagnostics (report, emitRegisterMap, emitSymbolBreadcrumbs,
     /// dumpBlocks) are refused, because the pipeline sets those itself.
     Kernel,
