@@ -21,6 +21,18 @@ python tests/run_all.py --only gemm
 python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (llvm20/llvm22)
 ```
 
+The multi-layer suite can also run directly from the platform directory:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.py
+```
+
+That command covers one test file. A default `python tests/run_all.py` additionally
+runs the corpus validity/domain gates and the full pytest suite, including a
+`ROCKE_BACKEND=both` pass when the extension is importable. Report the actual
+command and any disabled or skipped stages; a runner invocation with
+`--no-pytest` or `--no-gate` establishes only its enabled stages.
+
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
@@ -51,12 +63,14 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
-> Notes: `instances/rocke_ir_parity_harness.py` is a helper imported by the
-> gate, not a `test_`-prefixed pytest module. The pybind **`rocke_engine` module
-> has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
-> owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
-> 65 `*_emit.c` outputs to `*_emit.py`), and the binding itself by the
-> consistency proof documented in `cpp/bindings/README.md`.
+> Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
+> to `test_rocke_ci_static.py` and the corpus gates. It is not itself a
+> `test_`-prefixed pytest module. `tools/check_byte_identity.py` drives a separate
+> paired-emitter inventory. Representative cases lowered in strict `both` pytest
+> mode compare Python/native bytes through the `rocke_engine` binding; cases
+> registered only in that corpus are not included in the paired-emitter totals.
+> See the [NVFP4 validation commands](../python/rocke/examples/gfx1250/gemm/NVFP4.md#validation-and-scope)
+> for the four representative NVFP4 variants and their focused backend matrix.
 
 ## Execution categories
 
@@ -159,7 +173,8 @@ output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
 verification; committed golden entries anchor the existing configurations.
 `instances/test_optimization_barrier_numeric.py` compiles through COMGR and
 checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
-Native HIP-source lowering is outside this feature's supported path.
+NVFP4 also exercises native HIP-source lowering of the pure tied-VGPR
+optimization barrier. Other native inline-assembly forms remain unsupported.
 
 ## Installed pinned-reference suites
 

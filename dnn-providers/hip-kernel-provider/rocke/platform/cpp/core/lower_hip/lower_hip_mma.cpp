@@ -788,12 +788,6 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr16_b64(rocke_h_lowerer_t* lw, co
         lw, op, "ds_read_tr16_b64", "i16x4_raw", "_llvm_amdgcn_ds_read_tr16_b64", 4, 8);
 }
 
-static rocke_status_t rocke_h_op_tile_ds_read_tr16_b128(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    return h_ds_read_tr16(
-        lw, op, "ds_read_tr16_b128", "i16x8_raw", "_llvm_amdgcn_ds_read_tr16_b128", 8, 16);
-}
-
 /* tile.ds_read_tr_b8 has NO _op_tile_ds_read_tr_b8 method in lower_hip.py: the
  * HIP source backend has no 8-bit transpose-read lowering (the IRBuilder exposes
  * ds_read_tr_b8 but only the LLVM path lowers it). Python's getattr-dispatch
@@ -1646,7 +1640,6 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_PERMLANEX16, rocke_h_op_tile_permlanex16},
         {ROCKE_OP_TILE_BYTE_PERM, rocke_h_op_tile_byte_perm},
         {ROCKE_OP_TILE_DS_READ_TR16_B64, rocke_h_op_tile_ds_read_tr16_b64},
-        {ROCKE_OP_TILE_DS_READ_TR16_B128, rocke_h_op_tile_ds_read_tr16_b128},
         {ROCKE_OP_TILE_DS_READ_TR_B8, rocke_h_op_tile_ds_read_tr_b8},
         /* barriers / scheduling */
         {ROCKE_OP_TILE_SYNC, rocke_h_op_tile_sync},

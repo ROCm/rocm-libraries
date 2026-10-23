@@ -87,15 +87,50 @@ factors, zero scales, isolated K groups, and all FP4 code products at lane/K
 boundaries. Exact fixtures use bounded products and explicitly rounded FP32
 tensor scaling; they do not establish arbitrary-input accumulation behavior.
 
+Run these host checks from the platform directory with test dependencies installed
+and a fresh `rocke_engine` extension on `PYTHONPATH`:
+
+```sh
+ROCKE_BACKEND=python python -m pytest -q \
+    tests/core/test_gfx1250_nvfp4.py tests/test_rocke_ci_static.py \
+    tests/instances/test_gfx1250_nvfp4_example.py tests/core/test_optimization_barrier.py
+ROCKE_BACKEND=cpp ROCKE_CPP_STRICT=1 python -m pytest -q \
+    tests/core/test_gfx1250_nvfp4.py tests/test_rocke_ci_static.py \
+    tests/instances/test_gfx1250_nvfp4_example.py tests/core/test_optimization_barrier.py
+ROCKE_BACKEND=both ROCKE_CPP_STRICT=1 python -m pytest -q \
+    tests/core/test_gfx1250_nvfp4.py tests/test_rocke_ci_static.py \
+    tests/instances/test_gfx1250_nvfp4_example.py tests/core/test_optimization_barrier.py
+python tests/instances/rocke_ir_parity_harness.py \
+    --check tests/golden/rocke_representative_ir_sha256.json
+```
+
+The representative registry includes BF16/FP16 outputs at M32/N48 and
+K128/K256. The strict `both` registry test builds each case in Python and compares
+Python/native LLVM lowering through serialized IR. The golden checks emitted-byte
+stability and expected LLVM20/22 rejections; NVFP4 emits at the `llvm23` flavor.
+`tools/check_byte_identity.py` uses a separate inventory of paired Python/C
+emitters, so its family totals do not establish NVFP4 builder coverage.
+
+The host example test calls `nvfp4_gemm.main`; the GPU test below launches
+`nvfp4_gemm_verify` as a subprocess for COMGR/HIP, BF16/FP16, and both shapes:
+
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 ROCKE_BACKEND=both ROCKE_CPP_STRICT=1 \
 ROCKE_REQUIRE_GFX1250=1 python -m pytest -q -s \
     tests/instances/test_gfx1250_nvfp4_numeric.py
 ```
 
-Run from the platform directory with a matching gfx1250 device, LLVM 23
-COMGR/HIP, NumPy/ml_dtypes, and a freshly built C++ extension. COMGR compares
+Run from the platform directory with a matching gfx1250 device, NumPy/ml_dtypes,
+a freshly built C++ extension, and COMGR/HIP supporting the `llvm23` emission
+flavor. The flavor describes rocKE's emitted intrinsic ABI; it does not require
+the compiler major to be exactly 23. COMGR compares
 Python/C++ LLVM bytes; the HIP route compiles Python-generated HIP source.
+`ROCKE_REQUIRE_GFX1250=1` makes missing dependencies or the requested device fail
+the GPU lane. Host hashes and engine agreement do not establish GPU correctness.
+Record the tested source revision, device architecture, compiler/runtime versions,
+command, and pass/skip/failure counts for each GPU campaign. If a merge receives
+only host validation, state that explicitly and retain the revision of earlier
+GPU evidence.
 
 This is a packed-input GEMM. Quantization, conversion of foreign scale layouts,
 NVFP4 output quantization, partial tiles, a dynamic K loop, and a full C++ builder
