@@ -135,6 +135,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   NumWarmups: 1
   EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
   CpuThreads: 1
   DataInitTypeBeta: 1
   KernelTime: false
