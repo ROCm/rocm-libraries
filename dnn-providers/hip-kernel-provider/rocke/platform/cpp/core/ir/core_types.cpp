@@ -1046,7 +1046,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_store_vN",
 
     /* tile.* global pointer offset without inbounds */
-    "tile.global_ptr_offset"};
+    "tile.global_ptr_offset",
+
+    /* tile.* kernel abort */
+    "tile.trap"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1336,7 +1339,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_store_vN            */ false,
 
     /* tile.* global pointer offset without inbounds (address arithmetic) */
-    /* global_ptr_offset          */ true};
+    /* global_ptr_offset          */ true,
+
+    /* tile.* kernel abort (effectful) */
+    /* trap                       */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

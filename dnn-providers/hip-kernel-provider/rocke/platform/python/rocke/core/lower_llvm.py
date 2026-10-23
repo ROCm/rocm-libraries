@@ -786,6 +786,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
+    "trap": "declare void @llvm.trap()",
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -6026,6 +6027,10 @@ class _Lowerer:
         self._need("s.setprio")
         level = int(op.attrs["level"])
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
+
+    def _op_tile_trap(self, op: Op) -> None:
+        self._need("trap")
+        self._current().emit("  call void @llvm.trap()")
 
     # ----- buffer-rsrc + async DRAM->LDS -----
 

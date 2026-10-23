@@ -2115,6 +2115,13 @@ void rocke_b_s_setprio(rocke_ir_builder_t* b, int level)
     rocke_i_op0(b, ROCKE_OP_TILE_S_SETPRIO, NULL, 0, &attrs);
 }
 
+void rocke_b_trap(rocke_ir_builder_t* b)
+{
+    if(!rocke_i_live(b))
+        return;
+    rocke_i_op0(b, ROCKE_OP_TILE_TRAP, NULL, 0, NULL);
+}
+
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level)
 {
     rocke_attr_map_t attrs;

@@ -479,6 +479,10 @@ typedef enum rocke_opcode
      * IRBuilder.global_ptr_offset). Appended so no existing index shifts. */
     ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
 
+    /* Kernel abort (Python IRBuilder.trap). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_TILE_TRAP,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1718,6 +1722,9 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_amount,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
+/* Abort the kernel (Python IRBuilder.trap): llvm.trap, s_trap 2. After a trap
+ * every later HIP call in the process fails, so it is a last resort. */
+void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
 void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int group);

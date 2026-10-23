@@ -193,6 +193,13 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`); HIP `__builtin_trap()` |
+
+`trap()` ends the kernel with a hardware exception. What the host sees depends on the HIP runtime:
+the launch reports an error, or the runtime aborts the process. Either way the process cannot use the
+GPU afterwards, so a trap is a last resort: put it under an `scf_if` on a condition the host already
+checks before the launch, to stop a launch that slipped past that check before it reaches a memory
+access.
 
 `static_for` and `unroll` are Python-time helpers that emit no `scf.for`; they execute their body in Python and emit straight-line IR.
 

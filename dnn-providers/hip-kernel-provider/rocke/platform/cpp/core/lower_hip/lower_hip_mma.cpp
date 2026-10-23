@@ -913,6 +913,14 @@ static rocke_status_t rocke_h_op_tile_s_setprio(rocke_h_lowerer_t* lw, const roc
     return lw->status;
 }
 
+/* def _op_tile_trap(self, op):
+ *     self._emit("__builtin_trap();") */
+static rocke_status_t rocke_h_op_tile_trap(rocke_h_lowerer_t* lw, const rocke_op_t* /*op*/)
+{
+    rocke_h_emitf(lw, "__builtin_trap();");
+    return lw->status;
+}
+
 /* ============================== vector =================================== */
 
 /* def _op_vector_bitcast(self, op): memcpy into the result type. */
@@ -1683,6 +1691,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_S_BARRIER_BARE, rocke_h_op_tile_s_barrier_bare},
         {ROCKE_OP_TILE_S_WAITCNT, rocke_h_op_tile_s_waitcnt},
         {ROCKE_OP_TILE_S_SETPRIO, rocke_h_op_tile_s_setprio},
+        {ROCKE_OP_TILE_TRAP, rocke_h_op_tile_trap},
         {ROCKE_OP_TILE_IGLP_OPT, rocke_h_op_tile_iglp_opt},
         {ROCKE_OP_TILE_SCHED_BARRIER, rocke_h_op_tile_sched_barrier},
         {ROCKE_OP_TILE_SCHED_GROUP_BARRIER, rocke_h_op_tile_sched_group_barrier},

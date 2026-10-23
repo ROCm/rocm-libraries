@@ -2667,6 +2667,28 @@ void case_global_ptr_offset()
         fail("tile.global_ptr_offset must be pure", __LINE__);
 }
 
+/* trap: the C++ builder's op lowers to a call of llvm.trap, declared once, and
+ * to __builtin_trap() in HIP source; it is effectful, so nothing removes it. */
+void build_trap(rocke_ir_builder_t* b)
+{
+    rocke_b_trap(b);
+}
+
+void case_trap()
+{
+    const std::string ir = lower_one("trap", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(ir, "  call void @llvm.trap()\n", 1);
+    EXPECT_IR_COUNT(ir, "declare void @llvm.trap()\n", 1);
+
+    const std::string hip = lower_one_hip("trap_hip", build_trap, "gfx90a");
+    EXPECT_IR_COUNT(hip, "__builtin_trap();", 1);
+
+    if(rocke_opcode_is_pure(ROCKE_OP_TILE_TRAP))
+        fail("tile.trap must not be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_TILE_TRAP)) != "tile.trap")
+        fail("ROCKE_OP_TILE_TRAP must be named tile.trap", __LINE__);
+}
+
 void case_gfx1250_tdm_gated()
 {
     const struct
@@ -3768,6 +3790,7 @@ const TestCase k_cases[] = {
     {"gfx1250_tdm_group_types", case_gfx1250_tdm_group_types},
     {"global_ptr_to_i64", case_global_ptr_to_i64},
     {"global_ptr_offset", case_global_ptr_offset},
+    {"trap", case_trap},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},

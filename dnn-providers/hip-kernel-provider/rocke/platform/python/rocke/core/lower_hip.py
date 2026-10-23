@@ -1450,6 +1450,9 @@ class _Lowerer:
     def _op_tile_sched_barrier(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_sched_barrier({int(op.attrs.get('mask', 0))});")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        self._emit("__builtin_trap();")
+
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])
         c = int(op.attrs["count"])

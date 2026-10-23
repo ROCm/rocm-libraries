@@ -304,6 +304,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sched.group.barrier",
      "declare void @llvm.amdgcn.sched.group.barrier(i32 immarg, i32 immarg, i32 immarg)"},
     {"s.setprio", "declare void @llvm.amdgcn.s.setprio(i16 immarg)"},
+    {"trap", "declare void @llvm.trap()"},
     {"s.waitcnt", "declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"},
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) nocapture "

@@ -5330,6 +5330,20 @@ class IRBuilder:
             raise ValueError("s_setprio level must be in 0..3")
         self._op("tile.s_setprio", attrs={"level": int(level)})
 
+    def trap(self) -> None:
+        """Abort the kernel: ``call void @llvm.trap()`` (HIP
+        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+
+        A taken trap ends the kernel with a hardware exception. What the host
+        sees depends on the HIP runtime: the launch reports an error, or the
+        runtime aborts the process. Either way the process cannot use the GPU
+        afterwards. So a trap is the last resort, for a condition the host
+        checks before the launch and that must still never reach a memory
+        access on the device. Put it under a branch on that condition
+        (``scf_if``).
+        """
+        self._op("tile.trap")
+
     # ----- buffer resources + async DRAM->LDS -----
 
     def global_ptr_add(self, ptr: Value, byte_off: Value) -> Value:
