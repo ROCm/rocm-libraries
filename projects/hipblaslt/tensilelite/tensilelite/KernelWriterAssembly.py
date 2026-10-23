@@ -16319,7 +16319,7 @@ class KernelWriterAssembly(KernelWriter):
     # Only complete-tile waves reach here (StreamK Role C branched away earlier).
     module = Module("SubtileFusedEpilogue")
     from .Components.CustomSchedule import megaFusedEpilogueCompatible
-    if not megaFusedEpilogueCompatible(kernel):
+    if not kernel["RMSEpilogue"] or not megaFusedEpilogueCompatible(kernel):
       return module
     # Native CMS path: the emitter runs the shared RMS schedule with a CMS layout that reads
     # SS=True accumulators directly (no AGPR transpose, no synthesized tile view, so no
