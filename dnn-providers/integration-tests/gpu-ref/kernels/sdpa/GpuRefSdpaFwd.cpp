@@ -103,6 +103,22 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     const long long liveQ = liveLength(args.seqLenQ, args.seqLenQStride, b, args.seqQ);
     const long long liveKv = liveLength(args.seqLenKv, args.seqLenKvStride, b, args.seqKv);
 
+    // Element offset of logical key `skv` (row base, without head and dim terms) in a dense or
+    // paged K / V. Only called for skv < liveKv, so unused table entries are never read.
+    auto rowOffset = [&](const int* table,
+                         long long strB,
+                         long long strT,
+                         long long blockSize,
+                         const SdpaStrides& str,
+                         long long skv) -> long long {
+        if(table == nullptr)
+        {
+            return b * str.s[0] + skv * str.s[2];
+        }
+        long long block = static_cast<long long>(table[b * strB + (skv / blockSize) * strT]);
+        return block * str.s[0] + (skv % blockSize) * str.s[2];
+    };
+
     // Sliding-window offset (matches CpuFpReferenceSdpa Step 3): bottom-right alignment uses the
     // batch's valid lengths.
     long long windowOffset = args.topLeftAlignment ? 0 : (liveKv - liveQ);
@@ -120,8 +136,13 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         {
             long long qIdx = b * args.qStr.s[0] + h * args.qStr.s[1] + sq * args.qStr.s[2]
                              + d * args.qStr.s[3];
-            long long kIdx = b * args.kStr.s[0] + kvHeadK * args.kStr.s[1] + skv * args.kStr.s[2]
-                             + d * args.kStr.s[3];
+            long long kIdx = rowOffset(args.pageTableK,
+                                       args.pageTableKStrB,
+                                       args.pageTableKStrT,
+                                       args.blockSizeK,
+                                       args.kStr,
+                                       skv)
+                             + kvHeadK * args.kStr.s[1] + d * args.kStr.s[3];
             dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
         }
         COMPUTE_TYPE s = dot * static_cast<COMPUTE_TYPE>(args.scale);
@@ -217,8 +238,13 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
         probability = storeSoftmaxProbability(probability);
 
-        long long vIdx = b * args.vStr.s[0] + kvHeadV * args.vStr.s[1] + skv * args.vStr.s[2]
-                         + dv * args.vStr.s[3];
+        long long vIdx = rowOffset(args.pageTableV,
+                                   args.pageTableVStrB,
+                                   args.pageTableVStrT,
+                                   args.blockSizeV,
+                                   args.vStr,
+                                   skv)
+                         + kvHeadV * args.vStr.s[1] + dv * args.vStr.s[3];
         weighted += probability * toAccum(v[vIdx]);
     }
 

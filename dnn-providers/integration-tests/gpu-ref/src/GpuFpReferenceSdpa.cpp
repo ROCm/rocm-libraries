@@ -63,7 +63,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        const int32_t* seqLenQPtr,
                                        const int32_t* seqLenKvPtr,
                                        int64_t seqLenQStride,
-                                       int64_t seqLenKvStride)
+                                       int64_t seqLenKvStride,
+                                       const SdpaPagedSide& pagedK,
+                                       const SdpaPagedSide& pagedV)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -102,6 +104,14 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.seqLenKv = seqLenKvPtr;
     args.seqLenQStride = static_cast<long long>(seqLenQStride);
     args.seqLenKvStride = static_cast<long long>(seqLenKvStride);
+    args.pageTableK = pagedK.table;
+    args.pageTableKStrB = static_cast<long long>(pagedK.strideBatch);
+    args.pageTableKStrT = static_cast<long long>(pagedK.strideTable);
+    args.blockSizeK = static_cast<long long>(pagedK.blockSize);
+    args.pageTableV = pagedV.table;
+    args.pageTableVStrB = static_cast<long long>(pagedV.strideBatch);
+    args.pageTableVStrT = static_cast<long long>(pagedV.strideTable);
+    args.blockSizeV = static_cast<long long>(pagedV.blockSize);
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));

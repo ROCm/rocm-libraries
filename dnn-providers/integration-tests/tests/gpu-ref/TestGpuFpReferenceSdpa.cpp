@@ -1825,3 +1825,151 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const ::testing::TestParamInfo<GpuPaddingCase>& info) {
                              return std::string(info.param.name);
                          });
+
+// ============================================================================
+// Paged KV cache: GPU reference (direct page-table addressing) vs CPU reference
+// (gather then dense). NHD cache strides, shuffled blocks, and NaN in the null
+// block 0 and in every unused slot, which neither reference may read.
+// ============================================================================
+
+class TestGpuSdpaFwdPagedFp32 : public ::testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestGpuSdpaFwdPagedFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t blockSize = GetParam();
+    constexpr int64_t BATCH = 3;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 5;
+    constexpr int64_t MAX_KV = 11;
+    constexpr int64_t D = 16;
+    const std::vector<int32_t> lensQ = {5, 2, 4};
+    const std::vector<int32_t> lensKv = {11, 4, 7};
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const int64_t tableSize = (MAX_KV + blockSize - 1) / blockSize;
+    const int64_t numBlocks = 1 + BATCH * tableSize;
+
+    Tensor<float> q({BATCH, H, SQ, D});
+    const std::vector<int64_t> cDims = {numBlocks, H, blockSize, D};
+    const std::vector<int64_t> nhdStrides = {blockSize * H * D, D, H * D, 1};
+    Tensor<float> kCache(cDims, nhdStrides);
+    Tensor<float> vCache(cDims, nhdStrides);
+    Tensor<float> bias({SQ, MAX_KV});
+    Tensor<int32_t> seqLenQ({BATCH, 1, 1, 1});
+    Tensor<int32_t> seqLenKv({BATCH, 1, 1, 1});
+    Tensor<int32_t> pageTable({BATCH, 1, tableSize, 1});
+    q.fillWithRandomValues(-1.0f, 1.0f, SEED_Q);
+    bias.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 3);
+    kCache.fillWithValue(nan);
+    vCache.fillWithValue(nan);
+    Tensor<float> kSrc({1, 1, 1, D});
+    int32_t nextBlock = 0;
+    uint32_t seed = SEED_K;
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        seqLenQ.setHostValue(lensQ[static_cast<size_t>(b)], b, 0, 0, 0);
+        seqLenKv.setHostValue(lensKv[static_cast<size_t>(b)], b, 0, 0, 0);
+        const int64_t used = (lensKv[static_cast<size_t>(b)] + blockSize - 1) / blockSize;
+        for(int64_t t = 0; t < tableSize; ++t)
+        {
+            // Shuffled block ids from 1; unused entries point at the null block 0.
+            const auto id
+                = static_cast<int32_t>(t < used ? ((nextBlock++ * 7) % (numBlocks - 1)) + 1 : 0);
+            pageTable.setHostValue(id, b, 0, t, 0);
+        }
+        for(int64_t j = 0; j < lensKv[static_cast<size_t>(b)]; ++j)
+        {
+            const int64_t block = pageTable.getHostValue(b, 0, j / blockSize, 0);
+            for(int64_t h = 0; h < H; ++h)
+            {
+                kSrc.fillWithRandomValues(-1.0f, 1.0f, seed++);
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    kCache.setHostValue(kSrc.getHostValue(0, 0, 0, d), block, h, j % blockSize, d);
+                    vCache.setHostValue(
+                        -kSrc.getHostValue(0, 0, 0, (d + 1) % D), block, h, j % blockSize, d);
+                }
+            }
+        }
+    }
+    q.memory().hostData();
+    kCache.memory().hostData();
+    vCache.memory().hostData();
+    bias.memory().hostData();
+    seqLenQ.memory().hostData();
+    seqLenKv.memory().hostData();
+    pageTable.memory().hostData();
+
+    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
+    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
+    Tensor<float> oCpu({BATCH, H, SQ, D});
+    Tensor<float> oGpu({BATCH, H, SQ, D});
+    Tensor<float> lseCpu({BATCH, H, SQ, 1});
+    Tensor<float> lseGpu({BATCH, H, SQ});
+    oGpu.fillWithValue(nan);
+    lseGpu.fillWithValue(nan);
+    CpuFpReferenceSdpa::forward(q,
+                                kDense,
+                                vDense,
+                                oCpu,
+                                0.3f,
+                                static_cast<const TensorBase<float>*>(&bias),
+                                -1,
+                                0,
+                                false,
+                                &lseCpu,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                &seqLenQ,
+                                &seqLenKv);
+    GpuFpReferenceSdpa::fprop(q,
+                              kCache,
+                              vCache,
+                              oGpu,
+                              0.3f,
+                              static_cast<TensorBase<float>*>(&bias),
+                              -1,
+                              0,
+                              false,
+                              &lseGpu,
+                              SdpaSoftmaxProbabilityMode::FLOAT,
+                              &seqLenQ,
+                              &seqLenKv,
+                              &pageTable,
+                              &pageTable,
+                              MAX_KV);
+
+    assertAllClose(oCpu, oGpu, gpuRefFwdTolerance<float>());
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                const float cpu = lseCpuView.getHostValue(std::vector<int64_t>{b, h, s, 0});
+                const float gpu = lseGpuView.getHostValue(std::vector<int64_t>{b, h, s});
+                if(std::isinf(cpu))
+                {
+                    EXPECT_EQ(gpu, cpu) << "b=" << b << " h=" << h << " s=" << s;
+                }
+                else
+                {
+                    EXPECT_NEAR(gpu, cpu, gpuRefFwdTolerance<float>())
+                        << "b=" << b << " h=" << h << " s=" << s;
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaFwdPagedFp32,
+                         ::testing::Values(1, 3, 4),
+                         [](const ::testing::TestParamInfo<int64_t>& info) {
+                             return "BlockSize" + std::to_string(info.param);
+                         });
