@@ -455,8 +455,9 @@ namespace
         // the implementation returns invalid_value; accept both (AISPARSE-904).
         EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 0, 10), st_size, st_val);
         EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 2, -1), st_size, st_val);
-        // A positive stride with a batch count of one is not covered by the header.
-        EXPECT_STATUS_IN(rocsparse_ell_set_strided_batch(d, 1, 5), st_ok, st_size, st_val);
+        // A positive stride with a batch count of one is not covered by the header; the
+        // library accepts it.
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 1, 5), st_ok);
         ASSERT_EQ(rocsparse_ell_set_strided_batch(d, 3, 20), st_ok);
         rocsparse_int batch_count = 0;
         EXPECT_EQ(rocsparse_spmat_get_strided_batch(d, &batch_count), st_ok);

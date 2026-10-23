@@ -186,18 +186,11 @@ namespace
             ASSERT_TRUE(dA.ok());
             hyb_guard hyb;
             ASSERT_TRUE(hyb.d);
-            const rocsparse_status st
-                = csr2hyb<T>(handle, m, n, descr.d, dA.val, dA.ptr, dA.ind, hyb.d, c.width, c.part);
-            if(c.part == rocsparse_hyb_partition_user && c.width == 0
-               && st != rocsparse_status_success)
-            {
-                // rocsparse_csr2hyb.h does not say whether a user ELL width of 0 is valid.
-                EXPECT_TRUE(st == rocsparse_status_invalid_value
-                            || st == rocsparse_status_invalid_size)
-                    << st;
-                GTEST_SKIP() << "csr2hyb rejects a user ELL width of 0";
-            }
-            ASSERT_EQ(st, rocsparse_status_success);
+            // rocsparse_csr2hyb.h does not say whether a user ELL width of 0 is valid; the
+            // library accepts it.
+            ASSERT_EQ(
+                csr2hyb<T>(handle, m, n, descr.d, dA.val, dA.ptr, dA.ind, hyb.d, c.width, c.part),
+                rocsparse_status_success);
             ASSERT_EQ(hybmv<T>(handle, c.trans, palpha, descr.d, hyb.d, dx.ptr, pbeta, dy.ptr),
                       rocsparse_status_success);
             break;

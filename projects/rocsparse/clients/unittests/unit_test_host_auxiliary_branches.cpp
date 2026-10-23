@@ -168,20 +168,6 @@ namespace
         return status == rocsparse_status_invalid_size || status == rocsparse_status_invalid_value;
     }
 
-    // A descriptor whose `init` flag is false is internal state: the headers do
-    // not document not_initialized for these calls, so only a failure is checked.
-    void expect_status(rocsparse_status status, rocsparse_status expected)
-    {
-        if(expected == rocsparse_status_not_initialized)
-        {
-            EXPECT_NE(status, rocsparse_status_success);
-        }
-        else
-        {
-            EXPECT_EQ(status, expected);
-        }
-    }
-
     class HostAuxiliaryBranchesHandle : public HandleTest
     {
     };
@@ -348,36 +334,36 @@ TEST(HostAuxiliaryBranches, spmat_null_and_uninitialized_both_debug_modes)
     rocsparse_format     fmt{};
 
     const auto spmat_calls = [&](rocsparse_spmat_descr d, rocsparse_status expected) {
-        expect_status(rocsparse_spmat_set_values(d, any_ptr), expected);
-        expect_status(rocsparse_spmat_get_values(d, &vp), expected);
-        expect_status(rocsparse_spmat_get_nnz(d, &i64), expected);
-        expect_status(rocsparse_spmat_set_nnz(d, 4), expected);
-        expect_status(rocsparse_spmat_get_size(d, &i64, &i64, &i64), expected);
-        expect_status(rocsparse_spmat_get_format(d, &fmt), expected);
-        expect_status(rocsparse_spmat_get_strided_batch(d, &bc), expected);
-        expect_status(rocsparse_spmat_set_strided_batch(d, 1), expected);
-        expect_status(rocsparse_coo_set_strided_batch(d, 1, 0), expected);
-        expect_status(rocsparse_csr_set_strided_batch(d, 1, 0, 0), expected);
-        expect_status(rocsparse_csc_set_strided_batch(d, 1, 0, 0), expected);
-        expect_status(rocsparse_ell_set_strided_batch(d, 1, 0), expected);
-        expect_status(rocsparse_coo_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
-        expect_status(rocsparse_csr_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
-        expect_status(rocsparse_csc_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
-        expect_status(rocsparse_bsr_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
-        expect_status(rocsparse_csr_get(d, &i64, &i64, &i64, &vp, &vp, &vp, &it, &it, &ib, &dt),
-                      expected);
-        expect_status(rocsparse_coo_get(d, &i64, &i64, &i64, &vp, &vp, &vp, &it, &ib, &dt),
-                      expected);
-        expect_status(rocsparse_coo_aos_get(d, &i64, &i64, &i64, &vp, &vp, &it, &ib, &dt),
-                      expected);
-        expect_status(rocsparse_ell_get(d, &i64, &i64, &vp, &vp, &i64, &it, &ib, &dt), expected);
-        expect_status(
+        EXPECT_EQ(rocsparse_spmat_set_values(d, any_ptr), expected);
+        EXPECT_EQ(rocsparse_spmat_get_values(d, &vp), expected);
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &i64), expected);
+        EXPECT_EQ(rocsparse_spmat_set_nnz(d, 4), expected);
+        EXPECT_EQ(rocsparse_spmat_get_size(d, &i64, &i64, &i64), expected);
+        EXPECT_EQ(rocsparse_spmat_get_format(d, &fmt), expected);
+        EXPECT_EQ(rocsparse_spmat_get_strided_batch(d, &bc), expected);
+        EXPECT_EQ(rocsparse_spmat_set_strided_batch(d, 1), expected);
+        EXPECT_EQ(rocsparse_coo_set_strided_batch(d, 1, 0), expected);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(d, 1, 0, 0), expected);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(d, 1, 0, 0), expected);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(d, 1, 0), expected);
+        EXPECT_EQ(rocsparse_coo_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
+        EXPECT_EQ(rocsparse_csr_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
+        EXPECT_EQ(rocsparse_csc_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
+        EXPECT_EQ(rocsparse_bsr_set_pointers(d, any_ptr, any_ptr, any_ptr), expected);
+        EXPECT_EQ(rocsparse_csr_get(d, &i64, &i64, &i64, &vp, &vp, &vp, &it, &it, &ib, &dt),
+                  expected);
+        EXPECT_EQ(rocsparse_coo_get(d, &i64, &i64, &i64, &vp, &vp, &vp, &it, &ib, &dt), expected);
+        EXPECT_EQ(rocsparse_coo_aos_get(d, &i64, &i64, &i64, &vp, &vp, &it, &ib, &dt), expected);
+        EXPECT_EQ(rocsparse_ell_get(d, &i64, &i64, &vp, &vp, &i64, &it, &ib, &dt), expected);
+        EXPECT_EQ(
             rocsparse_sell_get(d, &i64, &i64, &i64, &i64, &i64, &vp, &vp, &vp, &it, &it, &ib, &dt),
             expected);
     };
 
     in_both_debug_modes([&] {
         spmat_calls(nullptr, rocsparse_status_invalid_pointer);
+        // A descriptor whose `init` flag is false is internal state: the headers do
+        // not document not_initialized for these calls, the library returns it.
         A->init = false;
         spmat_calls(A, rocsparse_status_not_initialized);
         A->init = true;

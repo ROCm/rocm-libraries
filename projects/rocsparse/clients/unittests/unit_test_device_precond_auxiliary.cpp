@@ -88,11 +88,9 @@ TEST_F(PrecondAuxiliary, copy_mat_info_keeps_the_iterative_triangular_solve_anal
 
     const auto trans       = rocsparse_operation_none;
     size_t     buffer_size = 0;
-    const auto st          = rocsparse_scsritsv_buffer_size(
-        handle, trans, m, nnz, descr, dval.ptr, dptr.ptr, dind.ptr, src, &buffer_size);
-    if(st == rocsparse_status_not_implemented)
-        GTEST_SKIP() << "iterative triangular solve is not implemented here";
-    ASSERT_EQ(st, rocsparse_status_success);
+    ASSERT_EQ(rocsparse_scsritsv_buffer_size(
+                  handle, trans, m, nnz, descr, dval.ptr, dptr.ptr, dind.ptr, src, &buffer_size),
+              rocsparse_status_success);
     device_vector<char> buffer{buffer_size ? buffer_size : size_t{1}};
     ASSERT_TRUE(buffer.ptr);
     ASSERT_EQ(rocsparse_scsritsv_analysis(handle,
