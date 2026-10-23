@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -135,3 +135,18 @@ hipsparseStatus_t hipsparseSpSV_solve(hipsparseHandle_t           handle,
                        nullptr,
                        spsvDescr->externalBuffer));
 }
+
+#if(defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12011)
+hipsparseStatus_t hipsparseSpSV_updateMatrix(hipsparseHandle_t     handle,
+                                             hipsparseSpSVDescr_t  spsvDescr,
+                                             void*                 newValues,
+                                             hipsparseSpSVUpdate_t updatePart)
+{
+    if(spsvDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    return HIPSPARSE_STATUS_SUCCESS;
+}
+#endif
