@@ -46,6 +46,7 @@ from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultipl
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, \
     isMxf4SubtilePath
 from ..Common.DataType import DataType
+from ..Common.RegisterLease import DeadRegisterLease
 from ..Component import GlobalWriteComponents
 from ..Component import Component
 from ..SolutionStructs import Solution
@@ -4666,18 +4667,16 @@ class GlobalWriteBatchWriter:
     # two sba elements' 4-slot windows are never read again.  For subtile kernels the whole
     # ValuC block is pool-RESERVED, so reuse those slots for the batchB pack (vPack2) and the
     # blended store src (vSD) instead of fresh cvt scratch -- never grows the high-water.
-    # The reuse writes two 4-register windows: [sumIdx0 .. sumIdx0+3] (vPack2) and
-    # [sumIdx1 .. sumIdx1+3] (vSD).  Correctness needs them 2-aligned (dwordx4 store) AND
-    # mutually DISJOINT -- the real hazard is overlap, not parity.  e.g. sumIdx1==sumIdx0+2
-    # passes a parity check but makes the windows alias at regs sumIdx0+2..+3, corrupting the
-    # store silently.  Require >= one full window apart.
+    # Lease the two reuse windows from a DeadRegisterLease over batchA's two dead 4-slot
+    # windows rather than asserting safety by hand: the pool rejects overlapping windows at
+    # construction, and lease(align=2) both enforces the dwordx4 2-alignment and physically
+    # cannot return a window overlapping the first.  So the old hazard (e.g. sumIdx1==sumIdx0+2,
+    # which passes a parity check but aliases regs sumIdx0+2..+3 and corrupts the store) is now
+    # impossible by construction, and an unaligned or too-close window fails loud instead.
     FOLD_VALUC_WINDOW = 4
-    assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0 \
-           and abs(sumIdx1 - sumIdx0) >= FOLD_VALUC_WINDOW, \
-      f"ValuC reuse needs 2-aligned, disjoint {FOLD_VALUC_WINDOW}-reg batchA windows " \
-      f"(sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
-    vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
-    vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
+    valuCReuse = DeadRegisterLease([(sumIdx0, FOLD_VALUC_WINDOW), (sumIdx1, FOLD_VALUC_WINDOW)])
+    vPack2     = valuCReuse.lease(FOLD_VALUC_WINDOW, align=2)  # batchA dead slots -> batchB packed data
+    vSD        = valuCReuse.lease(FOLD_VALUC_WINDOW, align=2)  # batchA dead slots -> blended store src
 
     permlane16 = getattr(self, "_permlane16Active", False)
 
