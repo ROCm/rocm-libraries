@@ -26,6 +26,7 @@
 #include "internal/precond/rocsparse_gtsv.h"
 #include "rocsparse_grid.hpp"
 
+#include "gtsv_nopivot_index.hpp"
 #include "gtsv_nopivot_strided_batch_device.h"
 #include "gtsv_nopivot_strided_batch_medium_device.h"
 #include "gtsv_nopivot_thomas_device.h"
@@ -515,25 +516,6 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    // stride * columns + inner fits in limit.
-    static bool
-        gtsv_strided_index_fits(int64_t stride, int64_t columns, int64_t inner, int64_t limit)
-    {
-        if(stride < 0 || columns < 0 || inner < 0 || inner > limit)
-        {
-            return false;
-        }
-        if(columns == 0)
-        {
-            return true;
-        }
-        if(stride > std::numeric_limits<int64_t>::max() / columns)
-        {
-            return false;
-        }
-        return stride * columns <= limit - inner;
-    }
-
     // Straight-line batch offsets for the workspace arrays are rocsparse_int
     // multiplies by hipBlockIdx_y, as before the grid clamp. The user strides
     // stay int64 on that path. When the workspace index would overflow, or the
@@ -552,9 +534,8 @@ namespace rocsparse
 
         const int64_t last  = static_cast<int64_t>(batch_count) - 1;
         const int64_t limit = std::numeric_limits<rocsparse_int>::max();
-        return gtsv_strided_index_fits(
-                   static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, limit)
-               && gtsv_strided_index_fits(num_spikes, last, num_spikes - 1, limit);
+        return gtsv_index_fits(static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, limit)
+               && gtsv_index_fits(num_spikes, last, num_spikes - 1, limit);
     }
 
     template <uint32_t BLOCKSIZE, typename T, bool GRID_STRIDE>

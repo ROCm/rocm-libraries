@@ -34,7 +34,7 @@ namespace rocsparse
     // hipBlockIdx_y in that type, matching the pre-clamp kernel. The grid-stride
     // instantiation uses the 64-bit loop index so the offset can pass 32 bits.
     template <bool GRID_STRIDE>
-    __device__ __forceinline__ auto gtsv_nopivot_batch_offset(rocsparse_int stride, int64_t bidy)
+    ROCSPARSE_DEVICE_ILF auto gtsv_nopivot_batch_offset(rocsparse_int stride, int64_t bidy)
     {
         if constexpr(GRID_STRIDE)
         {
@@ -50,7 +50,7 @@ namespace rocsparse
     // User strides are int64 on both paths. The straight-line batch index stays
     // the block index, so the multiply is the pre-clamp one.
     template <bool GRID_STRIDE>
-    __device__ __forceinline__ int64_t gtsv_nopivot_batch_offset_wide(int64_t stride, int64_t bidy)
+    ROCSPARSE_DEVICE_ILF int64_t gtsv_nopivot_batch_offset_wide(int64_t stride, int64_t bidy)
     {
         if constexpr(GRID_STRIDE)
         {

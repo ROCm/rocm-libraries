@@ -27,6 +27,7 @@
 #include "rocsparse_grid.hpp"
 
 #include "gtsv_nopivot_device.h"
+#include "gtsv_nopivot_index.hpp"
 #include "gtsv_nopivot_medium_device.h"
 #include "gtsv_nopivot_thomas_device.h"
 
@@ -519,29 +520,12 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    // stride * columns + inner fits in limit. columns == 0 checks inner alone.
-    static bool gtsv_index_fits(int64_t stride, int64_t columns, int64_t inner, int64_t limit)
-    {
-        if(stride < 0 || columns < 0 || inner < 0 || inner > limit)
-        {
-            return false;
-        }
-        if(columns == 0)
-        {
-            return true;
-        }
-        if(stride > std::numeric_limits<int64_t>::max() / columns)
-        {
-            return false;
-        }
-        return stride * columns <= limit - inner;
-    }
-
     // The straight-line medium kernels reproduce the pre-clamp index expressions.
-    // Those expressions are 32-bit (unsigned, because the column is unsigned) when
-    // rocsparse_int is 32-bit, and they wrap once m * (n - 1) passes 2^32 even
-    // though grid.y still holds every tile. Past that, or past the grid.y cap,
-    // the grid-stride kernel keeps the 64-bit indexing.
+    // The column is unsigned. m * column is a 32-bit unsigned product when
+    // rocsparse_int is 32-bit, and a 64-bit product when it is 64-bit. The
+    // backward kernel takes num_spikes as int, so num_spikes * column stays a
+    // 32-bit unsigned product in both builds. Past either limit, or past the
+    // grid.y cap, the grid-stride kernel keeps the 64-bit indexing.
     template <uint32_t NUM_RHS>
     static bool gtsv_no_pivot_medium_straight(rocsparse_handle handle,
                                               rocsparse_int    m,
@@ -556,12 +540,15 @@ namespace rocsparse
             return false;
         }
 
-        const int64_t last  = static_cast<int64_t>(n) - 1;
-        const int64_t limit = std::is_same<rocsparse_int, int32_t>::value
-                                  ? static_cast<int64_t>(std::numeric_limits<uint32_t>::max())
-                                  : std::numeric_limits<int64_t>::max();
-        return gtsv_index_fits(static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, limit)
-               && gtsv_index_fits(num_spikes, last, num_spikes - 1, limit);
+        const int64_t last = static_cast<int64_t>(n) - 1;
+        const int64_t modified_limit
+            = std::is_same<rocsparse_int, int32_t>::value
+                  ? static_cast<int64_t>(std::numeric_limits<uint32_t>::max())
+                  : std::numeric_limits<int64_t>::max();
+        const int64_t spike_limit = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+        return gtsv_index_fits(
+                   static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, modified_limit)
+               && gtsv_index_fits(num_spikes, last, num_spikes - 1, spike_limit);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T, bool GRID_STRIDE>

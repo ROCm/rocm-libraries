@@ -36,7 +36,7 @@ namespace rocsparse
     // is no longer the block index, and m * column has to be able to exceed
     // 32 bits while the launch still fits in grid.y.
     template <uint32_t NUM_RHS, bool GRID_STRIDE>
-    __device__ __forceinline__ auto gtsv_no_pivot_rhs_column(int rhs, int64_t bidy)
+    ROCSPARSE_DEVICE_ILF auto gtsv_no_pivot_rhs_column(int rhs, int64_t bidy)
     {
         if constexpr(GRID_STRIDE)
         {
