@@ -52,30 +52,6 @@ using extra_ut::SpgeamDescrH;
 using extra_ut::SpmatH;
 using extra_ut::status_is;
 
-namespace rocsparse_ut
-{
-    template <>
-    inline rocsparse_datatype dt_of<_Float16>()
-    {
-        return rocsparse_datatype_f16_r;
-    }
-    template <>
-    inline rocsparse_datatype dt_of<rocsparse_bfloat16>()
-    {
-        return rocsparse_datatype_bf16_r;
-    }
-    template <>
-    inline _Float16 scalar<_Float16>(float v)
-    {
-        return static_cast<_Float16>(v);
-    }
-    template <>
-    inline rocsparse_bfloat16 scalar<rocsparse_bfloat16>(float v)
-    {
-        return rocsparse_bfloat16(v);
-    }
-}
-
 namespace
 {
     using extra_ut::Bsr;
