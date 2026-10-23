@@ -503,9 +503,6 @@ class Registry:
             out.append(cell)
         return out
 
-    def cell_key(self, cell: dict) -> tuple:
-        return tuple(cell.get(f) for f in self.cell_fields)
-
     def request(self, cell: dict):
         try:
             return self.request_cls(**self.fixed, **self.pin, **cell)
@@ -1224,8 +1221,13 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
     """``(report lines, GAP shape count, covered shape count)``: each shape in its
     first matching category of outside cell axes, declined by registry, covered,
     GAP. "Covered" is coverage by the manifest's cell axes: a shape's sequence
-    lengths are not checked against what the catalog's kernels can serve."""
-    listed = {registry.cell_key(cell) for cell in registry.cells()}
+    lengths are not checked against what the catalog's kernels can serve.
+
+    A shape's cell is keyed without ``enumerate.selector_fields``: they only steer
+    the registry's rule, a merged cell carries none of them (`cell_spaces`), and a
+    graph need not set them or take a listed value."""
+    fields = [f for f in registry.cell_fields if f not in registry.selector_fields]
+    listed = {tuple(cell.get(f) for f in fields) for cell in registry.cells()}
     controlled = set(registry.fixed) | set(registry.cell_fields)
     categories = OrderedDict(
         (name, {"shapes": 0, "cells": set(), "detail": Counter()})
@@ -1234,7 +1236,7 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
     distinct = set()
     for raw in shapes:
         shape = {k: v for k, v in raw.items() if not k.startswith("_")}
-        key = tuple(registry.coerce(f, shape.get(f)) for f in registry.cell_fields)
+        key = tuple(registry.coerce(f, shape.get(f)) for f in fields)
         distinct.add(key)
         outside = []
         for name, value in shape.items():
@@ -1267,7 +1269,7 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
                     f"the registry cannot judge shape {shape!r} "
                     f"(AttributeError): {exc}"
                 ) from exc
-            cell_text = _show(dict(zip(registry.cell_fields, key)))
+            cell_text = _show(dict(zip(fields, key)))
             if not ok:
                 category, detail = "declined by registry", f"{cell_text}: {why}"
             elif key in listed:

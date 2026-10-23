@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import json
 import os
 import re
 import subprocess
@@ -737,3 +738,34 @@ def test_empty_dedup_keys_are_byte_identical_to_none(
             (capsys.readouterr().out, out.read_bytes() if out.exists() else None)
         )
     assert outputs[0] == outputs[1]
+
+
+def _shapes_run(manifest, tmp_path, capsys, shapes) -> str:
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    (data := tmp_path / "shapes.json").write_text(json.dumps(shapes))
+    out = tmp_path / "c.yaml"
+    capsys.readouterr()
+    argv = ["--manifest", str(path), "--out", str(out), "--shapes", str(data)]
+    assert re_.main(argv) == 0
+    return capsys.readouterr().out
+
+
+def test_the_shapes_report_keys_a_merged_cell_without_its_selector_fields(
+    split, tmp_path, capsys
+):
+    """A graph carries no selector field (or a value the cells do not list): the
+    selector fields only steer the rule, so the shape lands in its merged cell."""
+    out = _shapes_run(
+        _dedup(split),
+        tmp_path,
+        capsys,
+        [{"hdim": 64}, {"hdim": 128, "batch": 16, "seqlen": 4096}],
+    )
+    assert "  covered: 2 shapes, 2 cells\n" in out, out
+    assert "  GAP: 0 shapes, 0 cells\n" in out, out
+
+
+def test_a_shape_outside_the_merged_cells_is_still_a_gap(split, tmp_path, capsys):
+    out = _shapes_run(_dedup(split), tmp_path, capsys, [{"hdim": 256}, {"hdim": 64}])
+    assert "  covered: 1 shapes, 1 cells\n" in out, out
+    assert "  GAP: 1 shapes, 1 cells\n    1 x {hdim: 256}\n" in out, out

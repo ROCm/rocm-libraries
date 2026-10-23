@@ -728,7 +728,8 @@ so many cells name the same kernel and `--out` fails on duplicate names.
   so a knob the combos vary (`num_segments`) must be a `performance` knob to reach the
   name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
   naming the combo. A selector field must be a cell field and must not be a `feature` or
-  `performance` field.
+  `performance` field. `--shapes` keys a shape's cell without the selector fields too: a
+  graph need not set them (it never sets `kv_block_size`) nor take a listed value.
 - `neutral_fields` lists spec fields that do not change the compiled kernel. Before
   merging, each spec's neutral fields take the cell's default spec's value, so specs
   differing only there are one kernel. The manifest author owns that claim: a field is
