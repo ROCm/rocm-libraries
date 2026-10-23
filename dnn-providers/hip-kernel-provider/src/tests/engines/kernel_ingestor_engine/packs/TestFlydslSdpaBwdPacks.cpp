@@ -191,10 +191,12 @@ TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)
     ASSERT_EQ(slots.size(), 63U);
     ASSERT_EQ(offset, 452U);
 
+    size_t kernels = 0;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
         {
+            ++kernels;
             const auto& signature = kernel.source.signature;
             ASSERT_EQ(signature.size(), slots.size()) << kernel.name;
             for(size_t slot = 0; slot < slots.size(); ++slot)
@@ -207,6 +209,7 @@ TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)
             }
         }
     }
+    EXPECT_EQ(kernels, MERGED_ROWS);
 }
 
 } // namespace

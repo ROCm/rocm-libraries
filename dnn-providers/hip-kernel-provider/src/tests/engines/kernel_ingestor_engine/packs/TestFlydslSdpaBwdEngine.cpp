@@ -599,14 +599,6 @@ size_t workspaceBytesOf(const SdpaBwdSpec& spec, const RowSpec& row)
 // graph_match
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMergedGraph, RegistersItsFourSymbols)
-{
-    EXPECT_NE(graphMatcher(MERGED), nullptr);
-    EXPECT_NE(kernelMatcher(MERGED), nullptr);
-    EXPECT_NE(scorer(MERGED), nullptr);
-    EXPECT_NE(&dispatchHandler(MERGED), nullptr);
-}
-
 TEST(TestFlydslSdpaBwdMergedGraph, ServesThePlainGraphTheSharedMatcherAccepts)
 {
     EXPECT_TRUE(std::holds_alternative<SdpaBwdProblem>(matchSdpaBwdSpec(baseSpec())));
@@ -746,6 +738,11 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesAPaddedObjectAtOrBelowItsTile)
     EXPECT_TRUE(servesDims(32, 32));
     EXPECT_TRUE(servesDims(32, 16));
     EXPECT_TRUE(servesDims(8, 8));
+    for(const int64_t headDim : {64, 96, 128, 160, 192})
+    {
+        // The padded tile-32 object serves no head dim above its tile.
+        EXPECT_FALSE(servesDims(headDim, headDim)) << "D " << headDim;
+    }
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN1_ServesTheSmallestTilePaddedBelowIt)
@@ -796,6 +793,52 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAGqaPackedObjectOnlyAGroupedQueryG
     EXPECT_TRUE(serves(specOf(grouped), plainRow()));
 }
 
+TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenEveryPackedSpanFits32Bits)
+{
+    RowSpec packed = plainRow(128);
+    packed.dtype = "bf16";
+    packed.gqaPack = 1;
+    RowSpec unpacked = plainRow(128);
+    unpacked.dtype = "bf16";
+    const auto multiQuery = [](int64_t seq) {
+        Shape shape;
+        shape.batch = 1;
+        shape.heads = 32;
+        shape.kvHeads = 1;
+        shape.seqQ = seq;
+        shape.seqKv = seq;
+        shape.headDimQk = 128;
+        shape.headDimV = 128;
+        return specOf(shape, DataType::BFLOAT16);
+    };
+    // Each head's slab is 128 MiB, which fits; the 32 heads of the group span 4 GiB, which
+    // does not, so only an object that rebases per head serves the graph.
+    ASSERT_TRUE(graphMatch(multiQuery(524288)).has_value());
+    EXPECT_FALSE(serves(multiQuery(524288), packed));
+    EXPECT_TRUE(serves(multiQuery(524288), unpacked));
+    EXPECT_TRUE(serves(multiQuery(4096), packed));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAPackedObjectOnlyWhenThePackSplitIsExact)
+{
+    RowSpec packed = plainRow();
+    packed.gqaPack = 1;
+    const auto multiQuery = [](int64_t seq) {
+        Shape shape;
+        shape.batch = 1;
+        shape.heads = 8;
+        shape.kvHeads = 1;
+        shape.seqQ = seq;
+        shape.seqKv = seq;
+        return specOf(shape);
+    };
+    // Every packed span fits at 50000 rows, but (Sq * G + 2 * block_q) * Sq passes 2^31.
+    ASSERT_TRUE(graphMatch(multiQuery(50000)).has_value());
+    EXPECT_FALSE(serves(multiQuery(50000), packed));
+    EXPECT_TRUE(serves(multiQuery(50000), plainRow()));
+    EXPECT_TRUE(serves(multiQuery(4096), packed));
+}
+
 TEST(TestFlydslSdpaBwdMergedKernel, EN3_ServesAMultiQueryGraphWithAPackedObject)
 {
     RowSpec packed = plainRow();
@@ -827,6 +870,20 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseHeadStrideIsNotAMultip
     });
     EXPECT_FALSE(serves(padded, biasRow()));
     EXPECT_TRUE(serves(withBias(baseSpec(), false), biasRow()));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, BI8_DeclinesABiasWhoseRowStrideIsBelowThePaddedKeyLength)
+{
+    // Row strides are multiples of 8, but the bias chunk contract needs a row to span
+    // ceil8(Skv) elements.
+    const auto withRowStride = [](int64_t rowStride) {
+        return baseSpec().withEdit([rowStride](SdpaBwdGraph& g) {
+            auto& bias = addBias(g);
+            bias.strides = {g.heads * g.seqQ * rowStride, g.seqQ * rowStride, rowStride, 1};
+        });
+    };
+    EXPECT_FALSE(serves(withRowStride(8), biasRow()));
+    EXPECT_TRUE(serves(withRowStride(16), biasRow()));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, BI8_ServesABroadcastBiasWhoseBroadcastAxesHaveNoStride)
@@ -1431,6 +1488,8 @@ TEST(TestFlydslSdpaBwdMergedSeed, A32BitDeviceTensorIsCopiedIntoTheLowHalfOfAZer
     EXPECT_EQ(values.at("philox_offset1"), WORKSPACE + 8);
     EXPECT_TRUE(dump.seedUploaded);
     EXPECT_TRUE(dump.seedCopiedFromDevice);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(dump.seedSource), ptrOf(sdpa_bwd_uid::SEED));
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(dump.offsetSource), ptrOf(sdpa_bwd_uid::OFFSET));
     EXPECT_TRUE(dump.seedWords.empty());
 }
 
@@ -1447,6 +1506,8 @@ TEST(TestFlydslSdpaBwdMergedSeed, APassByValueSeedIsWrittenAsFourWords)
         EXPECT_EQ(values.at("philox_offset1"), WORKSPACE + 8);
         EXPECT_TRUE(dump.seedUploaded);
         EXPECT_FALSE(dump.seedCopiedFromDevice);
+        EXPECT_EQ(dump.seedSource, nullptr);
+        EXPECT_EQ(dump.offsetSource, nullptr);
         return dump.seedWords;
     };
     using Words = std::vector<uint32_t>;

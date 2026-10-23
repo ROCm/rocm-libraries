@@ -578,6 +578,43 @@ TEST(TestFlydslSdpaBwdMatcher, LY5_OverlappingOutputElementsDecline)
     })));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, LY6_ZeroSequenceStrideOnAMultiRowAxisDeclines)
+{
+    for(const auto& operand : {NamedOperand{"q", "Q"},
+                               NamedOperand{"k", "K"},
+                               NamedOperand{"v", "V"},
+                               NamedOperand{"o", "O"},
+                               NamedOperand{"do", "dO"}})
+    {
+        SCOPED_TRACE(operand.tensor);
+        const std::string tensor = operand.tensor;
+        declined(
+            baseline().withEdit([tensor](SdpaBwdGraph& g) { g.tensor(tensor).strides[2] = 0; }),
+            "layout",
+            std::string(operand.label) + " (uid ");
+    }
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("do").strides[2] = 0; }),
+             "layout",
+             "sequence axis (extent 16) has stride 0");
+
+    // The contiguous stride of the same tensor, and zero batch and head strides, stay legal.
+    EXPECT_TRUE(accepted(baseline()));
+    const auto broadcast = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        g.tensor("v").strides[0] = 0;
+        g.tensor("v").strides[1] = 0;
+    }));
+    ASSERT_TRUE(broadcast.has_value());
+    expectStrides(broadcast->v, 0, 0, 64);
+
+    // A single-row axis has no row to alias.
+    SdpaBwdSpec singleRow;
+    singleRow.seqKv = 1;
+    const auto single
+        = accepted(singleRow.withEdit([](SdpaBwdGraph& g) { g.tensor("v").strides[2] = 0; }));
+    ASSERT_TRUE(single.has_value());
+    EXPECT_EQ(single->v.seq, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Stats
 // ---------------------------------------------------------------------------
