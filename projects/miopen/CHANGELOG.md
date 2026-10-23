@@ -3,6 +3,18 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.3 for ROCm 10.3.0
+
+### Resolved Issues
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
+  `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
+  the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
+  applicable CK instance was never tuned.
+* [Conv] Fixed deterministic-mode tuning of the 3D grouped backward-weights CK xdlops solver, which
+  used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
+  first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
+  one applicable CK instance the enumeration never terminated.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
@@ -31,6 +43,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   batch size below 4.
 * [Conv] Fixed invalid Composable Kernel (CK) perf-config entries in the gfx1201 and gfx1100
   system databases that MIOpen could not resolve, which caused a fallback to untuned defaults.
+* [Conv] Fixed incorrect gfx1200 backward-weights results from Composable Kernel
+  `DeviceGroupedConvBwdWeight_Xdl_CShuffleV3` wave32 instances by removing the gfx1200 system
+  database entries that the CK host-side support check now rejects. Affected problems use the
+  next recorded solver instead.
 * [BatchNorm] Fixed just-in-time compilation failures for the batch normalization kernels on
   non-GFX9 targets by restricting the Welford reduction's DPP inline assembly to GFX9 instead
   of a per-architecture denylist.
@@ -54,6 +70,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
+* [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
+  stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
+  including a 3x3 112x112 tile.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
@@ -93,7 +112,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [LRN][LayerNorm] Fixed grid alignment and out-of-bounds thread access on gfx1250.
 * [Conv] Removed stale gfx950 grouped backward-weights SystemDB entries that caused suboptimal solver selection.
 * [Conv][Windows] Fixed system-database path resolution to use the MIOpen module location.
-* [Conv] Fixed system-database fallback so MI308X (gfx942) resolves to a usable tuned database.
+* [Conv] Fixed system-database fallback so certain gfx942 machines resolve to a usable tuned database.
 * Fixed JSON performance logs (`MIOPEN_PERFORMANCE_LOGS`) dropping the last solver evaluated during Find, so naive convolution solvers are no longer omitted.
 * Fixed a build failure when compiling against GCC 15's libstdc++ under C++20.
 

@@ -26,7 +26,8 @@ def test_repeated_lane_requires_inactive_access(target, opcode, address, active)
         LdsAccess(0, 0, 0, width),
         LdsAccess(1, 0, address, width, active=active),
     ]
-    request = dict(target=target, opcode=opcode, wave_size=64, accesses=accesses)
+    wave_size = min(resolve_profile(target).supported_wave_sizes)
+    request = dict(target=target, opcode=opcode, wave_size=wave_size, accesses=accesses)
 
     if active:
         with pytest.raises(LdsPredictionError, match="one active access per lane"):
@@ -44,14 +45,16 @@ def test_repeated_lane_requires_inactive_access(target, opcode, address, active)
 @pytest.mark.parametrize("width", [4, 8, 16])
 @pytest.mark.parametrize("direction", ["read", "write"])
 def test_profile_capacity_and_alignment_boundaries(target, width, direction):
-    capacity = {"gfx90a": 65536, "gfx942": 65536, "gfx950": 163840}[target]
+    capacity = {"gfx90a": 65536, "gfx942": 65536, "gfx950": 163840, "gfx1201": 65536}[
+        target
+    ]
     assert resolve_profile(target).lds_capacity_bytes == capacity
 
     def predict(address):
         return predict_lds_conflicts(
             target=target,
             opcode=f"ds_{direction}_b{width * 8}",
-            wave_size=64,
+            wave_size=min(resolve_profile(target).supported_wave_sizes),
             accesses=[LdsAccess(0, 0, address, width)],
         )
 
