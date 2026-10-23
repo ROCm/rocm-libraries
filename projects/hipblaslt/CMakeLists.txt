@@ -806,6 +806,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DESTINATION "${_tensilelite_install_dest}/Tensile"
         COMPONENT tests
     )
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/how-to/choose-gemm-for-solution.md"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/Utilities"
+        RENAME gemm_problem_for_solution.md
+        COMPONENT tests
+    )
 
     # Keep client tooling under the existing TheRock test-artifact include.
     install(

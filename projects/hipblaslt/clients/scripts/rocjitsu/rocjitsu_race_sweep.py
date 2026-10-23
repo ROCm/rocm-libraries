@@ -58,6 +58,8 @@ def solution_report(job, result, backend):
     observed = sum(c["status"] == "PASSED" for c in result["cases"])
     skipped = [c for c in result["cases"] if c["status"] == "SKIPPED"]
     state = "FAIL" if result["failed"] else "PASS"
+    if result.get("batch_errors"):
+        state = "BATCH FAILED"
     notes = "; ".join(result["errors"])
     if skipped:
         if not result["failed"]:
@@ -78,6 +80,10 @@ def solution_report(job, result, backend):
         f"{result['batch_seconds']:.2f}" if "batch_seconds" in result else "—",
         notes or "Identity, numerical and race checks passed",
     ]
+
+
+def failed_batch_ids(results):
+    return sorted({r.get("batch_id", r["id"]) for r in results if r["failed"]})
 
 
 def render_report(manifest, summary):
@@ -101,6 +107,10 @@ def render_report(manifest, summary):
         "",
         "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit. "
         "SKIPPED cases did not run; PASS WITH SKIPS validates only the remaining cases.",
+        "BATCH FAILED means the process had a diagnostic or incomplete evidence; "
+        "it does not identify every member index as a source of failure.",
+        f"Failed batches: {len(failed_batch_ids(summary['results']))}/"
+        f"{len({j.get('batch_id', j['id']) for j in manifest['jobs']})}.",
         f"Full shapes, identities, commands and logs are in the uploaded `sweep-{backend}/` artifacts.",
         "",
         "| Solution index | Result | Numerical passes | Target dispatches | Batch seconds | Notes |",
@@ -504,6 +514,8 @@ def classify_bench_batch(jobs, text, returncode):
     ends = [m.end() for m in re.finditer(r"^\s*--kernel name:[^\n]*", text, re.M)]
     expected_records = sum(len(j["cases"]) for j in jobs)
     batch_errors = []
+    if returncode:
+        batch_errors.append(f"Batch client exited {returncode}")
     if len(ends) != expected_records:
         batch_errors.append(
             f"Batch expected {expected_records} record boundaries, observed {len(ends)}"
@@ -991,6 +1003,7 @@ def run(args):
             counts=dict(counts),
             missing=missing,
             unstarted_cases=unstarted,
+            failed_batch_ids=failed_batch_ids(summary["results"]),
         )
         summary["accounted_cases"] = (
             sum(counts.values()) + len(missing) + len(unstarted)
