@@ -85,9 +85,9 @@ dependencies = [
     "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
     "cmake",
     "invoke",
-    "filelock",
-    "numpy",
-    "hip-python",
+    "filelock>=3.0.0",
+    "numpy>=1.26.0",
+    "hip-python; sys_platform != 'win32'",
 ]
 
 [project.scripts]
@@ -99,15 +99,40 @@ TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
 TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
 
 [dependency-groups]
-dev = [
-    "rocisa",
+# Compatibility constraints belong here; selected tool versions are pinned in uv.lock.
+# Share pytest versions with source-only checks that need no installed project or ROCm SDK.
+test-tools = [
+    # Pytest >=5.4.1 avoids multiprocessing exception crashes in older releases.
+    # https://github.com/pytest-dev/pytest/issues/5971
     "pytest>=5.4.1",
+    "pytest-timeout",
     "pytest-xdist>=1.32.0",
-    "pytest-cov",
     "syrupy",
-    "filelock",
-    "invoke",
+]
+# The TensileLite suites use rocisa in addition to the shared Python test tools.
+test = [{ include-group = "test-tools" }, "rocisa"]
+# These tools inspect or format source without importing TensileLite or building rocisa.
+lint = ["flake8", "bandit", "black", "isort"]
+# Package build requirements belong in the owning package's build-system.requires.
+# rocisa's backend is also needed by no-isolation development builds and by
+# requirements.txt consumers that build rocisa outside package build isolation.
+build = ["scikit-build-core>=0.10"]
+# Keep report-only coverage checks usable without the project or native tools.
+coverage = ["coverage[toml]>=7.0.0"]
+# Plain uv sync provides the complete test, build, reporting, and contributor toolset.
+dev = [
+    { include-group = "test" },
+    { include-group = "build" },
+    { include-group = "coverage" },
+    { include-group = "lint" },
+    "ninja",
+    "tox",
+    "pytest-cov>=4.0.0",
+    "lcov-cobertura",
+    "pycobertura",
     "pre-commit",
+    "mutmut>=3.6",
+    "memory-profiler",
 ]
 
 [build-system]

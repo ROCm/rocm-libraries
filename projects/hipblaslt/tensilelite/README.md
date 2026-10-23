@@ -42,6 +42,61 @@ tox -e coverage-unit
 
 Runs only Python unit tests.
 
+### Updating Python dependencies
+
+Declare dependency compatibility ranges in `pyproject.toml`; `uv.lock` records the resolved
+versions. Groups describe the dependencies needed for different tasks:
+
+| Group | Purpose |
+|---|---|
+| `test-tools` | Pytest and its shared plugins, usable by source-only checks without TensileLite or ROCm. |
+| `test` | Includes `test-tools` and rocisa for tests that use the native extension. |
+| `lint` | flake8, Bandit, Black, and isort for source inspection and formatting without package installation. |
+| `build` | The rocisa backend for existing no-isolation consumers. |
+| `coverage` | Coverage report tools, independently installable to inspect existing results. |
+| `dev` | Includes `test`, `lint`, `build`, and `coverage`, plus the remaining contributor tools; selected by default. |
+
+`test` and `dev` include the smaller groups so dependency constraints are declared once.
+Keep compatibility requirements in `pyproject.toml` and selected versions in `uv.lock`.
+After editing a declaration, run these commands from `projects/hipblaslt/tensilelite`:
+
+```bash
+uv lock
+python scripts/generate_requirements.py
+python scripts/generate_requirements.py --check
+```
+
+`uv lock` updates the lock while preferring existing locked versions that still satisfy
+the declarations. It does not automatically upgrade packages or select the lowest versions.
+For packages without a reusable lock entry, uv defaults to the highest compatible version.
+Keep the existing lock when regenerating it; deleting it discards those version selections.
+
+To deliberately change a locked version, use one of these commands in place of `uv lock`,
+then regenerate and check the requirements files as above:
+
+| Intent | Command |
+|---|---|
+| Upgrade one package | `uv lock --upgrade-package black` |
+| Select a specific release | `uv lock --upgrade-package black==24.4.0` |
+| Upgrade all packages | `uv lock --upgrade` |
+
+Review the lock and generated requirements diffs for version changes. See uv's
+[upgrade rules](https://docs.astral.sh/uv/concepts/projects/sync/#upgrading-locked-package-versions)
+and [resolution strategies](https://docs.astral.sh/uv/concepts/resolution/#resolution-strategy).
+
+The generated, fully pinned requirements files support pip consumers: `requirements.txt`
+contains project and build dependencies, `requirements-test.txt` adds test dependencies
+without replacing an already installed rocisa artifact, and `requirements-dev.txt` contains
+the full development profile including local rocisa. Run installations from this directory
+so the relative rocisa path resolves. Install the development profile, or tox separately,
+when you need the `tox` command; the base requirements no longer install it.
+
+The unit suite checks that the lock and generated requirements are current. This runs
+in the existing `coverage-unit` CI job and the affected-tests hook for dependency changes.
+Tox provisions uv for this check; it still installs test environments with pip. For direct pytest
+runs in a pip-only source environment, install uv separately or run through tox. Installed-artifact
+tests skip this repository-only check.
+
 ### Pre-commit hook (affected tests)
 
 An opt-in git pre-commit hook runs the unit + characterization tests affected by
