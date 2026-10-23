@@ -23,6 +23,11 @@
 #define CK_TILE_BP_PT_EXP_ROW_MASK 1
 #endif
 
+// Vectorized KV lean TDM issue; the same default as fmha_batch_prefill_qr_tdm_page_tile_window.hpp.
+#ifndef CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
+#define CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE 1
+#endif
+
 namespace ck_tile {
 
 // Paged QR schedule for batch prefill. K and V share one page ID per logical N128 tile;
@@ -167,6 +172,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr bool kLeanD64Loop = Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
                                          Geometry::kN == 128 && Problem::kPageBlockSize >= 64 &&
                                          !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+
+    // Lean TDM issue (per-wave descriptor inputs derived once, see make_lean_issue_state): the D64
+    // lean loop, and the vectorized P64 D128 tiles, which take only the issue path and keep the
+    // D128 general loop.
+    static constexpr bool kLeanIssue =
+        kLeanD64Loop ||
+        (CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE && detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+         Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
+         Problem::kPageBlockSize == 64 && !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
 
     // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
     // are issued right after it, and the Q and K/V load latencies overlap instead of adding up.
@@ -568,15 +582,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         index_t page_id3_raw_scalar   = 0;
 
         static_assert(1 <= k1_loops);
-        // kLeanD64Loop: per-wave TDM descriptor inputs, derived once (see tdm_issue_lean).
+        // kLeanIssue: per-wave TDM descriptor inputs, derived once (see tdm_issue_lean).
         [[maybe_unused]] const auto k_lean_issue = [&]() {
-            if constexpr(kLeanD64Loop)
+            if constexpr(kLeanIssue)
                 return k_dram_window.make_lean_issue_state(k_lds_write_window);
             else
                 return 0;
         }();
         [[maybe_unused]] const auto v_lean_issue = [&]() {
-            if constexpr(kLeanD64Loop)
+            if constexpr(kLeanIssue)
                 return v_dram_window.make_lean_issue_state(v_lds_write_window);
             else
                 return 0;
@@ -698,6 +712,28 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         merge_sequences(sequence<0, full_n_iter>{}, b_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
+#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
+                    constexpr index_t kPvRows = Schedule::kPvWmmasPerStage;
+                    constexpr index_t kPvM1 =
+                        (Geometry::kPvMIter - 1) * kPvRows / Geometry::kPvMIter;
+                    auto keep_v = [&](auto o) {
+                        constexpr index_t kO   = decltype(o)::value;
+                        constexpr index_t kN   = kO % Policy::OutputFragments::kNumN;
+                        constexpr index_t kMsb = kO / Policy::OutputFragments::kNumN % 2;
+                        BWarpTensor kept;
+                        kept.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                            merge_sequences(sequence<0, kN * 2 + kMsb>{}, b_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+                        Policy::KeepOperandLive(kept);
+                    };
+                    // After the wait of row ordinal - 1: the V slices it drained were kept
+                    // allocated until here.
+                    if constexpr(Policy::template PvGroupedWait<Mode>() && ordinal >= kPvM1 + 2 &&
+                                 Policy::template PvWaitRow<kPvRows, kPvM1>(ordinal - 1))
+                        static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal - 1),
+                                   ordinal - 1,
+                                   1>{}([&](auto q) { keep_v(q); });
+#endif
                     CWarpTensor c_warp_tensor;
                     c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(number<0>{},
                                                                                 o_acc.at(wmma));
@@ -705,9 +741,22 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     // Vectorized KV: the last M iteration is the last reader of the V operand
                     // registers that the next V read refills (see WaitWmmaOperandsRead).
                     static_assert(Policy::OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter);
+#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT // only the stage's last row keeps the RAW fence
+                    constexpr bool kRawFence = !Policy::template PvGroupedWait<Mode>() ||
+                                               ordinal == Policy::Schedule::kPvWmmasPerStage - 1;
+#else
+                    constexpr bool kRawFence = true;
+#endif
                     if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                                 m_iter == Geometry::kPvMIter - 1)
+                                 m_iter == Geometry::kPvMIter - 1 && kRawFence)
                         Policy::WaitWmmaOperandsRead(c_warp_tensor);
+#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT // slices pending at the RAW fence
+                    if constexpr(Policy::template PvGroupedWait<Mode>() && ordinal == kPvRows - 1 &&
+                                 ordinal > kPvM1)
+                        static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal),
+                                   ordinal,
+                                   1>{}([&](auto q) { keep_v(q); });
+#endif
                     o_acc.at(wmma) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
@@ -851,8 +900,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 move_tile_window(v_dram_window, {kN0, 0});
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
                 v_dram_window.set_page_id(page_id1);
-                if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
-                             std::is_same_v<VDataType, bf16_t>)
+                if constexpr(kLeanIssue && !kLeanD64Loop)
+                {
+                    v_dram_window.tdm_issue_lean(tdm_config_v, v_lds_write_window, v_lean_issue);
+                }
+                else if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
+                                  std::is_same_v<VDataType, bf16_t>)
                 {
                     v_dram_window.tdm_load_to_lds(
                         tdm_config_v,
@@ -1200,7 +1253,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 move_tile_window(k_dram_window, {kN0, 0});
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
                 k_dram_window.set_page_id(page_id2);
-                if constexpr(kLeanD64Loop)
+                if constexpr(kLeanIssue)
                     k_dram_window.tdm_issue_lean(tdm_config_k, k_lds_write_window, k_lean_issue);
                 else
                     load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
