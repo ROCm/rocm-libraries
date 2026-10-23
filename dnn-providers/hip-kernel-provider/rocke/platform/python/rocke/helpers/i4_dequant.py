@@ -201,15 +201,16 @@ def dequant_i4_byte_to_bf8_pair(
 # OCP MX fp4 / fp6 unpack (P54)
 # ---------------------------------------------------------------------
 #
-# fp4 layout per OCP MX spec: 1 sign bit, 2 exponent bits (bias 1), 1
-# mantissa bit. ``00 -> +0``, ``08 -> -0`` (treated as 0 in ML), denormal
-# encoding ``01 -> 0.5``. We implement the canonical 16-entry codebook
-# and lookup directly: simpler + faster than reconstructing the bit
-# fields and matches OCP-spec semantics exactly.
+# fp4 layout per OCP MX spec (E2M1): 1 sign bit, 2 exponent bits (bias 1),
+# 1 mantissa bit. ``0000 -> +0``, ``1000 -> -0``, and the one subnormal
+# code ``0001 -> 0.5``. We implement the canonical 16-entry codebook and
+# look it up directly: simpler + faster than reconstructing the bit
+# fields, and it matches the spec's values exactly.
 #
-# fp6 layout per OCP MX spec: 1 sign bit, 3 exponent bits (bias 3), 2
-# mantissa bits. 64-entry codebook keyed by the raw 6-bit value;
-# denormals at exponent 0 become 0.0 (ML convention).
+# The 6-bit table below is the OCP MX E3M2 format: 1 sign bit, 3 exponent
+# bits (bias 3), 2 mantissa bits, keyed by the raw 6-bit value. Exponent
+# field 0 is zero or subnormal: ``2^(1-3) * (m / 4)``; codes 0 and 32 are
+# +0 and -0. Exponent field 1..7 is normal: ``2^(e-3) * (1 + m/4)``.
 
 
 _FP4_CODEBOOK = (
@@ -254,8 +255,8 @@ def unpack_fp4_byte_to_pair_f32(
     """One packed fp4 byte -> two f32 values via the OCP MX codebook.
 
     Reference: OCP "MX FP4" spec — 1 sign bit + 2 exponent bits + 1
-    mantissa bit. Denormals at exponent 0 are treated as 0.0; the
-    codebook above lists every representable value.
+    mantissa bit. Exponent field 0 holds +0 / -0 and the subnormal
+    +0.5 / -0.5; the codebook above lists every representable value.
 
     Layout assumption (matches the i4 unpack convention):
     ``low = byte & 0xF`` (bits 0..3), ``high = (byte >> 4) & 0xF``
@@ -272,19 +273,25 @@ def unpack_fp4_byte_to_pair_f32(
     return _select_fp4_value(b, low_code), _select_fp4_value(b, high_code)
 
 
-# 64-entry fp6 codebook per OCP MX spec.
-_FP6_CODEBOOK: Tuple[float, ...] = tuple(
-    (
-        # Positive sign (bit 5 = 0).
-        # Exponent = 0 → all denormals collapse to 0.0 (ML convention).
-        # Exponent in 1..7: value = 2^(e-3) × (1 + m/4).
-        (1.0 if (i & 0b011111) == 0 else 0.0)
-        if ((i >> 2) & 0b111) == 0
-        else (2.0 ** (((i >> 2) & 0b111) - 3) * (1.0 + (i & 0b11) / 4.0))
-    )
-    * (1.0 if (i >> 5) == 0 else -1.0)
-    for i in range(64)
-)
+def _fp6_e3m2_value(code: int) -> float:
+    """The OCP MX E3M2 value of one raw 6-bit code.
+
+    Bit 5 is the sign, bits 4..2 the exponent (bias 3), bits 1..0 the
+    mantissa. Exponent field 0 is zero or subnormal, ``2^(1-3) * (m / 4)``,
+    so codes 0 and 32 are +0.0 and -0.0. Exponent field 1..7 is normal,
+    ``2^(e-3) * (1 + m/4)``. The format has no infinity and no NaN.
+    """
+    exponent = (code >> 2) & 0b111
+    mantissa = code & 0b11
+    if exponent == 0:
+        magnitude = 2.0 ** (1 - 3) * (mantissa / 4.0)
+    else:
+        magnitude = 2.0 ** (exponent - 3) * (1.0 + mantissa / 4.0)
+    return -magnitude if code & 0b100000 else magnitude
+
+
+# 64-entry fp6 (E3M2) codebook per OCP MX spec, indexed by the raw code.
+_FP6_CODEBOOK: Tuple[float, ...] = tuple(_fp6_e3m2_value(i) for i in range(64))
 
 
 def _select_fp6_value(b: IRBuilder, code_i32: Value) -> Value:
