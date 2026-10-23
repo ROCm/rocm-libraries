@@ -173,7 +173,7 @@ if(GPU_TARGETS MATCHES "gfx1250")
         target_compile_definitions(${test_target} PRIVATE
             CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN=${use_builtin})
         target_compile_options(${test_target} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
-        set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
+        set_property(TEST ${test_target} APPEND PROPERTY LABELS CK_TILE_GEMM_STREAMK_TESTS)
         list(APPEND CK_TILE_GFX1250_STREAMK_TEST_TARGETS ${test_target})
     endforeach()
     add_custom_target(ck_tile_gemm_streamk_tests

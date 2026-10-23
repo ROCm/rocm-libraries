@@ -118,8 +118,7 @@ class TestCkTileMultiReduceThreadwise : public ::testing::Test
         auto input_strides_tuple = make_shape_tuple.template operator()<InputDim>(input_strides);
 
         if(!Kernel::IsSupportedArgument(
-               total_reduce_elements,
-               input_strides_tuple)) // output tensor's continuous dimension
+               total_reduce_elements, input_strides_tuple, output_number_elements))
         {
             throw std::runtime_error("Wrong! Arguments not supported!\n");
         }
