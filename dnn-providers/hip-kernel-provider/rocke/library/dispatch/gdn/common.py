@@ -105,8 +105,10 @@ class GdnDecodeRequest(OperatorRequest):
       configuration of that tile: ``tuning_knobs`` is the knob dict a sweep
       recorded next to the id (``{"dpp_reduce": True, ...}``). ``tuning_id``
       ``"auto"`` with no knobs is the tile's base configuration (every knob
-      off), which is what ``auto`` runs. A pin that does not resolve raises
-      ``PinRefused``; it is never mapped to another configuration.
+      off), which is what ``auto`` runs. As for ``spec_id`` (the shared
+      dispatch convention), an empty or whitespace ``tuning_id`` means
+      ``"auto"``. A pin that does not resolve raises ``PinRefused``; it is
+      never mapped to another configuration.
     """
 
     batch: int
@@ -192,7 +194,7 @@ class GdnDecodeTunedSpec:
 
     def build(self, arch: str | None = None):
         return _decode_kernel_module(self.arch).build_gdn_decode(
-            self.kernel_spec, arch=arch or self.arch
+            self.kernel_spec, arch=self.arch if arch is None else arch
         )
 
     def launch_grid(self, batch: int) -> Tuple[int, int, int]:

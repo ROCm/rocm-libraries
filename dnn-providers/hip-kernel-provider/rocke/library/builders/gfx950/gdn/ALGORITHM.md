@@ -501,7 +501,9 @@ Each gate kind registers the Cartesian product of:
 This produces 180 stable tile identities per gate kind:
 `nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>` for GDN and the same with a `kda_`
 prefix for KDA. `is_valid_spec()` is the only legality authority and admits 54 tiles for the
-default D128 shape. Production `auto` deterministically prefers GDN's `(2, 16, 8)` whenever
+default D128 shape. KDA accepts only `DK = DV = 128` today, so 54 of its 180 tiles are admissible
+and the other 126 stay registered but unselectable until that limit is lifted. Production `auto`
+deterministically prefers GDN's `(2, 16, 8)` whenever
 legal; batch changes grid size, not GDN tile selection. A caller may pin an exact tile by its
 `spec_id`.
 
@@ -559,7 +561,7 @@ GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with it
 tile, `(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both
 gate kinds and every state width (`kda_nw4_wtk16_bpv1` for KDA). It is the tile the fused numeric
 suite is built around, not a measured winner; per-mode fused defaults are a separate measurement.
-It needs `DK` a multiple of `WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4
+It needs `DK` a multiple of `WTK × VPT = 128` and `DV` a multiple of 16, which both §1.4
 deployments meet. If it is illegal, `auto` falls back to the first legal candidate; for example,
 fused GDN at `DK = 64` falls back to `(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA's work table
 never selects it for an unfused request: KDA's fallback order (taken only when the auto tile is
@@ -960,6 +962,10 @@ Widening the range needs nested chunking or per-token rescaling.
 6. Machine-checked byte-identity for the prefill-side cross-engine surfaces this family touches —
    currently reasoned and Python-verified. (Decode is checked: the golden cases lower identically
    through both engines.)
+   The decode dispatch layer (request checks, the registry, the knob space and the shared
+   `rocke.dispatch.tuning` template) is Python-only, with no C++ twin to keep in parity: the
+   provider does not serve GDN/KDA decode through a C++ selector today. A C++ selector, if one is
+   added, needs the same request, scope and pin rules and a parity gate.
 7. A fast fused decode path (§4.9): lifting the three `NOT_YET_IMPLEMENTED` rules of §4.9 —
    `fuse_conv` with `Hk ≠ Hv` (GQA, e.g. Qwen3-Next) and `BPV > 1` for small-batch parallelism,
    through an out-of-place conv state, with `fuse_out_norm` at `BPV > 1` also needing a

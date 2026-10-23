@@ -147,8 +147,10 @@ consecutive rows instead; ALGORITHM.md §4.10).
 manufacture parallelism when the natural grid is small.
 
 GDN and KDA each register the same 180 stable tile identities
-(`nw<N>_wtk<K>_bpv<B>`, with a `kda_` prefix for KDA). `is_valid_spec()`
-filters that configured space per request; the default D128 request admits 54.
+(`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`, with a `kda_` prefix
+for KDA). `is_valid_spec()` filters that configured space per request; the
+default D128 request admits 54. KDA accepts only D128 today, so its other 126
+tiles stay registered but unselectable until that limit is lifted.
 Production `auto` deterministically prefers GDN's `(num_warps=2,
 warp_threads_k=16, blocks_per_v_dim=8)` whenever it is legal. It never measures
 at runtime and does not select by batch. An explicit `spec_id`, such as

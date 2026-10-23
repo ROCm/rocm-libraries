@@ -396,6 +396,37 @@ def test_every_spec_field_is_classified_exactly_once():
         assert len(owners) == 1, (field, owners)
 
 
+def test_pinned_xcd_remap_keeps_the_launch_grid():
+    """xcd_remap renumbers workgroups over the grid it computes from
+    batch_size, so the launch grid must stay gdn_decode_grid(batch, spec)
+    when the knob is pinned: the same grid with it on and off, in every mode."""
+    from kernels.gfx950.gdn_decode import gdn_decode_grid
+
+    for req in (
+        _req(gate_kind="gdn"),
+        _req(gate_kind="kda", state_dtype="f32"),
+        _req(gate_kind="kda", state_dtype="f32", **_FUSED),
+    ):
+        base = dispatch_gdn_decode(req)
+        spec_id = base.candidate.spec_id
+        on = dispatch_gdn_decode(
+            replace(req, spec_id=spec_id, tuning_knobs={"xcd_remap": True})
+        )
+        assert dict(on.spec.knobs) == {"xcd_remap": True}, req
+        assert on.grid == gdn_decode_grid(req.batch, on.spec.kernel_spec), req
+        assert on.grid == base.grid and on.block == base.block, req
+
+
+def test_kda_admits_exactly_its_d128_tiles():
+    """KDA accepts only DK = DV = 128, so 54 of its 180 registered tiles are
+    admissible and the rest are unselectable until that limit is lifted."""
+    from dispatch.gdn import dispatch_gdn_decode_bases
+
+    kda = [c for c in GDN_REGISTRY.candidates() if c.spec_id.startswith("kda_")]
+    assert len(kda) == 180
+    assert len(dispatch_gdn_decode_bases(_req(gate_kind="kda"))) == 54
+
+
 def test_waves_per_eu_listed_per_sweep_level_and_pinnable_at_any_legal_value():
     """``production`` lists waves_per_eu 0 and 4 on every knob set, ``full``
     every legal value 0-8; any legal value is pinnable at either level."""
