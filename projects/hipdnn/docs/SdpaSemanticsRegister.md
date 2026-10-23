@@ -227,7 +227,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-022: Attention sinks
 
-- **Status:** Aligned (CPU forward reference).
+- **Status:** Aligned (CPU and dense GPU forward references).
 - **Agreed semantics:** one unscaled logit per head, counted in the softmax denominator only, with no V row,
   and included in the LSE. cuDNN shape `[1, H_q, 1, 1]`, fp32 (cudnn-frontend `test/python/sdpa/fp16_ref.py`):
   `M = max(max_j s_j, sink)`, denominator `Σ exp(s_j − M) + exp(sink − M)`.

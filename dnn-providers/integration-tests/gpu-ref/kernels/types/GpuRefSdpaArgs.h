@@ -58,6 +58,9 @@ struct SdpaFwdArgs
     const int* pageTableV;
     long long pageTableKStrB, pageTableKStrT, blockSizeK;
     long long pageTableVStrB, pageTableVStrT, blockSizeV;
+    // Optional attention sink (cuDNN): one fp32 logit per query head, read at h * sinkStride.
+    const float* sink;
+    long long sinkStride;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

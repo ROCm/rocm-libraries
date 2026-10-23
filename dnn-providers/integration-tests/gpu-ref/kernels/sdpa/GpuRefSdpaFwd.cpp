@@ -186,7 +186,10 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     };
 
     // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
-    COMPUTE_TYPE maxVal = negInf;
+    // An attention sink joins the max and the denominator but has no value row.
+    const COMPUTE_TYPE sink
+        = args.sink != nullptr ? static_cast<COMPUTE_TYPE>(args.sink[h * args.sinkStride]) : negInf;
+    COMPUTE_TYPE maxVal = sink;
     for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
@@ -218,7 +221,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     }
 
     // PASS 2: softmax denominator.
-    COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
+    COMPUTE_TYPE sumExp = sink == negInf ? static_cast<COMPUTE_TYPE>(0) : expf(sink - maxVal);
     for(long long skv = 0; skv < liveKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);

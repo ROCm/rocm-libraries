@@ -65,7 +65,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        int64_t seqLenQStride,
                                        int64_t seqLenKvStride,
                                        const SdpaPagedSide& pagedK,
-                                       const SdpaPagedSide& pagedV)
+                                       const SdpaPagedSide& pagedV,
+                                       const float* sinkPtr,
+                                       int64_t sinkStride)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefSdpaFwd.cpp", defines, "sdpaFwdRef");
@@ -112,6 +114,8 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.pageTableVStrB = static_cast<long long>(pagedV.strideBatch);
     args.pageTableVStrT = static_cast<long long>(pagedV.strideTable);
     args.blockSizeV = static_cast<long long>(pagedV.blockSize);
+    args.sink = sinkPtr;
+    args.sinkStride = static_cast<long long>(sinkStride);
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));

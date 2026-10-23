@@ -155,6 +155,7 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V addressed through INT32 page tables | Not supported |
 | ALiBi | Not supported | Not supported |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
+| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Not supported |
 | Block-sparse attention | Not supported | Not supported |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Additive attention bias (`attn_mask`) | - | Not supported |
