@@ -9,13 +9,14 @@ Usage: impact.py <files|kernargs|symbols|surfaces|data|report> --repo DIR --base
        impact.py report ... --emit FILE.json
 
 Emits facts, never severity beyond the row statuses and the rollup line. Reads git objects only
-(cat-file, diff, ls-tree, grep, merge-tree); the repository and its worktrees are never written
-(`merge-tree --write-tree` adds one tree object, no ref, no worktree). Exit 0 when the analysis
+(cat-file, diff, ls-tree, grep, merge-tree); no ref, index or worktree is written
+(`merge-tree --write-tree` writes the merged trees to the object store). Exit 0 when the analysis
 ran, whatever it found; exit 1 with one line `impact: <reason>` on stderr when it could not.
 
 Views. Each fact is computed at base -> head and, when a target tip differs from base, also at the
 merged tree `git merge-tree --write-tree <tip> <head>` (before = the tip, after = the merge). A
-conflict skips the merged view and says why. A row that holds only in the merged view is marked
+conflict skips the merged view and says why; the skip is `changed` when the change touches the
+surface or the conflict does. A row that holds only in the merged view is marked
 `merged-only`: that is the race class (a parallel PR landed a copy the diff cannot see).
 `--round-dir` reads PIN.md (CLONE, BASE, HEAD, TARGET_TIP); a tip equal to BASE gives no merged
 view.
@@ -24,15 +25,19 @@ Row status: mismatch (producer and a copy disagree, a removed symbol still has a
 (a contract side changed, or static analysis cannot settle it; a surface file not understood is
 always changed), inert (touched, provably without runtime effect), outside (not on the surface;
 counted, never dropped). Test files and CMake are outside for status but are still searched as
-kernarg copies and as symbol readers.
+kernarg copies and as symbol readers. CMake and `requirements*.txt` belong to the BUILD and DEPS
+lanes; the rollup names how many it left to them.
 
 Rollup (last line of `report`):
-  Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected) | N/A (no surface file)
+  Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected[; not judged here: ...])
+                  | N/A (no surface file[; not judged here: ...])
 
-`report --emit FILE.json` folds in impact_emit.py output: changed params vs a static C++ list is a
-mismatch; changed IR is `changed` for that arch; when every family is equal (nothing changed,
-nothing failed, nothing not inspected) the rocKE rows that were `changed` only because a shipped
-module changed become `inert`. Static kernarg mismatch rows are never downgraded.
+`report --emit FILE.json` folds in impact_emit.py output (schema 2), which must have been made for
+the same base and head trees: changed params vs a static C++ list is a mismatch; changed IR is
+`changed` for that arch; when every family is equal (nothing changed, nothing failed, nothing not
+inspected) the rows that were `changed` only because a shipped module changed become `inert`, but
+only on modules a family with built variants imports. Static kernarg mismatch rows are never
+downgraded.
 """
 
 import argparse
@@ -108,7 +113,10 @@ SURFACE_TABLE = (
     ("generator", GEN + "*"),
     ("provider", HKP + "*"),
 )
-OUTSIDE_TAGS = {"carve-out", "test", "cmake", "other"}
+OUTSIDE_TAGS = {"carve-out", "test", "cmake", "deps", "other"}
+#: Outside tags another deep-review lane judges; the rollup names them so N/A is not read
+#: as "no impact" for these files.
+OWNER_LANES = {"cmake": "BUILD", "deps": "DEPS"}
 #: Tags whose files are read as copies or readers although they are outside for status.
 SEARCHED_TAGS = {"test"}
 
@@ -207,6 +215,8 @@ class Tree:
         self.repo, self.oid = repo, oid
         self.blobs, self.asts, self.lists, self._under = {}, {}, {}, {}
         self._paths = None
+        #: module_index and module_imports caches.
+        self.stems, self.imports = None, {}
 
     @property
     def paths(self) -> set:
@@ -414,16 +424,23 @@ def is_cmake(path: str) -> bool:
     return PurePosixPath(path).name == "CMakeLists.txt" or path.endswith(".cmake")
 
 
+def is_requirements(path: str) -> bool:
+    return re.fullmatch(r"requirements.*\.txt", PurePosixPath(path).name) is not None
+
+
 def is_doc(path: str) -> bool:
     name = PurePosixPath(path).name
-    return (path.endswith(DOC_SUFFIXES) and not is_cmake(path)) or name == ".gitignore"
+    return (
+        path.endswith(DOC_SUFFIXES) and not is_cmake(path) and not is_requirements(path)
+    ) or name == ".gitignore"
 
 
 def tag_of(path: str) -> str:
-    if is_cmake(path) and (
-        path.startswith(SEARCH) or path.startswith("projects/hipdnn/")
-    ):
-        return "cmake"
+    if path.startswith(SEARCH) or path.startswith("projects/hipdnn/"):
+        if is_cmake(path):
+            return "cmake"
+        if is_requirements(path):
+            return "deps"
     for tag, pattern in SURFACE_TABLE:
         if fnmatch.fnmatchcase(path, pattern):
             return tag
@@ -449,20 +466,28 @@ def generated_rule(path: str):
     return None
 
 
+#: A C++ raw string opener with any encoding prefix: `R"x(`, `u8R"(`, `LR"(`, `uR"(`, `UR"(`.
+_RAW = re.compile(r'(?:u8|u|U|L)?R"([^()\\ ]{0,16})\(')
+
+
+def raw_string_end(text: str, i: int):
+    """End offset of the raw string literal starting at `i`, or None when none starts there."""
+    if text[i] not in "RuUL" or (i and (text[i - 1].isalnum() or text[i - 1] == "_")):
+        return None
+    match = _RAW.match(text, i)
+    if not match:
+        return None
+    close = text.find(")" + match.group(1) + '"', match.end())
+    return len(text) if close < 0 else close + len(match.group(1)) + 2
+
+
 def mask_cpp(text: str, keep_strings: bool = False) -> str:
     """Comments become spaces and literal contents `x`; length and newlines are preserved."""
     out, i, n = [], 0, len(text)
-    raw = re.compile(r'R"([^()\\ ]{0,16})\(')
     while i < n:
         ch = text[i]
-        match = (
-            raw.match(text, i)
-            if ch == "R" and (i == 0 or not text[i - 1].isalnum())
-            else None
-        )
-        if match:
-            close = text.find(")" + match.group(1) + '"', match.end())
-            end = n if close < 0 else close + len(match.group(1)) + 2
+        end = raw_string_end(text, i)
+        if end is not None:
             seg = text[i:end]
             out.append(seg if keep_strings else re.sub(r"[^\n]", "x", seg))
             i = end
@@ -477,9 +502,12 @@ def mask_cpp(text: str, keep_strings: bool = False) -> str:
                 out.append(seg[0] + re.sub(r"[^\n]", "x", seg[1:-1]) + seg[-1])
             i += len(seg)
         elif text.startswith("//", i):
+            # A backslash before the newline splices the next line into the comment.
             j = text.find("\n", i)
+            while j > 0 and text[i:j].rstrip("\r").endswith("\\"):
+                j = text.find("\n", j + 1)
             j = n if j < 0 else j
-            out.append(" " * (j - i))
+            out.append(re.sub(r"[^\n]", " ", text[i:j]))
             i = j
         elif text.startswith("/*", i):
             j = text.find("*/", i + 2)
@@ -511,14 +539,19 @@ def strip_hash_comments(text: str) -> str:
     return "\n".join(lines)
 
 
-def collapse_space(text: str, quotes: str) -> str:
+def collapse_space(text: str, quotes: str, raw: bool = False) -> str:
     """Whitespace runs outside string literals become one space, or one newline when the run
-    holds one. Literals stay verbatim and tokens never join (`"attn fwd"` != `"attnfwd"`).
+    holds one. Literals stay verbatim and tokens never join (`"attn fwd"` != `"attnfwd"`);
+    `raw` keeps C++ raw strings verbatim too, across lines.
     """
     out, i, n = [], 0, len(text)
     while i < n:
         ch = text[i]
-        if ch in quotes:
+        end = raw_string_end(text, i) if raw else None
+        if end is not None:
+            out.append(text[i:end])
+            i = end
+        elif ch in quotes:
             j = i + 1
             while j < n and text[j] != ch and text[j] != "\n":
                 j += 2 if text[j] == "\\" else 1
@@ -631,10 +664,12 @@ def classify(ch: Change) -> str:
     if base.replace("\r\n", "\n") == head.replace("\r\n", "\n"):
         return "whitespace-only"
     if path.endswith(C_SUFFIXES):
-        if collapse_space(base, "\"'") == collapse_space(head, "\"'"):
+        if collapse_space(base, "\"'", raw=True) == collapse_space(
+            head, "\"'", raw=True
+        ):
             return "whitespace-only"
-        if collapse_space(strip_c_comments(base), "\"'") == collapse_space(
-            strip_c_comments(head), "\"'"
+        if collapse_space(strip_c_comments(base), "\"'", raw=True) == collapse_space(
+            strip_c_comments(head), "\"'", raw=True
         ):
             return "comment-only"
     elif is_cmake(path):
@@ -980,6 +1015,57 @@ def cpp_arg_size(arg: str):
     return _SIZEOF.get(m.group(1).replace(" ", "")) if m else None
 
 
+#: Byte size of a rocKE scalar type named in `b.param`; `PtrType(...)` is a pointer.
+_BUILDER_SIZES = {"I8": 1, "U8": 1, "I16": 2, "U16": 2, "F16": 2, "BF16": 2, "I32": 4,
+                  "U32": 4, "F32": 4, "I64": 8, "U64": 8, "F64": 8}  # fmt: skip
+
+
+def decl_size(decl: str):
+    """Size of the type a `b.param` declaration names first: `ptr`, bytes, or None."""
+    args = split_args(decl) if decl else []
+    first = args[0].strip() if args else ""
+    if first.startswith("PtrType(") or first == "PTR":
+        return "ptr"
+    return _BUILDER_SIZES.get(first)
+
+
+def size_text(size) -> str:
+    return "pointer" if size == "ptr" else f"{size}-byte"
+
+
+def name_bindings(statements) -> dict:
+    """Name -> source text of the simple `NAME = expr` assignments among `statements`."""
+    out = {}
+    for node in statements:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            out[node.targets[0].id] = ast.unparse(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.value is not None:
+                out[node.target.id] = ast.unparse(node.value)
+    return out
+
+
+def resolved_decls(tree, qual: str, decls: list) -> list:
+    """`decls` with the module's and the function's own `NAME = expr` bindings substituted
+    once, so `b.param("scale", SC)` changes when `SC = F16` becomes `SC = I64`."""
+    if tree is None:
+        return decls
+    scope = name_bindings(tree.body)
+    fn = function_nodes(tree).get(qual)
+    if fn is not None:
+        scope.update(name_bindings(fn.body))
+    if not scope:
+        return decls
+    word = re.compile(
+        r"\b(" + "|".join(sorted(map(re.escape, scope), key=len, reverse=True)) + r")\b"
+    )
+    return [word.sub(lambda m: scope[m.group(1)], d) for d in decls]
+
+
 def cpp_kernel_lists(text: str) -> list:
     """Every `std::vector<KernelArgument>`-returning function: one entry per static list (a
     multi-launch pack holds several, each its own consumer), or one dynamic entry.
@@ -1276,6 +1362,18 @@ class Closure:
     shipped: dict = field(default_factory=dict)
     #: archs whose descriptors sit behind DVC: their kernel modules are roots by directory.
     opaque: set = field(default_factory=set)
+    #: module -> [(imported module, line, eager)], ancestor `__init__.py` files included.
+    graph: dict = field(default_factory=dict)
+
+    def reach(self, start: str) -> set:
+        """Every module that importing `start` loads."""
+        seen, stack = set(), [start]
+        while stack:
+            current = stack.pop()
+            if current not in seen:
+                seen.add(current)
+                stack += [t for t, _, _ in self.graph.get(current, ())]
+        return seen
 
 
 def build_closure(tree: Tree) -> Closure:
@@ -1344,7 +1442,7 @@ def build_closure(tree: Tree) -> Closure:
                 roots.append(
                     (f"{path}:{line}", target, None, path.startswith(PRODUCTION_DIRS))
                 )
-    graph, body = {}, {}
+    graph, body = out.graph, {}
     frontier = sorted({t for _, t, _, _ in roots})
     while frontier:
         tree.read(frontier)
@@ -1556,14 +1654,18 @@ def file_row(ctx: Ctx, ch: Change):
             0,
             path,
             "outside",
-            f"{tag}: not on the runtime-integration surface",
+            (
+                f"{tag}: judged by the {OWNER_LANES[tag]} lane, not by this report"
+                if tag in OWNER_LANES
+                else f"{tag}: not on the runtime-integration surface"
+            ),
         )
     if cls == "docs":
         return make_row(kind, path, 0, path, "outside", "documentation")
     if cls in ("comment-only", "whitespace-only", "data-equal"):
         return make_row(kind, path, 0, path, "inert", cls)
     arch = arch_of(path)
-    if tag in ("descriptor", "generic-targets") or cls == "dvc-pointer":
+    if tag == "descriptor" or path == GENERIC_TARGETS_JSON or cls == "dvc-pointer":
         return None  # data rows carry these files
     if cls == "generated":
         sources = generated_rule(path)
@@ -1620,6 +1722,7 @@ def file_row(ctx: Ctx, ch: Change):
     reason = {
         "native-pack": "native pack code changed",
         "sdk-ingestor": "ingestor SDK header changed",
+        "generic-targets": "generic-target header changed",
         "kpack-runtime": "kpack runtime changed",
         "packer": "packer code changed",
         "generator": "ingestor generator changed",
@@ -1704,10 +1807,19 @@ def kernarg_rows(ctx: Ctx) -> list:
                         arch=arch, foldable=True))  # fmt: skip
             elif old.names != new.names:
                 work.append(Work(ch, qual, old, new, new.lineno))
-            elif old.decls != new.decls:
+            elif old.conditional != new.conditional:
+                rows.append(make_row("kernargs", ch.path, new.lineno, qual, "changed",
+                    f"b.param list of {qual} keeps its names but not which are conditional: "
+                    f"{old.marked()} -> {new.marked()}; a variant may now pass a different list",
+                    arch=arch, foldable=True))  # fmt: skip
+            else:
+                before = resolved_decls(bt, qual, old.decls)
+                after = resolved_decls(at, qual, new.decls)
+                if before == after:
+                    continue
                 diff = [
                     f"{n}({b or '-'} -> {a or '-'})"
-                    for n, b, a in zip(new.names, old.decls, new.decls)
+                    for n, b, a in zip(new.names, before, after)
                     if b != a
                 ]
                 rows.append(make_row("kernargs", ch.path, new.lineno, qual, "changed",
@@ -1765,12 +1877,24 @@ def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
                 producer is not None and producer.cls in MOVING,
             )
         ]
+        moved = (producer is not None and producer.cls in MOVING) or (
+            mirror is not None and mirror.cls in MOVING
+        )
+        sizes = dict(
+            zip(
+                pl.names,
+                map(decl_size, resolved_decls(tree, surface.function, pl.decls)),
+            )
+        )
+        compared, closest = False, 0
+        arch = surface.arch or arch_of(surface.cpp_mirror)
         for entry in cpp_kernel_lists(text):
             key = (surface.cpp_mirror, entry["line"])
             if key in reported:
+                compared = True
                 continue
-            arch = surface.arch or arch_of(surface.cpp_mirror)
             if entry["dynamic"] or entry["unnamed"]:
+                compared = True
                 if mirror is not None and mirror.cls in MOVING:
                     kind = "dynamic" if entry["dynamic"] else "static but unnamed"
                     rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
@@ -1780,18 +1904,41 @@ def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
             if not related(entry["names"], pl.names) and not compatible(
                 entry["names"], pl
             ):
+                closest = max(closest, len(set(entry["names"]) & set(pl.names)))
                 continue
-            if compatible(entry["names"], pl):
-                if (producer is not None and producer.cls in MOVING) or (
-                    mirror is not None and mirror.cls in MOVING
-                ):
-                    rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
-                        "changed", f"{entry['func']}() agrees with {surface.function}", counter, arch=arch))  # fmt: skip
-            else:
+            compared = True
+            if not compatible(entry["names"], pl):
                 rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
                     "mismatch", f"static list {entry['func']}() disagrees with builder {surface.function} "
                     f"({list_diff(entry['names'], pl.names)}): {entry['names']} vs {pl.marked()}",
                     counter, arch=arch))  # fmt: skip
+                continue
+            differ, unknown = [], []
+            for name, size in zip(entry["names"], entry["sizes"]):
+                want = sizes.get(name)
+                if size is None or want is None:
+                    unknown.append(name)
+                elif size != want:
+                    differ.append(
+                        f"{name}: builder {size_text(want)}, C++ {size_text(size)}"
+                    )
+            if differ:
+                rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
+                    "mismatch", f"static list {entry['func']}() names agree with builder {surface.function} "
+                    f"but types do not: {'; '.join(differ[:4])}", counter, arch=arch))  # fmt: skip
+            elif moved:
+                if not unknown:
+                    note = "names and types agree"
+                elif len(unknown) == len(entry["names"]):
+                    note = "names agree; types not compared"
+                else:
+                    note = f"names agree; types not compared for {', '.join(unknown)}"
+                rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
+                    "changed", f"{entry['func']}() vs {surface.function}: {note}", counter, arch=arch))  # fmt: skip
+        if not compared and moved:
+            rows.append(make_row("kernargs", surface.cpp_mirror, 0, f"declared:{surface.function}",
+                "changed", f"no static list in the C++ mirror shares two names with {surface.function} "
+                f"(closest shares {closest}): cannot compare", counter, arch=arch))  # fmt: skip
     return rows
 
 
@@ -1909,6 +2056,63 @@ def in_module(path: str, stem: str) -> bool:
     if stem.startswith("/"):
         return path in (f[1:] for f in files)
     return any(path == f or path.endswith("/" + f) for f in files)
+
+
+def module_index(tree: Tree) -> dict:
+    """Import stem -> repo path of every Python file, keyed as `in_module` matches: the exact
+    `/a/b/m`, and each trailing `a/b/m`, `b/m`, `m` (a package is its `__init__.py`)."""
+    if tree.stems is None:
+        tree.stems = {}
+        for path in sorted(p for p in tree.paths if p.endswith(".py")):
+            stem = path[:-3].removesuffix("/__init__")
+            tree.stems.setdefault("/" + stem, path)
+            parts = stem.split("/")
+            for i in range(len(parts)):
+                tree.stems.setdefault("/".join(parts[i:]), path)
+    return tree.stems
+
+
+def module_imports(tree: Tree, path: str) -> set:
+    """Repo files that importing `path` loads directly: `import a.b.c` loads `a`, `a.b` and
+    `a.b.c`; `from m import x` loads `m` and, when `x` is a submodule, `m/x`."""
+    if path not in tree.imports:
+        module, index, out = tree.ast(path), module_index(tree), set()
+        for node in ast.walk(module) if module is not None else ():
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    parts = alias.name.split(".")
+                    out |= {
+                        index.get("/".join(parts[:i])) for i in range(1, len(parts) + 1)
+                    }
+        for _, stem, imported, _ in (
+            iter_imports(path, module) if module is not None else ()
+        ):
+            if imported is not None:
+                out |= {index.get(stem), index.get(f"{stem}/{imported}")}
+        tree.imports[path] = out - {None, path}
+    return tree.imports[path]
+
+
+def modules_reaching(tree: Tree, starts, target: str) -> set:
+    """The `starts` whose imports, followed transitively, load `target`: one shared search
+    with batched reads, then a reverse walk from `target`."""
+    graph, frontier = {}, sorted(set(starts))
+    while frontier:
+        tree.read([p for p in frontier if p not in tree.imports])
+        for path in frontier:
+            graph[path] = module_imports(tree, path)
+        frontier = sorted({t for p in frontier for t in graph[p]} - graph.keys())
+    importers = {}
+    for path, targets in graph.items():
+        for t in targets:
+            importers.setdefault(t, []).append(path)
+    seen, stack = {target}, [target]
+    while stack:
+        for path in importers.get(stack.pop(), ()):
+            if path not in seen:
+                seen.add(path)
+                stack.append(path)
+    return set(starts) & seen
 
 
 def symbol_references(tree, path: str, defining: str, name: str, is_method: bool):
@@ -2154,8 +2358,7 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
             for b, bl, h, hl in ch.hunks
             if b <= entry[2] and entry[1] <= b + max(bl, 1) - 1
         ]
-        moved_elsewhere = False
-        refs, calls = [], []
+        refs, calls, loose = [], [], []
         for path in mentioning:
             tree = ctx.after.ast(path)
             text = ctx.after.text(path) or ""
@@ -2172,21 +2375,18 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
                 if is_method and not re.search(
                     r"\b" + re.escape(qual.split(".")[0]) + r"\b", text
                 ):
-                    continue
-                if (
-                    path != ch.path
-                    and not is_method
-                    and kind == "removed"
-                    and any(
-                        isinstance(
-                            n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                    # `.name` read through a subclass or an untyped receiver: the class
+                    # cannot be told, so it can only make the removal `changed`.
+                    loose += [
+                        cp(path, line, False)
+                        for line, _ in symbol_references(
+                            tree, path, ch.path, name, True
                         )
-                        and n.name == name
-                        for n in tree.body
-                    )
-                ):
-                    moved_elsewhere = True
-                    break
+                    ]
+                    continue
+                # Only reads bound to the old module count (an import from it, `m.name` on
+                # it, or an unbound read in the file itself), so a same-named def elsewhere
+                # neither hides a stale importer nor turns an unrelated file into a reader.
                 found = symbol_references(tree, path, ch.path, name, is_method)
             other = ctx.changes.get(path)
             for line, node in found:
@@ -2195,9 +2395,22 @@ def reader_rows(ctx: Ctx, cands: list) -> list:
                 refs.append(cp(path, line, other is not None and line in other.added))
                 if node is not None:
                     calls.append((path, tree, node))
-        if moved_elsewhere or not refs:
-            continue
         arch = arch_of(ch.path)
+        if not refs:
+            # Only a method of a class that survives (a removed class has its own row; a
+            # field's `.name` is too common a word to stand for a reader), read in a file
+            # whose imports reach the defining module.
+            survives = qual.split(".")[0] in module_bindings(ctx.after.ast(ch.path))
+            if kind == "removed" and entry[0] == "def" and survives and loose:
+                reaching = modules_reaching(
+                    ctx.after, {c["path"] for c in loose}, ch.path
+                )
+                loose = [c for c in loose if c["path"] in reaching]
+            if loose and kind == "removed" and entry[0] == "def" and survives:
+                rows.append(make_row("symbols", ch.path, entry[1], qual, "changed",
+                    f"{qual} is removed; {len(loose)} `.{name}` read(s) in files that never name "
+                    f"{qual.split('.')[0]}: their receiver's class cannot be told", loose, arch=arch))  # fmt: skip
+            continue
         if kind == "removed":
             what = "module" if entry[0] == "module" else qual
             rows.append(make_row("symbols", ch.path, entry[1], qual, "mismatch",
@@ -2548,11 +2761,77 @@ def load_emit(path) -> dict:
         raise rl.Fail(f"cannot read emit file {path}: {exc}") from None
     if (
         not isinstance(data, dict)
-        or data.get("schema") != 1
+        or data.get("schema") != 2
         or data.get("tool") != "impact_emit"
     ):
-        raise rl.Fail(f"{path} is not impact_emit schema 1 output")
+        raise rl.Fail(f"{path} is not impact_emit schema 2 output")
+    problem = emit_shape_problem(data)
+    if problem:
+        raise rl.Fail(f"emit file {path}: {problem}")
     return data
+
+
+def emit_shape_problem(data: dict):
+    """Why an impact_emit document cannot be folded, or None: every field the fold reads
+    must have its type, so a malformed file fails instead of crashing or folding."""
+
+    def strings(value):
+        return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+    def count(value):
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    def params(value):
+        return value is None or (
+            isinstance(value, list)
+            and all(isinstance(p, list) and len(p) == 2 and strings(p) for p in value)
+        )
+
+    for key in ("base_tree", "head_tree"):
+        if not (
+            isinstance(data.get(key), str)
+            and re.fullmatch(r"[0-9a-f]{40,64}", data[key])
+        ):
+            return f"`{key}` is not a tree id"
+    if not isinstance(data.get("families"), list):
+        return "`families` is not a list"
+    skipped = data.get("not_inspected")
+    if not isinstance(skipped, list) or not all(isinstance(i, dict) for i in skipped):
+        return "`not_inspected` is not a list of objects"
+    for n, fam in enumerate(data["families"]):
+        if not isinstance(fam, dict):
+            return f"family {n} is not an object"
+        if not all(
+            isinstance(fam.get(k), str) and fam[k]
+            for k in ("arch", "source", "builder")
+        ):
+            return f"family {n} lacks arch, source or builder"
+        variants = fam.get("variants")
+        if not (
+            isinstance(variants, dict)
+            and count(variants.get("base"))
+            and count(variants.get("head"))
+        ):
+            return f"family {n}: `variants` lacks base and head counts"
+        lists = ("only_in_base", "only_in_head", "params_changed", "ir_changed")
+        if not all(strings(fam.get(k)) for k in lists):
+            return f"family {n}: {', '.join(lists)} must be lists of names"
+        failures, built = fam.get("failures"), fam.get("params")
+        if not (
+            isinstance(failures, dict)
+            and all(isinstance(failures.get(s), dict) for s in ("base", "head"))
+        ):
+            return f"family {n}: `failures` lacks base and head objects"
+        if not (
+            isinstance(built, dict)
+            and all(params(built.get(s)) for s in ("base", "head"))
+        ):
+            return f"family {n}: `params` is not base and head [name, type] lists"
+        if not isinstance(fam.get("kdp", ""), str) or not isinstance(
+            fam.get("spec_origin", ""), str
+        ):
+            return f"family {n}: `kdp` or `spec_origin` is not a string"
+    return None
 
 
 def emit_agrees(params, entry):
@@ -2567,23 +2846,43 @@ def emit_agrees(params, entry):
     return None
 
 
+def emit_source(ctx: Ctx, source: str) -> str:
+    """Repo path of a family's `source`: descriptors name it relative to the rocKE library
+    (`kernels/gfx950/attn.py`); an unresolvable source is returned as given."""
+    for tree in (ctx.after, ctx.before):
+        if source in tree.paths:
+            return source
+        known = {
+            p for p in tree.paths if p.endswith(".py") and p.startswith(IMPORT_ROOTS)
+        }
+        found = resolve_path_literal(source, known)
+        if found:
+            return found
+    return source
+
+
 def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
     """Apply impact_emit output to the base..head view's rows (see the module docstring)."""
-    families = emit.get("families") or []
+    families = emit["families"]
     out = []
     surfaces = ctx.surfaces("after")
-    equal = bool(families) and not emit.get("not_inspected")
+    equal = bool(families) and not emit["not_inspected"]
+    #: modules a built variant imports: only rows on these paths can be proven equal.
+    covered = set()
     for fam in families:
-        arch, builder = fam.get("arch"), fam.get("builder")
+        arch, builder = fam["arch"], fam["builder"]
         quiet = not any(
-            fam.get(k)
+            fam[k]
             for k in ("params_changed", "ir_changed", "only_in_base", "only_in_head")
         )
-        failures = fam.get("failures") or {}
-        if not quiet or any(failures.get(side) for side in ("base", "head")):
+        failures = fam["failures"]
+        if not quiet or any(failures[side] for side in ("base", "head")):
             equal = False
-        params = (fam.get("params") or {}).get("head")
-        source = fam.get("source", "")
+        params = fam["params"]["head"]
+        source = emit_source(ctx, fam["source"])
+        if fam["variants"]["head"] > 0:
+            for side in ("before", "after"):
+                covered |= ctx.closure(side).reach(source)
         if fam.get("params_changed") and params:
             entries = []
             for s in surfaces:
@@ -2646,7 +2945,9 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
         dvc_dirs = [
             str(PurePosixPath(f["kdp"]).parent) + "/"
             for f in families
-            if f.get("spec_origin") == "registry_enumerator" and f.get("kdp")
+            if f.get("spec_origin") == "registry_enumerator"
+            and f.get("kdp")
+            and f["variants"]["head"] > 0
         ]
         for row in rows:
             if (
@@ -2666,7 +2967,7 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
                     status="inert",
                     reason="catalog regenerated: every shipped variant equal",
                 )
-            else:
+            elif row["path"] in covered:
                 row.update(
                     status="inert",
                     reason="emitted IR and params equal for every shipped variant",
@@ -2687,11 +2988,20 @@ def rollup(rows: list) -> str:
     if changed:
         archs = sorted({a.strip() for r in changed for a in r["arch"].split(",")})
         return "Runtime impact: NEEDS-DEVICE " + ", ".join(archs)
+    left = {}
+    for r in rows:
+        lane = OWNER_LANES.get(tag_of(r["path"])) if r["kind"] == "file" else None
+        if lane and r["status"] == "outside":
+            left.setdefault(lane, set()).add(r["path"])
+    note = (
+        "; not judged here: "
+        + ", ".join(f"{len(p)} file(s) for {lane}" for lane, p in sorted(left.items()))
+        if left
+        else ""
+    )
     if live:
-        return (
-            f"Runtime impact: NONE ({len({r['path'] for r in live})} files inspected)"
-        )
-    return "Runtime impact: N/A (no surface file)"
+        return f"Runtime impact: NONE ({len({r['path'] for r in live})} files inspected{note})"
+    return f"Runtime impact: N/A (no surface file{note})"
 
 
 def anchor(row) -> str:
@@ -2771,6 +3081,15 @@ def run(args):
     if base_tree_id == head_tree_id:
         raise rl.Fail("empty diff")
     base_tree, head_tree = Tree(repo, base_tree_id), Tree(repo, head_tree_id)
+    emit = None
+    if args.cmd == "report" and args.emit:
+        emit = load_emit(args.emit)
+        made_for = (emit["base_tree"], emit["head_tree"])
+        if made_for != (base_tree_id, head_tree_id):
+            raise rl.Fail(
+                f"emit file {args.emit} was made for trees {made_for[0][:12]}..{made_for[1][:12]}, "
+                f"not {base_tree_id[:12]}..{head_tree_id[:12]}; run impact_emit.py on this base and head"
+            )
     views = [
         dict(
             label="base..head",
@@ -2798,13 +3117,21 @@ def run(args):
         views.append(view)
         if tree_id is None:
             view.update(status="skipped", reason=why)
-            surface_hit = False
-            if why.startswith("merge conflict in "):
-                surface_hit = any(
-                    tag_of(p.strip()) not in OUTSIDE_TAGS for p in why[18:].split(",")
+            # Skipping the merged view loses the race check for every surface file of the
+            # change, wherever the conflict sits; a conflicted test is also a searched copy.
+            matters = any(r["status"] != "outside" for r in rows)
+            if (
+                why.startswith("merge conflict in ")
+                and why != "merge conflict in unknown files"
+            ):
+                matters = matters or any(
+                    tag_of(p.strip()) not in OUTSIDE_TAGS - SEARCHED_TAGS
+                    for p in why[18:].split(",")
                 )
+            else:
+                matters = True
             per_view.append([
-                dict(make_row("views", "(merged view)", 0, "merged", "changed" if surface_hit or not why.startswith("merge conflict in ") else "outside",
+                dict(make_row("views", "(merged view)", 0, "merged", "changed" if matters else "outside",
                     f"merged view skipped: {why}; a race with the target cannot be excluded"),
                     view="merged", merged_only=True)
             ])  # fmt: skip
@@ -2814,8 +3141,8 @@ def run(args):
             )
             view["files"] = len(mctx.changes)
             per_view.append(mrows)
-    if args.cmd == "report" and args.emit:
-        per_view[0] = fold_emit(ctx, per_view[0], load_emit(args.emit))
+    if emit is not None:
+        per_view[0] = fold_emit(ctx, per_view[0], emit)
     return ctx, views, merge_views(per_view)
 
 

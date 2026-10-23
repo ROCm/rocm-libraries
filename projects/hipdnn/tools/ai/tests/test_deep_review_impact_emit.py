@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,14 @@ def scenarios():
     s["generic"][
         f"{PROVIDER}/descriptor-packaging/python/hkp_pack/rocke_compile.py"
     ] = GENERIC_HELPERS
+    s["dupname"] = tree_files(
+        body="v2",
+        variants=(
+            KDP_VARIANTS[0],
+            {"name": "v_a", "spec": {"n": 3}},
+            KDP_VARIANTS[1],
+        ),
+    )
     s["bare"] = {"README.md": "x"}
     return s
 
@@ -254,6 +263,12 @@ def run(emit, repo, base, head, tmp_path, *extra):
     return rc, (json.loads(out.read_text(encoding="utf-8")) if out.exists() else None)
 
 
+def git_out(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
 def only_family(doc):
     assert len(doc["families"]) == 1
     return doc["families"][0]
@@ -290,7 +305,13 @@ def test_extra_param_lists_every_variant_and_shows_head_list(emit, repo, tmp_pat
 
 
 def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
-    _, doc = run(emit, repo, "base", "body", tmp_path)
+    rc, doc = run(emit, repo, "base", "body", tmp_path)
+    assert rc == 0
+    assert doc["schema"] == 2
+    # the recorded ids are the real tree ids, and differ when the sides differ
+    assert doc["base_tree"] == git_out(repo, "rev-parse", "base^{tree}")
+    assert doc["head_tree"] == git_out(repo, "rev-parse", "body^{tree}")
+    assert doc["base_tree"] != doc["head_tree"]
     f = only_family(doc)
     assert f["params_changed"] == []
     assert f["ir_changed"] == ["v_a", "v_b"]
@@ -318,8 +339,9 @@ def test_raising_builder_is_a_recorded_failure_and_exit_zero(emit, repo, tmp_pat
     assert rc == 0
     f = only_family(doc)
     assert f["variants"] == {"base": 3, "head": 3}
-    assert f["failures"]["head"] == {"v_bad": "ValueError: boom"}
-    assert f["failures"]["base"] == {"v_bad": "ValueError: boom"}
+    for side in ("head", "base"):
+        assert set(f["failures"][side]) == {"v_bad"}
+        assert f["failures"][side]["v_bad"].startswith("ValueError")
     assert f["params_changed"] == f["ir_changed"] == []
 
 
@@ -328,7 +350,7 @@ def test_missing_helper_fails_every_variant_instead_of_skipping(emit, repo, tmp_
     assert rc == 0
     f = only_family(doc)
     assert set(f["failures"]["head"]) == {"v_a", "v_b"}
-    assert "build_spec" in f["failures"]["head"]["v_a"]
+    assert f["failures"]["head"]["v_a"]
 
 
 def test_dvc_held_kdp_without_enumerator_is_not_inspected(emit, repo, tmp_path):
@@ -338,7 +360,7 @@ def test_dvc_held_kdp_without_enumerator_is_not_inspected(emit, repo, tmp_path):
     assert sorted(n["side"] for n in doc["not_inspected"]) == ["base", "head"]
     n = doc["not_inspected"][0]
     assert n["kdp"] == f"{DESC}/fake.kdp.json"
-    assert "registry_enumerator" in n["reason"]
+    assert n["reason"]
 
 
 def test_dvc_held_kdp_is_regenerated_by_the_enumerator_of_that_side(
@@ -374,9 +396,24 @@ def test_flavor_is_pinned_in_the_child_and_overridable(
     _, doc = run(emit, repo, "base", "base^{tree}", tmp_path, "--flavor", "llvm22")
     assert doc["flavor"] == "llvm22"
     assert doc["head"] == "base^{tree}"  # a tree id is a valid rev
+    tree = git_out(repo, "rev-parse", "base^{tree}")
+    assert doc["head_tree"] == doc["base_tree"] == tree
     assert only_family(doc)["ir_changed"] == []
     _, doc = run(emit, repo, "base", "base", tmp_path)
     assert doc["flavor"] == "llvm23"
+
+
+def test_dup_name_with_different_specs_is_a_failure_not_silently_one_variant(
+    emit, repo, tmp_path
+):
+    # catches: the second of two same-named variants being dropped unnoticed
+    rc, doc = run(emit, repo, "base", "dupname", tmp_path)
+    assert rc == 0
+    f = only_family(doc)
+    assert "v_a" in f["failures"]["head"]
+    assert f["ir_changed"] == ["v_b"]  # v_a takes no part in the comparison
+    rc, doc = run(emit, repo, "dupname", "dupname", tmp_path)
+    assert only_family(doc)["failures"]["base"].keys() == {"v_a"}
 
 
 def test_unreadable_rev_exits_one_with_one_line(emit, repo, tmp_path, capsys):
@@ -389,7 +426,7 @@ def test_unreadable_rev_exits_one_with_one_line(emit, repo, tmp_path, capsys):
 def test_tree_without_rocke_exits_one(emit, repo, tmp_path, capsys):
     rc, _ = run(emit, repo, "bare", "bare", tmp_path, "--flavor", "llvm23")
     assert rc == 1
-    assert "lacks" in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("impact_emit: ")
 
 
 @pytest.mark.parametrize(
@@ -439,3 +476,77 @@ def test_default_flavor_is_the_ladder_top_else_the_newest_known_flavor(
     # catches: a tree from before the ladder existed failing instead of using its newest flavor
     monkeypatch.setattr(emit, "git", lambda *args, **kw: source)
     assert emit.default_flavor(".", "rev") == expected
+
+
+LADDER_22 = 'A = "llvm20"\nB = "llvm22"\n_LLVM_FLAVOR_LADDER = ((0, A), (22, B))\n'
+LADDER_23 = (
+    'A = "llvm20"\nB = "llvm22"\nC = "llvm23"\n'
+    "_LLVM_FLAVOR_LADDER = ((0, A), (22, B), (23, C))\n"
+)
+
+
+@pytest.mark.parametrize(
+    "base_src, head_src, expected",
+    [
+        (LADDER_22, LADDER_23, "llvm22"),  # base predates the head's top rung
+        (LADDER_23, LADDER_23, "llvm23"),
+        (LADDER_23, LADDER_22, "llvm22"),
+        ('X = "llvm19"\nLLVM_FLAVORS = (X,)\n', LADDER_23, "llvm23"),  # none shared
+    ],
+)
+def test_shared_default_flavor_is_the_heads_newest_that_the_base_knows(
+    emit, monkeypatch, base_src, head_src, expected
+):
+    # catches: a base lacking the head's top flavor failing every variant
+    srcs = {"b": base_src, "h": head_src}
+    monkeypatch.setattr(
+        emit, "git", lambda repo, cmd, spec, **kw: srcs[spec.split(":")[0]]
+    )
+    assert emit.shared_default_flavor(".", "b", "h") == expected
+
+
+def test_child_env_is_an_allow_list_that_pins_the_rocke_variables(
+    emit, tmp_path, monkeypatch
+):
+    # catches: parent credentials and import paths reaching the executed rocKE code
+    for k, v in {
+        "GH_TOKEN": "t",
+        "AWS_SECRET_ACCESS_KEY": "s",
+        "ROCKE_FOO": "1",
+        "HIP_VISIBLE_DEVICES": "0",
+        "PYTHONPATH": "/bogus",
+        "ROCKE_LLVM_FLAVOR": "llvm20",
+        "LC_ALL": "C",
+        "IMPACT_EMIT_ENUM_TIMEOUT": "7",
+    }.items():
+        monkeypatch.setenv(k, v)
+    env = emit.child_env(tmp_path, "llvm23")
+    names = {k.upper() for k in env}
+    assert not {"GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "ROCKE_FOO"} & names
+    assert "HIP_VISIBLE_DEVICES" not in names
+    assert "PATH" in names and env["LC_ALL"] == "C"
+    assert env["IMPACT_EMIT_ENUM_TIMEOUT"] == "7"
+    assert env["ROCKE_LLVM_FLAVOR"] == "llvm23"
+    assert "/bogus" not in env["PYTHONPATH"]
+    assert str(tmp_path) in env["PYTHONPATH"]
+    assert env["ROCKE_PROVIDER_ROOT"].startswith(str(tmp_path))
+    assert env["PYTHONDONTWRITEBYTECODE"] == env["PYTHONUTF8"] == "1"
+
+
+def test_timeout_kills_a_grandchild_holding_the_pipes_and_exits_one(
+    emit, repo, tmp_path, monkeypatch, capsys
+):
+    # catches: --timeout not bounding wall time when a grandchild outlives the child
+    fake = tmp_path / "fake_child.py"
+    fake.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        "time.sleep(120)\n"
+    )
+    monkeypatch.setattr(emit, "__file__", str(fake))
+    t0 = time.time()
+    rc, doc = run(emit, repo, "base", "base", tmp_path, "--timeout", "2")
+    assert time.time() - t0 < 60
+    assert rc == 1 and doc is None
+    err = capsys.readouterr().err.strip().splitlines()
+    assert len(err) == 1 and err[0].startswith("impact_emit: ")

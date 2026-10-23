@@ -157,7 +157,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
-| `IMPACT` | [runtime-impact](lanes/runtime-impact.md) | Kernel ABI and dispatch contracts of the kernel ingestor (kernarg lists, launch surfaces, matchers, descriptors, generic targets) at base, head and the merged tree; which shipped variants change and which device runs would settle it | A file under `dnn-providers/hip-kernel-provider/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, `projects/hipdnn/tools/IngestorGenerator/` or `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` changes |
+| `IMPACT` | [runtime-impact](lanes/runtime-impact.md) | Kernel ABI and dispatch contracts of the kernel ingestor (kernarg lists, launch surfaces, matchers, descriptors, generic targets) at base, head and the merged tree; which shipped variants change and which device runs would settle it | A file under `dnn-providers/hip-kernel-provider/`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, `projects/hipdnn/tools/IngestorGenerator/`, `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json` or `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets*` changes |
 
 `ORCH` (process findings you file), `SCOUT<k>`, `SYNTH` ([orient](lanes/orient.md)) and `VER`
 ([verify](lanes/verify.md)) are not partition choices. Merge two lanes into one agent when the
@@ -219,7 +219,8 @@ message. Agents see only their dispatch: each begins by reading `dispatch-contex
 `IMPACT` (its emitter builds every shipped variant twice), then the
 longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `DRIFT` and an approved
 `ROCK` build, or any other lane that builds or mutates, run concurrently in their own `$SCRATCH` trees and
-split `Cores:` between them while they overlap, `RUN` taking the larger share.
+split `Cores:` between them while they overlap, `RUN` taking the larger share. `IMPACT`'s emitter does not
+read `Cores:`: it builds the two sides on two concurrent workers, so count two cores against `Cores:` while it runs.
 
 ```markdown
 Role:      <LANE> | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
@@ -251,7 +252,7 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH`, `TESTQ` and `DRIFT` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH`, `TESTQ`, `DRIFT` and `IMPACT` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from

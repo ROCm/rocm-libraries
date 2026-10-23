@@ -51,10 +51,12 @@ AREA_ROWS = [
 ]
 
 # Changes under these trigger the IMPACT lane (lanes/runtime-impact.md): the kernel ingestor's
-# producers, packer, native packs, SDK ingestor headers and generator configs.
+# producers, packer, native packs, SDK ingestor headers, generic-target table and header, and
+# generator configs. Keep in step with impact.py's SURFACE_TABLE.
 IMPACT_PREFIXES = (
     "dnn-providers/hip-kernel-provider/",
     "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/",
+    "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets",
     "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
     "projects/hipdnn/tools/IngestorGenerator/",
 )
