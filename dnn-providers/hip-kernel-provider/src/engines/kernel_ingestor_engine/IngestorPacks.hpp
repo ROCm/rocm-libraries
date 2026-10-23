@@ -116,10 +116,13 @@ struct FlydslSdpaBwdMergedLaunchDump
     size_t workspaceBytes = 0;
     /// Set when the seed and offset are written into the workspace ahead of the launch: either
     /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
-    /// seedCopiedFromDevice, by copying the 4 bytes of each 32-bit device tensor.
+    /// seedCopiedFromDevice, by copying the 4 bytes at seedSource and offsetSource (the device
+    /// addresses of the 32-bit seed and offset tensors).
     bool seedUploaded = false;
     bool seedCopiedFromDevice = false;
     std::vector<uint32_t> seedWords;
+    const void* seedSource = nullptr;
+    const void* offsetSource = nullptr;
 };
 
 /// The launch of @p kernel on the graph of @p context, over @p buffers (by tensor uid) and a

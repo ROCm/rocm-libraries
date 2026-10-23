@@ -337,7 +337,8 @@ void logDecline(std::string_view cause, const std::string& detail)
 }
 
 /// The bias's LDS staging rule: every non-unit stride a multiple of 8 elements (the matcher
-/// records 0 on a broadcast or unit axis) and a 16-byte aligned base.
+/// records 0 on a broadcast or unit axis), a row stride of at least ceil8(Skv) (the kernel's
+/// bias chunk contract), and a 16-byte aligned base.
 bool stagesBias(const bwd::SdpaBwdProblem& problem)
 {
     constexpr int64_t VECTOR_ELEMENTS = 8;
@@ -345,7 +346,97 @@ bool stagesBias(const bwd::SdpaBwdProblem& problem)
     return problem.biasStrides.batch % VECTOR_ELEMENTS == 0
            && problem.biasStrides.head % VECTOR_ELEMENTS == 0
            && problem.biasStrides.seq % VECTOR_ELEMENTS == 0
+           && (problem.biasStrides.seq == 0
+               || problem.biasStrides.seq >= bwd::detail::ceilToVector(problem.seqLenKv))
            && problem.biasAlignmentBytes % ALIGNMENT_BYTES == 0;
+}
+
+/// The largest query tile (block_q) of the dK/dV role among the shipped gqa_pack == 1 merged
+/// objects: 64 at head dims 32 to 160 and 32 at 192, from resolving each object's dK/dV
+/// knobs through the descriptor generator's build policy. It is not a descriptor field, so
+/// the pack_split bound below uses this graph-level maximum.
+constexpr int64_t PACK_MAX_BLOCK_Q = 64;
+
+/// Whether every span a gqa_pack object binds, from head 0 of the group over its G heads,
+/// fits the 32-bit buffer descriptor: Q, dO and O, the statistics and, when present, the
+/// bias; and whether the kernel's pack_split multiply-high is exact for every packed row it
+/// can address: (Sq * G + 2 * block_q) * Sq < 2^31, the rows Sq * G plus the pad to an even
+/// tile count. A graph that is not grouped has no packed span.
+bool packedSpansFit(const bwd::SdpaBwdProblem& problem)
+{
+    if(problem.numHeads <= problem.numKvHeads)
+    {
+        return false;
+    }
+    const int64_t group = problem.numHeads / problem.numKvHeads;
+    const auto packedRows = bwd::detail::checkedProduct({problem.seqLenQ, group});
+    if(!packedRows || *packedRows > INT32_LIMIT)
+    {
+        return false;
+    }
+    const auto splitBound
+        = bwd::detail::checkedProduct({*packedRows + 2 * PACK_MAX_BLOCK_Q, problem.seqLenQ});
+    if(!splitBound || *splitBound >= (int64_t{1} << 31))
+    {
+        return false;
+    }
+    const auto spanFits = [&](int64_t rows,
+                              int64_t seqStride,
+                              int64_t width,
+                              int64_t headStride,
+                              int64_t elementBytes) {
+        const auto slab = bwd::detail::slabElements(rows, seqStride, width);
+        const auto heads = bwd::detail::checkedProduct({group - 1, headStride});
+        if(!slab || !heads || *heads > INT32_LIMIT)
+        {
+            return false;
+        }
+        const auto bytes = bwd::detail::checkedProduct({*slab + *heads, elementBytes});
+        return bytes.has_value() && *bytes <= INT32_LIMIT;
+    };
+    const int64_t rowsQ = problem.seqLenQ - 1;
+    constexpr int64_t ELEMENT_BYTES = bwd::detail::BYTES_PER_ELEMENT;
+    constexpr int64_t STATS_BYTES = 4;
+    if(!spanFits(rowsQ,
+                 problem.q.seq,
+                 bwd::detail::ceilToVector(problem.headDimQk),
+                 problem.q.head,
+                 ELEMENT_BYTES)
+       || !spanFits(rowsQ,
+                    problem.dO.seq,
+                    bwd::detail::ceilToVector(problem.headDimV),
+                    problem.dO.head,
+                    ELEMENT_BYTES)
+       || !spanFits(rowsQ,
+                    problem.o.seq,
+                    bwd::detail::ceilToVector(problem.headDimV),
+                    problem.o.head,
+                    ELEMENT_BYTES))
+    {
+        return false;
+    }
+    // The statistics: HT packs the group's heads contiguously, TH interleaves them one
+    // element apart.
+    const auto statsElements
+        = problem.statsLayout == bwd::StatsLayout::HT
+              ? bwd::detail::checkedProduct({group, problem.seqLenQ})
+              : bwd::detail::checkedProduct({problem.seqLenQ, problem.numHeads});
+    if(!statsElements)
+    {
+        return false;
+    }
+    const int64_t statsExtra = problem.statsLayout == bwd::StatsLayout::HT ? 0 : group - 1;
+    const auto statsBytes = bwd::detail::checkedProduct({*statsElements + statsExtra, STATS_BYTES});
+    if(!statsBytes || *statsBytes > INT32_LIMIT)
+    {
+        return false;
+    }
+    if(problem.biasUid == bwd::NO_UID)
+    {
+        return true;
+    }
+    return spanFits(
+        rowsQ, problem.biasStrides.seq, problem.seqLenKv, problem.biasStrides.head, ELEMENT_BYTES);
 }
 
 /**
@@ -377,9 +468,10 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
         return std::nullopt;
     }
 
-    // The merged table (`_instances.py`, `sdpa_bwd_merged`) builds exact objects at tiles 64 to
-    // 192 and, at tile 32 only, a padded object: a head size is served when both dims are at
-    // most 32 or both equal one of those tiles. kernel_match keeps its per-row check.
+    // The merged table (`_instances.py`, `sdpa_bwd_merged`) builds exact objects at tiles 32 to
+    // 192 and, at tile 32 only, padded objects: a head size is served when both dims are at
+    // most 32 (an exact or padded tile-32 object) or both equal one of the exact tiles 64 to
+    // 192. kernel_match keeps its per-row check.
     const int64_t largest = std::max(problem.headDimQk, problem.headDimV);
     const bool exactTile = problem.headDimQk == problem.headDimV && largest >= 64 && largest <= 192
                            && largest % 32 == 0;
@@ -410,8 +502,10 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     bound[std::string(HEAD_DIM_V_TOKEN)] = problem.headDimV;
     bound[std::string(DROPOUT_TOKEN)] = int64_t{problem.dropoutP > 0.0F ? 1 : 0};
     bound[std::string(DBIAS_TOKEN)] = int64_t{problem.dbiasUid != bwd::NO_UID ? 1 : 0};
-    // The matcher guarantees Hq % Hk == 0, so more query heads than key heads is a group.
-    bound[std::string(GQA_PACK_TOKEN)] = int64_t{problem.numHeads > problem.numKvHeads ? 1 : 0};
+    // The matcher guarantees Hq % Hk == 0, so more query heads than key heads is a group; a
+    // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
+    // graph is served by the non-pack objects, which rebase per head.
+    bound[std::string(GQA_PACK_TOKEN)] = int64_t{packedSpansFit(problem) ? 1 : 0};
     bound[std::string(BIAS_STAGING_TOKEN)] = int64_t{stagesBias(problem) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
@@ -538,7 +632,7 @@ bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
         .has_value();
 }
 
-/// Every row's position is its descriptor order, which is the priority order (D9).
+/// Every row's position is its descriptor order, which is the priority order.
 double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
                                 const BoundTokens& /*bound*/,
                                 const KernelDefinition& kernel)
@@ -1156,7 +1250,7 @@ LaunchArguments launchArguments(const MergedPlan& plan,
             m.philoxOffset1 = buffer(problem.offsetUid);
         }
     }
-    // DR-5: the one-offset API, the second Philox scalar is zero.
+    // The one-offset API: the second Philox scalar is zero.
     m.philoxOffset2 = 0;
 
     m.numHeadQ = toInt32(problem.numHeads, "num_head_q");
@@ -1168,22 +1262,23 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     // The matcher records 0 on a unit axis. A unit sequence axis keeps a row pitch instead:
     // the kernels drop padding rows through the buffer bound rows * stride_seq, which a zero
     // stride collapses onto row 0. The pitch is the head dim rounded to 8 elements, which
-    // keeps the 8-element alignment of every other stride.
-    const auto rowPitch = [](bwd::Strides strides, int64_t headDim) {
-        if(strides.seq == 0)
+    // keeps the 8-element alignment of every other stride. The matcher declines a zero
+    // sequence stride on a multi-row axis, so the substitution keys on the extent.
+    const auto rowPitch = [](bwd::Strides strides, int64_t rows, int64_t headDim) {
+        if(rows == 1)
         {
-            strides.seq = (headDim + 7) / 8 * 8;
+            strides.seq = bwd::detail::ceilToVector(headDim);
         }
         return strides;
     };
-    m.strideQ = rowPitch(problem.q, problem.headDimQk);
-    m.strideK = rowPitch(problem.k, problem.headDimQk);
-    m.strideV = rowPitch(problem.v, problem.headDimV);
-    m.strideO = rowPitch(problem.o, problem.headDimV);
-    m.strideDO = rowPitch(problem.dO, problem.headDimV);
-    m.strideDK = rowPitch(problem.dK, problem.headDimQk);
-    m.strideDV = rowPitch(problem.dV, problem.headDimV);
-    m.strideDQ = rowPitch(problem.dQ, problem.headDimQk);
+    m.strideQ = rowPitch(problem.q, problem.seqLenQ, problem.headDimQk);
+    m.strideK = rowPitch(problem.k, problem.seqLenKv, problem.headDimQk);
+    m.strideV = rowPitch(problem.v, problem.seqLenKv, problem.headDimV);
+    m.strideO = rowPitch(problem.o, problem.seqLenQ, problem.headDimV);
+    m.strideDO = rowPitch(problem.dO, problem.seqLenQ, problem.headDimV);
+    m.strideDK = rowPitch(problem.dK, problem.seqLenKv, problem.headDimQk);
+    m.strideDV = rowPitch(problem.dV, problem.seqLenKv, problem.headDimV);
+    m.strideDQ = rowPitch(problem.dQ, problem.seqLenQ, problem.headDimQk);
     m.strideB = problem.biasUid != bwd::NO_UID ? problem.biasStrides : bwd::Strides{};
 
     // dBias: none requested leaves DB as O over zero strides, with which the kernel drops
@@ -1446,6 +1541,8 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
     {
         dump.seedUploaded = true;
         dump.seedCopiedFromDevice = arguments.seedUpload->seedSource != nullptr;
+        dump.seedSource = arguments.seedUpload->seedSource;
+        dump.offsetSource = arguments.seedUpload->offsetSource;
         if(!dump.seedCopiedFromDevice)
         {
             dump.seedWords.assign(arguments.seedUpload->words.begin(),

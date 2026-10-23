@@ -81,8 +81,9 @@ enum class SeedForm : uint8_t
     PASS_BY_VALUE
 };
 
-/// Element strides of a (B, H, S, D) tensor's batch, head and sequence axes; 0 on a
-/// broadcast or unit axis.
+/// Element strides of a (B, H, S) tensor's batch, head and sequence axes; 0 on a unit axis,
+/// or on a batch or head axis the tensor broadcasts. A multi-row sequence axis never has
+/// stride 0 (LY-6).
 struct Strides
 {
     int64_t batch = 0;
@@ -210,6 +211,19 @@ inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> fact
         }
     }
     return product;
+}
+
+/// Elements a slab of @p rows + 1 rows at @p rowStride elements reaches, the last @p width
+/// elements wide; nullopt when it does not fit in int64_t.
+inline std::optional<int64_t> slabElements(int64_t rows, int64_t rowStride, int64_t width)
+{
+    const auto reach = checkedProduct({rows, rowStride});
+    int64_t total = 0;
+    if(!reach.has_value() || __builtin_add_overflow(*reach, width, &total))
+    {
+        return std::nullopt;
+    }
+    return total;
 }
 
 /// Whether no two elements of @p tensor share an address: its axes of more than one element,
@@ -395,6 +409,7 @@ private:
         return dimsOf(_operands[operand]).Get(axis);
     }
 
+    /// ST-4: an operand uid that is missing, virtual or pass-by-value declines [operand].
     Verdict resolveOperands()
     {
         const auto& a = _attributes;
@@ -417,8 +432,8 @@ private:
         return resolveOperand(_context, _stats);
     }
 
-    /// An output (dQ, dK, dV, dBias) must not share its uid with any other role; inputs may
-    /// share among themselves.
+    /// ST-5: an output (dQ, dK, dV, dBias) must not share its uid with any other role; inputs
+    /// may share among themselves.
     Verdict checkUidAliasing()
     {
         const auto& a = _attributes;
@@ -491,6 +506,8 @@ private:
         return std::nullopt;
     }
 
+    /// SH-1: dQ, dK and dV match Q, K and V; O and dO are [B, Hq, Sq, Dv]; V's heads equal
+    /// K's; stats is [B, Hq, Sq, 1]; every extent is positive.
     Verdict checkShapes()
     {
         const auto all = [this](auto&& visit) -> Verdict {
@@ -588,6 +605,8 @@ private:
         return std::nullopt;
     }
 
+    /// DT-1: one dtype, f16 or bf16, on all eight tensors. DT-2 (fp32) and DT-3 (FP8) decline
+    /// [data_type] through the same check.
     Verdict checkDataTypes()
     {
         const auto dtype = servedDataType(_operands[Q].tensor->data_type());
@@ -616,6 +635,9 @@ private:
         return std::nullopt;
     }
 
+    /// DT-4: max(Dqk, Dv) above MAX_HEAD_DIM declines [head_size]. DT-5: unequal Dqk and Dv are
+    /// accepted; tile routing is the engine's. DT-6: any group size is accepted, a head count
+    /// that is not a multiple of the key/value heads declines [gqa].
     Verdict checkHeads()
     {
         if(std::max(_problem.headDimQk, _problem.headDimV) > MAX_HEAD_DIM)
@@ -636,6 +658,7 @@ private:
         return std::nullopt;
     }
 
+    /// LY-1: every operand declares the 16-byte alignment the kernels assume.
     Verdict checkAlignment()
     {
         for(const auto& operand : _operands)
@@ -662,8 +685,10 @@ private:
         return Strides{stride(BATCH_AXIS), stride(HEAD_AXIS), stride(SEQ_AXIS)};
     }
 
-    /// Whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the last
-    /// @p width elements wide, fits the kernels' 32-bit byte offsets.
+    /// DT-9: whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the
+    /// last @p width elements wide, fits the kernels' 32-bit byte offsets. DT-7: this is the
+    /// only bound on sequence length and tensor size; a tensor larger than 4 GiB in total is
+    /// served when every slab fits.
     static bool slabFits(int64_t rows, int64_t rowStride, int64_t width)
     {
         const auto reach = checkedProduct({rows, rowStride});
@@ -674,6 +699,12 @@ private:
         return (*reach + width) * BYTES_PER_ELEMENT <= INT32_LIMIT;
     }
 
+    /// LY-2: the last stride is 1, the others are independent. LY-3: every stride of an axis of
+    /// more than one element is a non-negative multiple of 8 elements. LY-6: a sequence axis of
+    /// more than one row has a non-zero stride on every operand (padding rows read zero through
+    /// the row bound, and an aliased row would feed them data). DT-8: a head dim that is not a
+    /// multiple of 8 needs a smallest stride of at least ceil8(D). DT-9: the per-head slab
+    /// fits. LY-5: output elements do not overlap.
     Verdict checkTensorLayout(const Operand& operand, int64_t headDim, bool isOutput)
     {
         const auto& dims = dimsOf(operand);
@@ -699,6 +730,13 @@ private:
                                    + std::to_string(axis) + " (extent "
                                    + std::to_string(dims.Get(axis))
                                    + ") is not a non-negative multiple of 8 elements"};
+            }
+            if(axis == SEQ_AXIS && stride == 0)
+            {
+                return Decline{"layout",
+                               describe(operand) + " sequence axis (extent "
+                                   + std::to_string(dims.Get(axis)) + ") has stride 0; rows of a "
+                                   + "multi-row sequence axis must not alias"};
             }
             if(stride > 0)
             {
@@ -734,6 +772,8 @@ private:
         return std::nullopt;
     }
 
+    /// LY-4: dQ, dK and dV may share one buffer and Q, K and V may be packed views; aliasing
+    /// between tensors is not visible here, only overlap within one output (LY-5).
     Verdict checkLayouts()
     {
         const std::array<Strides*, 8> slots{&_problem.q,
@@ -756,6 +796,8 @@ private:
         return std::nullopt;
     }
 
+    /// SS-1: stats is packed (B*H, Sq) (HT) or packed (B, Sq, H) (TH); the kernels take no
+    /// stats strides, so any other layout declines.
     Verdict checkStats()
     {
         const auto& strides = stridesOf(_stats);
@@ -790,6 +832,13 @@ private:
         return value.has_value() ? std::optional<int64_t>(value.value()) : std::nullopt;
     }
 
+    /// MW-1: both deprecated causal flags decline. MW-2: a flag implies right bound 0 unless
+    /// right_bound is set. MW-3: a bound below -1 declines. MW-4: only TOP_LEFT and BOTTOM_RIGHT
+    /// alignments are served. MW-5, MW-6, MW-7, MW-8, MW-9a: windows are accepted in cuDNN's
+    /// convention. MW-9b, MW-9c: left_bound 0 with a right bound of 0 or unbounded declines.
+    /// MW-11: dropout with a bottom-right causal mask is accepted. MW-12: ALiBi declines.
+    /// MW-13: a window with bottom-right alignment under padding_mask declines. MW-10 (a mask
+    /// with bias) is checkBias's.
     Verdict checkMask()
     {
         const auto& a = _attributes;
@@ -855,6 +904,8 @@ private:
         return std::nullopt;
     }
 
+    /// PV-4, PV-7: a seq_len tensor is a device INT32 [B, 1, 1, 1] tensor without a ragged
+    /// offset.
     Verdict checkSeqLen(const char* label, int64_t uid)
     {
         Operand operand{label, uid};
@@ -893,6 +944,9 @@ private:
         return std::nullopt;
     }
 
+    /// PV-1: padding_mask with both seq_len tensors is accepted. PV-2: the flag without
+    /// tensors, tensors without the flag, or one length tensor decline. PV-3, PV-8: a ragged
+    /// offset on any operand or stats declines.
     Verdict checkVarlen()
     {
         const auto& a = _attributes;
@@ -972,6 +1026,12 @@ private:
         return std::nullopt;
     }
 
+    /// BI-6: dBias without bias declines. BI-1: a bias of rank 1..4 right-aligned to
+    /// (B, Hq, Sq, Skv), whose first three axes may broadcast. BI-2: the bias dtype is Q's.
+    /// BI-3: a bias broadcast over batch or head with dBias is accepted. BI-4: dBias with a
+    /// row-broadcast bias declines. BI-5, BI-7: dBias has the bias's dims and dtype. PV-8: a
+    /// ragged offset on bias or dBias declines. PV-10: bias with padding_mask declines. MW-10:
+    /// bias with a mask declines. LY-1, DT-9: bias and dBias alignment and slab bounds.
     Verdict checkBias()
     {
         const auto& a = _attributes;
@@ -1125,6 +1185,8 @@ private:
         return std::nullopt;
     }
 
+    /// DR-4: INT32 and INT64 seed and offset tensors are accepted; the width is recorded. DR-6:
+    /// a device tensor or a pass-by-value one is accepted.
     Verdict checkSeedTensor(Operand& operand, SeedWidth& width, SeedForm& form)
     {
         if(auto verdict = resolveOperand(_context, operand, "dropout", true))
@@ -1163,6 +1225,10 @@ private:
         return std::nullopt;
     }
 
+    /// DR-1: probability 0 or unset is off, (0, 1) is on. DR-2: p outside [0, 1) or NaN
+    /// declines. DR-3: p in (0, 1) needs both seed and offset, and either one without p > 0
+    /// declines. DR-6: seed and offset share one width and one form. DR-7: dropout_mask,
+    /// dropout_scale and dropout_scale_inv tensors decline.
     Verdict checkDropout()
     {
         const auto& a = _attributes;
@@ -1301,6 +1367,9 @@ private:
         return std::nullopt;
     }
 
+    /// SC-1: attn_scale_value or a pass-by-value scale tensor, 1.0 when absent. SC-2: a device
+    /// scale tensor declines. SC-3: both set declines. SC-4: any finite scale up to the bound,
+    /// zero and negative included. SC-5: non-finite or above 2^20 in magnitude declines.
     Verdict checkScale()
     {
         const auto& a = _attributes;
@@ -1340,6 +1409,7 @@ private:
 inline std::variant<SdpaBwdProblem, Decline>
     matchSdpaBackward(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
 {
+    // ST-1: a graph that is not exactly one SdpaBackwardAttributes node declines [node].
     if(context.graph.nodeCount() != 1)
     {
         return Decline{"node",
@@ -1351,12 +1421,14 @@ inline std::variant<SdpaBwdProblem, Decline>
     {
         return Decline{"node", "node is not an SDPA backward node"};
     }
+    // ST-2: an override-shape graph declines [node].
     // Launch arguments are bound from the graph's shapes at prepare, so an override-shape
     // graph, whose shapes are replaced at execute, is declined.
     if(context.graph.getGraph().is_override_shape_enabled())
     {
         return Decline{"node", "graph has override shapes enabled"};
     }
+    // ST-3: the compute type is one of UNSET, FLOAT, HALF, BF16.
     // The kernels accumulate in f32 whatever the compute type; DOUBLE asks for more and an
     // integer or FP8 compute type for a different computation.
     const auto computeType = node.computeDataType();
