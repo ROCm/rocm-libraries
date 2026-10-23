@@ -263,6 +263,24 @@ reduction:
     ignored: [num_seqs]
   aot_budget_per_arch: 1000
 
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+# `${<request field>}` fills a scalar; `value_map` translates a request value to that
+# scalar or to patches; an unlisted value fails the row. The template is gfx950 dense's:
+# packed BSHD Q/K/V/O with Sq a placeholder, which at seqlen_q 1 is the contiguous
+# [B, Hq, 1, D] Q/O and unit-D-stride K/V this engine's matcher requires, and the layout
+# of every servable external decode graph. Its attn_scale_value is null (1.0, cuDNN's
+# default); the kernel takes the scale as a launch argument, so timing does not depend
+# on it. Map the owner rows' batch, seqlen_q, seqlen_k, nhead_q, nhead_k, hdim_q,
+# hdim_v, dtype and mask_type. NO_MASK and BOTTOM_RIGHT_CAUSAL are the same computation
+# at seqlen_q 1 (see the header); TOP_LEFT_CAUSAL is declined, so it is not listed.
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      BOTTOM_RIGHT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: true}
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: false}
+
 # The Python/C++ launch-contract restatement, per surface (tools/launch_surface.py).
 # C++ mirrors are relative to the repo root; python_source to rocke/library.
 launch_surface:
