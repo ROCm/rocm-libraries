@@ -35,9 +35,8 @@
 //   * rocsparse::numeric_boost           (common/rocsparse_numeric_boost.cpp)
 //   * _rocsparse_csrmv_info::clear + adaptive/lrb/nnzsplit clear
 //         (header-inline clear; level2/rocsparse_csrmv_{adaptive,lrb,nnzsplit}_info.cpp)
-//   * nnzsplit csrmv_info device-buffer release through the public rocsparse_spmv
-//         path (regression for rocm-libraries#6595; see
-//         level2/rocsparse_csrmv_nnzsplit_info.cpp)
+//   * nnzsplit csrmv analysis buffer returned to the device memory pool on
+//         rocsparse_destroy_spmat_descr (rocm-libraries#6595)
 //   * rocsparse csrgemm_info create/copy/destroy (extra/rocsparse_csrgemm_info.cpp)
 //   * _rocsparse_mat_info lifecycle via the public C API (rocsparse_create/destroy_mat_info)
 //
@@ -47,9 +46,7 @@
 // unit-test target adds library/src/include to its include path.
 #include "rocsparse_csrgemm_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
-#include "rocsparse_mat_info.hpp"
 #include "rocsparse_numeric_boost.hpp"
-#include "rocsparse_spmat_descr.hpp"
 
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -225,148 +222,147 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 }
 
 // ===========================================================================
-// nnzsplit csrmv_info device-buffer lifecycle
+// nnzsplit csrmv analysis buffer release
 // ===========================================================================
-// Regression test for the device leak fixed by rocm-libraries PR #6595:
-// _rocsparse_csrmv_info::clear() must call nnzsplit.clear(), which frees
-// nnzsplit.starting_ids. starting_block_ids is an interior pointer into that
-// same allocation (level2/rocsparse_csrmv_template_nnzsplit.cpp), so it must
-// not be freed a second time. csrmv_subinfo_clear_null_safe above never
-// allocates, so it cannot tell whether that call is still there.
-//
-// The nnzsplit algorithm is reachable only through the public
-// rocsparse_spmv(..., rocsparse_spmv_alg_csr_nnzsplit, ...) entry point: the
-// legacy rocsparse_Xcsrmv_analysis path hard-codes adaptive or rowsplit (see
-// rocsparse_csrmv_impl.cpp, csrmv_alg_default2csrmv_alg) and never selects
-// nnzsplit. After rocsparse_spmv_stage_preprocess, the resulting csrmv_info
-// lives at mat->info->get_csrmv_info(), where `mat` is the concrete
-// _rocsparse_spmat_descr behind the opaque rocsparse_spmat_descr handle (see
-// rocsparse_spmv.cpp around line 604 and rocsparse_mat_info.hpp).
-//
-// use_starting_block_ids is NOT covered here: it is reachable only through
-// the separate v2 rocsparse_spmv_descr API's
-// rocsparse_spmv_input_nnz_use_starting_block_ids input (see
-// rocsparse_v2_spmv.cpp), whose _rocsparse_spmv_descr type -- and the
-// csrmv_info pointer it owns -- is defined entirely inside that one .cpp with
-// no declaring header, so it is not reachable from this test file the way
-// mat->info->get_csrmv_info() is above. This is an API-shape limitation, not
-// a matrix-size one, so no matrix is invented to work around it; the
-// starting_ids path alone already exercises the exact allocation the fix in
-// #6595 frees.
-TEST(internal_infostructs, csrmv_nnzsplit_info_clear_releases_device_buffer)
+namespace
 {
-    // Small 4x4 CSR, 6 nonzeros -- just enough for the nnzsplit analysis to
-    // allocate its starting_ids buffer; the exact block count is an
-    // implementation detail (nnzsplit_block_size / nnzsplit_nnz_per_thread).
-    const int64_t            m         = 4;
-    const int64_t            n         = 4;
-    const int64_t            nnz       = 6;
+    struct SpmatGuard
+    {
+        rocsparse_spmat_descr mat = nullptr;
+
+        SpmatGuard() = default;
+        ~SpmatGuard()
+        {
+            if(mat != nullptr)
+            {
+                rocsparse_destroy_spmat_descr(mat);
+            }
+        }
+        SpmatGuard(const SpmatGuard&) = delete;
+        SpmatGuard& operator=(const SpmatGuard&) = delete;
+    };
+
+    struct DnvecGuard
+    {
+        rocsparse_dnvec_descr vec = nullptr;
+
+        DnvecGuard() = default;
+        ~DnvecGuard()
+        {
+            if(vec != nullptr)
+            {
+                rocsparse_destroy_dnvec_descr(vec);
+            }
+        }
+        DnvecGuard(const DnvecGuard&) = delete;
+        DnvecGuard& operator=(const DnvecGuard&) = delete;
+    };
+}
+
+// Preprocessing through rocsparse_spmv with rocsparse_spmv_alg_csr_nnzsplit
+// allocates nnzsplit.starting_ids with hipMallocAsync; destroying the matrix
+// descriptor must return it to the device memory pool (rocm-libraries#6595).
+class CsrmvNnzsplitInfo : public HandleTest
+{
+};
+
+TEST_F(CsrmvNnzsplitInfo, destroy_spmat_descr_returns_analysis_buffer)
+{
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    int pools_supported = 0;
+    ASSERT_EQ(
+        hipDeviceGetAttribute(&pools_supported, hipDeviceAttributeMemoryPoolsSupported, device),
+        hipSuccess);
+    if(!pools_supported)
+    {
+        GTEST_SKIP() << "device has no stream-ordered memory pool";
+    }
+    hipMemPool_t pool = nullptr;
+    ASSERT_EQ(hipDeviceGetMemPool(&pool, device), hipSuccess);
+
+    const auto pool_used_bytes = [pool]() {
+        uint64_t used = 0;
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used), hipSuccess);
+        return used;
+    };
+
     const std::vector<int>   h_row_ptr = {0, 2, 3, 5, 6};
     const std::vector<int>   h_col_ind = {0, 1, 1, 0, 2, 3};
     const std::vector<float> h_val     = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
-    const std::vector<float> h_x       = {1.f, 1.f, 1.f, 1.f};
-    const std::vector<float> h_y       = {0.f, 0.f, 0.f, 0.f};
+    device_vector<int>       d_row_ptr(h_row_ptr);
+    device_vector<int>       d_col_ind(h_col_ind);
+    device_vector<float>     d_val(h_val);
+    device_vector<float>     d_x(std::vector<float>(4, 1.f));
+    device_vector<float>     d_y(std::vector<float>(4, 0.f));
+    ASSERT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr && d_x.ptr && d_y.ptr);
 
-    device_vector<int>   d_row_ptr(h_row_ptr);
-    device_vector<int>   d_col_ind(h_col_ind);
-    device_vector<float> d_val(h_val);
-    device_vector<float> d_x(h_x);
-    device_vector<float> d_y(h_y);
-    ASSERT_NE(d_row_ptr.ptr, nullptr);
-    ASSERT_NE(d_col_ind.ptr, nullptr);
-    ASSERT_NE(d_val.ptr, nullptr);
-    ASSERT_NE(d_x.ptr, nullptr);
-    ASSERT_NE(d_y.ptr, nullptr);
-
-    rocsparse_handle handle = nullptr;
-    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
-
-    rocsparse_spmat_descr mat = nullptr;
-    ASSERT_EQ(rocsparse_create_csr_descr(&mat,
-                                         m,
-                                         n,
-                                         nnz,
-                                         d_row_ptr.ptr,
-                                         d_col_ind.ptr,
-                                         d_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_index_base_zero,
-                                         rocsparse_datatype_f32_r),
+    DnvecGuard x, y;
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&x.vec, 4, d_x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&y.vec, 4, d_y.ptr, rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    rocsparse_dnvec_descr x = nullptr;
-    rocsparse_dnvec_descr y = nullptr;
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&x, n, d_x.ptr, rocsparse_datatype_f32_r),
-              rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_dnvec_descr(&y, m, d_y.ptr, rocsparse_datatype_f32_r),
-              rocsparse_status_success);
+    // Creates the matrix, preprocesses it twice and destroys it; stores the
+    // pool usage after the first preprocess.
+    const auto analyse_and_destroy = [&](uint64_t* after_preprocess) {
+        SpmatGuard mat;
+        ASSERT_EQ(rocsparse_create_csr_descr(&mat.mat,
+                                             4,
+                                             4,
+                                             6,
+                                             d_row_ptr.ptr,
+                                             d_col_ind.ptr,
+                                             d_val.ptr,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_index_base_zero,
+                                             rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
 
-    const float alpha = 1.0f;
-    const float beta  = 0.0f;
+        const float alpha       = 1.f;
+        const float beta        = 0.f;
+        size_t      buffer_size = 0;
+        const auto  spmv        = [&](rocsparse_spmv_stage stage, void* buffer) {
+            return rocsparse_spmv(handle,
+                                  rocsparse_operation_none,
+                                  &alpha,
+                                  mat.mat,
+                                  x.vec,
+                                  &beta,
+                                  y.vec,
+                                  rocsparse_datatype_f32_r,
+                                  rocsparse_spmv_alg_csr_nnzsplit,
+                                  stage,
+                                  &buffer_size,
+                                  buffer);
+        };
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_buffer_size, nullptr), rocsparse_status_success);
+        device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t(1));
+        ASSERT_NE(buffer.ptr, nullptr);
 
-    size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_spmv(handle,
-                             rocsparse_operation_none,
-                             &alpha,
-                             mat,
-                             x,
-                             &beta,
-                             y,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_spmv_alg_csr_nnzsplit,
-                             rocsparse_spmv_stage_buffer_size,
-                             &buffer_size,
-                             nullptr),
-              rocsparse_status_success);
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        *after_preprocess = pool_used_bytes();
 
-    device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t(1));
-    ASSERT_NE(buffer.ptr, nullptr);
+        // A second preprocess reuses the cached analysis and must not allocate again.
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        EXPECT_EQ(pool_used_bytes(), *after_preprocess);
 
-    ASSERT_EQ(rocsparse_spmv(handle,
-                             rocsparse_operation_none,
-                             &alpha,
-                             mat,
-                             x,
-                             &beta,
-                             y,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_spmv_alg_csr_nnzsplit,
-                             rocsparse_spmv_stage_preprocess,
-                             &buffer_size,
-                             buffer.ptr),
-              rocsparse_status_success);
+        ASSERT_EQ(rocsparse_destroy_spmat_descr(mat.mat), rocsparse_status_success);
+        mat.mat = nullptr;
+    };
 
-    // mat->info is the real _rocsparse_mat_info behind the opaque
-    // rocsparse_mat_info handle; get_csrmv_info() is its public accessor for
-    // the private csrmv_info it is caching (set by the preprocess stage
-    // above). This is the exact same lookup rocsparse_spmv's compute stage
-    // uses (rocsparse_spmv.cpp).
-    rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
-    ASSERT_NE(csrmv_info, nullptr);
-    ASSERT_NE(csrmv_info->nnzsplit.starting_ids, nullptr);
-    EXPECT_GT(csrmv_info->nnzsplit.size, 0u);
+    // The first cycle absorbs any one-time pool growth outside the matrix.
+    uint64_t warmup = 0;
+    ASSERT_NO_FATAL_FAILURE(analyse_and_destroy(&warmup));
 
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    // The same clear() the destructor of _rocsparse_csrmv_info calls.
-    csrmv_info->clear();
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    // These fail if _rocsparse_csrmv_info::clear() stops calling
-    // nnzsplit.clear(): the pointers would still aim at the live buffer.
-    // Byte-counting with hipMemGetInfo cannot stand in for this -- a leak does
-    // not make free device memory drop, it only fails to make it rise -- and on
-    // a shared GPU the whole-device figure moves with other processes, the
-    // caching allocators of the runtime and fragmentation anyway.
-    EXPECT_EQ(csrmv_info->nnzsplit.starting_ids, nullptr);
-    EXPECT_EQ(csrmv_info->nnzsplit.starting_block_ids, nullptr);
-    EXPECT_EQ(csrmv_info->nnzsplit.size, 0u);
-
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(y), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_dnvec_descr(x), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-    EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+    const uint64_t before   = pool_used_bytes();
+    uint64_t       analysed = 0;
+    ASSERT_NO_FATAL_FAILURE(analyse_and_destroy(&analysed));
+    const uint64_t after = pool_used_bytes();
+    EXPECT_GT(analysed, before);
+    EXPECT_EQ(after, before);
 }
 
 // ===========================================================================
