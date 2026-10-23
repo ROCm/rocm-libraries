@@ -40,7 +40,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 _PROJ_ROOT = os.path.dirname(  # .../tensilelite (project root)
-    os.path.dirname(  # .../Tensile
+    os.path.dirname(  # .../tensilelite
         os.path.dirname(  # .../Tests
             os.path.dirname(  # .../unit
                 os.path.dirname(  # .../characterization
