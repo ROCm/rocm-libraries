@@ -3,9 +3,9 @@
 
 """Shipping the merged objects: which bytes a row ships, when the run stops, and the two-kernel `verify`.
 
-``generate("sdpa_bwd_merged", ...)`` ships the sweep's pins for the 126 non-bias rows (their rebuild
-only verifies) and the combined (merged + dBias reduce) rebuild for the 82 bias rows, whose
-per-kernel gate must be green; a red gate or a row that does not build ships nothing. The compile
+``generate("sdpa_bwd_merged", ...)`` ships the sweep's pins for the 180 rows that never write dB (their
+rebuild only verifies) and the combined (merged + dBias reduce) rebuild for the 28 dB-storing
+bias rows, whose per-kernel gate must be green; a red gate or a row that does not build ships nothing. The compile
 and the toolchain are replaced by fixtures: nothing is compiled.
 """
 

@@ -29,11 +29,13 @@ different objects: LLVM's AMDGPU backend is not deterministic for some kernels
 reported, never retried; one build per spec. Comparing an object against a pin, and
 deciding which outcomes are red, is the caller's job (``tools/sdpa_bwd_compare.py``).
 
-The ``bias`` rows of ``sdpa_bwd_merged`` build one object with two kernels: the merged kernel and the
-dBias reduce kernel (``reduce_symbol``). Its per-kernel gate (``tools/sdpa_bwd_gate.py``) holds the merged
-kernel's function bytes and resource row to the standalone merged pin and the reduce kernel's resource row
-to the reduce pin. ``generate`` for that op ships pins (``--reference-dir``): a non-bias row ships its pin's
-bytes and its rebuild only verifies it; a bias row ships the combined rebuild. A row that does not build
+The dB-storing ``bias`` rows of ``sdpa_bwd_merged`` (``store_db`` unset) build one object with two kernels:
+the merged kernel and the dBias reduce kernel (``reduce_symbol``); a ``store_db=0`` object never writes dB,
+so it never launches the reduce and holds the merged kernel alone. A combined object's per-kernel gate
+(``tools/sdpa_bwd_gate.py``) holds the merged kernel's function bytes and resource row to the standalone
+merged pin and the reduce kernel's resource row to the reduce pin. ``generate`` for that op ships pins
+(``--reference-dir``): every other row ships its pin's bytes and its rebuild only verifies it; a combined
+row ships the combined rebuild. A row that does not build
 (``error``; for a combined row also ``dual_object``) or a red per-kernel gate stops the run, and nothing
 is shipped.
 
@@ -402,10 +404,10 @@ def op_of(spec: Spec) -> str:
 
 
 def reduce_symbol_of(spec: Spec) -> str:
-    """The dBias reduce kernel the object of @p spec carries beside its own: the merged ``bias`` objects only."""
+    """The dBias reduce kernel the object of @p spec carries beside its own: the dB-storing merged ``bias`` objects only."""
     return (
         SDPA_BWD_MERGED_REDUCE_SYMBOL
-        if spec.kernel == "merged" and spec.cls == "bias"
+        if spec.kernel == "merged" and spec.cls == "bias" and spec.store_db != 0
         else ""
     )
 

@@ -12,7 +12,7 @@
 edit never restamps an object.
 
 An object holds one kernel, or, with ``--reduce-symbol``, two: the merged kernel and the
-dBias reduce kernel of a ``bias`` merged object. ``per_kernel`` carries every kernel's
+dBias reduce kernel of a dB-storing ``bias`` merged object. ``per_kernel`` carries every kernel's
 facts by symbol; ``resources`` and ``static_1087`` are the object's primary kernel's (the
 one that is not the reduce).
 

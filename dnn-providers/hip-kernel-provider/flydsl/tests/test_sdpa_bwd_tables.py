@@ -82,12 +82,12 @@ def test_knobs_stay_in_their_domains(tables) -> None:
 
 
 def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
-    """Only a `bias` merged object holds the dBias reduce kernel, and the field moves no name and no Spec."""
+    """Only a dB-storing `bias` merged object holds the dBias reduce kernel, and the field moves no name and no Spec."""
     rows = tables["sdpa_bwd_merged"]
     for instance in rows:
-        bias = bool(instance.knobs["has_bias"])
+        stores_db = bool(instance.knobs["has_bias"]) and instance.knobs["store_db"] != 0
         assert instance.knobs["reduce_symbol"] == (
-            "fmha_bwd_dbias_reduce_gfx950_kernel_1" if bias else ""
+            "fmha_bwd_dbias_reduce_gfx950_kernel_1" if stores_db else ""
         )
         assert "reduce" not in instance.name
         stripped = replace(
@@ -95,7 +95,8 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
             knobs={k: v for k, v in instance.knobs.items() if k != "reduce_symbol"},
         )
         assert to_spec(stripped) == to_spec(instance)
-    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 82
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 28
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 82
     assert len(rows) == 208
 
 
