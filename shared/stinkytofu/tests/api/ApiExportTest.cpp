@@ -53,6 +53,7 @@
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
+#include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
@@ -250,7 +251,37 @@ TEST(ApiExport, GetGfxArchID) {
 }
 
 // =============================================================================
-// Pass factory functions (stinkytofu-opt availablePasses table)
+// Pass catalog (src/pipeline/PassCatalog.cpp)
+// =============================================================================
+
+TEST(ApiExport, PassCatalogNamesCreatePasses) {
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
+
+    const std::vector<PassInfo>& catalog = passCatalog();
+    EXPECT_FALSE(catalog.empty());
+    EXPECT_EQ(findCatalogPass("NotARealPass"), nullptr);
+    EXPECT_EQ(createCatalogPass("NotARealPass", {}), nullptr);
+
+    const PassInfo* lift = findCatalogPass("LiftAsmRegistersToSSAPass");
+    ASSERT_NE(lift, nullptr);
+    EXPECT_NE(createCatalogPass(lift->name, {}), nullptr);
+    EXPECT_EQ(createCatalogPass(lift->name, {"classes=not-a-class"}), nullptr);
+
+    const PassInfo* removeInst = findCatalogPass("RemoveInstructionPass");
+    ASSERT_NE(removeInst, nullptr);
+    EXPECT_EQ(createCatalogPass(removeInst->name, {}), nullptr);
+    EXPECT_NE(createCatalogPass(removeInst->name, {"s_nop"}), nullptr);
+
+    for (const PassInfo& info : catalog) {
+        EXPECT_EQ(findCatalogPass(info.name), &info);
+        if (std::string(info.name) == "RemoveInstructionPass") continue;
+        EXPECT_NE(createCatalogPass(info.name, {}), nullptr) << info.name;
+    }
+}
+
+// =============================================================================
+// Pass factory functions
 // =============================================================================
 
 TEST(ApiExport, PassFactories) {

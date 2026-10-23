@@ -99,7 +99,7 @@ names and strips comments unless the flag is set.
 ```
 
 Output (illustrative — the authoritative, up-to-date list is whatever the tool
-prints, sourced from `availablePasses` in `tools/stinkytofu-opt/stinkytofu-opt.hpp`):
+prints, sourced from `passCatalog` in `src/pipeline/PassCatalog.cpp`):
 ```
 Available passes:
 =================
@@ -232,7 +232,7 @@ IR File → IRLexer → Tokens → IRParser → Instructions → PassManager →
 
 The tool uses several configuration components defined in `stinkytofu-opt.hpp`:
 
-#### 1. Available Passes (`availablePasses`)
+#### 1. Available Passes (`passCatalog`)
 
 A vector of `PassInfo` structures that register all available optimization passes:
 
@@ -240,20 +240,18 @@ A vector of `PassInfo` structures that register all available optimization passe
 struct PassInfo
 {
     const char* name;                               // Pass identifier (e.g., "StinkyDAGSchedulerPass")
-    std::function<std::unique_ptr<Pass>()> creator; // Factory function to create the pass
+    std::function<std::unique_ptr<Pass>(const std::vector<std::string>&)> creator;
 };
 
-// Illustrative — see the actual, up-to-date registry in stinkytofu-opt.hpp.
-const std::vector<PassInfo> availablePasses = {
-    { "StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); } },
-    // ...
-};
+// Illustrative — see the actual, up-to-date registry in src/pipeline/PassCatalog.cpp.
+const std::vector<PassInfo>& passCatalog();
 ```
 
 **Purpose:** This registry allows dynamic pass creation based on command-line
-arguments. The authoritative list lives in
-`tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`.
+arguments. The authoritative list lives in `src/pipeline/PassCatalog.cpp`.
+`findCatalogPass` looks a name up without building the pass. `createCatalogPass`
+builds it; a null result is an unknown name, or a known name whose creator
+rejected the arguments.
 
 #### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 
