@@ -554,17 +554,24 @@ def _spec_raw(idx: int):
             ),
             "gfx1250",
         )
-    if 36 <= idx <= 39:
+    if 36 <= idx <= 45:
         return _split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
-# Split-K forward (split_k > 1) on gfx1250 WMMA. Keep in lockstep with
-# make_cfg_split_k() in conv_implicit_gemm_emit.c.
+# Split-K forward (split_k > 1) and its single-launch cluster form
+# (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
+# with make_cfg_split_k() in conv_implicit_gemm_emit.c.
 #   36: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
 #   37: mem/cshuffle, 64x64 tile, 2x2 warps
 #   38: mem/default (vector_size_c=1), 32x32x32 tile
 #   39: grouped (groups=2) wavelet/cshuffle
+#   40: cluster S=4, mem/cshuffle, 16x16x64 tile
+#   41: cluster S=8, mem/cshuffle, 64x64 tile
+#   42: cluster S=15, mem/cshuffle, 16x16x64 tile
+#   43: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
+#   44: cluster S=12, mem/default, 32x32x32 tile
+#   45: split_k=2 on gfx950 (MFMA): rejected by both engines
 _SMALL_M = dict(N=1, Hi=7, Wi=7, C=256, K=64, fy=3, fx=3, pH=1, pW=1)
 _CSH_64 = dict(N=2, Hi=12, Wi=12, C=128, K=96, fy=3, fx=3, pH=1, pW=1)
 _DEFAULT = dict(N=1, Hi=9, Wi=9, C=64, K=40, fy=3, fx=3, pH=1, pW=1)
@@ -605,9 +612,41 @@ def _split_k_spec(idx: int):
         37: (_CSH_64, dict(tile_64, pipeline="mem")),
         38: (_DEFAULT, dict(tile_def, pipeline="mem")),
         39: (_GROUPED, {}),
+        40: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4)),
+        41: (_CSH_64, dict(tile_64, pipeline="mem", split_k_cluster=8)),
+        42: (_SMALL_M, dict(pipeline="mem", split_k_cluster=15)),
+        43: (
+            _GROUPED,
+            dict(
+                tile_m=32,
+                tile_n=32,
+                warp_m=1,
+                warp_n=2,
+                pipeline="mem",
+                split_k_cluster=4,
+            ),
+        ),
+        44: (_DEFAULT, dict(tile_def, pipeline="mem", split_k_cluster=12)),
+        45: (
+            _CSH_64,
+            dict(
+                tile_m=64,
+                tile_n=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+            ),
+        ),
     }[idx]
     cfg = dict(base, **kw)
-    return ImplicitGemmConvSpec(problem=_cp(**prob), **cfg), "gfx1250"
+    return (
+        ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
+        "gfx950" if idx == 45 else "gfx1250",
+    )
 
 
 def main() -> int:

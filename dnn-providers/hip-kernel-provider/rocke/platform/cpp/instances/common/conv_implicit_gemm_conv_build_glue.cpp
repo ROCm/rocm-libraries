@@ -328,7 +328,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- split-K kernargs (spec.split_k > 1) ----
      * Python: the fp32 workspace, then the slice width and degree -- the same
-     * trailing pair wgrad takes -- emitted right after the problem block. */
+     * trailing pair wgrad takes -- emitted right after the problem block. The
+     * cluster form also declares its (1, 1, S) launch shape. */
     ctx->fwd_split = spec->split_k > 1;
     if(ctx->fwd_split)
     {
@@ -343,6 +344,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->fwd_p_ws_bytes = rocke_b_param(b, "ws_bytes", rocke_i32(), NULL);
         ctx->fwd_p_ks = rocke_b_param(b, "ks", rocke_i32(), NULL);
         ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+        if(spec->split_k_cluster && b->kernel != NULL)
+        {
+            const int64_t dims[3] = {1, 1, spec->split_k_cluster};
+            rocke_attr_set_int_list(b, &b->kernel->attrs, "cluster_dims", dims, 3);
+        }
     }
 
     /* ---- resolve op + atom + frag widths ---- (811-815) */

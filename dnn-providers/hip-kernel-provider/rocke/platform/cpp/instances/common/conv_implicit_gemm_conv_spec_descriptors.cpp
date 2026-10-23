@@ -301,6 +301,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.groups = 1;
     s.group_merge = 1; /* inert: every merged-aware site reduces to the unmerged form */
     s.split_k = 1; /* inert: the plain (unsplit) forward binary */
+    s.split_k_cluster = 0;
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
@@ -385,7 +386,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
      *            "unroll": self.unroll_k,
      *            f"gm{group_merge}": group_merge > 1,
-     *            "splitk": split_k > 1}) */
+     *            "splitk": split_k > 1,
+     *            f"skc{split_k_cluster}": split_k_cluster > 0}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -393,9 +395,10 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     char gm_buf[24];
+    char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[5];
-    int flag_on[5];
+    const char* flag_names[6];
+    int flag_on[6];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -444,11 +447,14 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     flag_names[3] = gm_buf;
     flag_on[3] = s->group_merge > 1 ? 1 : 0;
     /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
-     * so only the variant reaches the name. */
+     * so only the variant reaches the name. The cluster form bakes its degree. */
     flag_names[4] = "splitk";
     flag_on[4] = s->split_k > 1 ? 1 : 0;
+    snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
+    flag_names[5] = skc_buf;
+    flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 5, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 6, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -567,6 +573,25 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
     {
         ROCKE_SPLITK_REJECT("split-K forward with the default epilogue stores scalars "
                             "(vector_size_c must be 1)");
+    }
+    if(s->split_k_cluster)
+    {
+        if(s->split_k < 2)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster needs the split-K binary (split_k > 1)");
+        }
+        if(s->split_k_cluster < 2 || s->split_k_cluster > 15)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster must be 2..15 (got %d)", s->split_k_cluster);
+        }
+        if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster is wired for the mem pipeline only");
+        }
+        if(s->tile_n % 4)
+        {
+            ROCKE_SPLITK_REJECT("split_k_cluster folds 4-channel quads (tile_n %% 4 == 0)");
+        }
     }
     return true;
 #undef ROCKE_SPLITK_REJECT
@@ -1201,7 +1226,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
-    if(s->split_k > 1)
+    if(s->split_k > 1 || s->split_k_cluster)
     {
         if(!rocke_conv_fwd_split_k_available(s, family, reason, reason_cap))
         {

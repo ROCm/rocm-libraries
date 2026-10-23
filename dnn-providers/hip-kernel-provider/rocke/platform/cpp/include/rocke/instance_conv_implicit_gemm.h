@@ -176,6 +176,12 @@ typedef struct rocke_implicit_gemm_conv_spec
      * Stage 2 (instance_conv_fwd_split_k_reduce.h) folds the slabs into D.
      * Default 1 emits none of this. Mirrors Python ImplicitGemmConvSpec.split_k. */
     int split_k; /* default 1     */
+    /* Single-launch split-K through a gfx1250 workgroup cluster (0 = off). The
+     * split_k_cluster slices of one output tile form one (1, 1, S) cluster;
+     * after a cluster barrier each slice folds 1/S of the tile's rows across
+     * the S slabs into D. Requires split_k > 1. Mirrors
+     * ImplicitGemmConvSpec.split_k_cluster. */
+    int split_k_cluster; /* default 0     */
 
     /* #8624 vector-sizes-as-args: per-operand load/store vector widths
      * (elements). has_* false => Python None => auto-select (choose_load_vec /
@@ -261,7 +267,7 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
                                           char* reason,
                                           size_t reason_cap);
 
-/* Admission gate for spec.split_k > 1, called from
+/* Admission gate for spec.split_k > 1 / spec.split_k_cluster, called from
  * rocke_implicit_gemm_conv_is_valid_spec after the WMMA gates. `family` is the
  * MMA family ("wmma" / "mma"). Returns true when the split-K forward can be
  * built; on false writes the reason. Mirrors Python fwd_split_k_reason. */

@@ -106,6 +106,35 @@ class TestSplitKGate(unittest.TestCase):
         self.assertEqual(names, abi)
 
 
+class TestClusterSplitKGate(unittest.TestCase):
+    """``split_k_cluster``: the single-launch fold through a workgroup cluster."""
+
+    def test_mem_cluster_is_valid_and_sets_the_cluster(self):
+        spec = _spec(split_k=2, split_k_cluster=4, pipeline="mem")
+        ok, why = is_valid_spec(spec, "gfx1250")
+        self.assertTrue(ok, why)
+        kernel = build_implicit_gemm_conv(spec, arch="gfx1250")
+        self.assertEqual(kernel.cluster_dims, (1, 1, 4))
+        self.assertTrue(spec.kernel_name().endswith("_splitk_skc4"))
+        # The ABI is the split-K one: the degree still arrives as ks_count.
+        abi = [n for n, _ in conv_arg_names(direction="fwd", two_stage=True)]
+        self.assertEqual([p.name for p in kernel.params], abi)
+
+    def test_rejections(self):
+        for kw, why in (
+            (dict(split_k=1, split_k_cluster=4, pipeline="mem"), "split_k > 1"),
+            (dict(split_k=2, split_k_cluster=4), "mem pipeline"),
+            (dict(split_k=2, split_k_cluster=16, pipeline="mem"), "2..15"),
+        ):
+            ok, reason = is_valid_spec(_spec(**kw), "gfx1250")
+            self.assertFalse(ok, kw)
+            self.assertIn(why, reason)
+
+    def test_off_by_default(self):
+        kernel = build_implicit_gemm_conv(_spec(split_k=2), arch="gfx1250")
+        self.assertIsNone(kernel.cluster_dims)
+
+
 # ---------------------------------------------------------------------------
 # GPU numerics
 # ---------------------------------------------------------------------------
@@ -129,7 +158,7 @@ def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
 
-def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True):
+def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
     """Max relative error per degree of one split-K binary on ``problem``."""
     import torch
 
@@ -146,18 +175,38 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True):
         fwd_split_k_workspace_nbytes,
     )
     from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.runtime.launcher import (
+        KernelLauncher,
+        LaunchConfig,
+        synchronize_and_release,
+    )
 
     data = ConvDataSpec(dtype, dtype, dtype)
-    spec = _spec(problem=problem, data=data, split_k=2, **spec_kw)
-    ok, why = is_valid_spec(spec, "gfx1250")
-    assert ok, why
-    art = compile_kernel(build_implicit_gemm_conv(spec, arch="gfx1250"), arch="gfx1250")
-    s1 = KernelLauncher(
-        hsaco=art.hsaco,
-        kernel_name=art.kernel_name,
-        signature=conv_args_signature(dtype, two_stage=True),
-    )
+
+    def _stage1(degree):
+        # The cluster binary bakes its degree (one per degree); the plain one
+        # serves every degree.
+        spec = _spec(
+            problem=problem,
+            data=data,
+            split_k=2,
+            split_k_cluster=degree if cluster else 0,
+            **spec_kw,
+        )
+        ok, why = is_valid_spec(spec, "gfx1250")
+        assert ok, why
+        art = compile_kernel(
+            build_implicit_gemm_conv(spec, arch="gfx1250"), arch="gfx1250"
+        )
+        return spec, KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=conv_args_signature(dtype, two_stage=True),
+            cluster_dims=(1, 1, degree) if cluster else None,
+        )
+
+    if not cluster:
+        spec, s1 = _stage1(2)
     elems = problem.M * problem.K
 
     def _stage2(degree):
@@ -197,6 +246,8 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True):
     errs = {}
     try:
         for degree in degrees:
+            if cluster:
+                spec, s1 = _stage1(degree)
             r_spec, s2 = _stage2(degree)
             ws_bytes = fwd_split_k_workspace_nbytes(problem.M, problem.K, degree)
             ws = rt.alloc(ws_bytes)
@@ -216,14 +267,31 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True):
                 ws_ptr=int(ws),
                 ws_bytes=ws_bytes,
             )
-            s1(
-                values,
-                config=LaunchConfig(
-                    grid=args.grid(degree),
-                    block=(spec.launch_block_size, 1, 1),
-                    fence=True,
-                ),
+            s1_cfg = LaunchConfig(
+                grid=args.grid(degree),
+                block=(spec.launch_block_size, 1, 1),
+                fence=True,
             )
+            if cluster:
+                # One launch: the cluster folds the slabs into D itself. Run
+                # it through bind() too, the path the benchmark times.
+                s1(values, config=s1_cfg)
+                out = torch.empty_like(D)
+                rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
+                errs[degree] = float(
+                    (out.float() - ref).abs().max() / ref.abs().max().clamp(min=1.0)
+                )
+                rt.memset(bufs[2], 0x7F, D.nbytes)
+                s1.bind(values, config=s1_cfg)()
+                synchronize_and_release()
+                rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
+                rt.free(ws)
+                diff = (out.float() - ref).abs().max()
+                errs[degree] = max(
+                    errs[degree], float(diff / ref.abs().max().clamp(min=1.0))
+                )
+                continue
+            s1(values, config=s1_cfg)
             s2(
                 dict(
                     ws_ptr=int(ws),
@@ -320,6 +388,46 @@ class TestSplitKNumerics(unittest.TestCase):
                                 f"{name} {dtype} degree {degree} "
                                 f"unrolled={unrolled}: {err}",
                             )
+
+
+# (problem, spec knobs, degrees) for the single-launch cluster fold (mem only).
+_CLUSTER_CASES = [
+    (
+        "small_m",
+        ConvProblem(N=1, Hi=7, Wi=7, C=256, K=64, Y=3, X=3, pH=1, pW=1),
+        dict(pipeline="mem"),
+        (2, 4, 15),
+    ),
+    (
+        "mem_cshuffle_64",
+        ConvProblem(N=2, Hi=12, Wi=12, C=128, K=96, Y=3, X=3, pH=1, pW=1),
+        dict(tile_m=64, tile_n=64, warp_m=2, warp_n=2, pipeline="mem"),
+        (3, 8),
+    ),
+    (
+        "k_tail_stride2",
+        ConvProblem(N=2, Hi=15, Wi=13, C=24, K=32, Y=3, X=3, sH=2, sW=2, pH=1, pW=1),
+        dict(tile_m=32, tile_n=32, warp_m=2, warp_n=1, pipeline="mem"),
+        (2, 4),
+    ),
+    (
+        "grouped",
+        ConvProblem(N=1, Hi=10, Wi=10, C=128, K=64, Y=3, X=3, pH=1, pW=1, groups=2),
+        dict(tile_m=32, tile_n=32, warp_m=1, warp_n=2, pipeline="mem"),
+        (2, 4),
+    ),
+]
+
+
+@unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
+class TestClusterSplitKNumerics(unittest.TestCase):
+    def test_cases(self):
+        for dtype in ("bf16", "fp16"):
+            for name, problem, kw, degrees in _CLUSTER_CASES:
+                with self.subTest(case=name, dtype=dtype):
+                    errs = _run(problem, kw, degrees, dtype, cluster=True)
+                    for degree, err in errs.items():
+                        self.assertLess(err, 2e-2, f"{name} {dtype} S={degree}: {err}")
 
 
 if __name__ == "__main__":
