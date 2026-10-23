@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` failures when a row's hash table reached the device shared-memory limit. Previously, hash tables at the limit could result in an unsupported shared-memory request. The issue appeared as `rocsparse_status_internal_error` in the `GemmCalcGrids csrgemm` tests. Affected cases now use the bitmap fallback.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
