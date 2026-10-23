@@ -29,7 +29,7 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
     const size_t chunkCount =
         completeRange && independentOutputs
             ? std::min(plan.lineCount,
-                       static_cast<size_t>(detail::operationThreadCount(work, 500'000)))
+                       static_cast<size_t>(detail::operationThreadCount(work, 500'000, 8)))
             : 1;
     if (chunkCount > 1) {
         std::vector<detail::StructuredSparsityWorkCounts> partialRuns(chunkCount);
@@ -200,7 +200,7 @@ StructuredSparseTensor applyStructuredSparsity(Tensor input, StructuredSparsityP
         .retainedIndices = std::move(retainedIndices),
         .twoOfFourMetadata = std::move(twoOfFourMetadata),
     };
-    applyStructuredSparsityInto(std::move(input), outputs, std::move(pattern));
+    applyStructuredSparsityInto(std::move(input), outputs, std::move(pattern), {});
     return outputs;
 }
 

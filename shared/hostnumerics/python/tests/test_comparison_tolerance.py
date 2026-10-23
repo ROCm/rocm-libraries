@@ -5,6 +5,12 @@ from _hostnumerics_test_support import *  # noqa: F403
 
 
 class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
+    def test_allclose_requires_explicit_tolerances_and_nan_policy(self):
+        with self.assertRaises(TypeError):
+            hv.allclose_comparison_options()
+        with self.assertRaises(TypeError):
+            hv.allclose_comparison_options(1e-8, 1e-5)
+
     def test_explicit_relative_norm_policy(self):
         options = hv.ComparisonOptions()
         options.all_close = False
@@ -33,7 +39,7 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
         observed = hv.from_numpy(observed_values)
         expected = hv.from_numpy(expected_values)
 
-        magnitude = hv.allclose_comparison_options(1.0, 0.0)
+        magnitude = hv.allclose_comparison_options(1.0, 0.0, equal_nans=False)
         self.assertEqual(
             magnitude.complex_comparison_mode,
             hv.ComplexComparisonMode.Magnitude,
@@ -44,7 +50,7 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
             bool(np.allclose(observed_values, expected_values, atol=1.0, rtol=0.0)),
         )
 
-        componentwise = hv.allclose_comparison_options(1.0, 0.0)
+        componentwise = hv.allclose_comparison_options(1.0, 0.0, equal_nans=False)
         componentwise.complex_comparison_mode = hv.ComplexComparisonMode.Componentwise
         self.assertTrue(hv.compare(observed, expected, componentwise).passed)
 
@@ -54,7 +60,7 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
 
         boundary_observed_values = np.asarray([0.0 + 0.0j], dtype=np.complex128)
         boundary_expected_values = np.asarray([3.0 + 4.0j], dtype=np.complex128)
-        boundary = hv.allclose_comparison_options(0.0, 1.0)
+        boundary = hv.allclose_comparison_options(0.0, 1.0, equal_nans=False)
         boundary_result = hv.compare(
             hv.from_numpy(boundary_observed_values),
             hv.from_numpy(boundary_expected_values),
@@ -107,9 +113,12 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
                 search_expected,
                 [0.1],
                 [0.0],
+                options=hv.allclose_comparison_options(1e-8, 1e-5, False),
             )
         )
-        componentwise_search = hv.allclose_comparison_options()
+        componentwise_search = hv.allclose_comparison_options(
+            absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
+        )
         componentwise_search.complex_comparison_mode = (
             hv.ComplexComparisonMode.Componentwise
         )
@@ -179,7 +188,9 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
                 )
                 observed_values = hv.to_numpy(observed, np.float64)
                 expected_values = hv.to_numpy(expected, np.float64)
-                options = hv.allclose_comparison_options()
+                options = hv.allclose_comparison_options(
+                    absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
+                )
                 options.compute_frobenius = False
 
                 with np.errstate(invalid="ignore"):
@@ -228,7 +239,9 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
                 )
                 observed_values = hv.to_numpy(observed, np.complex128)
                 expected_values = hv.to_numpy(expected, np.complex128)
-                options = hv.allclose_comparison_options()
+                options = hv.allclose_comparison_options(
+                    absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
+                )
                 options.compute_frobenius = False
 
                 with np.errstate(invalid="ignore"):
@@ -266,18 +279,20 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
         observed = hv.from_numpy(np.asarray([1.02, 0.0], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([1.0, 1.0], dtype=np.float32))
 
-        defaults = hv.allclose_comparison_options()
+        defaults = hv.allclose_comparison_options(
+            absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
+        )
         defaults.compute_frobenius = False
         self.assertEqual(hv.compare(observed, expected, defaults).mismatches, 2)
 
-        overridden = hv.allclose_comparison_options(0.01, 0.02)
+        overridden = hv.allclose_comparison_options(0.01, 0.02, equal_nans=False)
         overridden.compute_frobenius = False
         self.assertEqual(
             hv.compare(observed, expected, overridden).mismatches,
             1,
         )
 
-        exact_boundary = hv.allclose_comparison_options(0.0, 1.0)
+        exact_boundary = hv.allclose_comparison_options(0.0, 1.0, equal_nans=False)
         exact_boundary.compute_frobenius = False
         boundary_observed = hv.from_numpy(np.asarray([0.0], dtype=np.float32))
         boundary_expected = hv.from_numpy(np.asarray([1.0], dtype=np.float32))
@@ -305,7 +320,9 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
         for dtype, scalar_type, base, accepted_delta, rejected_delta in cases:
             with self.subTest(scalar_type=scalar_type):
                 tolerance = 0.0002 if scalar_type == hv.ScalarType.Float32 else 1e-12
-                options = hv.allclose_comparison_options(tolerance, 2.0 * tolerance)
+                options = hv.allclose_comparison_options(
+                    tolerance, 2.0 * tolerance, equal_nans=False
+                )
                 options.compute_frobenius = False
                 accepted = hv.compare(
                     hv.from_numpy(np.asarray([base], dtype=dtype)),
@@ -323,7 +340,7 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
     def test_float32_policy_rejects_opposite_signs_near_zero(self):
         observed = hv.from_numpy(np.asarray([-0.0001, -0.0002], dtype=np.float32))
         expected = hv.from_numpy(np.asarray([0.0001, 0.0002], dtype=np.float32))
-        options = hv.allclose_comparison_options(0.0002, 0.0004)
+        options = hv.allclose_comparison_options(0.0002, 0.0004, equal_nans=False)
         options.compute_frobenius = False
         report = hv.compare(observed, expected, options)
         self.assertFalse(report.passed)

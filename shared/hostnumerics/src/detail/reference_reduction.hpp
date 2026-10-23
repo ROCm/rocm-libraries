@@ -139,8 +139,8 @@ void referenceReductionTyped(const ReductionInvocation& invocation, const Reduct
     const RuntimeTensorReader<Accumulator> input(invocation.input);
     const RuntimeTensorWriter<Accumulator> output(invocation.output);
 
-    const IndexIteration outputPlan(plan.outputShape);
-    const IndexIteration reductionPlan(plan.reductionShape);
+    const IndexIteration outputPlan(plan.outputShape, {});
+    const IndexIteration reductionPlan(plan.reductionShape, {});
     std::vector<size_t> outputCoordinates(plan.outputShape.rank());
     std::vector<size_t> reductionCoordinates(plan.reductionShape.rank());
     std::vector<size_t> inputCoordinates(invocation.input.shape().rank(), 0);

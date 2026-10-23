@@ -16,9 +16,9 @@ namespace roc::hostnumerics {
 // conversion semantics visible.
 Tensor add(const Tensor& left, const Tensor& right);
 Tensor add(const Tensor& left, const Tensor& right, ScalarType outputType, ScalarType computeType,
-           std::optional<Layout> outputLayout = std::nullopt);
+           std::optional<Layout> outputLayout);
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             OutputSelection selection = OutputSelection::all());
+             OutputSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -34,9 +34,9 @@ Tensor add(Number value, const Tensor& tensor) {
 
 Tensor subtract(const Tensor& left, const Tensor& right);
 Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
-                ScalarType computeType, std::optional<Layout> outputLayout = std::nullopt);
+                ScalarType computeType, std::optional<Layout> outputLayout);
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection = OutputSelection::all());
+                  OutputSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -52,9 +52,9 @@ Tensor subtract(Number value, const Tensor& tensor) {
 
 Tensor multiply(const Tensor& left, const Tensor& right);
 Tensor multiply(const Tensor& left, const Tensor& right, ScalarType outputType,
-                ScalarType computeType, std::optional<Layout> outputLayout = std::nullopt);
+                ScalarType computeType, std::optional<Layout> outputLayout);
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  OutputSelection selection = OutputSelection::all());
+                  OutputSelection selection);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -70,9 +70,9 @@ Tensor multiply(Number value, const Tensor& tensor) {
 
 Tensor activate(const Tensor& input, ActivationFunction function);
 Tensor activate(const Tensor& input, ActivationFunction function, ScalarType outputType,
-                ScalarType computeType, std::optional<Layout> outputLayout = std::nullopt);
+                ScalarType computeType, std::optional<Layout> outputLayout);
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
-                  ScalarType computeType, OutputSelection selection = OutputSelection::all());
+                  ScalarType computeType, OutputSelection selection);
 
 inline Tensor absolute(const Tensor& input) {
     return activate(input, AbsoluteActivation{});
@@ -90,7 +90,7 @@ inline Tensor sigmoid(const Tensor& input) {
     return activate(input, SigmoidActivation{});
 }
 
-inline Tensor tanh(const Tensor& input, double inputScale = 1.0, double outputScale = 1.0) {
+inline Tensor tanh(const Tensor& input, double inputScale, double outputScale) {
     return activate(input, TanhActivation{inputScale, outputScale});
 }
 
@@ -98,7 +98,7 @@ inline Tensor silu(const Tensor& input) {
     return activate(input, SiluActivation{});
 }
 
-inline Tensor swish(const Tensor& input, double beta = 1.0) {
+inline Tensor swish(const Tensor& input, double beta) {
     return activate(input, SwishActivation{beta});
 }
 

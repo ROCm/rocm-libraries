@@ -59,7 +59,8 @@ void testComparisonMetrics() {
                 !nonFiniteNormResult.passed(),
             "Non-finite norm invalidation did not produce a failing NaN ratio.");
     ComparisonOptions sampledMetrics = metrics;
-    sampledMetrics.selection = OutputSelection::strided(1, 2);
+    sampledMetrics.selection =
+        OutputSelection::strided(1, 2, std::numeric_limits<size_t>::max(), {});
     const auto sampledMetricResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
                 Tensor::copyNativeStorage(std::span<const double>(expected)), sampledMetrics);
@@ -113,14 +114,14 @@ void testComparisonMetrics() {
                 noElementwiseStatisticsResult.matchedInfinities == 0,
             "Disabled elementwise statistics collected matched infinities.");
 
-    const ComparisonOptions numpyDefaults = allCloseComparisonOptions();
+    const ComparisonOptions numpyDefaults = allCloseComparisonOptions(1e-8, 1e-5, false);
     require(numpyDefaults.absoluteTolerance == 1e-8 && numpyDefaults.relativeTolerance == 1e-5 &&
                 !numpyDefaults.equalNaNs &&
                 numpyDefaults.complexComparisonMode == ComplexComparisonMode::Magnitude,
             "Allclose options do not expose NumPy's finite-value defaults.");
     const std::array<double, 1> lowerValue{8.0};
     const std::array<double, 1> referenceValue{10.0};
-    ComparisonOptions numpyBoundary = allCloseComparisonOptions(0.0, 0.2);
+    ComparisonOptions numpyBoundary = allCloseComparisonOptions(0.0, 0.2, false);
     numpyBoundary.computeFrobenius = false;
     require(
         compare(Tensor::copyNativeStorage(std::span<const double>(lowerValue)),
@@ -134,7 +135,7 @@ void testComparisonMetrics() {
 
     const std::array<std::complex<double>, 1> componentwiseObserved{std::complex<double>(1.0, 1.0)};
     const std::array<std::complex<double>, 1> componentwiseExpected{std::complex<double>(0.0, 0.0)};
-    ComparisonOptions componentwiseComplex = allCloseComparisonOptions(1.0, 0.0);
+    ComparisonOptions componentwiseComplex = allCloseComparisonOptions(1.0, 0.0, false);
     componentwiseComplex.computeFrobenius = false;
     require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseObserved)),
@@ -152,7 +153,7 @@ void testComparisonMetrics() {
             .passed(),
         "Explicit componentwise complex comparison rejected passing components.");
 
-    ComparisonOptions magnitudeAllCloseOnly = allCloseComparisonOptions(1.0, 0.0);
+    ComparisonOptions magnitudeAllCloseOnly = allCloseComparisonOptions(1.0, 0.0, false);
     magnitudeAllCloseOnly.computeElementwiseStatistics = false;
     magnitudeAllCloseOnly.computeFrobenius = false;
     magnitudeAllCloseOnly.selection = OutputSelection::all(std::vector<size_t>{0});
@@ -168,7 +169,7 @@ void testComparisonMetrics() {
         std::complex<double>(0.0, 0.0)};
     const std::array<std::complex<double>, 1> magnitudeBoundaryExpected{
         std::complex<double>(3.0, 4.0)};
-    ComparisonOptions magnitudeBoundary = allCloseComparisonOptions(0.0, 1.0);
+    ComparisonOptions magnitudeBoundary = allCloseComparisonOptions(0.0, 1.0, false);
     magnitudeBoundary.computeFrobenius = false;
     require(compare(Tensor::copyNativeStorage(
                         std::span<const std::complex<double>>(magnitudeBoundaryObserved)),
@@ -221,7 +222,8 @@ void testComparisonMetrics() {
         std::complex<double>(infinity, 1.0)};
     const std::array<std::complex<double>, 1> mismatchedComplexInfinityExpected{
         std::complex<double>(infinity, 2.0)};
-    ComparisonOptions permissiveComplexInfinity = allCloseComparisonOptions(infinity, infinity);
+    ComparisonOptions permissiveComplexInfinity =
+        allCloseComparisonOptions(infinity, infinity, false);
     permissiveComplexInfinity.computeFrobenius = false;
     require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(mismatchedComplexInfinityObserved)),
@@ -233,7 +235,7 @@ void testComparisonMetrics() {
 
     const std::array<double, 1> mixedReal{3.0};
     const std::array<std::complex<double>, 1> mixedComplex{std::complex<double>(3.0, 4.0)};
-    ComparisonOptions mixedMagnitude = allCloseComparisonOptions(0.0, 1.0);
+    ComparisonOptions mixedMagnitude = allCloseComparisonOptions(0.0, 1.0, false);
     mixedMagnitude.computeFrobenius = false;
     require(compare(Tensor::copyNativeStorage(std::span<const double>(mixedReal)),
                     Tensor::copyNativeStorage(std::span<const std::complex<double>>(mixedComplex)),
@@ -265,7 +267,8 @@ void testComparisonMetrics() {
     const auto tolerance = findAllCloseTolerance(
         Tensor::copyNativeStorage(std::span<const double>(closeObserved)),
         Tensor::copyNativeStorage(std::span<const double>(closeExpected)),
-        std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates));
+        std::span<const double>(absoluteCandidates), std::span<const double>(relativeCandidates),
+        allCloseComparisonOptions(1e-8, 1e-5, false));
     require(tolerance && tolerance->absolute == 1e-4 && tolerance->relative == 0.0,
             "Allclose tolerance search selected the wrong candidate.");
 
@@ -279,9 +282,10 @@ void testComparisonMetrics() {
             Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchObserved)),
             Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexSearchExpected)),
             std::span<const double>(complexSearchAbsoluteCandidates),
-            std::span<const double>(complexSearchRelativeCandidates)),
+            std::span<const double>(complexSearchRelativeCandidates),
+            allCloseComparisonOptions(1e-8, 1e-5, false)),
         "Allclose tolerance search defaulted complex values to componentwise comparison.");
-    ComparisonOptions componentwiseSearch = allCloseComparisonOptions();
+    ComparisonOptions componentwiseSearch = allCloseComparisonOptions(1e-8, 1e-5, false);
     componentwiseSearch.complexComparisonMode = ComplexComparisonMode::Componentwise;
     require(
         findAllCloseTolerance(
@@ -297,7 +301,7 @@ void testComparisonMetrics() {
         std::numeric_limits<float>::infinity(), 0.0f, std::numeric_limits<float>::infinity()};
     const SentinelReport rangedSentinelResult = checkUnwrittenSentinel(
         ScalarType::Float32, std::as_bytes(std::span<const float>(rangedSentinel)), 2, 2,
-        SentinelRegion::Before);
+        SentinelRegion::Before, 10);
     require(rangedSentinelResult.checked == 2 && rangedSentinelResult.mismatches == 1 &&
                 rangedSentinelResult.reportedMismatches[0].region == SentinelRegion::Before &&
                 rangedSentinelResult.reportedMismatches[0].index == 3,
@@ -309,18 +313,20 @@ void testComparisonMetrics() {
         std::numeric_limits<float>::infinity()};
     Tensor guardedView = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 3}, 0),
                                                           std::span<const float>(guarded));
-    require(checkUnusedTensorStorage(guardedView, guarded.size()).passed(),
-            "Unwritten tensor padding sentinel was rejected.");
+    require(
+        checkUnusedTensorStorage(guardedView, guarded.size(), SentinelRegion::Inside, 10).passed(),
+        "Unwritten tensor padding sentinel was rejected.");
     const float writtenPadding = 0.0f;
     std::memcpy(guardedView.rawEncodedBackingStorage().data() + 2 * sizeof(float), &writtenPadding,
                 sizeof(writtenPadding));
-    const auto sentinel = checkUnusedTensorStorage(guardedView, guarded.size());
+    const auto sentinel =
+        checkUnusedTensorStorage(guardedView, guarded.size(), SentinelRegion::Inside, 10);
     require(
         !sentinel.passed() && sentinel.mismatches == 1 && sentinel.reportedMismatches[0].index == 2,
         "Written tensor padding was not detected.");
     bool rejectedOversizedSentinelAllocation = false;
     try {
-        (void)checkUnusedTensorStorage(guardedView, guarded.size() + 1);
+        (void)checkUnusedTensorStorage(guardedView, guarded.size() + 1, SentinelRegion::Inside, 10);
     } catch (const std::runtime_error&) {
         rejectedOversizedSentinelAllocation = true;
     }

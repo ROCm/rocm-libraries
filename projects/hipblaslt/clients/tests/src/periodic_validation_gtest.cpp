@@ -104,7 +104,7 @@ namespace
         auto storage = hn::generate(
             type,
             hn::Shape{batches * batchStride},
-            hn::GenerationRecipe::realOnly(hn::GenerationRecipe::constant({.value = 40})));
+            hn::GenerationRecipe::realOnly(hn::GenerationRecipe::constant({.value = 40}), {}));
         return storage.shareStorageWithLayout(hn::Layout(
             hn::Shape{batches, rows, cols}, {ptrdiff_t(batchStride), rowStride, columnStride}, 0));
     }
@@ -205,13 +205,14 @@ namespace
         if(method == CheckMethod::Periodic)
             for(const auto& definition : definitions)
             {
-                plans.push_back(requirePlan(
-                    hn::preparePeriodicMatmul(hn::Shape{m, n},
-                                              k,
-                                              definition,
-                                              hn::MatmulOptions{},
-                                              floating ? hn::PeriodicMatmulMode::FloatingPoint
-                                                       : hn::PeriodicMatmulMode::ExactInteger)));
+                plans.push_back(requirePlan(hn::preparePeriodicMatmul(
+                    hn::Shape{m, n},
+                    k,
+                    definition,
+                    hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                    floating ? hn::PeriodicMatmulMode::FloatingPoint
+                             : hn::PeriodicMatmulMode::ExactInteger,
+                    {})));
                 referenceWork += plans.back().statistics().referenceMultiplyAdds;
                 productBytes += plans.back().statistics().productBytes;
                 EXPECT_GT(plans.back().statistics().combinedRowPeriod, m);
@@ -230,7 +231,9 @@ namespace
                                  b.shareStorageWithLayout(
                                      hn::Layout(hn::Shape{k, n}, {br, bc}, batch * hostStrideB)),
                                  hn::ScalarType::Float64,
-                                 hn::MatmulOptions(hn::ScalarType::Float64));
+                                 hn::MatmulOptions(hn::ScalarType::Float64),
+                                 std::nullopt,
+                                 roc::hostnumerics::GemmBackend::Automatic);
                 ++fullReferenceCalls;
                 hn::EpilogueOptions epilogue(hn::ScalarType::Float64);
                 epilogue.inputScale  = hn::Tensor(2.0);
@@ -482,7 +485,7 @@ namespace
                             report.status = hn::VerificationStatus::Passed;
                             if(method == CheckMethod::Periodic)
                             {
-                                hn::EpilogueOptions epilogue;
+                                hn::EpilogueOptions epilogue(hn::ScalarType::Float32);
                                 epilogue.inputScale  = hn::Tensor(alpha);
                                 epilogue.addendScale = hn::Tensor(beta);
                                 epilogue.addend      = c.shareStorageWithLayout(

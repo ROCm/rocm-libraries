@@ -23,11 +23,13 @@ Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> 
     if (!outputType && !computeType) return add(left, tensorOperand(right, left.type()));
     const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
     const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
-    return add(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
+    return add(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+               std::nullopt);
 }
 
 void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
-    addInto(left, tensorOperand(right, computeType), std::move(output), computeType);
+    addInto(left, tensorOperand(right, computeType), std::move(output), computeType,
+            OutputSelection::all({}));
 }
 
 Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -35,12 +37,14 @@ Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarT
     if (!outputType && !computeType) return subtract(left, tensorOperand(right, left.type()));
     const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
     const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
-    return subtract(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
+    return subtract(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+                    std::nullopt);
 }
 
 void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
-    subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType);
+    subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType,
+                 OutputSelection::all({}));
 }
 
 Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -48,12 +52,14 @@ Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarT
     if (!outputType && !computeType) return multiply(left, tensorOperand(right, left.type()));
     const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
     const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
-    return multiply(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute);
+    return multiply(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+                    std::nullopt);
 }
 
 void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
-    multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType);
+    multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType,
+                 OutputSelection::all({}));
 }
 
 ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
@@ -269,20 +275,14 @@ void registerOperationBindings(nb::module_& module) {
             },
             nb::rv_policy::reference_internal);
 
-    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a = std::optional<ScalarType>{},
-               "compute_type"_a = std::optional<ScalarType>{});
-    module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a,
-               "compute_type"_a = ScalarType::Float32);
-    module.def("subtract", &subtractOwned, "left"_a, "right"_a,
-               "output_type"_a = std::optional<ScalarType>{},
-               "compute_type"_a = std::optional<ScalarType>{});
+    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
+    module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a, "compute_type"_a);
+    module.def("subtract", &subtractOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
     module.def("subtract_into", &subtractIntoBound, "left"_a, "right"_a, "output"_a,
-               "compute_type"_a = ScalarType::Float32);
-    module.def("multiply", &multiplyOwned, "left"_a, "right"_a,
-               "output_type"_a = std::optional<ScalarType>{},
-               "compute_type"_a = std::optional<ScalarType>{});
+               "compute_type"_a);
+    module.def("multiply", &multiplyOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
     module.def("multiply_into", &multiplyIntoBound, "left"_a, "right"_a, "output"_a,
-               "compute_type"_a = ScalarType::Float32);
+               "compute_type"_a);
     module.def("absolute", [](const Tensor& input) { return absolute(input); }, "input"_a);
     module.def("relu", [](const Tensor& input) { return relu(input); }, "input"_a);
     module.def("gelu", [](const Tensor& input) { return gelu(input); }, "input"_a);
@@ -292,11 +292,11 @@ void registerOperationBindings(nb::module_& module) {
         [](const Tensor& input, double inputScale, double outputScale) {
             return tanh(input, inputScale, outputScale);
         },
-        "input"_a, "input_scale"_a = 1.0, "output_scale"_a = 1.0);
+        "input"_a, "input_scale"_a, "output_scale"_a);
     module.def("silu", [](const Tensor& input) { return silu(input); }, "input"_a);
     module.def(
         "swish", [](const Tensor& input, double beta) { return swish(input, beta); }, "input"_a,
-        "beta"_a = 1.0);
+        "beta"_a);
     module.def(
         "clip",
         [](const Tensor& input, double minimum, double maximum) {
@@ -304,15 +304,13 @@ void registerOperationBindings(nb::module_& module) {
         },
         "input"_a, "minimum"_a, "maximum"_a);
 
-    module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a,
-               "output_type"_a = ScalarType::Float32, "accumulator_type"_a = ScalarType::Float32,
-               "axis"_a = 0);
-    module.def("reference_softmax_into", &referenceSoftmaxInto, "input"_a, "output"_a, "axis"_a = 0,
-               "accumulator_type"_a = ScalarType::Float32);
+    module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a, "output_type"_a,
+               "accumulator_type"_a, "axis"_a);
+    module.def("reference_softmax_into", &referenceSoftmaxInto, "input"_a, "output"_a, "axis"_a,
+               "accumulator_type"_a);
 
-    module.def("reference_layer_norm", &referenceLayerNormOwned, "input"_a,
-               "output_type"_a = ScalarType::Float32, "statistics_type"_a = ScalarType::Float32,
-               "accumulator_type"_a = ScalarType::Float32, "axis"_a = 0, "epsilon"_a = 1e-5,
+    module.def("reference_layer_norm", &referenceLayerNormOwned, "input"_a, "output_type"_a,
+               "statistics_type"_a, "accumulator_type"_a, "axis"_a, "epsilon"_a,
                "gamma"_a = std::optional<Tensor>{}, "beta"_a = std::optional<Tensor>{});
 
     module.def("reference_reduce", &referenceReduce, "input"_a, "axes"_a, "operation"_a,
@@ -329,31 +327,23 @@ void registerOperationBindings(nb::module_& module) {
                "output"_a, "accumulator_type"_a);
 
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
-               "compute_type"_a, "bias"_a = std::optional<Tensor>{},
-               "activation"_a = Activation::None,
-               "activation_application"_a = ActivationApplication::Forward,
-               "auxiliary_input"_a = std::optional<Tensor>{},
+               "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+               "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
                "auxiliary_output_type"_a = std::optional<ScalarType>{},
-               "gate_residual"_a = std::optional<Tensor>{},
-               "output_scale"_a = std::complex<double>(1.0, 0.0),
-               "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
-               "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
-               "output_conversion"_a = OutputConversion::Default, "include_raw_output"_a = false,
-               "include_amax"_a = false, "output_selection"_a = OutputSelection::all());
-    module.def(
-        "reference_epilogue_into", &referenceEpilogueIntoBound, "input"_a, "output"_a,
-        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a = Activation::None,
-        "activation_application"_a = ActivationApplication::Forward,
-        "auxiliary_input"_a = std::optional<Tensor>{}, "raw_output"_a = std::optional<Tensor>{},
-        "auxiliary_output"_a = std::optional<Tensor>{}, "gate_residual"_a = std::optional<Tensor>{},
-        "output_scale"_a = std::complex<double>(1.0, 0.0),
-        "auxiliary_scale"_a = std::complex<double>(1.0, 0.0), "activation_parameter0"_a = 0.0,
-        "activation_parameter1"_a = 0.0, "output_conversion"_a = OutputConversion::Default,
-        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a = false,
-        "output_selection"_a = OutputSelection::all());
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "include_raw_output"_a, "include_amax"_a, "output_selection"_a);
+    module.def("reference_epilogue_into", &referenceEpilogueIntoBound, "input"_a, "output"_a,
+               "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+               "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+               "raw_output"_a = std::optional<Tensor>{},
+               "auxiliary_output"_a = std::optional<Tensor>{},
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "output_selection"_a);
 
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
-               "emit_two_of_four_metadata"_a = false);
+               "emit_two_of_four_metadata"_a);
     module.def("encode_two_of_four_metadata", &encodeTwoOfFourMetadata, "retained_indices"_a,
                "axis"_a);
 }

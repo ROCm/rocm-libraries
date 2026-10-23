@@ -230,15 +230,13 @@ struct SentinelReport {
     }
 };
 
-/// Absolute-only elementwise comparison with equal NaNs. This is not NumPy's default policy.
+/// Absolute-only elementwise comparison that treats NaNs as equal.
 ComparisonOptions nearComparisonOptions(double absoluteTolerance);
 
-/// NumPy-formula finite-value allclose options. Arguments remain absolute-then-relative for API
-/// compatibility; the defaults are NumPy's `atol=1e-8` and `rtol=1e-5`. Complex values use
-/// double-precision magnitude comparison as documented on `ComparisonOptions`.
-ComparisonOptions allCloseComparisonOptions(double absoluteTolerance = 1e-8,
-                                            double relativeTolerance = 1e-5,
-                                            bool equalNaNs = false);
+/// Uses NumPy's finite-value allclose formula with caller-supplied tolerances.
+/// Complex values use double-precision magnitude comparison as documented on ComparisonOptions.
+ComparisonOptions allCloseComparisonOptions(double absoluteTolerance, double relativeTolerance,
+                                            bool equalNaNs);
 
 int ulpMantissaBits(ScalarType type);
 
@@ -247,7 +245,7 @@ double ulpDistance(double exact, double approximation, int mantissaBits);
 double encodedUlpDistance(double exact, double approximation, ScalarType type);
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
-                         const ComparisonOptions& options = {});
+                         const ComparisonOptions& options);
 
 /// Formats aggregate comparison evidence and any recorded mismatch samples.
 /// Callers may prepend product-specific context to the returned text.
@@ -255,12 +253,12 @@ std::string formatComparisonReport(const ComparisonReport& report);
 
 /// Returns the first candidate pair, in absolute-major then relative-minor input order, for which
 /// all enabled criteria pass. The search sets the asymmetric absolute and relative tolerances and
-/// all other supplied options remain active. The default uses `allCloseComparisonOptions()`,
-/// including magnitude comparison for complex values.
-std::optional<ComparisonTolerance> findAllCloseTolerance(
-    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
-    std::span<const double> relativeCandidates,
-    ComparisonOptions options = allCloseComparisonOptions());
+/// all other supplied options remain active, including the complex-value policy.
+std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
+                                                         const Tensor& expected,
+                                                         std::span<const double> absoluteCandidates,
+                                                         std::span<const double> relativeCandidates,
+                                                         ComparisonOptions options);
 
 /// Checks `[firstElement, firstElement + elementCount)` for the type's unwritten sentinel and
 /// reports absolute storage element indices. Signed integers use the lowest value; unsigned
@@ -272,13 +270,11 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(
 /// overflows, or the storage span does not contain the complete range.
 SentinelReport checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
                                       size_t firstElement, size_t elementCount,
-                                      SentinelRegion region = SentinelRegion::Unspecified,
-                                      size_t maxReportedMismatches = 10);
+                                      SentinelRegion region, size_t maxReportedMismatches);
 
 /// Checks every element in `[0, allocatedElements)` that is not addressed by `logicalTensor`.
 /// Reported indices are storage element offsets in that same range. Throws `std::runtime_error`
 /// if the allocated range exceeds storage or any logical tensor coordinate addresses outside it.
 SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
-                                        SentinelRegion region = SentinelRegion::Inside,
-                                        size_t maxReportedMismatches = 10);
+                                        SentinelRegion region, size_t maxReportedMismatches);
 }  // namespace roc::hostnumerics

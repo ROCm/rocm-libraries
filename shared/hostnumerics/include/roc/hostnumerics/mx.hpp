@@ -112,6 +112,5 @@ struct MxTensor {
     void refreshReference() const;
 };
 
-MxTensor generateMx(Shape shape, MxDataGeneration generation,
-                    const MxGenerationOptions& options = {});
+MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGenerationOptions& options);
 }  // namespace roc::hostnumerics

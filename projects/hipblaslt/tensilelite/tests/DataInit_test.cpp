@@ -577,7 +577,8 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
         {.pruned            = componentPrunedTensor,
          .compressed        = componentCompressedTensor,
          .twoOfFourMetadata = componentMetadataTensor},
-        pattern);
+        pattern,
+        {});
     std::memcpy(componentPruned.data(),
                 componentPrunedTensor.rawEncodedBackingStorage().data(),
                 componentPrunedTensor.rawEncodedBackingStorage().size());
@@ -1172,7 +1173,8 @@ TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
                                                   4,
                                                   InitMode::Random,
                                                   InitMode::One,
-                                                  17);
+                                                  17,
+                                                  false);
     EXPECT_EQ(generated.data.type(), ScalarType::Float4E2M1);
     EXPECT_EQ(generated.scales.type(), ScalarType::E5M3);
 }
@@ -1190,7 +1192,8 @@ TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
                                   32,
                                   InitMode::Random,
                                   InitMode::One,
-                                  seed);
+                                  seed,
+                                  false);
     };
     const MxTensor first  = generateWithSeed(17);
     const MxTensor replay = generateWithSeed(17);
@@ -1373,7 +1376,8 @@ TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
                                     4,
                                     InitMode::Random,
                                     InitMode::One,
-                                    17),
+                                    17,
+                                    false),
                  std::runtime_error);
     EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float4,
                                     rocisa::DataType::E8,
@@ -1383,7 +1387,8 @@ TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
                                     4,
                                     InitMode::Free,
                                     InitMode::One,
-                                    17),
+                                    17,
+                                    false),
                  std::runtime_error);
 }
 
@@ -1610,7 +1615,8 @@ TEST(TensileMxGenerationTranslation, NonMxSwitchUsesCoordinatedBytesForBothOpera
                     32,
                     InitMode::RandomNarrow,
                     InitMode::Zero,
-                    17 + stableDataInitializationStream(descriptor.getName()) + batch);
+                    17 + stableDataInitializationStream(descriptor.getName()) + batch,
+                    false);
                 for(size_t row = 0; row < descriptor.sizes()[0]; ++row)
                     for(size_t col = 0; col < descriptor.sizes()[1]; ++col)
                         EXPECT_EQ(observed.loadAs<float>({row, col, batch}),

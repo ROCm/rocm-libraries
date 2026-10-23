@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import sys
+
 from _hostnumerics_test_support import *  # noqa: F403
 
 
@@ -12,10 +14,13 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
                 hv.UniformIntegerGenerationParameters(lower=-3, upper=3)
             ),
             seed=seed,
+            index_order=(),
         )
         first = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
         second = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
-        self.assertTrue(hv.compare(first, second).passed)
+        self.assertTrue(
+            hv.compare(first, second, options=hv.ComparisonOptions()).passed
+        )
         expected = np.asarray(
             [
                 -3 + counter_random(seed, GENERATION_REAL_RANDOM_DOMAIN, index) % 7
@@ -24,11 +29,11 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             dtype=np.float32,
         ).reshape((2, 3), order="C")
         np.testing.assert_array_equal(
-            hv.to_numpy(first),
+            hv.to_numpy(first, dtype=None),
             expected,
         )
 
-        changed_values = hv.to_numpy(second).copy()
+        changed_values = hv.to_numpy(second, dtype=None).copy()
         changed_values[1, 2] += 1
         changed = hv.from_numpy(changed_values)
         options = hv.ComparisonOptions()
@@ -87,7 +92,9 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         )
 
         selected = hv.ComparisonOptions()
-        selected.selection = hv.OutputSelection.strided(0, 2, index_order=[1, 0])
+        selected.selection = hv.OutputSelection.strided(
+            0, 2, index_order=[1, 0], max_elements=sys.maxsize * 2 + 1
+        )
         selected_report = hv.compare(observed, expected, selected)
         expected_flat_fortran = expected_values.reshape(-1, order="F")
         observed_flat_fortran = observed_values.reshape(-1, order="F")
@@ -144,6 +151,7 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             hv.from_numpy(np.asarray([1.0], dtype=np.float64)),
             candidates,
             [0.0],
+            options=hv.allclose_comparison_options(1e-8, 1e-5, False),
         )
         self.assertIsNotNone(tolerance)
         self.assertEqual(tolerance.absolute, 1e-4)
@@ -154,9 +162,15 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             [2, 2],
             sentinel_values.tobytes(),
             strides=[1, 3],
+            offset=0,
         )
         self.assertTrue(
-            hv.check_unused_tensor_storage(sentinel, allocated_elements=5).passed
+            hv.check_unused_tensor_storage(
+                sentinel,
+                allocated_elements=5,
+                region=hv.SentinelRegion.Inside,
+                max_reported_mismatches=10,
+            ).passed
         )
         sentinel_values[2] = 0.0
         sentinel = hv.Tensor.from_storage(
@@ -164,7 +178,13 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             [2, 2],
             sentinel_values.tobytes(),
             strides=[1, 3],
+            offset=0,
         )
-        sentinel_report = hv.check_unused_tensor_storage(sentinel, allocated_elements=5)
+        sentinel_report = hv.check_unused_tensor_storage(
+            sentinel,
+            allocated_elements=5,
+            region=hv.SentinelRegion.Inside,
+            max_reported_mismatches=10,
+        )
         self.assertFalse(sentinel_report.passed)
         self.assertEqual(sentinel_report.reported_mismatches[0].index, 2)

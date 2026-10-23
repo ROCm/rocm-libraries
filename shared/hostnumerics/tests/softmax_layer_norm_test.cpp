@@ -113,7 +113,7 @@ void testReferenceLayerNorm() {
     const std::array<float, 3> rankOneValues{1.0f, 2.0f, 3.0f};
     const LayerNormOutputs rankOneResult = referenceLayerNorm(
         Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
-        {.output = ScalarType::Float32, .mean = ScalarType::Float32});
+        {.output = ScalarType::Float32, .mean = ScalarType::Float32}, {});
     require(rankOneResult.mean && rankOneResult.mean->shape() == Shape{} &&
                 !rankOneResult.inverseVariance,
             "Owning reference LayerNorm did not preserve a requested rank-zero statistic.");

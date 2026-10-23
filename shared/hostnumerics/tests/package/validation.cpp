@@ -27,9 +27,10 @@ TEST(Package, Operations) {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a));
     const Tensor operandB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
-    matmulInto(operandA, operandB, d);
+    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32}, OutputSelection::all({}),
+               GemmBackend::Automatic);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
-    matmulInto(operandA, operandB, d, MatmulOptions{}, OutputSelection::all(),
+    matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32}, OutputSelection::all({}),
                GemmBackend::Blocked);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
 
@@ -38,10 +39,11 @@ TEST(Package, Operations) {
                                                 std::span<const float>(a)),
                Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                                 std::span<const float>(b)),
-               ScalarType::Float32);
+               ScalarType::Float32, MatmulOptions{ScalarType::Float32}, std::nullopt,
+               GemmBackend::Automatic);
     ASSERT_FALSE((ownedGemm.loadAs<float>({0, 0}) != 6));
 
-    EpilogueOptions epilogueOptions;
+    EpilogueOptions epilogueOptions(ScalarType::Float32);
     epilogueOptions.activation = ReluActivation{};
     const EpilogueOutputs epilogue = referenceEpilogue(
         Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{-2.0f}),
@@ -65,7 +67,7 @@ TEST(Package, Operations) {
         ASSERT_FALSE((value != -2.0f && value != 3.0f));
     }
     generateAt(generated, 2,
-               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0})));
+               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0}), {}));
     ASSERT_FALSE((generated.loadAs<float>({2}) != 11.0f));
 
     const Tensor scaledA =

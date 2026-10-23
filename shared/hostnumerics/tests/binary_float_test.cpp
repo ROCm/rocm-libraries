@@ -24,7 +24,7 @@ void testExhaustiveBinaryFormat(ScalarType type) {
 }
 
 void testEveryBinaryFormatRoundingBoundary(ScalarType type, uint32_t maximumPositiveRaw,
-                                           uint32_t signMask, bool hasSignedZero = true) {
+                                           uint32_t signMask, bool hasSignedZero) {
     for (uint32_t upperRaw = 1; upperRaw <= maximumPositiveRaw; ++upperRaw) {
         const uint32_t lowerRaw = upperRaw - 1U;
         const float lower = expectedBinaryDecode(type, lowerRaw);
@@ -182,15 +182,15 @@ void testScalarEncodings() {
     testExhaustiveBinaryFormat(ScalarType::E5M3);
     testExhaustiveBinaryFormat(ScalarType::E4M3);
 
-    testEveryBinaryFormatRoundingBoundary(ScalarType::Float4E2M1, 0x07, 0x08);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E2M3, 0x1f, 0x20);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E3M2, 0x1f, 0x20);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E4M3, 0x7e, 0x80);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E5M2, 0x7b, 0x80);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float4E2M1, 0x07, 0x08, true);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E2M3, 0x1f, 0x20, true);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E3M2, 0x1f, 0x20, true);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E4M3, 0x7e, 0x80, true);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E5M2, 0x7b, 0x80, true);
     testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E4M3Fnuz, 0x7f, 0x80, false);
     testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E5M2Fnuz, 0x7f, 0x80, false);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::E5M3, 0xfe, 0);
-    testEveryBinaryFormatRoundingBoundary(ScalarType::E4M3, 0x7e, 0);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::E5M3, 0xfe, 0, true);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::E4M3, 0x7e, 0, true);
 
     require(encodeRaw(ScalarType::Float8E4M3, 1.0625f) == 0x38,
             "FP8 E4M3 lower-even midpoint rounding mismatch.");

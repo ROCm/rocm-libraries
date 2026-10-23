@@ -227,7 +227,7 @@ namespace TensileLite::Client
     }
 
     inline std::optional<roc::hostnumerics::ActivationFunction>
-        getHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
+        getHostNumericsActivation(ActivationType activation, bool gradientApplication)
     {
         switch(activation)
         {
@@ -272,8 +272,8 @@ namespace TensileLite::Client
         }
     }
 
-    inline roc::hostnumerics::ActivationFunction
-        toHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
+    inline roc::hostnumerics::ActivationFunction toHostNumericsActivation(ActivationType activation,
+                                                                          bool gradientApplication)
     {
         auto result = getHostNumericsActivation(activation, gradientApplication);
         if(!result)

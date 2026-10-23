@@ -24,7 +24,11 @@ class CodecTests(unittest.TestCase):
                 bits = format_info[0]
                 raw = list(range(1 << bits))
                 tensor = hv.Tensor.from_storage(
-                    scalar_type, [len(raw)], pack_bits(raw, bits)
+                    scalar_type,
+                    [len(raw)],
+                    pack_bits(raw, bits),
+                    strides=None,
+                    offset=0,
                 )
                 observed = hv.to_numpy(tensor, np.float32)
                 expected = np.asarray(
@@ -44,7 +48,7 @@ class CodecTests(unittest.TestCase):
     def test_exhaustive_float16_decode(self):
         raw = np.arange(1 << 16, dtype="<u2")
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.Float16, [raw.size], raw.tobytes()
+            hv.ScalarType.Float16, [raw.size], raw.tobytes(), strides=None, offset=0
         )
         observed = hv.to_numpy(tensor, np.float32)
         expected = raw.view("<f2").astype(np.float32)
@@ -53,7 +57,7 @@ class CodecTests(unittest.TestCase):
     def test_exhaustive_bfloat16_decode_and_finite_round_trip(self):
         raw = np.arange(1 << 16, dtype="<u2")
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.BFloat16, [raw.size], raw.tobytes()
+            hv.ScalarType.BFloat16, [raw.size], raw.tobytes(), strides=None, offset=0
         )
         observed = hv.to_numpy(tensor, np.float32)
         expected_bits = raw.astype("<u4") << 16
@@ -67,7 +71,9 @@ class CodecTests(unittest.TestCase):
 
     def test_e8m0_has_no_zero_encoding(self):
         raw = bytes([0, 1, 127, 128, 254, 255])
-        tensor = hv.Tensor.from_storage(hv.ScalarType.E8M0, [len(raw)], raw)
+        tensor = hv.Tensor.from_storage(
+            hv.ScalarType.E8M0, [len(raw)], raw, strides=None, offset=0
+        )
         observed = hv.to_numpy(tensor, np.float32)
         expected = np.asarray(
             [
@@ -84,7 +90,9 @@ class CodecTests(unittest.TestCase):
 
     def test_e8m0_zero_uses_exponent_field_with_zero_sentinel(self):
         raw = bytes([0, 1, 127, 128, 254, 255])
-        tensor = hv.Tensor.from_storage(hv.ScalarType.E8M0Zero, [len(raw)], raw)
+        tensor = hv.Tensor.from_storage(
+            hv.ScalarType.E8M0Zero, [len(raw)], raw, strides=None, offset=0
+        )
         observed = hv.to_numpy(tensor, np.float32)
         expected = np.asarray(
             [

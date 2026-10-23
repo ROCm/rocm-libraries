@@ -210,15 +210,15 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        auto tmp_D = hostnumerics::convertHostReference<float>(
-            hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
-                                               hostnumerics::hostTensor(descB, B),
-                                               hostnumerics::hostTensor(descC, C),
-                                               std::nullopt,
-                                               std::nullopt,
-                                               0,
-                                               1.0f,
-                                               1.0f));
+        auto tmp_D = hostnumerics::convertHostReference<float>(hostnumerics::computeHostReference(
+            hostnumerics::hostTensor(descA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(descB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
+            std::nullopt,
+            std::nullopt,
+            0,
+            1.0f,
+            1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);
@@ -333,15 +333,16 @@ namespace rocRollerTest
 
         std::vector<TypeAB> zeroC(M * N, 0.f);
         TensorDescriptor    referenceDescC(dataTypeAB, {size_t(M), size_t(N)}, "N");
-        auto                tmp_D = hostnumerics::convertHostReference<TypeAB>(
-            hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
-                                               hostnumerics::hostTensor(descB, B),
-                                               hostnumerics::hostTensor(referenceDescC, zeroC),
-                                               std::nullopt,
-                                               std::nullopt,
-                                               0,
-                                               1.0f,
-                                               1.0f));
+        auto tmp_D = hostnumerics::convertHostReference<TypeAB>(hostnumerics::computeHostReference(
+            hostnumerics::hostTensor(descA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(descB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(
+                referenceDescC, zeroC, hostnumerics::DataTypeInterpretation::Unscaled),
+            std::nullopt,
+            std::nullopt,
+            0,
+            1.0f,
+            1.0f));
 
         std::vector<TypeD> cpu_D;
         cpu_D.reserve(M * N);

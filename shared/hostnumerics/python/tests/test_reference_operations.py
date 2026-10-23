@@ -14,7 +14,12 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             dtype=np.float32,
         )
         input_tensor = hv.from_numpy(source, hv.ScalarType.Float16)
-        result = hv.reference_softmax(input_tensor, axis=1)
+        result = hv.reference_softmax(
+            input_tensor,
+            axis=1,
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+        )
 
         quantized = source.astype(np.float16).astype(np.float32)
         expected = np.empty_like(quantized)
@@ -32,17 +37,30 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                 for row in range(quantized.shape[1]):
                     expected[batch, row, column] = np.float32(exponentials[row] / total)
 
-        np.testing.assert_allclose(hv.to_numpy(result), expected, rtol=1e-6, atol=1e-7)
+        np.testing.assert_allclose(
+            hv.to_numpy(result, dtype=None), expected, rtol=1e-6, atol=1e-7
+        )
         with self.assertRaises(RuntimeError):
-            hv.reference_softmax(input_tensor, axis=source.ndim)
+            hv.reference_softmax(
+                input_tensor,
+                axis=source.ndim,
+                output_type=hv.ScalarType.Float32,
+                accumulator_type=hv.ScalarType.Float32,
+            )
 
         padded_input = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
             [2, 2],
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
             strides=[3, 1],
+            offset=0,
         )
-        contiguous = hv.reference_softmax(padded_input, axis=1)
+        contiguous = hv.reference_softmax(
+            padded_input,
+            axis=1,
+            output_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+        )
         self.assertEqual(contiguous.strides, [2, 1])
         self.assertEqual(contiguous.offset, 0)
 
@@ -66,6 +84,9 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             epsilon=float(epsilon),
             gamma=gamma,
             beta=beta,
+            output_type=hv.ScalarType.Float32,
+            statistics_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
         )
 
         quantized = source.astype(np.float16).astype(np.float32)
@@ -105,13 +126,13 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     )
 
         np.testing.assert_allclose(
-            hv.to_numpy(result.output), expected, rtol=1e-6, atol=1e-6
+            hv.to_numpy(result.output, dtype=None), expected, rtol=1e-6, atol=1e-6
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result.mean), expected_mean, rtol=1e-6, atol=1e-6
+            hv.to_numpy(result.mean, dtype=None), expected_mean, rtol=1e-6, atol=1e-6
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result.inverse_variance),
+            hv.to_numpy(result.inverse_variance, dtype=None),
             expected_inverse,
             rtol=1e-6,
             atol=1e-6,
@@ -122,8 +143,16 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [2, 2],
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
             strides=[3, 1],
+            offset=0,
         )
-        contiguous = hv.reference_layer_norm(padded_input, axis=1)
+        contiguous = hv.reference_layer_norm(
+            padded_input,
+            axis=1,
+            output_type=hv.ScalarType.Float32,
+            statistics_type=hv.ScalarType.Float32,
+            accumulator_type=hv.ScalarType.Float32,
+            epsilon=1e-5,
+        )
         self.assertEqual(contiguous.output.strides, [2, 1])
         self.assertEqual(contiguous.output.offset, 0)
         self.assertEqual(contiguous.mean.strides, [1])
@@ -143,18 +172,25 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             auxiliary_scale=3.0,
             include_raw_output=True,
             include_amax=True,
+            activation_application=hv.ActivationApplication.Forward,
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            output_selection=hv.OutputSelection.all([]),
         )
         pre_activation = values + bias[:, None]
         activated = np.maximum(pre_activation, 0.0)
         np.testing.assert_array_equal(
             hv.to_numpy(result.output, np.float32), activated * 2.0
         )
-        np.testing.assert_array_equal(hv.to_numpy(result.raw_output), activated * 2.0)
         np.testing.assert_array_equal(
-            hv.to_numpy(result.auxiliary_output), pre_activation * 3.0
+            hv.to_numpy(result.raw_output, dtype=None), activated * 2.0
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result.amax), np.asarray([5.0], dtype=np.float32)
+            hv.to_numpy(result.auxiliary_output, dtype=None), pre_activation * 3.0
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.amax, dtype=None), np.asarray([5.0], dtype=np.float32)
         )
 
         gate = np.asarray([[0.5, 2.0], [-1.0, 0.25]], dtype=np.float32)
@@ -165,10 +201,20 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             gate_residual=hv.from_numpy(gate),
             output_scale=2.0,
             include_raw_output=True,
+            activation=hv.Activation.None_,
+            activation_application=hv.ActivationApplication.Forward,
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            include_amax=False,
+            output_selection=hv.OutputSelection.all([]),
         )
         raw = values * 2.0
-        np.testing.assert_array_equal(hv.to_numpy(gated.raw_output), raw)
-        np.testing.assert_array_equal(hv.to_numpy(gated.output), gate * raw + gate)
+        np.testing.assert_array_equal(hv.to_numpy(gated.raw_output, dtype=None), raw)
+        np.testing.assert_array_equal(
+            hv.to_numpy(gated.output, dtype=None), gate * raw + gate
+        )
 
         selected = hv.reference_epilogue(
             hv.from_numpy(values),
@@ -176,14 +222,23 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             activation=hv.Activation.Relu,
             include_raw_output=True,
-            output_selection=hv.OutputSelection.explicit_indices([1, 2]),
+            output_selection=hv.OutputSelection.explicit_indices(
+                [1, 2], index_order=[]
+            ),
+            activation_application=hv.ActivationApplication.Forward,
+            output_scale=complex(1.0, 0.0),
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            include_amax=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(selected.output),
+            hv.to_numpy(selected.output, dtype=None),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(selected.raw_output),
+            hv.to_numpy(selected.raw_output, dtype=None),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
         )
         int8_values = np.asarray([[-200.0, -128.5], [126.5, 300.0]], dtype=np.float32)
@@ -192,9 +247,18 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Int8,
             hv.ScalarType.Float32,
             output_conversion=hv.OutputConversion.SaturatingInt8,
+            activation=hv.Activation.None_,
+            activation_application=hv.ActivationApplication.Forward,
+            output_scale=complex(1.0, 0.0),
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            include_raw_output=False,
+            include_amax=False,
+            output_selection=hv.OutputSelection.all([]),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(saturated.output),
+            hv.to_numpy(saturated.output, dtype=None),
             np.clip(np.rint(int8_values), -128, 127).astype(np.int8),
         )
 
@@ -208,9 +272,17 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation=hv.Activation.Relu,
             activation_application=hv.ActivationApplication.Gradient,
             auxiliary_input=hv.from_numpy(activation_input),
+            output_scale=complex(1.0, 0.0),
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            include_raw_output=False,
+            include_amax=False,
+            output_selection=hv.OutputSelection.all([]),
         )
         expected = gradient * (activation_input > 0)
-        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result.output, dtype=None), expected)
 
         gelu = hv.reference_epilogue(
             hv.from_numpy(gradient),
@@ -219,6 +291,14 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation=hv.Activation.Gelu,
             activation_application=hv.ActivationApplication.Gradient,
             auxiliary_input=hv.from_numpy(activation_input),
+            output_scale=complex(1.0, 0.0),
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            include_raw_output=False,
+            include_amax=False,
+            output_selection=hv.OutputSelection.all([]),
         )
         coefficient0 = np.float32(0.7978845608028654)
         coefficient1 = np.float32(0.044715)
@@ -236,7 +316,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             * (1.0 + 3.0 * coefficient1 * activation_input * activation_input)
         )
         np.testing.assert_allclose(
-            hv.to_numpy(gelu.output),
+            hv.to_numpy(gelu.output, dtype=None),
             gradient * gelu_derivative,
             rtol=5e-6,
             atol=2e-5,
@@ -310,9 +390,16 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     activation=activation,
                     activation_parameter0=float(parameter0),
                     activation_parameter1=float(parameter1),
+                    activation_application=hv.ActivationApplication.Forward,
+                    output_scale=complex(1.0, 0.0),
+                    auxiliary_scale=complex(1.0, 0.0),
+                    output_conversion=hv.OutputConversion.Default,
+                    include_raw_output=False,
+                    include_amax=False,
+                    output_selection=hv.OutputSelection.all([]),
                 )
                 np.testing.assert_allclose(
-                    hv.to_numpy(result.output),
+                    hv.to_numpy(result.output, dtype=None),
                     expected,
                     rtol=5e-6,
                     atol=2e-5,
@@ -352,9 +439,15 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     auxiliary_input=hv.from_numpy(values),
                     activation_parameter0=float(parameter0),
                     activation_parameter1=float(parameter1),
+                    output_scale=complex(1.0, 0.0),
+                    auxiliary_scale=complex(1.0, 0.0),
+                    output_conversion=hv.OutputConversion.Default,
+                    include_raw_output=False,
+                    include_amax=False,
+                    output_selection=hv.OutputSelection.all([]),
                 )
                 np.testing.assert_allclose(
-                    hv.to_numpy(result.output),
+                    hv.to_numpy(result.output, dtype=None),
                     gradient * factor,
                     rtol=5e-6,
                     atol=2e-5,
@@ -367,10 +460,19 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float64,
             hv.ScalarType.Float64,
             activation=hv.Activation.Sigmoid,
+            activation_application=hv.ActivationApplication.Forward,
+            output_scale=complex(1.0, 0.0),
+            auxiliary_scale=complex(1.0, 0.0),
+            activation_parameter0=0.0,
+            activation_parameter1=0.0,
+            output_conversion=hv.OutputConversion.Default,
+            include_raw_output=False,
+            include_amax=False,
+            output_selection=hv.OutputSelection.all([]),
         )
         expected = 1.0 / (1.0 + np.exp(-values))
         np.testing.assert_allclose(
-            hv.to_numpy(result.output), expected, rtol=0.0, atol=1e-15
+            hv.to_numpy(result.output, dtype=None), expected, rtol=0.0, atol=1e-15
         )
 
     def test_reference_sum_matches_numpy(self):
@@ -382,7 +484,8 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [0, 2],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(observed), np.sum(values, axis=(0, 2), dtype=np.float32)
+            hv.to_numpy(observed, dtype=None),
+            np.sum(values, axis=(0, 2), dtype=np.float32),
         )
 
         complex_values = values.astype(np.complex64) * np.complex64(1.0 + 2.0j)
@@ -393,7 +496,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [1],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(complex_observed),
+            hv.to_numpy(complex_observed, dtype=None),
             np.sum(complex_values, axis=1, dtype=np.complex64),
         )
 
@@ -405,7 +508,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [1],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(integer_observed),
+            hv.to_numpy(integer_observed, dtype=None),
             np.sum(integer_values, axis=1, dtype=np.int32),
         )
 
@@ -417,7 +520,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [0],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(wrapping_observed),
+            hv.to_numpy(wrapping_observed, dtype=None),
             np.sum(wrapping_values, dtype=np.int32),
         )
 
@@ -435,7 +538,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             np.max(np.where(np.isnan(values), 0.0, np.abs(values))),
             dtype=np.float16,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
         all_nan = np.full((2, 3), np.nan, dtype=np.float32)
         all_nan_observed = hv.reference_maximum_absolute(
@@ -444,6 +547,6 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(all_nan_observed),
+            hv.to_numpy(all_nan_observed, dtype=None),
             np.asarray(0.0, dtype=np.float32),
         )

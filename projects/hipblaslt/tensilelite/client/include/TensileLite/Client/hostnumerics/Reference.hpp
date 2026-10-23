@@ -60,14 +60,12 @@ namespace TensileLite
         void executeReferenceGemm(ContractionProblemGemm const&      problem,
                                   ContractionInputs const&           inputs,
                                   roc::hostnumerics::OutputSelection outputSelection,
-                                  roc::hostnumerics::GemmBackend     backend
-                                  = roc::hostnumerics::GemmBackend::Automatic);
+                                  roc::hostnumerics::GemmBackend     backend);
 
         void executeReferenceGemm(ContractionProblemGemm const&  problem,
                                   ContractionInputs const&       inputs,
                                   size_t                         elementsToValidate,
-                                  roc::hostnumerics::GemmBackend backend
-                                  = roc::hostnumerics::GemmBackend::Automatic);
+                                  roc::hostnumerics::GemmBackend backend);
 
     } // namespace Client
 } // namespace TensileLite

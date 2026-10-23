@@ -78,7 +78,7 @@ inline void validateBinaryInvocation(const BinaryInvocation& invocation) {
     (void)invocation.selection.selectedCount(outputShape.elementCount());
 }
 
-template <typename Accumulator, bool QuantizeResult = false>
+template <typename Accumulator, bool QuantizeResult>
 void binaryTyped(const BinaryInvocation& invocation, BinaryOperation operation) {
     const Tensor left = invocation.left.broadcastTo(invocation.output.shape());
     const Tensor right = invocation.right.broadcastTo(invocation.output.shape());
@@ -116,15 +116,15 @@ inline void runBinary(const BinaryInvocation& invocation, BinaryOperation operat
         case ScalarType::BFloat16:
             return binaryTyped<float, true>(invocation, operation);
         case ScalarType::Float32:
-            return binaryTyped<float>(invocation, operation);
+            return binaryTyped<float, false>(invocation, operation);
         case ScalarType::Float64:
-            return binaryTyped<double>(invocation, operation);
+            return binaryTyped<double, false>(invocation, operation);
         case ScalarType::Int32:
-            return binaryTyped<int32_t>(invocation, operation);
+            return binaryTyped<int32_t, false>(invocation, operation);
         case ScalarType::ComplexFloat32:
-            return binaryTyped<std::complex<float>>(invocation, operation);
+            return binaryTyped<std::complex<float>, false>(invocation, operation);
         case ScalarType::ComplexFloat64:
-            return binaryTyped<std::complex<double>>(invocation, operation);
+            return binaryTyped<std::complex<double>, false>(invocation, operation);
         default:
             throw std::runtime_error("Unsupported elementwise compute type.");
     }
@@ -171,7 +171,7 @@ inline void validateActivationInvocation(const ActivationInvocation& invocation)
     (void)invocation.selection.selectedCount(invocation.output.shape().elementCount());
 }
 
-template <typename Accumulator, bool QuantizeResult = false>
+template <typename Accumulator, bool QuantizeResult>
 void activationTyped(const ActivationInvocation& invocation) {
     const RuntimeTensorReader<Accumulator> input(invocation.input);
     const RuntimeTensorWriter<Accumulator> output(invocation.output);
@@ -195,11 +195,11 @@ inline void runActivation(const ActivationInvocation& invocation) {
         case ScalarType::BFloat16:
             return activationTyped<float, true>(invocation);
         case ScalarType::Float32:
-            return activationTyped<float>(invocation);
+            return activationTyped<float, false>(invocation);
         case ScalarType::Float64:
-            return activationTyped<double>(invocation);
+            return activationTyped<double, false>(invocation);
         case ScalarType::Int32:
-            return activationTyped<int32_t>(invocation);
+            return activationTyped<int32_t, false>(invocation);
         default:
             throw std::runtime_error("Unsupported activation compute type.");
     }

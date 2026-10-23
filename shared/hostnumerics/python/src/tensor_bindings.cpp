@@ -447,7 +447,7 @@ void registerTensorBindings(nb::module_& module) {
                             std::span<const std::complex<double>>(values));
                     })
         .def_static("from_storage", &tensorFromStorage, "type"_a, "shape"_a, "storage"_a,
-                    "strides"_a = std::optional<std::vector<ptrdiff_t>>{}, "offset"_a = 0)
+                    "strides"_a, "offset"_a)
         .def_prop_ro("type", &Tensor::type)
         .def_prop_ro("shape", [](const Tensor& tensor) { return dimensions(tensor.shape()); })
         .def_prop_ro("strides", [](const Tensor& tensor) { return strides(tensor.layout()); })
@@ -516,9 +516,9 @@ void registerTensorBindings(nb::module_& module) {
         .def("relu", &Tensor::relu)
         .def("gelu", &Tensor::gelu)
         .def("sigmoid", &Tensor::sigmoid)
-        .def("tanh", &Tensor::tanh, "input_scale"_a = 1.0, "output_scale"_a = 1.0)
+        .def("tanh", &Tensor::tanh, "input_scale"_a, "output_scale"_a)
         .def("silu", &Tensor::silu)
-        .def("swish", &Tensor::swish, "beta"_a = 1.0)
+        .def("swish", &Tensor::swish, "beta"_a)
         .def("clip", &Tensor::clip, "minimum"_a, "maximum"_a)
         .def(
             "__add__",

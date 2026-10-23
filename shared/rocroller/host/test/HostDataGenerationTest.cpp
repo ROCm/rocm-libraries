@@ -70,7 +70,8 @@ namespace
             std::pair{DataType::ComplexDouble, ScalarType::ComplexFloat64},
         };
         for(auto const& [source, expected] : mappings)
-            require(hostScalarType(source) == expected, "Ordinary scalar type mapping mismatch.");
+            require(hostScalarType(source, DataTypeInterpretation::Unscaled) == expected,
+                    "Ordinary scalar type mapping mismatch.");
     }
 
     GeneratedGEMMInputs generate(TensorDescriptor const&   descriptorA,

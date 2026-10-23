@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     };
 
     const double componentMilliseconds = milliseconds(
-        [&] { applyStructuredSparsityInto(prunedTensor, outputs, pattern); }, iterations);
+        [&] { applyStructuredSparsityInto(prunedTensor, outputs, pattern, {}); }, iterations);
     std::memcpy(pruned.data(), prunedTensor.rawEncodedBackingStorage().data(),
                 prunedTensor.rawEncodedBackingStorage().size());
     std::memcpy(compressed.data(), compressedTensor.rawEncodedBackingStorage().data(),

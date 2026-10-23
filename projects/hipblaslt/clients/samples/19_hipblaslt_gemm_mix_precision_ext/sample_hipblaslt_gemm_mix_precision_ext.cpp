@@ -85,12 +85,18 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
                                            Layout(Shape{size_t(runner.k), size_t(runner.n)},
                                                   {1, static_cast<ptrdiff_t>(runner.k)},
                                                   0));
-        Tensor       c        = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
+        Tensor       c = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
                                                 batchStrideC,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.n)},
                                                        {1, static_cast<ptrdiff_t>(runner.m)},
                                                        0));
-        const Tensor product  = matmul(a, bTensor, ScalarType::Float32);
+        const Tensor product
+            = matmul(a,
+                     bTensor,
+                     ScalarType::Float32,
+                     roc::hostnumerics::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
+                     std::nullopt,
+                     roc::hostnumerics::GemmBackend::Automatic);
         const Tensor combined = product * (runner.alpha * scaleA)
                                 + c.copyConvertedTo(ScalarType::Float32) * runner.beta;
         referenceTensor.copyLogicalElementsFrom(combined);

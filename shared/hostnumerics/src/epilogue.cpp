@@ -16,15 +16,15 @@ void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
         case ScalarType::BFloat16:
             return detail::referenceEpilogueTyped<float, true>(invocation);
         case ScalarType::Float32:
-            return detail::referenceEpilogueTyped<float>(invocation);
+            return detail::referenceEpilogueTyped<float, false>(invocation);
         case ScalarType::Float64:
-            return detail::referenceEpilogueTyped<double>(invocation);
+            return detail::referenceEpilogueTyped<double, false>(invocation);
         case ScalarType::Int32:
-            return detail::referenceEpilogueTyped<int32_t>(invocation);
+            return detail::referenceEpilogueTyped<int32_t, false>(invocation);
         case ScalarType::ComplexFloat32:
-            return detail::referenceEpilogueTyped<std::complex<float>>(invocation);
+            return detail::referenceEpilogueTyped<std::complex<float>, false>(invocation);
         case ScalarType::ComplexFloat64:
-            return detail::referenceEpilogueTyped<std::complex<double>>(invocation);
+            return detail::referenceEpilogueTyped<std::complex<double>, false>(invocation);
         default:
             throw std::runtime_error("Unsupported reference epilogue compute type.");
     }

@@ -13,7 +13,7 @@ void testStructuredSparsity() {
         pattern.fixedPositions = {0, 2};
         for (size_t elements : {size_t{0}, size_t{4}}) {
             requireError(
-                [&] { (void)applyStructuredSparsity(Tensor(type, Shape{elements}), pattern); },
+                [&] { (void)applyStructuredSparsity(Tensor(type, Shape{elements}), pattern, {}); },
                 "Structured sparsity accepted an unsupported unsigned floating-point input.");
         }
     }
@@ -44,7 +44,7 @@ void testStructuredSparsity() {
     pattern.fixedPositions = {1, 3};
     applyStructuredSparsityInto(
         input, {.pruned = pruned, .compressed = compressed, .retainedIndices = retainedIndices},
-        pattern);
+        pattern, {});
 
     for (size_t row = 0; row < 2; ++row) {
         for (size_t group = 0; group < 2; ++group) {
@@ -83,7 +83,7 @@ void testStructuredSparsity() {
     };
     applyStructuredSparsityInto(input, fusedOutputs, pattern, {.firstSlice = 0, .sliceCount = 1});
     applyStructuredSparsityInto(input, fusedOutputs, pattern, {.firstSlice = 1, .sliceCount = 1});
-    require(compare(fusedMetadata, metadata).passed(),
+    require(compare(fusedMetadata, metadata, {}).passed(),
             "Fused structured sparsity metadata mismatch.");
 
     Tensor inPlace =
@@ -95,7 +95,7 @@ void testStructuredSparsity() {
     applyStructuredSparsityInto(
         inPlace,
         {.pruned = inPlace, .compressed = inPlaceCompressed, .retainedIndices = inPlaceIndices},
-        pattern);
+        pattern, {});
     require(inPlace.loadAs<float>({0}) == 1 && inPlace.loadAs<float>({1}) == 0 &&
                 inPlace.loadAs<float>({2}) == 3 && inPlace.loadAs<float>({3}) == 0,
             "In-place structured sparsity mismatch.");
@@ -165,7 +165,7 @@ void testStructuredSparsity() {
         };
         StructuredSparsityPattern emptyPattern;
         emptyPattern.axis = axis;
-        applyStructuredSparsityInto(emptyInput, outputs, emptyPattern);
+        applyStructuredSparsityInto(emptyInput, outputs, emptyPattern, {});
         encodeTwoOfFourMetadataInto(*outputs.retainedIndices, *outputs.twoOfFourMetadata, axis);
         require(outputs.pruned.elementCount() == 0 &&
                     outputs.twoOfFourMetadata->rawEncodedBackingStorage().empty(),
@@ -177,7 +177,7 @@ void testStructuredSparsity() {
             },
             "Oversized empty structured sparsity accepted a nonempty slice range.");
         emptyPattern.fixedPositions = {0, 4};
-        requireError([&] { applyStructuredSparsityInto(emptyInput, outputs, emptyPattern); },
+        requireError([&] { applyStructuredSparsityInto(emptyInput, outputs, emptyPattern, {}); },
                      "Oversized empty structured sparsity skipped pattern validation.");
     }
 
@@ -199,7 +199,7 @@ void testStructuredSparsity() {
     widePattern.retainedElements = 1;
     widePattern.fixedPositions = {0};
     const StructuredSparseTensor wide =
-        applyStructuredSparsity(Tensor(ScalarType::Float32, Shape{257}), widePattern);
+        applyStructuredSparsity(Tensor(ScalarType::Float32, Shape{257}), widePattern, {});
     require(wide.compressed.shape() == Shape{1} && !wide.retainedIndices,
             "Structured sparsity imposed the UInt8 index limit without an index output.");
 
@@ -212,13 +212,13 @@ void testStructuredSparsity() {
     overlappingPattern.fixedPositions = {1, 3};
     applyStructuredSparsityInto(
         input, {.pruned = overlappingPrunedA, .compressed = independentCompressedA},
-        overlappingPattern);
+        overlappingPattern, {});
     applyStructuredSparsityInto(
         input, {.pruned = overlappingPrunedB, .compressed = independentCompressedB},
-        overlappingPattern);
+        overlappingPattern, {});
     require(std::ranges::equal(overlappingPrunedA.rawEncodedBackingStorage(),
                                overlappingPrunedB.rawEncodedBackingStorage()) &&
-                compare(independentCompressedA, independentCompressedB).passed(),
+                compare(independentCompressedA, independentCompressedB, {}).passed(),
             "Structured sparsity was nondeterministic for overlapping nonzero strides.");
 }
 

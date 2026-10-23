@@ -17,7 +17,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         tensor = hv.from_numpy(values)
         self.assertEqual(tensor.type, hv.ScalarType.Float32)
         self.assertEqual(tensor.shape, [3, 4])
-        np.testing.assert_array_equal(hv.to_numpy(tensor), values)
+        np.testing.assert_array_equal(hv.to_numpy(tensor, dtype=None), values)
 
     def test_numpy_tensor_preserves_positive_stride_and_gaps(self):
         storage = np.asarray(
@@ -46,14 +46,27 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(view.strides, [5, 2])
         self.assertEqual(view.offset, 0)
         self.assertEqual(len(view.storage), storage.nbytes)
-        np.testing.assert_array_equal(hv.to_numpy(view), values)
-        self.assertTrue(hv.compare(view, expected).passed)
+        np.testing.assert_array_equal(hv.to_numpy(view, dtype=None), values)
+        self.assertTrue(
+            hv.compare(view, expected, options=hv.ComparisonOptions()).passed
+        )
 
-        tolerance = hv.find_allclose_tolerance(view, expected, [0.0], [0.0])
+        tolerance = hv.find_allclose_tolerance(
+            view,
+            expected,
+            [0.0],
+            [0.0],
+            options=hv.allclose_comparison_options(1e-8, 1e-5, False),
+        )
         self.assertIsNotNone(tolerance)
         self.assertEqual(tolerance.absolute, 0.0)
         self.assertTrue(
-            hv.check_unused_tensor_storage(view, allocated_elements=storage.size).passed
+            hv.check_unused_tensor_storage(
+                view,
+                allocated_elements=storage.size,
+                region=hv.SentinelRegion.Inside,
+                max_reported_mismatches=10,
+            ).passed
         )
 
     def test_numpy_tensor_preserves_negative_strides(self):
@@ -64,8 +77,12 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(view.strides, [-6, -2])
         self.assertEqual(view.offset, 22)
         self.assertEqual(len(view.storage), 23 * values.itemsize)
-        np.testing.assert_array_equal(hv.to_numpy(view), values)
-        self.assertTrue(hv.compare(view, hv.from_numpy(values)).passed)
+        np.testing.assert_array_equal(hv.to_numpy(view, dtype=None), values)
+        self.assertTrue(
+            hv.compare(
+                view, hv.from_numpy(values), options=hv.ComparisonOptions()
+            ).passed
+        )
 
     def test_scalar_item_and_broadcast_view(self):
         scalar = hv.from_numpy(np.asarray(3.5, dtype=np.float32))
@@ -93,7 +110,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(broadcast.shape, [2, 3])
         self.assertEqual(broadcast.strides, [0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(broadcast), np.full((2, 3), 3.5, dtype=np.float32)
+            hv.to_numpy(broadcast, dtype=None), np.full((2, 3), 3.5, dtype=np.float32)
         )
 
         vector = hv.from_numpy(np.asarray([1.0, 2.0], dtype=np.float32))
@@ -101,7 +118,8 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(expanded.shape, [2, 1])
         self.assertEqual(expanded.strides, [1, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(expanded), np.asarray([[1.0], [2.0]], dtype=np.float32)
+            hv.to_numpy(expanded, dtype=None),
+            np.asarray([[1.0], [2.0]], dtype=np.float32),
         )
 
         with self.assertRaisesRegex(RuntimeError, "rank-zero"):
@@ -114,16 +132,18 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         copied = view.to(hv.ScalarType.Float32)
         self.assertEqual(copied.strides, view.strides)
         self.assertEqual(copied.offset, view.offset)
-        np.testing.assert_array_equal(hv.to_numpy(copied), values)
+        np.testing.assert_array_equal(hv.to_numpy(copied, dtype=None), values)
 
         converted = view.to(hv.ScalarType.Float16)
         self.assertEqual(converted.strides, view.strides)
         self.assertEqual(converted.offset, view.offset)
-        np.testing.assert_array_equal(hv.to_numpy(converted), values.astype(np.float16))
+        np.testing.assert_array_equal(
+            hv.to_numpy(converted, dtype=None), values.astype(np.float16)
+        )
 
         bfloat_source = hv.from_numpy(np.asarray([1.1, -2.25], dtype=np.float32))
         np.testing.assert_array_equal(
-            hv.to_numpy(bfloat_source.to(hv.ScalarType.BFloat16)),
+            hv.to_numpy(bfloat_source.to(hv.ScalarType.BFloat16), dtype=None),
             quantize_bfloat16(np.asarray([1.1, -2.25], dtype=np.float32)),
         )
 
@@ -132,7 +152,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float4E2M1,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(packed.to(hv.ScalarType.Float32)),
+            hv.to_numpy(packed.to(hv.ScalarType.Float32), dtype=None),
             np.asarray([-6.0, -0.5, 1.5, 6.0], dtype=np.float32),
         )
 
@@ -140,13 +160,17 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
         view = hv.Tensor.from_numpy(values)
         expected = hv.from_numpy(values.copy())
-        self.assertTrue(hv.compare(view, expected).passed)
+        self.assertTrue(
+            hv.compare(view, expected, options=hv.ComparisonOptions()).passed
+        )
 
         values[1, 2] = -17.0
         np.testing.assert_array_equal(
-            hv.to_numpy(view), np.arange(6, dtype=np.float32).reshape(2, 3)
+            hv.to_numpy(view, dtype=None), np.arange(6, dtype=np.float32).reshape(2, 3)
         )
-        self.assertTrue(hv.compare(view, expected).passed)
+        self.assertTrue(
+            hv.compare(view, expected, options=hv.ComparisonOptions()).passed
+        )
 
     def test_numpy_tensor_does_not_retain_source_owner(self):
         values = np.arange(6, dtype=np.float64)
@@ -156,19 +180,23 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         del values
         gc.collect()
         self.assertIsNone(owner())
-        np.testing.assert_array_equal(hv.to_numpy(view), np.arange(6, dtype=np.float64))
+        np.testing.assert_array_equal(
+            hv.to_numpy(view, dtype=None), np.arange(6, dtype=np.float64)
+        )
 
     def test_tensor_clone_is_independent(self):
         tensor = hv.from_numpy(np.arange(6, dtype=np.float32))
         cloned = tensor.clone()
         recipe = real_generation_recipe(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0))
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
+            seed=0,
+            index_order=(),
         )
         hv.generate_at(cloned, 5, recipe)
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor), np.arange(6, dtype=np.float32)
+            hv.to_numpy(tensor, dtype=None), np.arange(6, dtype=np.float32)
         )
-        self.assertEqual(hv.to_numpy(cloned)[5], -17.0)
+        self.assertEqual(hv.to_numpy(cloned, dtype=None)[5], -17.0)
 
     def test_numpy_tensor_accepts_read_only_array(self):
         values = np.arange(6, dtype=np.int32).reshape(2, 3)
@@ -176,7 +204,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         view = hv.Tensor.from_numpy(values)
 
         self.assertEqual(view.type, hv.ScalarType.Int32)
-        np.testing.assert_array_equal(hv.to_numpy(view), values)
+        np.testing.assert_array_equal(hv.to_numpy(view, dtype=None), values)
 
     def test_numpy_tensor_rejects_storage_conversion(self):
         with self.assertRaises(TypeError):
@@ -217,7 +245,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             offset=1,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor),
+            hv.to_numpy(tensor, dtype=None),
             np.asarray([[1.0, 3.0], [2.0, 4.0]], dtype=np.float32),
         )
 
@@ -231,11 +259,13 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(view.shape, [2, 3, 4])
         self.assertEqual(view.strides, [60, 24, 1])
         self.assertEqual(view.offset, 8)
-        np.testing.assert_array_equal(hv.to_numpy(view), values[:, ::2, -1, :])
-        np.testing.assert_array_equal(hv.to_numpy(tensor[-1]), values[-1])
-        np.testing.assert_array_equal(hv.to_numpy(tensor[()]), values)
         np.testing.assert_array_equal(
-            hv.to_numpy(view * 2.0 + 1.0), values[:, ::2, -1, :] * 2.0 + 1.0
+            hv.to_numpy(view, dtype=None), values[:, ::2, -1, :]
+        )
+        np.testing.assert_array_equal(hv.to_numpy(tensor[-1], dtype=None), values[-1])
+        np.testing.assert_array_equal(hv.to_numpy(tensor[()], dtype=None), values)
+        np.testing.assert_array_equal(
+            hv.to_numpy(view * 2.0 + 1.0, dtype=None), values[:, ::2, -1, :] * 2.0 + 1.0
         )
         scalar = tensor[-1, -1, -1, -1]
         self.assertEqual(scalar.shape, [])
@@ -262,7 +292,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
                     view = tensor[key]
                     expected = values[key]
                     self.assertEqual(view.shape, list(expected.shape))
-                    np.testing.assert_array_equal(hv.to_numpy(view), expected)
+                    np.testing.assert_array_equal(
+                        hv.to_numpy(view, dtype=None), expected
+                    )
                     if expected.size > 1:
                         self.assertEqual(
                             view.strides,
@@ -272,7 +304,9 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         tensor = hv.from_numpy(values)
         self.assertEqual(tensor[0, ::-3].strides, [-3])
         for key in ((slice(0, 0), -1), (slice(None), slice(3, 3, -1))):
-            np.testing.assert_array_equal(hv.to_numpy(tensor[key]), values[key])
+            np.testing.assert_array_equal(
+                hv.to_numpy(tensor[key], dtype=None), values[key]
+            )
 
     def test_slices_of_reversed_gapped_and_broadcast_views(self):
         values = np.arange(240, dtype=np.float32).reshape(2, 5, 3, 8)
@@ -280,10 +314,10 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         tensor = hv.Tensor.from_numpy(reversed_values)
         view = tensor[:, ::-2, -1, ::-1]
         np.testing.assert_array_equal(
-            hv.to_numpy(view), reversed_values[:, ::-2, -1, ::-1]
+            hv.to_numpy(view, dtype=None), reversed_values[:, ::-2, -1, ::-1]
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(view[::-1, 1:, ::2]),
+            hv.to_numpy(view[::-1, 1:, ::2], dtype=None),
             reversed_values[:, ::-2, -1, ::-1][::-1, 1:, ::2],
         )
 
@@ -291,7 +325,8 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         broadcast = scalar.broadcast_to([2, 5, 3, 4])[:, ::2, -1, :]
         self.assertEqual(broadcast.strides, [0, 0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(broadcast), np.full((2, 3, 4), 3.5, dtype=np.float32)
+            hv.to_numpy(broadcast, dtype=None),
+            np.full((2, 3, 4), 3.5, dtype=np.float32),
         )
 
     def test_integer_index_protocol_and_scalar_tensors(self):
@@ -318,18 +353,24 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         tensor = hv.from_numpy(values)
         view = tensor[:, ::2, -1, :]
         recipe = real_generation_recipe(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0))
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
+            seed=0,
+            index_order=(),
         )
         hv.generate_at(view, 5, recipe)
         values[0, 2, 2, 1] = -17.0
-        np.testing.assert_array_equal(hv.to_numpy(tensor), values)
+        np.testing.assert_array_equal(hv.to_numpy(tensor, dtype=None), values)
 
         hv.generate_at(tensor, 119, recipe)
         values[1, 4, 2, 3] = -17.0
-        np.testing.assert_array_equal(hv.to_numpy(view), values[:, ::2, -1, :])
+        np.testing.assert_array_equal(
+            hv.to_numpy(view, dtype=None), values[:, ::2, -1, :]
+        )
         del tensor
         gc.collect()
-        np.testing.assert_array_equal(hv.to_numpy(view), values[:, ::2, -1, :])
+        np.testing.assert_array_equal(
+            hv.to_numpy(view, dtype=None), values[:, ::2, -1, :]
+        )
         hv.generate_at(view, 0, recipe)
         self.assertEqual(view[0, 0, 0].item(), -17.0)
 
@@ -339,15 +380,19 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(len(tensor), len(values))
         iterator = iter(tensor)
         first = next(iterator)
-        np.testing.assert_array_equal(hv.to_numpy(first), values[0])
+        np.testing.assert_array_equal(hv.to_numpy(first, dtype=None), values[0])
         recipe = real_generation_recipe(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0))
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
+            seed=0,
+            index_order=(),
         )
         hv.generate_at(first, 0, recipe)
         self.assertEqual(tensor[0, 0].item(), -17.0)
         del tensor
         gc.collect()
-        np.testing.assert_array_equal(hv.to_numpy(next(iterator)), values[1])
+        np.testing.assert_array_equal(
+            hv.to_numpy(next(iterator), dtype=None), values[1]
+        )
         for _ in range(2):
             with self.assertRaises(StopIteration):
                 next(iterator)
@@ -400,21 +445,23 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             with self.subTest(scalar_type=scalar_type):
                 values = np.resize(np.asarray(samples, dtype=np.float32), 100)
                 tensor = hv.from_numpy(values.reshape(2, 5, 2, 5), scalar_type)
-                expected = hv.to_numpy(tensor)
+                expected = hv.to_numpy(tensor, dtype=None)
                 original_storage = tensor.storage
                 view = tensor[:, ::2, -1, :]
                 self.assertEqual(view.offset, 5)
                 np.testing.assert_array_equal(
-                    hv.to_numpy(view), expected[:, ::2, -1, :]
+                    hv.to_numpy(view, dtype=None), expected[:, ::2, -1, :]
                 )
                 recipe = real_generation_recipe(
                     hv.GenerationRecipe.constant(
                         hv.ConstantGenerationParameters(value=2.0)
-                    )
+                    ),
+                    seed=0,
+                    index_order=(),
                 )
                 hv.generate_at(view, 0, recipe)
                 expected[0, 0, 1, 0] = 2
-                np.testing.assert_array_equal(hv.to_numpy(tensor), expected)
+                np.testing.assert_array_equal(hv.to_numpy(tensor, dtype=None), expected)
                 bits = hv.scalar_type_info(scalar_type).storage_bits
                 changed_bits = range(5 * bits, 6 * bits)
                 updated_storage = tensor.storage
@@ -480,6 +527,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             [1],
             np.asarray([3.5], dtype=np.float32).tobytes(),
             strides=[int(np.iinfo(np.intp).min)],
+            offset=0,
         )
         self.assertEqual(tensor[::-1][0].item(), 3.5)
         self.assertEqual(tensor[:0:-1].shape, [0])
@@ -488,6 +536,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             [0, 3],
             b"",
             strides=[1, int(np.iinfo(np.intp).max)],
+            offset=0,
         )
         self.assertEqual(empty[:, ::2].shape, [0, 2])
 
@@ -507,12 +556,16 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             with self.subTest(key=key):
                 view = tensor[key]
                 self.assertEqual(view.shape, list(np.asarray(values[key]).shape))
-                np.testing.assert_array_equal(hv.to_numpy(view), values[key])
+                np.testing.assert_array_equal(
+                    hv.to_numpy(view, dtype=None), values[key]
+                )
         scalar = tensor[0, 0, 0]
         self.assertEqual(scalar[...].item(), 0)
         self.assertEqual(scalar[None, ..., None].shape, [1, 1])
         recipe = real_generation_recipe(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0))
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=-17.0)),
+            seed=0,
+            index_order=(),
         )
         hv.generate_at(tensor[None, ..., None], 23, recipe)
         self.assertEqual(tensor[-1, -1, -1].item(), -17.0)
@@ -525,7 +578,7 @@ class TensorApiTests(unittest.TestCase):  # noqa: F405
             for axis in range(-destination_rank, destination_rank):
                 with self.subTest(shape=shape, axis=axis):
                     np.testing.assert_array_equal(
-                        hv.to_numpy(tensor.expand_dims(axis)),
+                        hv.to_numpy(tensor.expand_dims(axis), dtype=None),
                         np.expand_dims(values, axis),
                     )
             for axis in (-destination_rank - 1, destination_rank):

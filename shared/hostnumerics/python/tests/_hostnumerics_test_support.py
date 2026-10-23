@@ -23,8 +23,8 @@ MX_BOUNDED_SCALE_RANDOM_DOMAIN = 0xA24BAED4963EE407
 def real_generation_recipe(
     component,
     *,
-    seed=0,
-    index_order=(),
+    seed,
+    index_order,
 ):
     return hv.GenerationRecipe.real_only(
         component,
@@ -220,7 +220,7 @@ def unpack_bits(storage, count, bits):
     return result
 
 
-def decode_binary(raw, exponent_bits, mantissa_bits, bias, total_bits, signed=True):
+def decode_binary(raw, exponent_bits, mantissa_bits, bias, total_bits, signed):
     sign_mask = 1 << (total_bits - 1) if signed else 0
     negative = signed and bool(raw & sign_mask)
     magnitude = raw & (sign_mask - 1) if signed else raw
@@ -305,7 +305,7 @@ def multiply_int32(left, right):
     return wrap_int32(int(left) * int(right))
 
 
-def gemm_int32_exact(left, right, initial, alpha=1, beta=0, output_scale=1):
+def gemm_int32_exact(left, right, initial, alpha, beta, output_scale):
     left = np.asarray(left)
     right = np.asarray(right)
     initial = np.asarray(initial)

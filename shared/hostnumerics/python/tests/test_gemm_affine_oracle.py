@@ -23,9 +23,20 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
                     alpha=np.nan if reductions == 0 else 1.0,
                     beta=1.5,
                     backend=hv.GemmBackend.Blocked,
+                    compute_type_a=None,
+                    compute_type_b=None,
+                    math_mode=hv.MathMode.Default,
+                    output_selection=hv.OutputSelection.all([]),
+                    output_conversion=hv.OutputConversion.Default,
+                    accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                    conjugate_a=False,
+                    conjugate_b=False,
+                    output_layout=None,
                 )
                 self.assertEqual(observed.shape, [rows, columns])
-                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+                np.testing.assert_array_equal(
+                    hv.to_numpy(observed, dtype=None), expected
+                )
 
     def test_selected_affine_reduced_precision_accumulation_rounds_each_step(self):
         left = np.asarray(
@@ -64,18 +75,31 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
                     affine_tensor(initial, hv.ScalarType.Float32, [5, 2], 1),
                     hv.ScalarType.Float32,
                     accumulator_type,
-                    output_selection=hv.OutputSelection.explicit_indices(selected),
+                    output_selection=hv.OutputSelection.explicit_indices(
+                        selected, index_order=[]
+                    ),
                     output_layout=output_layout,
                     backend=hv.GemmBackend.Blocked,
+                    alpha=1.0,
+                    beta=0.0,
+                    compute_type_a=None,
+                    compute_type_b=None,
+                    math_mode=hv.MathMode.Default,
+                    output_conversion=hv.OutputConversion.Default,
+                    accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+                    conjugate_a=False,
+                    conjugate_b=False,
                 )
 
                 self.assertEqual(observed.strides, [7, 2])
                 self.assertEqual(observed.offset, 1)
-                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+                np.testing.assert_array_equal(
+                    hv.to_numpy(observed, dtype=None), expected
+                )
 
     def test_selected_affine_zero_coefficients_suppress_poisoned_inputs(self):
         selected = [0, 3]
-        selection = hv.OutputSelection.explicit_indices(selected)
+        selection = hv.OutputSelection.explicit_indices(selected, index_order=[])
         output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
         finite_left = np.asarray([[1.0, 2.0, -3.0], [4.0, -5.0, 6.0]], dtype=np.float32)
         finite_right = np.asarray(
@@ -104,9 +128,17 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             output_selection=selection,
             output_layout=output_layout,
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(alpha_zero), selected_values(2.0 * finite_initial, selected)
+            hv.to_numpy(alpha_zero, dtype=None),
+            selected_values(2.0 * finite_initial, selected),
         )
 
         beta_zero = reference_gemm(
@@ -125,9 +157,16 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             output_selection=selection,
             output_layout=output_layout,
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(beta_zero),
+            hv.to_numpy(beta_zero, dtype=None),
             selected_values(finite_left @ finite_right, selected),
         )
 
@@ -151,10 +190,19 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             alpha=0.75,
             beta=-0.25,
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_selection=hv.OutputSelection.all([]),
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
+            output_layout=None,
         )
         expected = np.float32(0.75) * (left @ right) + np.float32(-0.25) * initial
         np.testing.assert_allclose(
-            hv.to_numpy(observed), expected, rtol=1e-6, atol=1e-6
+            hv.to_numpy(observed, dtype=None), expected, rtol=1e-6, atol=1e-6
         )
 
     def test_selected_int32_outputs_wrap_in_affine_storage(self):
@@ -186,8 +234,17 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             alpha=alpha,
             beta=beta,
             output_scale=output_scale,
-            output_selection=hv.OutputSelection.explicit_indices(selected),
+            output_selection=hv.OutputSelection.explicit_indices(
+                selected, index_order=[]
+            ),
             backend=hv.GemmBackend.Blocked,
+            compute_type_a=None,
+            compute_type_b=None,
+            math_mode=hv.MathMode.Default,
+            output_conversion=hv.OutputConversion.Default,
+            accumulation_rounding=hv.AccumulationRounding.TypeDefault,
+            conjugate_a=False,
+            conjugate_b=False,
         )
 
         complete_expected = exact_int32_gemm(
@@ -195,7 +252,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(complete_expected)
         expected.reshape(-1)[selected] = complete_expected.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
 
         expected_storage = np.zeros(11, dtype=np.int32)
         expected_storage[[3, 8]] = complete_expected.reshape(-1)[selected]

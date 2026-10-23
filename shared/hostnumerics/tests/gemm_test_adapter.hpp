@@ -11,10 +11,9 @@ namespace roc::hostnumerics {
 // inputs remain the same Tensor and MatmulOptions values used by the public
 // matmul API.
 struct GemmTestOptions : MatmulOptions {
-    explicit GemmTestOptions(ScalarType accumulator = ScalarType::Float32)
-        : MatmulOptions(accumulator) {}
+    explicit GemmTestOptions(ScalarType accumulator) : MatmulOptions(accumulator) {}
 
-    OutputSelection outputSelection = OutputSelection::all();
+    OutputSelection outputSelection = OutputSelection::all({});
 };
 
 struct GemmTestCase : GemmTestOptions {
@@ -42,24 +41,22 @@ inline MatmulOptions testMatmulOptions(const GemmTestOptions& options) {
     return static_cast<const MatmulOptions&>(options);
 }
 
-inline GemmSupportInfo queryGemmSupport(const GemmTestCase& request,
-                                        GemmBackend backend = GemmBackend::Automatic) {
+inline GemmSupportInfo queryGemmSupport(const GemmTestCase& request, GemmBackend backend) {
     return detail::queryGemmSupport(
         detail::GemmInvocation(request.a, request.b, request.d, testMatmulOptions(request),
                                request.outputSelection),
         backend);
 }
 
-inline GemmTestRunInfo referenceGemm(const GemmTestCase& request,
-                                     GemmBackend backend = GemmBackend::Automatic) {
+inline GemmTestRunInfo referenceGemm(const GemmTestCase& request, GemmBackend backend) {
     return detail::executeGemm(
         detail::GemmInvocation(request.a, request.b, request.d, testMatmulOptions(request),
                                request.outputSelection),
         backend);
 }
 
-inline GemmSupportInfo queryGemmSupportWithBlasBackend(
-    const GemmTestCase& request, GemmBackend backend = GemmBackend::Automatic) {
+inline GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmTestCase& request,
+                                                       GemmBackend backend) {
     return detail::queryBlasGemmSupport(
         detail::GemmInvocation(request.a, request.b, request.d, testMatmulOptions(request),
                                request.outputSelection),
@@ -67,7 +64,7 @@ inline GemmSupportInfo queryGemmSupportWithBlasBackend(
 }
 
 inline GemmTestRunInfo referenceGemmWithBlasBackend(const GemmTestCase& request,
-                                                    GemmBackend backend = GemmBackend::Automatic) {
+                                                    GemmBackend backend) {
     return detail::executeBlasGemm(
         detail::GemmInvocation(request.a, request.b, request.d, testMatmulOptions(request),
                                request.outputSelection),

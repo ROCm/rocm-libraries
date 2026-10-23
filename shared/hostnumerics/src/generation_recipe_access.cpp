@@ -659,7 +659,7 @@ struct GenerationRecipeAccess {
         const bool sameOrder = std::ranges::equal(traversalPlan.axes(), logicalPlan.axes());
         const bool contiguous = detail::isContiguous(destination.layout(), traversalOrder);
         const bool trackCoordinates = valueUsesCoordinates || !contiguous || !sameOrder;
-        const int threadCount = independent ? operationThreadCount(elementCount) : 1;
+        const int threadCount = independent ? operationThreadCount(elementCount, 4096, 8) : 1;
 
         const auto runRange = [&](size_t first, size_t end) {
             if (first == end) return;
@@ -919,7 +919,7 @@ struct GenerationRecipeAccess {
     }
 
     template <typename Tag, typename Pattern>
-    static auto prepareEncodedDiscreteValues(const Pattern& pattern, bool negate = false) {
+    static auto prepareEncodedDiscreteValues(const Pattern& pattern, bool negate) {
         // The random counter still selects one source candidate per logical element. Caching only
         // removes repeated conversion of that finite candidate set, so both the distribution and
         // the seed-to-output mapping remain unchanged.
@@ -993,7 +993,7 @@ struct GenerationRecipeAccess {
 
         if constexpr (signedNumerical && discretePattern) {
             if (lowPrecisionFloatingPoint || onlyAlternatingSign) {
-                const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern);
+                const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern, false);
                 if (encodedValues.size != 0) {
                     const uint64_t seed = recipe.settings_.seed;
                     const uint64_t domain = randomDomain(bound);

@@ -35,16 +35,16 @@ void testAutomaticSelectionUsesBlockedBackend() {
 
     const GemmSupportInfo fullSupport = queryGemmSupport(problem, GemmBackend::Blocked);
     require(fullSupport.supported, "Blocked backend rejected dense work.");
-    const GemmTestRunInfo full = referenceGemm(problem);
+    const GemmTestRunInfo full = referenceGemm(problem, GemmBackend::Automatic);
     require(full.backendUsed == GemmBackend::Blocked && !full.fallbackReason,
             "Automatic GEMM did not select Blocked for dense reusable work.");
     const float firstOutput = output.loadAs<float>({0, 0});
 
     fillTensor(output, untouchedValue);
-    problem.outputSelection = OutputSelection::explicitIndices({0});
+    problem.outputSelection = OutputSelection::explicitIndices({0}, {});
     const GemmSupportInfo sparseSupport = queryGemmSupport(problem, GemmBackend::Blocked);
     require(sparseSupport.supported, "Blocked backend rejected sparse work.");
-    const GemmTestRunInfo sparse = referenceGemm(problem);
+    const GemmTestRunInfo sparse = referenceGemm(problem, GemmBackend::Automatic);
     require(sparse.backendUsed == GemmBackend::Blocked && !sparse.fallbackReason,
             "Automatic GEMM did not use Blocked for sparse work.");
     require(sparse.outputElementsWritten == 1 && sparse.outputElementsCovered == 1,

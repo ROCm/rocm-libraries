@@ -300,18 +300,18 @@ class GenerationRecipe {
     // For a complex destination, realOnly writes zero to the imaginary
     // component. For a non-complex destination, it evaluates component.
     [[nodiscard]] static GenerationRecipe realOnly(Component component,
-                                                   GenerationRecipeSettings settings = {});
+                                                   GenerationRecipeSettings settings);
 
     // For a complex destination, replicated evaluates one component once and
     // writes the same value to both components. Raw components are rejected.
     [[nodiscard]] static GenerationRecipe replicated(Component component,
-                                                     GenerationRecipeSettings settings = {});
+                                                     GenerationRecipeSettings settings);
 
     // For a complex destination, cartesian evaluates real and imaginary in
     // distinct random domains. For a non-complex destination, it evaluates
     // only real. Raw components are rejected.
     [[nodiscard]] static GenerationRecipe cartesian(Component real, Component imaginary,
-                                                    GenerationRecipeSettings settings = {});
+                                                    GenerationRecipeSettings settings);
 
     [[nodiscard]] uint64_t seed() const noexcept;
     // Borrows this recipe's owned order; valid while the recipe is alive and unmodified.

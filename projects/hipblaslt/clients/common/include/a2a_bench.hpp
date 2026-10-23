@@ -135,11 +135,19 @@ namespace hipblaslt_bench
         hipblaslt::hostnumerics::initializeMatrix(hostA,
                                                   hipblaslt::hostnumerics::MatrixRole::A,
                                                   hipblaslt_initialization::hpl,
-                                                  uint64_t(env.rank) * 2 + 1);
+                                                  uint64_t(env.rank) * 2 + 1,
+                                                  false,
+                                                  std::nullopt,
+                                                  false,
+                                                  {});
         hipblaslt::hostnumerics::initializeMatrix(hostB,
                                                   hipblaslt::hostnumerics::MatrixRole::B,
                                                   hipblaslt_initialization::hpl,
-                                                  uint64_t(env.rank) * 2 + 2);
+                                                  uint64_t(env.rank) * 2 + 2,
+                                                  false,
+                                                  std::nullopt,
+                                                  false,
+                                                  {});
 
         CHECK_HIP_RC(hipMemcpy(res.dA,
                                hostA.rawEncodedBackingStorage().data(),
@@ -208,9 +216,10 @@ namespace hipblaslt_bench
             const auto observed = Tensor::copyEncodedBackingStorage(
                 ScalarType::BFloat16, layout, std::as_bytes(std::span(landed)));
             // SDMA transfers must preserve each value exactly.
-            const auto report = compare(observed, expected, allCloseComparisonOptions(0.0, 0.0));
-            allClose          = report.passed() && allClose;
-            const double e    = std::abs(report.relativeFrobeniusError);
+            const auto report
+                = compare(observed, expected, allCloseComparisonOptions(0.0, 0.0, false));
+            allClose       = report.passed() && allClose;
+            const double e = std::abs(report.relativeFrobeniusError);
             if(e > normError)
                 normError = e;
         }

@@ -72,7 +72,7 @@ namespace rocRoller::hostnumerics
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::Shape;
         using roc::hostnumerics::Tensor;
-        auto const scalarType = hostScalarType(type);
+        auto const scalarType = hostScalarType(type, DataTypeInterpretation::Unscaled);
         if(!isSupportedScaleType(type))
             throw std::runtime_error("rocRoller runtime scale requires a scale data type.");
         if(values.size() != 1)
@@ -96,7 +96,7 @@ namespace rocRoller::hostnumerics
         using roc::hostnumerics::Tensor;
 
         auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
-        auto const scalarType = hostScalarType(type);
+        auto const scalarType = hostScalarType(type, DataTypeInterpretation::Unscaled);
         if(!isSupportedScaleType(type))
             throw std::runtime_error("rocRoller block scales require a scale data type.");
         if(values.size() == 1)
@@ -154,8 +154,9 @@ namespace rocRoller::hostnumerics
         std::optional<Tensor> result;
         if(alpha != 0.0f && a.shape()[1] != 0)
         {
-            const Tensor product = matmulWithBlasBackend(a, b, ScalarType::Float32, options);
-            result               = product * alpha;
+            const Tensor product
+                = matmulWithBlasBackend(a, b, ScalarType::Float32, options, std::nullopt);
+            result = product * alpha;
         }
         if(beta != 0.0f)
         {

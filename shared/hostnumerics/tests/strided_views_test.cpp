@@ -27,13 +27,14 @@ void testStridedAndOffsetViews() {
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 4}, 0), std::span<const float>(c));
     Tensor d = Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::Float32, outputLayout,
                                                             std::move(dStorage));
-    const Tensor product = matmul(operandA, operandB, ScalarType::Float32,
-                                  MatmulOptions(ScalarType::Float32), outputLayout);
+    const Tensor product =
+        matmul(operandA, operandB, ScalarType::Float32, MatmulOptions(ScalarType::Float32),
+               outputLayout, GemmBackend::Automatic);
     const Tensor scaledProduct =
         multiply(product, 2.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
     const Tensor scaledC =
         multiply(inputC, 3.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
-    addInto(scaledProduct, scaledC, d, ScalarType::Float32);
+    addInto(scaledProduct, scaledC, d, ScalarType::Float32, OutputSelection::all({}));
 
     std::array<float, 12> expected;
     expected.fill(-99);
@@ -42,7 +43,7 @@ void testStridedAndOffsetViews() {
     expected[6] = 2 * 64 + 3;
     expected[7] = 2 * 154 + 3;
     const auto comparison = compare(
-        d, Tensor::copyNativeStorage<float>(outputLayout, std::span<const float>(expected)));
+        d, Tensor::copyNativeStorage<float>(outputLayout, std::span<const float>(expected)), {});
     require(comparison.passed(), "Strided GEMM matrix comparison failed.");
     const auto storageValue = [&d](size_t index) {
         float value;

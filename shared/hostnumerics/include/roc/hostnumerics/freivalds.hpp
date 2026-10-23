@@ -124,12 +124,10 @@ class FreivaldsPlan {
     // CPU oracle and device-observation path use the same numerical check.
     // A caller checking several batches may further restrict exception work
     // to the remainder of a shared budget. This never raises the plan's limit.
-    FreivaldsCheck check(const Tensor& observed,
-                         size_t exceptionLimit = std::numeric_limits<size_t>::max(),
-                         const FreivaldsCheckOptions& options = {}) const;
-    FreivaldsCheck check(const FreivaldsObservation& observation,
-                         size_t exceptionLimit = std::numeric_limits<size_t>::max(),
-                         const FreivaldsCheckOptions& options = {}) const;
+    FreivaldsCheck check(const Tensor& observed, size_t exceptionLimit,
+                         const FreivaldsCheckOptions& options) const;
+    FreivaldsCheck check(const FreivaldsObservation& observation, size_t exceptionLimit,
+                         const FreivaldsCheckOptions& options) const;
 
     // Independently useful for bounded diagnostics/exception lists. Coordinates
     // are checked. The plan owns compact immutable inputs used by these calls.
@@ -155,9 +153,8 @@ class FreivaldsPlan {
 // Nonlinear/auxiliary checks are separate operations. No special input pattern
 // or generation recipe is required. Copies logical inputs into private storage.
 FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
-                                      const MatmulOptions& operation = MatmulOptions{},
-                                      const EpilogueOptions& epilogue = EpilogueOptions{},
-                                      ScalarType outputType = ScalarType::Float32,
-                                      const FreivaldsProbeOptions& probes = {},
-                                      const FreivaldsLimits& limits = {});
+                                      const MatmulOptions& operation,
+                                      const EpilogueOptions& epilogue, ScalarType outputType,
+                                      const FreivaldsProbeOptions& probes,
+                                      const FreivaldsLimits& limits);
 }  // namespace roc::hostnumerics

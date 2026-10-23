@@ -141,7 +141,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
-                             .withAffineValueMapping({.offset = 1})));
+                             .withAffineValueMapping({.offset = 1}),
+                         {}));
     generateMatrices(hostB,
                      bRows,
                      bColumns,
@@ -150,7 +151,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
-                             .withAffineValueMapping({.offset = 1})));
+                             .withAffineValueMapping({.offset = 1}),
+                         {}));
     generateMatrices(hostC,
                      M,
                      N,
@@ -158,7 +160,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      cPlan,
                      roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
-                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3})));
+                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}),
+                         {}));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);
@@ -297,12 +300,22 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             Layout(Shape{size_t(M), size_t(N)},
                    {1, ldc},
                    ptrdiff_t(batch * cPlan.allocationElements) + cPlan.logicalStart()));
-        const ScalarType computeType = scalarType<Tc>();
-        Tensor product = roc::hostnumerics::matmul(a, b, computeType, MatmulOptions(computeType));
-        Tensor scaledProduct
-            = multiply(product, Tensor::scalar(computeType, alpha), computeType, computeType);
-        Tensor scaledC = multiply(c, Tensor::scalar(computeType, beta), computeType, computeType);
-        addInto(scaledProduct, scaledC, result, computeType);
+        const ScalarType computeType   = scalarType<Tc>();
+        Tensor           product       = roc::hostnumerics::matmul(a,
+                                                   b,
+                                                   computeType,
+                                                   MatmulOptions(computeType),
+                                                   std::nullopt,
+                                                   roc::hostnumerics::GemmBackend::Automatic);
+        Tensor           scaledProduct = multiply(
+            product, Tensor::scalar(computeType, alpha), computeType, computeType, std::nullopt);
+        Tensor scaledC = multiply(
+            c, Tensor::scalar(computeType, beta), computeType, computeType, std::nullopt);
+        addInto(scaledProduct,
+                scaledC,
+                result,
+                computeType,
+                roc::hostnumerics::OutputSelection::all({}));
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;

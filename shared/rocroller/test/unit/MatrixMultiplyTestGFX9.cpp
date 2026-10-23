@@ -815,9 +815,9 @@ namespace MatrixMultiplyTest
         TensorDescriptor descB(dataTypeB, {K, N}, "T");
 
         auto generatedA
-            = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, 9861u);
+            = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, 9861u, false);
         auto generatedB
-            = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, 9861u);
+            = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, 9861u, false);
         using PackedTypeA = typename PackedTypeOf<TA>::type;
         using PackedTypeB = typename PackedTypeOf<TB>::type;
         auto A            = hostnumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
@@ -834,9 +834,11 @@ namespace MatrixMultiplyTest
         TensorDescriptor descC(DataType::Float, {M, N}, "N");
 
         auto D = hostnumerics::convertHostReference<float>(hostnumerics::computeHostReference(
-            hostnumerics::hostTensor(referenceDescA, A),
-            hostnumerics::hostTensor(referenceDescB, B),
-            hostnumerics::hostTensor(descC, C),
+            hostnumerics::hostTensor(
+                referenceDescA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(
+                referenceDescB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+            hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
             hostnumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
             hostnumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
             scaleBlockSize,
@@ -845,15 +847,18 @@ namespace MatrixMultiplyTest
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
-        auto reference = hostnumerics::convertHostReference<float>(
-            hostnumerics::computeHostReference(hostnumerics::hostTensor(referenceDescA, A),
-                                               hostnumerics::hostTensor(referenceDescB, B),
-                                               hostnumerics::hostTensor(descC, C),
-                                               std::nullopt,
-                                               std::nullopt,
-                                               0,
-                                               alpha,
-                                               0.0f));
+        auto reference
+            = hostnumerics::convertHostReference<float>(hostnumerics::computeHostReference(
+                hostnumerics::hostTensor(
+                    referenceDescA, A, hostnumerics::DataTypeInterpretation::Unscaled),
+                hostnumerics::hostTensor(
+                    referenceDescB, B, hostnumerics::DataTypeInterpretation::Unscaled),
+                hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
+                std::nullopt,
+                std::nullopt,
+                0,
+                alpha,
+                0.0f));
 
         double rnorm = relativeNormL2(D, reference);
         Log::info("RNorm is {}", rnorm);

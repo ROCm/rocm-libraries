@@ -336,7 +336,8 @@ namespace rocRoller::hostnumerics
                                          uint32_t                  seed,
                                          bool                      includeReference)
         {
-            auto const type = hostScalarType(descriptor.dataType());
+            auto const type
+                = hostScalarType(descriptor.dataType(), DataTypeInterpretation::Unscaled);
             if(descriptor.dataType() == DataType::FP8 || descriptor.dataType() == DataType::BF8)
             {
                 auto data
@@ -391,7 +392,7 @@ namespace rocRoller::hostnumerics
             MxGenerationOptions options;
             options.dataType
                 = hostScalarType(descriptor.dataType(), DataTypeInterpretation::BlockScaled);
-            options.scaleType = hostScalarType(scaleType);
+            options.scaleType = hostScalarType(scaleType, DataTypeInterpretation::Unscaled);
             options.leadingDimension
                 = checkedPtrdiff(descriptor.stride(freeDimension),
                                  "rocRoller MX leading dimension exceeds ptrdiff_t.");
@@ -544,7 +545,8 @@ namespace rocRoller::hostnumerics
                                              scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
-            seed + 1);
+            seed + 1,
+            false);
         auto generatedB = generateHostTensor(
             descriptorB,
             initializationB,
@@ -553,9 +555,10 @@ namespace rocRoller::hostnumerics
                                              scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
-            seed + 2);
+            seed + 2,
+            false);
         auto generatedC = generateHostTensor(
-            descriptorC, initializationC, std::nullopt, minimum, maximum, seed);
+            descriptorC, initializationC, std::nullopt, minimum, maximum, seed, false);
 
         return {std::move(generatedA.data),
                 std::move(generatedB.data),

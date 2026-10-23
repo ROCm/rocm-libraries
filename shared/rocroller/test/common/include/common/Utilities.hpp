@@ -95,7 +95,8 @@ roc::hostnumerics::Tensor hostComparisonTensor(std::vector<T> const& values)
         throw std::runtime_error("rocRoller comparison element count overflow.");
     const size_t logicalElements = values.size() * packing;
     const auto   type            = rocRoller::hostnumerics::hostScalarType(
-        rocRoller::TypeInfo<T>::SegmentVariableType.dataType);
+        rocRoller::TypeInfo<T>::SegmentVariableType.dataType,
+        rocRoller::hostnumerics::DataTypeInterpretation::Unscaled);
     return roc::hostnumerics::Tensor::copyEncodedBackingStorage(
         type,
         roc::hostnumerics::Layout::contiguousLastDimensionFastest(

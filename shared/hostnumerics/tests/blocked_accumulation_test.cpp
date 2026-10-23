@@ -44,7 +44,7 @@ void testSelectedBlockAccumulatorFamilies() {
     constexpr size_t rows = 32;
     constexpr size_t columns = 32;
     constexpr size_t reductions = 64;
-    const OutputSelection selection = OutputSelection::explicitIndices({0});
+    const OutputSelection selection = OutputSelection::explicitIndices({0}, {});
 
     const std::vector<float> reducedA(rows * reductions, 0.1f);
     const std::vector<float> reducedB(reductions * columns, 0.1f);

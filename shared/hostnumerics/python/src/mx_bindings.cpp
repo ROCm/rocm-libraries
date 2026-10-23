@@ -19,7 +19,7 @@ void registerMxBindings(nb::module_& module) {
         .value("PreserveGeneratedEncoding", MxDataQuantization::PreserveGeneratedEncoding);
 
     nb::class_<MxRepresentedValueRange>(module, "MxRepresentedValueRange")
-        .def(nb::init<double, double>(), "lower"_a = -1.0, "upper"_a = 1.0)
+        .def(nb::init<double, double>(), "lower"_a, "upper"_a)
         .def_rw("lower", &MxRepresentedValueRange::lower)
         .def_rw("upper", &MxRepresentedValueRange::upper);
 
@@ -64,8 +64,7 @@ void registerMxBindings(nb::module_& module) {
            const MxGenerationOptions& options) {
             return generateMx(Shape(std::move(shape)), std::move(generation), options);
         },
-        "shape"_a, "generation"_a, "options"_a = MxGenerationOptions{});
-    module.def("generate_mx", &generateMx, "shape"_a, "generation"_a,
-               "options"_a = MxGenerationOptions{});
+        "shape"_a, "generation"_a, "options"_a);
+    module.def("generate_mx", &generateMx, "shape"_a, "generation"_a, "options"_a);
 }
 }  // namespace roc::hostnumerics::python_bindings
