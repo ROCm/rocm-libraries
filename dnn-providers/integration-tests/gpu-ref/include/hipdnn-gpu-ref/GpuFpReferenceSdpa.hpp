@@ -45,6 +45,27 @@ inline std::vector<std::string> buildSdpaDefines(SdpaSoftmaxProbabilityMode prob
     return defines;
 }
 
+template <typename QDataType,
+          typename KDataType,
+          typename VDataType,
+          typename ODataType,
+          typename DODataType,
+          typename DQDataType,
+          typename DKDataType,
+          typename DVDataType,
+          typename ComputeDataType>
+inline std::vector<std::string> buildSdpaBwdDefines()
+{
+    auto defines = buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+        SdpaSoftmaxProbabilityMode::FLOAT);
+
+    defines.emplace_back(std::string("-DDO_TYPE=") + HipRtcTypeName<DODataType>::VALUE);
+    defines.emplace_back(std::string("-DDQ_TYPE=") + HipRtcTypeName<DQDataType>::VALUE);
+    defines.emplace_back(std::string("-DDK_TYPE=") + HipRtcTypeName<DKDataType>::VALUE);
+    defines.emplace_back(std::string("-DDV_TYPE=") + HipRtcTypeName<DVDataType>::VALUE);
+    return defines;
+}
+
 // Puts a type in a non-deduced context so a template parameter is never deduced from
 // the argument (a literal nullptr mask still compiles, a wrong-dtype mask does not).
 template <typename T>
@@ -178,6 +199,228 @@ public:
         }
     }
 
+    template <class QDataType,
+              class KDataType = QDataType,
+              class VDataType = QDataType,
+              class ODataType = QDataType,
+              class DODataType = ODataType,
+              class DQDataType = QDataType,
+              class DKDataType = KDataType,
+              class DVDataType = VDataType,
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
+    static void bprop(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                      hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                      hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                      hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                      hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+                      hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+                      hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+                      hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+                      std::optional<float> attnScaleValue = std::nullopt,
+                      hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                      hipdnn_data_sdk::utilities::TensorBase<
+                          typename detail::NonDeduced<MaskDataType>::type>* attnMask
+                      = nullptr,
+                      int64_t leftBound = -1,
+                      int64_t rightBound = -1,
+                      bool topLeftAlignment = true)
+    {
+        validateInput(q.dims(), k.dims(), v.dims(), o.dims());
+        validateInput(dQ.dims(), dK.dims(), dV.dims(), dO.dims());
+
+        // Dims of dQ/dK/dV/dO must match q/k/v/o, respectively.
+        if(dQ.dims() != q.dims())
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: dQ shape must match q");
+        }
+        if(dK.dims() != k.dims())
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: dK shape must match k");
+        }
+        if(dV.dims() != v.dims())
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: dV shape must match v");
+        }
+        if(dO.dims() != o.dims())
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: dO shape must match o");
+        }
+
+        // An absent scale is 1.0 (no scaling), as in cuDNN.
+        const float scale = attnScaleValue.value_or(1.0F);
+
+        const auto batch = q.dims()[0];
+        const auto numHeads = q.dims()[1];
+        const auto seqQ = q.dims()[2];
+        const auto headDim = q.dims()[3];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
+        const auto seqKv = k.dims()[2];
+        const auto headDimV = v.dims()[3];
+
+        auto defines = detail::buildSdpaBwdDefines<QDataType,
+                                                   KDataType,
+                                                   VDataType,
+                                                   ODataType,
+                                                   DODataType,
+                                                   DQDataType,
+                                                   DKDataType,
+                                                   DVDataType,
+                                                   ComputeDataType>();
+        defines.emplace_back(std::string("-DMASK_TYPE=")
+                             + detail::HipRtcTypeName<MaskDataType>::VALUE);
+
+        const void* maskPtr = nullptr;
+        std::vector<int64_t> maskDims;
+        std::vector<int64_t> maskStrides;
+        if(attnMask != nullptr)
+        {
+            // The kernel right-aligns the mask to [B, H, Sq, Skv] and indexes
+            // args.maskDims/maskStr (size 4); a rank>4 mask would read out of bounds.
+            if(attnMask->dims().empty() || attnMask->dims().size() > 4)
+            {
+                throw std::invalid_argument("GpuFpReferenceSdpa: attention mask must be rank 1..4");
+            }
+            maskPtr = attnMask->memory().deviceData();
+            maskDims = attnMask->dims();
+            maskStrides = attnMask->strides();
+        }
+
+        const void* lsePtr = nullptr;
+        std::vector<int64_t> lseStrides;
+        if(lse != nullptr)
+        {
+            // LSE is one value per query position; mirror the CPU oracle's shape check.
+            if(lse->dims().size() != 3 || lse->dims()[0] != batch || lse->dims()[1] != numHeads
+               || lse->dims()[2] != seqQ)
+            {
+                throw std::invalid_argument("GpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+            }
+            lsePtr = lse->memory().deviceData();
+            lseStrides = lse->strides();
+        }
+
+        // Temporary buffer for D = dO . O
+        hipdnn_data_sdk::utilities::Tensor<float> dBuffer(
+            std::vector<int64_t>{batch, numHeads, seqQ},
+            std::vector<int64_t>{numHeads * seqQ, seqQ, 1});
+        void* dBuffPtr = dBuffer.memory().deviceData();
+
+        // Compute D first so dQ and dK can read it
+        launchSdpaBwdD(o.memory().deviceData(),
+                       dO.memory().deviceData(),
+                       dBuffPtr,
+                       o.strides(),
+                       dO.strides(),
+                       dBuffer.strides(),
+                       batch,
+                       numHeads,
+                       seqQ,
+                       headDimV,
+                       defines);
+
+        // Compute dQ
+        launchSdpaBwdDQ(q.memory().deviceData(),
+                        k.memory().deviceData(),
+                        v.memory().deviceData(),
+                        dO.memory().deviceData(),
+                        dQ.memory().deviceData(),
+                        lsePtr,
+                        maskPtr,
+                        dBuffPtr,
+                        q.strides(),
+                        k.strides(),
+                        v.strides(),
+                        dO.strides(),
+                        dQ.strides(),
+                        lseStrides,
+                        maskStrides,
+                        dBuffer.strides(),
+                        maskDims,
+                        batch,
+                        numHeads,
+                        numHeadsK,
+                        numHeadsV,
+                        seqQ,
+                        seqKv,
+                        headDim,
+                        headDimV,
+                        scale,
+                        leftBound,
+                        rightBound,
+                        topLeftAlignment,
+                        defines);
+
+        // Compute dK
+        launchSdpaBwdDK(q.memory().deviceData(),
+                        k.memory().deviceData(),
+                        v.memory().deviceData(),
+                        dO.memory().deviceData(),
+                        dK.memory().deviceData(),
+                        lsePtr,
+                        maskPtr,
+                        dBuffPtr,
+                        q.strides(),
+                        k.strides(),
+                        v.strides(),
+                        dO.strides(),
+                        dK.strides(),
+                        lseStrides,
+                        maskStrides,
+                        dBuffer.strides(),
+                        maskDims,
+                        batch,
+                        numHeads,
+                        numHeadsK,
+                        numHeadsV,
+                        seqQ,
+                        seqKv,
+                        headDim,
+                        headDimV,
+                        scale,
+                        leftBound,
+                        rightBound,
+                        topLeftAlignment,
+                        defines);
+
+        // Compute dV
+        launchSdpaBwdDV(q.memory().deviceData(),
+                        k.memory().deviceData(),
+                        v.memory().deviceData(),
+                        dO.memory().deviceData(),
+                        dV.memory().deviceData(),
+                        lsePtr,
+                        maskPtr,
+                        dBuffPtr,
+                        q.strides(),
+                        k.strides(),
+                        v.strides(),
+                        dO.strides(),
+                        dV.strides(),
+                        lseStrides,
+                        maskStrides,
+                        dBuffer.strides(),
+                        maskDims,
+                        batch,
+                        numHeads,
+                        numHeadsK,
+                        numHeadsV,
+                        seqQ,
+                        seqKv,
+                        headDim,
+                        headDimV,
+                        scale,
+                        leftBound,
+                        rightBound,
+                        topLeftAlignment,
+                        defines);
+
+        dQ.memory().markDeviceModified();
+        dK.memory().markDeviceModified();
+        dV.memory().markDeviceModified();
+    }
+
 private:
     // --- Validation ---
     // No SDPA param validator exists; perform minimal shape checks only.
@@ -231,7 +474,7 @@ private:
         }
     }
 
-    // --- Kernel launcher (defined in GpuFpReferenceSdpa.cpp) ---
+    // --- Kernel launchers (defined in GpuFpReferenceSdpa.cpp) ---
 
     static void launchSdpaFwd(const void* qPtr,
                               const void* kPtr,
@@ -259,6 +502,111 @@ private:
                               int64_t rightBound,
                               bool topLeftAlignment,
                               const std::vector<std::string>& defines);
+
+    static void launchSdpaBwdD(const void* oPtr,
+                               const void* dOPtr,
+                               void* dBuffPtr,
+                               const std::vector<int64_t>& oStrides,
+                               const std::vector<int64_t>& dOStrides,
+                               const std::vector<int64_t>& dBuffStrides,
+                               int64_t batch,
+                               int64_t numHeads,
+                               int64_t seqQ,
+                               int64_t headDimV,
+                               const std::vector<std::string>& defines);
+
+    static void launchSdpaBwdDQ(const void* qPtr,
+                                const void* kPtr,
+                                const void* vPtr,
+                                const void* dOPtr,
+                                void* dQPtr,
+                                const void* lsePtr,
+                                const void* maskPtr,
+                                void* dBuffPtr,
+                                const std::vector<int64_t>& qStrides,
+                                const std::vector<int64_t>& kStrides,
+                                const std::vector<int64_t>& vStrides,
+                                const std::vector<int64_t>& dOStrides,
+                                const std::vector<int64_t>& dQStrides,
+                                const std::vector<int64_t>& lseStrides,
+                                const std::vector<int64_t>& maskStrides,
+                                const std::vector<int64_t>& dBuffStrides,
+                                const std::vector<int64_t>& maskDims,
+                                int64_t batch,
+                                int64_t numHeads,
+                                int64_t numHeadsK,
+                                int64_t numHeadsV,
+                                int64_t seqQ,
+                                int64_t seqKv,
+                                int64_t headDim,
+                                int64_t headDimV,
+                                float scale,
+                                int64_t leftBound,
+                                int64_t rightBound,
+                                bool topLeftAlignment,
+                                const std::vector<std::string>& defines);
+
+    static void launchSdpaBwdDK(const void* qPtr,
+                                const void* kPtr,
+                                const void* vPtr,
+                                const void* dOPtr,
+                                void* dKPtr,
+                                const void* lsePtr,
+                                const void* maskPtr,
+                                void* dBuffPtr,
+                                const std::vector<int64_t>& qStrides,
+                                const std::vector<int64_t>& kStrides,
+                                const std::vector<int64_t>& vStrides,
+                                const std::vector<int64_t>& dOStrides,
+                                const std::vector<int64_t>& dKStrides,
+                                const std::vector<int64_t>& lseStrides,
+                                const std::vector<int64_t>& maskStrides,
+                                const std::vector<int64_t>& dBuffStrides,
+                                const std::vector<int64_t>& maskDims,
+                                int64_t batch,
+                                int64_t numHeads,
+                                int64_t numHeadsK,
+                                int64_t numHeadsV,
+                                int64_t seqQ,
+                                int64_t seqKv,
+                                int64_t headDim,
+                                int64_t headDimV,
+                                float scale,
+                                int64_t leftBound,
+                                int64_t rightBound,
+                                bool topLeftAlignment,
+                                const std::vector<std::string>& defines);
+
+    static void launchSdpaBwdDV(const void* qPtr,
+                                const void* kPtr,
+                                const void* vPtr,
+                                const void* dOPtr,
+                                void* dVPtr,
+                                const void* lsePtr,
+                                const void* maskPtr,
+                                void* dBuffPtr,
+                                const std::vector<int64_t>& qStrides,
+                                const std::vector<int64_t>& kStrides,
+                                const std::vector<int64_t>& vStrides,
+                                const std::vector<int64_t>& dOStrides,
+                                const std::vector<int64_t>& dVStrides,
+                                const std::vector<int64_t>& lseStrides,
+                                const std::vector<int64_t>& maskStrides,
+                                const std::vector<int64_t>& dBuffStrides,
+                                const std::vector<int64_t>& maskDims,
+                                int64_t batch,
+                                int64_t numHeads,
+                                int64_t numHeadsK,
+                                int64_t numHeadsV,
+                                int64_t seqQ,
+                                int64_t seqKv,
+                                int64_t headDim,
+                                int64_t headDimV,
+                                float scale,
+                                int64_t leftBound,
+                                int64_t rightBound,
+                                bool topLeftAlignment,
+                                const std::vector<std::string>& defines);
 };
 
 } // namespace hipdnn_gpu_ref

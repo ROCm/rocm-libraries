@@ -105,3 +105,47 @@ struct SdpaRaggedFwdArgs
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
+
+// --- SDPA backward argument struct ---
+// Shared between device kernels and host launch code for ABI compatibility.
+
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes,
+//             readability-identifier-naming,
+//             modernize-avoid-c-arrays)
+struct SdpaBwdArgs
+{
+    const void* q;
+    const void* k;
+    const void* v;
+    const void* o;
+    const void* dO;
+    void* dQ;
+    void* dK;
+    void* dV;
+    // Optional log-sum-exp from forward [B, H, Sq, 1], always float. nullptr disables it.
+    const void* lse;
+    const void* mask;
+    // Intermediate buffer to store D = sum_j dO_ij * O_ij for each query position (b, h, sq)
+    void* dBuff;
+    SdpaStrides qStr;
+    SdpaStrides kStr;
+    SdpaStrides vStr;
+    SdpaStrides oStr;
+    SdpaStrides dOStr;
+    SdpaStrides dQStr;
+    SdpaStrides dKStr;
+    SdpaStrides dVStr;
+    SdpaStrides lseStr;
+    SdpaStrides maskStr;
+    SdpaStrides dBuffStr;
+    long long batch, numHeads, numHeadsK, numHeadsV;
+    long long seqQ, seqKv, headDim, headDimV;
+    float scale;
+    int maskRank;
+    long long maskDims[4];
+    long long leftBound, rightBound;
+    int topLeftAlignment;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes,
+//           readability-identifier-naming,
+//           modernize-avoid-c-arrays)
