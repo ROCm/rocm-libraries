@@ -15,6 +15,7 @@ Layers:
     byte-identical IR at every LLVM flavor.
   * Every static field the build reads splits the key.
   * The launch signature matches the kernel's params, including the stride.
+  * ``run_unified_attention_torch`` packs the table's real row stride.
 
 No GPU required. ``test_attention_scalar_block_table_numeric.py`` runs the
 launch path on hardware.
@@ -127,3 +128,55 @@ def test_launch_signature_matches_kernel_params():
         _BASE.dtype, include_bt_stride=True, kv_dtype=au._kv_storage_dtype(_BASE)
     )
     assert [item["name"] for item in signature] == [p.name for p in kernel.params]
+
+
+class _FakeArray:
+    """The tensor attributes ``run_unified_attention_torch`` reads on the
+    scalar path; nothing is launched, so the pointer is never dereferenced."""
+
+    device = None
+
+    def __init__(self, shape, *, row_stride=None):
+        self.shape = shape
+        self._row_stride = shape[-1] if row_stride is None else row_stride
+
+    def stride(self, dim):
+        assert dim == 0
+        return self._row_stride
+
+    def data_ptr(self):
+        return 0x1000
+
+
+@pytest.mark.parametrize("row_stride", (16, 24), ids=("exact", "wider"))
+def test_scalar_launch_packs_the_table_row_stride(monkeypatch, row_stride):
+    """The scalar launch packs ``block_table.stride(0)``, not a stride derived
+    from ``max_seqlen_k``. 24 models a column view of a wider table: its rows
+    hold 16 slots, but the next row starts 24 slots on."""
+    launches = []
+    monkeypatch.setattr(au, "_RESOLVED_ATTENTION_ARCH", "gfx950")
+    monkeypatch.setattr(
+        au,
+        "_get_scalar_launcher",
+        lambda problem, key, *, arch: lambda vals, *, config: launches.append(
+            (vals, config)
+        ),
+    )
+    p = _BASE
+    blocks_per_seq = -(-p.max_seqlen_k // p.block_size)
+    au.run_unified_attention_torch(
+        problem=p,
+        q=_FakeArray((p.total_q, p.num_query_heads, p.head_size)),
+        k=_FakeArray((64, p.block_size, p.num_kv_heads, p.head_size)),
+        v=_FakeArray((64, p.block_size, p.num_kv_heads, p.head_size)),
+        out=_FakeArray((p.total_q, p.num_query_heads, p.head_size)),
+        cu_seqlens_q=_FakeArray((p.num_seqs + 1,)),
+        seqused_k=_FakeArray((p.num_seqs,)),
+        softmax_scale=0.125,
+        block_table=_FakeArray((p.num_seqs, blocks_per_seq), row_stride=row_stride),
+        softcap=0.0,
+        backend="scalar",
+    )
+    [(vals, config)] = launches
+    assert vals["block_table_stride"] == row_stride
+    assert config.grid == (p.total_q, p.num_query_heads, p.head_size)

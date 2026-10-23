@@ -10,51 +10,98 @@ after the first must still find its own blocks. Unused table slots point at a
 poison block, so a wrong row stride corrupts the output instead of passing by
 luck.
 
-Reference attention is computed independently in FP32 from the logical K/V
-after rounding inputs to bf16. Requires a ROCm GPU; skips otherwise.
+The launch goes through ``run_unified_attention_torch(backend="scalar")`` with
+``rocke.runtime`` device buffers instead of torch tensors, so the test runs in
+GPU lanes without torch. Reference attention is computed independently in FP32
+with numpy from the logical K/V, after rounding inputs to fp16. Skips without a
+GPU, and on devices whose target id the attention builders do not know.
 """
 
+import ctypes
 import itertools
 import math
 
+import numpy as np
 import pytest
 
 from kernels.common import attention_unified as au
+from rocke.core.arch.target import known_arches
+from rocke.runtime.hip_module import get_device_arch
 
 _HQ, _HKV, _D, _BS = 8, 2, 64, 16
 _ATOL = 1e-2
 
+# The launch compiles for the device's own target id, which the builders must
+# know (gfx11 devices are only known through their generic target).
+_ARCH = get_device_arch()
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        _ARCH not in known_arches(),
+        reason=f"needs a GPU with a known attention target, found {_ARCH}",
+    ),
+]
+
 
 @pytest.fixture(scope="module")
-def torch():
-    torch = pytest.importorskip("torch")
-    if not torch.cuda.is_available():
-        pytest.skip("requires a ROCm GPU")
-    return torch
+def rt():
+    from rocke.runtime.hip_module import Runtime
+
+    return Runtime()
 
 
-def _case(torch, q_lens, kv_lens, row_width, *, view_of_wider=False, seed=0):
-    """Build a paged case whose block-table rows hold ``row_width`` slots."""
-    gen = torch.Generator().manual_seed(seed)
+def _u8(array):
+    return (ctypes.c_uint8 * array.nbytes).from_buffer(array)
+
+
+class _DeviceArray:
+    """A device copy of a numpy array, exposing the tensor attributes
+    ``run_unified_attention_torch`` reads. ``shape`` may be narrower than the
+    host array along the last axis, which models a column view of it."""
+
+    device = None
+
+    def __init__(self, rt, host, *, shape=None):
+        from rocke.runtime.launcher import DeviceMem
+
+        self._rt = rt
+        self._host = np.ascontiguousarray(host)
+        self._mem = DeviceMem(self._host.nbytes)
+        rt.memcpy_h2d(self._mem.ptr(), _u8(self._host), self._host.nbytes)
+        self.shape = self._host.shape if shape is None else shape
+
+    def stride(self, dim):
+        return self._host.strides[dim] // self._host.itemsize
+
+    def data_ptr(self):
+        return self._mem.ptr()
+
+    def read(self):
+        out = np.empty_like(self._host)
+        self._rt.memcpy_d2h(_u8(out), self._mem.ptr(), out.nbytes)
+        return out
+
+
+def _case(q_lens, kv_lens, row_width, *, seed):
+    """A paged case whose block-table rows hold ``row_width`` slots."""
+    rng = np.random.default_rng(seed)
     needed = [math.ceil(n / _BS) for n in kv_lens]
     num_blocks = sum(needed) + 1
     poison = num_blocks - 1
-    order = torch.randperm(num_blocks - 1, generator=gen).tolist()
-    alloc_width = row_width + 5 if view_of_wider else row_width
-    table = torch.full((len(kv_lens), alloc_width), poison, dtype=torch.int32)
+    order = iter(rng.permutation(num_blocks - 1))
+    table = np.full((len(kv_lens), row_width), poison, dtype=np.int32)
     for s, n in enumerate(needed):
-        table[s, :n] = torch.tensor(order[:n], dtype=torch.int32)
-        order = order[n:]
+        table[s, :n] = [next(order) for _ in range(n)]
 
     def randn(*shape):
-        return torch.randn(*shape, generator=gen).to(torch.bfloat16)
+        return rng.standard_normal(shape).astype(np.float16)
 
     q = randn(sum(q_lens), _HQ, _D)
     k = randn(num_blocks, _BS, _HKV, _D)
     v = randn(num_blocks, _BS, _HKV, _D)
     k[poison] = 64.0
     v[poison] = 64.0
-    cu = torch.tensor([0, *itertools.accumulate(q_lens)], dtype=torch.int32)
+    cu = np.array([0, *itertools.accumulate(q_lens)], dtype=np.int32)
     problem = au.UnifiedAttentionProblem(
         total_q=sum(q_lens),
         num_seqs=len(q_lens),
@@ -64,78 +111,75 @@ def _case(torch, q_lens, kv_lens, row_width, *, view_of_wider=False, seed=0):
         block_size=_BS,
         max_seqlen_q=max(q_lens),
         max_seqlen_k=max(kv_lens),
-        dtype="bf16",
+        dtype="fp16",
     )
-    dev = table.cuda()
-    if view_of_wider:
-        dev = dev[:, :row_width]
-    return problem, q, k, v, cu, table, dev
+    return problem, q, k, v, cu, table
 
 
-def _reference(torch, q, k, v, cu, table, q_lens, kv_lens):
-    out = torch.zeros(q.shape, dtype=torch.float32)
+def _reference(q, k, v, cu, table, q_lens, kv_lens):
+    out = np.zeros(q.shape, dtype=np.float32)
     ratio = _HQ // _HKV
     for s, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
-        blocks = table[s, : math.ceil(kv_len / _BS)].long()
-        keys = k[blocks].reshape(-1, _HKV, _D)[:kv_len].float()
-        values = v[blocks].reshape(-1, _HKV, _D)[:kv_len].float()
+        blocks = table[s, : math.ceil(kv_len / _BS)]
+        keys = k[blocks].reshape(-1, _HKV, _D)[:kv_len].astype(np.float32)
+        values = v[blocks].reshape(-1, _HKV, _D)[:kv_len].astype(np.float32)
         context = kv_len - q_len
         for i in range(q_len):
             tok = int(cu[s]) + i
             visible = context + i + 1
             for h in range(_HQ):
-                scores = keys[:visible, h // ratio] @ q[tok, h].float()
-                probs = (scores / math.sqrt(_D)).softmax(0)
-                out[tok, h] = probs @ values[:visible, h // ratio]
+                scores = keys[:visible, h // ratio] @ q[tok, h].astype(np.float32)
+                scores /= math.sqrt(_D)
+                probs = np.exp(scores - scores.max())
+                out[tok, h] = (probs / probs.sum()) @ values[:visible, h // ratio]
     return out
 
 
-def _launch(torch, problem, q, k, v, cu, kv_lens, block_table):
-    out = torch.empty(q.shape, dtype=q.dtype, device="cuda")
+def _launch(rt, problem, q, k, v, cu, kv_lens, block_table):
+    out = _DeviceArray(rt, np.zeros_like(q))
     au.run_unified_attention_torch(
         problem=problem,
-        q=q.cuda(),
-        k=k.cuda(),
-        v=v.cuda(),
+        q=_DeviceArray(rt, q),
+        k=_DeviceArray(rt, k),
+        v=_DeviceArray(rt, v),
         out=out,
-        cu_seqlens_q=cu.cuda(),
-        seqused_k=torch.tensor(kv_lens, dtype=torch.int32, device="cuda"),
+        cu_seqlens_q=_DeviceArray(rt, cu),
+        seqused_k=_DeviceArray(rt, np.array(kv_lens, dtype=np.int32)),
         softmax_scale=1.0 / math.sqrt(_D),
         block_table=block_table,
         softcap=0.0,
         backend="scalar",
     )
-    torch.cuda.synchronize()
-    return out.float().cpu()
+    return out.read().astype(np.float32)
 
 
 @pytest.mark.parametrize("view_of_wider", (False, True), ids=("wide", "view"))
-def test_wide_block_table_rows(torch, view_of_wider):
+def test_wide_block_table_rows(rt, view_of_wider):
     q_lens, kv_lens = [5, 1, 9], [37, 20, 61]
     row_width = math.ceil(max(kv_lens) / _BS) + 6
-    problem, q, k, v, cu, table, dev = _case(
-        torch, q_lens, kv_lens, row_width, view_of_wider=view_of_wider
-    )
+    alloc_width = row_width + 5 if view_of_wider else row_width
+    problem, q, k, v, cu, table = _case(q_lens, kv_lens, alloc_width, seed=0)
+    dev = _DeviceArray(rt, table, shape=(len(q_lens), row_width))
     assert dev.stride(0) > math.ceil(problem.max_seqlen_k / _BS)
-    got = _launch(torch, problem, q, k, v, cu, kv_lens, dev)
-    want = _reference(torch, q, k, v, cu, table, q_lens, kv_lens)
-    max_abs = (got - want).abs().max().item()
+    got = _launch(rt, problem, q, k, v, cu, kv_lens, dev)
+    want = _reference(q, k, v, cu, table, q_lens, kv_lens)
+    max_abs = float(np.abs(got - want).max())
     assert max_abs <= _ATOL, f"max_abs {max_abs:.3e} vs fp32 reference"
 
 
-def test_one_binary_serves_different_batches(torch):
+def test_one_binary_serves_different_batches(rt):
     """Shapes that differ only in batch geometry share a key; the second
     launch must reuse the first binary and still match the reference."""
     first = ([4, 2], [30, 17], 4)
     second = ([1, 7, 3, 2], [90, 64, 15, 33], 12)
     launchers = None
     for i, (q_lens, kv_lens, width) in enumerate((first, second)):
-        problem, q, k, v, cu, table, dev = _case(torch, q_lens, kv_lens, width, seed=i)
-        got = _launch(torch, problem, q, k, v, cu, kv_lens, dev)
+        problem, q, k, v, cu, table = _case(q_lens, kv_lens, width, seed=i)
+        got = _launch(rt, problem, q, k, v, cu, kv_lens, _DeviceArray(rt, table))
         if launchers is None:
             launchers = len(au._SCALAR_LAUNCHERS)
         else:
             assert len(au._SCALAR_LAUNCHERS) == launchers
-        want = _reference(torch, q, k, v, cu, table, q_lens, kv_lens)
-        max_abs = (got - want).abs().max().item()
+        want = _reference(q, k, v, cu, table, q_lens, kv_lens)
+        max_abs = float(np.abs(got - want).max())
         assert max_abs <= _ATOL, f"case {i}: max_abs {max_abs:.3e}"
