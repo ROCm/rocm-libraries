@@ -1428,6 +1428,7 @@
     'LdsPadMXSA',
     'LdsPadMXSB',
     'LdsPadMetadata',
+    'LdsXorSwizzle',
     'LocalReadVectorWidth',
     'LocalReadVectorWidthA',
     'LocalReadVectorWidthB',
@@ -2126,6 +2127,14 @@
         1,
       ]),
       'len': 7,
+      'type': 'list',
+    }),
+    'LdsXorSwizzle': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'LocalReadVectorWidth': dict({

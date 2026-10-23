@@ -1104,6 +1104,9 @@ validParameters = { # we need to make sure this matches develop
     "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    # Avoid LDS bank conflicts with an XOR layout instead of row padding
+    # (16 B chunk c of a row is stored at c ^ (128 B line index & (nChunk-1))).
+    "LdsXorSwizzle": [False, True],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
     # -1 : keep LDS layout same as global fetch dimension for both A and B
     #      set TLDS = 1 for NN,TN,TT
