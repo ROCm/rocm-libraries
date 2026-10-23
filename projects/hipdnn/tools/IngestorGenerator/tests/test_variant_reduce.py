@@ -3,8 +3,10 @@
 
 """tools/variant_reduce.py on a tiny selection, KDP and sweep output built per test."""
 
+import base64
 import json
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -536,6 +538,66 @@ def test_a_record_with_no_entries_is_skipped_not_fatal(tmp_path):
     assert "records with no usable entry: 1" in (tmp_path / "report.md").read_text()
 
 
+def test_a_version_2_line_reads_like_version_1(tmp_path):
+    """WinnerCacheFile.hpp writes v=2, which adds the DeviceKey memory fields."""
+
+    def v2(line):
+        line["v"] = 2
+        line["device"] = {
+            **line["device"],
+            "total_global_mem": 1 << 34,
+            "memory_bus_width": 8192,
+            "memory_clock_rate": 1300000,
+            "shared_mem_per_block": 65536,
+        }
+
+    assert variant_reduce.main(build(tmp_path, v2)) == 0
+
+
+def test_a_version_2_line_without_its_memory_fields_exits_2(tmp_path, capsys):
+    def edit(line):
+        line["v"] = 2
+
+    assert variant_reduce.main(build(tmp_path, edit)) == 2
+    assert "missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("version", [0, 3, "2"])
+def test_an_unknown_line_version_exits_2(tmp_path, capsys, version):
+    def edit(line):
+        line["v"] = version
+
+    assert variant_reduce.main(build(tmp_path, edit)) == 2
+    assert f"line format v={version!r}" in capsys.readouterr().err
+
+
+def _graph_buffer(graph_id: bytes, payload: int = 0) -> str:
+    """A minimal serialized Graph: a vtable with every slot through VT_ID (22) and the
+    table holding only `id` (16 bytes) plus one u32 in an unrelated slot."""
+    # Slots VT 4..18 absent, VT 20 (min_required_engine_api_version's slot, reused here
+    # as an opaque u32) at table+20, VT_ID at table+4.
+    vtable = struct.pack("<HH", 24, 24) + struct.pack("<10H", *([0] * 8), 20, 4)
+    table = 4 + len(vtable)
+    body = struct.pack("<i", table - 4) + graph_id + struct.pack("<I", payload)
+    return base64.b64encode(struct.pack("<I", table) + vtable + body).decode("ascii")
+
+
+def test_graphs_differing_only_in_their_minted_id_share_a_key():
+    a = {"content_base64": _graph_buffer(b"\x11" * 16)}
+    b = {"content_base64": _graph_buffer(b"\x22" * 16)}
+    other = {"content_base64": _graph_buffer(b"\x11" * 16, payload=7)}
+    key = variant_reduce._graph_key
+    assert key(a, "a") == key(b, "b")
+    assert key(a, "a") != key(other, "other")
+    assert key({"key": "g"}, "plain") == {"key": "g"}
+
+
+@pytest.mark.parametrize("content", ["not base64!", base64.b64encode(b"\x00").decode()])
+def test_graph_content_that_is_not_a_graph_buffer_is_unusable(content):
+    with pytest.raises(variant_reduce.ReduceError, match="not a Graph buffer"):
+        variant_reduce._graph_key({"content_base64": content}, "where")
+
+
 def test_equal_gains_take_the_smaller_kernel_name_first(tmp_path):
     kernels = [("fp32", 128, 2, True), ("fp32", 128, 1, False), ("fp32", 128, 4, False)]
     default = (("fp32", 128, 2), 1.2)
@@ -642,7 +704,7 @@ def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
     "edit, reduction, extra, message",
     [
         (lambda d: d["entries"][0].update(pack_id="0"), True, [], "stale ranking"),
-        (lambda d: d.update(v=2), True, [], "line format v=2"),
+        (lambda d: d.update(v=3), True, [], "line format v=3"),
         (
             lambda d: d["entries"][0].update(score=1),
             True,
@@ -652,7 +714,7 @@ def test_a_multi_launch_selection_writes_and_reloads_its_launches(tmp_path):
         (None, False, [], "'reduction'"),
         (None, True, ["--apply-rules", "R99"], "R99"),
     ],
-    ids=["stale-pack-id", "line-v2", "unknown-field", "no-reduction", "bad-rule"],
+    ids=["stale-pack-id", "line-v3", "unknown-field", "no-reduction", "bad-rule"],
 )
 def test_unusable_input_exits_2(tmp_path, capsys, edit, reduction, extra, message):
     assert variant_reduce.main(build(tmp_path, edit, reduction) + extra) == 2

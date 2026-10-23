@@ -23,8 +23,11 @@ than 2 timing rounds warns on stdout: its noise floor is assumed, not measured. 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
+import struct
 import math
 import statistics
 import sys
@@ -46,9 +49,15 @@ from codegen.models import EVERY_ARCH  # noqa: E402
 
 # WinnerCacheFile.hpp detail::WINNER_LINE_*: line, device and entry fields; version.
 _LINE_FIELDS = frozenset({"v", "graph", "device", "entries"})
-_DEVICE_FIELDS = frozenset({"gcn_arch_name", "warp_size", "multi_processor_count"})
 _ENTRY_FIELDS = frozenset({"kernel_id", "pack_id", "dispatch_id", "time_ms"})
-_LINE_FORMAT_VERSION = 1
+# WINNER_LINE_FORMAT_VERSION -> the device fields a line of that version carries. Version 2
+# added the memory fields DeviceKey compares; the rankings read the same either way.
+_V1_DEVICE_FIELDS = frozenset({"gcn_arch_name", "warp_size", "multi_processor_count"})
+_DEVICE_FIELDS_BY_VERSION = {
+    1: _V1_DEVICE_FIELDS,
+    2: _V1_DEVICE_FIELDS
+    | {"total_global_mem", "memory_bus_width", "memory_clock_rate", "shared_mem_per_block"},
+}
 
 EPSILON_GRID = tuple(i / 100 for i in range(51)) + (math.inf,)
 # A healthy elapsed may be 0 (BenchmarkPlan.hpp); ratios use this floor instead.
@@ -210,6 +219,38 @@ def _require_fields(obj, expected: frozenset, where: str) -> None:
         raise ReduceError(f"{where}: missing {missing}")
 
 
+# graph_generated.h Graph::VT_ID and the size of its inline `Uuid` struct (graph.fbs).
+_GRAPH_ID_VTABLE_OFFSET = 22
+_GRAPH_ID_BYTES = 16
+
+
+def _graph_key(graph, where: str):
+    """``graph`` with the serialized Graph's ``id`` zeroed.
+
+    hipDNN mints ``Graph.id`` at finalization, so the same graph serializes to different
+    bytes in each run, while GraphContentKey compares it as equal (the field is
+    ``cache_ignore``). Every other field of a sweep's graph is the staged file's, the same
+    in every round. A graph without ``content_base64`` is keyed as given."""
+    content = graph.get("content_base64") if isinstance(graph, dict) else None
+    if not isinstance(content, str):
+        return graph
+    try:
+        buffer = bytearray(base64.b64decode(content, validate=True))
+        table = struct.unpack_from("<I", buffer, 0)[0]
+        vtable = table - struct.unpack_from("<i", buffer, table)[0]
+        vtable_bytes = struct.unpack_from("<H", buffer, vtable)[0]
+        field = 0
+        if vtable_bytes > _GRAPH_ID_VTABLE_OFFSET:
+            field = struct.unpack_from("<H", buffer, vtable + _GRAPH_ID_VTABLE_OFFSET)[0]
+        if field and table + field + _GRAPH_ID_BYTES > len(buffer):
+            raise ValueError("Graph.id runs past the buffer")
+    except (binascii.Error, struct.error, ValueError) as exc:
+        raise ReduceError(f"{where}: graph content is not a Graph buffer ({exc})") from exc
+    if field:
+        buffer[table + field : table + field + _GRAPH_ID_BYTES] = bytes(_GRAPH_ID_BYTES)
+    return {**graph, "content_base64": base64.b64encode(bytes(buffer)).decode("ascii")}
+
+
 def read_shard(path) -> dict:
     """``{key: [entry, ...]}`` for one winner-cache shard; the last line per key wins.
 
@@ -231,10 +272,15 @@ def read_shard(path) -> dict:
         if not isinstance(doc, dict):
             raise ReduceError(f"{where}: expected a JSON object")
         version = doc.get("v")
-        if type(version) is not int or version != _LINE_FORMAT_VERSION:
-            raise ReduceError(f"{where}: line format v={version!r}, expected 1")
+        if type(version) is not int or version not in _DEVICE_FIELDS_BY_VERSION:
+            raise ReduceError(
+                f"{where}: line format v={version!r}, expected one of "
+                f"{sorted(_DEVICE_FIELDS_BY_VERSION)}"
+            )
         _require_fields(doc, _LINE_FIELDS, where)
-        _require_fields(doc["device"], _DEVICE_FIELDS, f"{where} device")
+        _require_fields(
+            doc["device"], _DEVICE_FIELDS_BY_VERSION[version], f"{where} device"
+        )
         if not isinstance(doc["entries"], list):
             raise ReduceError(f"{where}: 'entries' must be a list")
         for index, entry in enumerate(doc["entries"]):
@@ -242,7 +288,7 @@ def read_shard(path) -> dict:
             t = entry["time_ms"]
             if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
                 raise ReduceError(f"{where} entries[{index}]: bad time_ms {t!r}")
-        key = json.dumps([doc["graph"], doc["device"]], sort_keys=True)
+        key = json.dumps([_graph_key(doc["graph"], where), doc["device"]], sort_keys=True)
         records[key] = doc["entries"]
     return records
 
