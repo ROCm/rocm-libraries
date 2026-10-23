@@ -340,10 +340,10 @@ mode. The missing selector and precision contract are described in §2.5.
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
-  matrix. The gfx950 scaled 32x32x64 `f8f6f4` MFMA (`mfma_scaled` catalog rows)
-  takes fp4 / fp6 / bf6 operands and the hipBLASLt provider already maps
-  `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
-  the silicon are both ready — but **no rocKE kernel instance ships**.
+  matrix. The gfx950 `f8f6f4` MFMA (the scaled 32x32x64 `mfma_scaled` catalog
+  rows and the dense 16x16x128 / 32x32x64 rows) takes fp4 / fp6 / bf6 operands
+  and the hipBLASLt provider already maps `FP4_E2M1`→`HIP_R_4F_E2M1` and
+  `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and the silicon are both ready — but **no rocKE kernel instance ships**.
 - **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
   packed byte to two f32 via a hand-written 16-entry codebook
   (`_FP4_CODEBOOK`, `:216-233`) that matches OCP E2M1
@@ -514,7 +514,7 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
 | `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
-| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` | f32, f16, bf16, fp8, bf8, i8, f64 |
+| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand) | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
@@ -542,6 +542,15 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   passed as its logical values and a narrower one as its packed words, which
   the call zero-pads to sixteen words. The f4 atom has no lane maps yet. No
   family uses them yet.
+- The gfx950 dense f8f6f4 atoms (`mfma_f32_16x16x128_f8f6f4_<a>_<b>` and
+  `mfma_f32_32x32x64_f8f6f4_<a>_<b>`, one per (A, B) format pair with a 6-bit or
+  4-bit operand) are declared. Each operand holds 32 values per lane in the
+  f8f6f4 operand layout of its own format (four groups of 16 lanes at
+  16x16x128, two groups of 32 at 32x32x64, as the public CDNA4 ISA operand
+  tables give); an fp8 / bf8 operand is passed as its logical values and a
+  narrower one as its packed words, which the call zero-pads to eight words.
+  They lower to the f8f6f4 scaled-MFMA intrinsic with every scale argument 0,
+  which LLVM selects as the unscaled instruction. No family uses them yet.
 - `wmma_gfx1250_f32_16x16x4_f32` lowers; its A and B lane maps follow CK's
   parameters (lane `l` holds row `l % 16` of A, column `l % 16` of B, and K
   `2 * (l // 16) + slot`) and are not validated on hardware.

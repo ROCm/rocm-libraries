@@ -3331,11 +3331,15 @@ void case_lowbit_dtype_aliases()
                     &arch->mma, "mfma_scaled", "fp8", pair[1], "fp32", 32, 32, 64)))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
-    /* gfx950 has no unscaled fp4 16x16x128 or fp6 16x16x96 MFMA instruction. */
+    /* gfx950 has no fp6 16x16x96 MFMA instruction; its unscaled fp4 16x16x128
+     * MFMA is the f8f6f4 instruction, reached through the short name too. */
     const auto* gfx950 = rocke_arch_target_from_gfx("gfx950");
-    if(rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp4", "fp4", "fp32", 16, 16, 128)
-       || rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp6", "fp6", "fp32", 16, 16, 96))
-        fail("gfx950 must not list an unscaled fp4 or fp6 MFMA", __LINE__);
+    if(rocke_mma_catalog_has_shape(&gfx950->mma, "mma", "fp6", "fp6", "fp32", 16, 16, 96))
+        fail("gfx950 must not list an fp6 16x16x96 MFMA", __LINE__);
+    const rocke_mma_op_t* fp4
+        = rocke_mma_catalog_op_for_shape(&gfx950->mma, "mma", "fp4", "fp4", "fp32", 16, 16, 128);
+    if(!fp4 || strcmp(fp4->op_id, "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1") != 0)
+        fail("gfx950 fp4 16x16x128 must select the f8f6f4 MFMA", __LINE__);
 }
 
 /* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but

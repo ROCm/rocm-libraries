@@ -545,17 +545,17 @@ def test_rdna_integer_wmma_rows_name_i8_and_i4():
                 assert (found and found.op_id) == want
 
 
-def test_gfx950_has_no_unscaled_fp4_or_fp6_mfma():
-    # gfx950 reaches fp4 / fp6 only through the scaled f8f6f4 MFMA. There is no
-    # unscaled 16x16x128 fp4 or 16x16x96 fp6 MFMA instruction, so the catalog must
-    # neither list such an op_id nor select one for a dense fp4 / fp6 request.
+def test_gfx950_reaches_fp4_and_fp6_only_through_the_f8f6f4_mfma():
+    # gfx950 has no fp4-only 16x16x128 or fp6-only 16x16x96 MFMA instruction:
+    # the catalog lists neither op_id. A dense fp4 16x16x128 request selects the
+    # f8f6f4 MFMA reading fp4 x fp4; nothing serves fp6 at K 96.
     mma = ArchTarget.from_gfx("gfx950").mma
     op_ids = {op.op_id for op in mma.ops}
     for op_id in ("mfma_f32_16x16x128_fp4", "mfma_f32_16x16x96_fp6"):
         assert op_id not in op_ids
         assert _op_id_family().get(op_id) is None
-    for dtype, k in (("fp4", 128), ("fp6", 96)):
-        found = mma.op_for_shape(
+    found = {
+        dtype: mma.op_for_shape(
             family="mma",
             a_dtype=dtype,
             b_dtype=dtype,
@@ -564,7 +564,10 @@ def test_gfx950_has_no_unscaled_fp4_or_fp6_mfma():
             n=16,
             k=k,
         )
-        assert found is None
+        for dtype, k in (("fp4", 128), ("fp6", 96))
+    }
+    assert found["fp4"].op_id == "mfma_f32_16x16x128_f8f6f4_fp4e2m1_fp4e2m1"
+    assert found["fp6"] is None
 
 
 @pytest.mark.parametrize("gfx", known_arches())

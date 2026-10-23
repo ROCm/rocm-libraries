@@ -455,6 +455,24 @@ if(BUILD_TESTING)
                  rocke_gfx1250_f8f6f4_wmma_ops)
   endif()
 
+  # The gfx950 f8f6f4 16x16x128 and 32x32x64 MFMA catalog rows, calls and lane
+  # maps.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx950_f8f6f4_mfma_ops.cpp")
+    add_executable(rocke_gfx950_f8f6f4_mfma_ops core/gfx950_f8f6f4_mfma_ops.cpp)
+    target_link_libraries(rocke_gfx950_f8f6f4_mfma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx950_f8f6f4_mfma_ops
+             COMMAND rocke_gfx950_f8f6f4_mfma_ops)
+    set_tests_properties(rocke_gfx950_f8f6f4_mfma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx950_f8f6f4_mfma_ops)
+    set_target_properties(rocke_gfx950_f8f6f4_mfma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx950_f8f6f4_mfma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx950_f8f6f4_mfma_ops)
+  endif()
+
   # The MMA result dtype where it differs from the accumulator: catalog rows,
   # queries and the tile.mma result type.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_result_dtype.cpp")
