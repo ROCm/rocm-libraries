@@ -130,6 +130,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
+    gpu-ref/TestGpuFpReferenceSdpaBwd.cpp
     gpu-ref/TestGpuFpReferenceSdpaRagged.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
