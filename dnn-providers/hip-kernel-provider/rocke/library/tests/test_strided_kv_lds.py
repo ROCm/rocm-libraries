@@ -3,17 +3,16 @@
 
 """Static LDS admission agrees with the emitted tiled split-KV pools."""
 
+import re
 from dataclasses import replace
 from importlib import import_module
-import re
 from types import SimpleNamespace
 
 import pytest
-
-from kernels.common import attention_unified as au
 from dispatch.attention import AttentionRequest, dispatch_attention
 from dispatch.attention.common import _problem
 from dispatch.attention.strided_decode import make_candidate
+from kernels.common import attention_unified as au
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, FP4E2M1
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -49,7 +48,7 @@ def _explicit(req, tile):
 def _run(problem, spec=None):
     return au.run_unified_attention_torch(
         problem=problem,
-        q=object(),
+        q=SimpleNamespace(device=None),
         k=object(),
         v=object(),
         out=object(),
@@ -64,26 +63,35 @@ def _run(problem, spec=None):
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_oversized_tile_rejected_at_every_strided_entry(dtype, monkeypatch):
-    # With one V slot and no P tile the gfx942 default for D256 / block 64
-    # (tile 32) fits; a block-sized tile 64 still exceeds the 64 KiB LDS.
+def test_gfx942_d256_t32_fits_at_every_strided_entry(dtype, monkeypatch):
+    from kernels.common.attention_kv_cache import StridedKvCacheLayout
+
     req = _request(dtype=dtype)
     problem = _problem(req)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
-    monkeypatch.setattr(
-        au, "compile_kernel", lambda *a, **kw: pytest.fail("must reject before compile")
-    )
     assert make_candidate().admits(req)[0]
-    segment, _ = au._strided_3d_specs_from_problem(problem, arch="gfx942")
-    assert au._tiled_3d_segment_lds_bytes(segment) == 57344
+    spec = dispatch_attention(req).spec
+    assert spec.kernel_spec.tile_size == 32
+    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch) == 57344
+    assert (
+        au._strided_3d_specs_from_problem(problem, arch=req.arch)[0] == spec.kernel_spec
+    )
+    monkeypatch.setattr(
+        StridedKvCacheLayout,
+        "from_tensors",
+        lambda *a: (_ for _ in ()).throw(RuntimeError("passed LDS admission")),
+    )
+    for explicit in (None, spec, replace(spec, allow_unsupported=True)):
+        with pytest.raises(RuntimeError, match="passed LDS admission"):
+            _run(problem, explicit)
     for allow_unsupported in (False, True):
-        spec = replace(_explicit(req, 64), allow_unsupported=allow_unsupported)
+        oversized = replace(_explicit(req, 64), allow_unsupported=allow_unsupported)
         with pytest.raises(ValueError, match="106496 B LDS"):
-            au._validate_strided_3d_spec(problem, spec)
+            au._validate_strided_3d_spec(problem, oversized)
         with pytest.raises(ValueError, match="106496 B LDS"):
-            _run(problem, spec)
+            _run(problem, oversized)
         with pytest.raises(ValueError, match="106496 B LDS"):
-            make_candidate().bind_torch(req, spec, {})
+            make_candidate().bind_torch(req, oversized, {})
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -94,7 +102,7 @@ def test_explicit_smaller_tile_uses_actual_footprint(dtype, monkeypatch):
     spec = _explicit(req, 16)
     problem = _problem(req)
     au._validate_strided_3d_spec(problem, spec)
-    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 32768
+    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch) == 32768
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
 
     def stop_at_tensor_validation(*args):
@@ -112,17 +120,13 @@ def test_explicit_smaller_tile_uses_actual_footprint(dtype, monkeypatch):
 def test_lds_estimate_matches_lowered_pools(arch, dtype, head, block, monkeypatch):
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
     req = _request(arch, dtype, head, block)
-    if (arch, head, block) == ("gfx942", 256, 64):
-        # Raw emission remains available as a negative control, including goldens.
-        spec = _explicit(req, 32)
-    else:
-        assert make_candidate().admits(req)[0]
-        spec = dispatch_attention(req).spec
+    assert make_candidate().admits(req)[0]
+    spec = dispatch_attention(req).spec
     module = import_module(f"kernels.{arch}.attention_tiled_3d")
     for kernel, estimated in (
         (
             module.build_unified_attention_3d_tiled(spec.kernel_spec, arch=arch),
-            au._tiled_3d_segment_lds_bytes(spec.kernel_spec),
+            au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch),
         ),
         (
             module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
@@ -136,10 +140,10 @@ def test_lds_estimate_matches_lowered_pools(arch, dtype, head, block, monkeypatc
 
 def test_lds_width_comes_from_allocation_dtype():
     spec = SimpleNamespace(block_m=16, head_size=256, tile_size=32, dtype_ir=F32)
-    assert au._tiled_3d_segment_lds_bytes(spec) == 114688
+    assert au._tiled_3d_segment_lds_bytes(spec, arch="gfx950") == 114688
     spec.dtype_ir = FP4E2M1
     with pytest.raises(ValueError, match="byte-addressable"):
-        au._tiled_3d_segment_lds_bytes(spec)
+        au._tiled_3d_segment_lds_bytes(spec, arch="gfx950")
 
 
 def test_reducer_budget_is_independent_and_allows_exact_capacity():

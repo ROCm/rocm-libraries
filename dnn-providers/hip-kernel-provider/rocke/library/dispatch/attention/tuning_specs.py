@@ -10,7 +10,20 @@ fields come from the operator problem.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Optional, Tuple
+from functools import lru_cache
+from typing import Mapping, Optional, Tuple, get_args, get_type_hints
+
+from kernels.common._attention_kv_loader import (
+    AttentionKVLoaderKind,
+    resolve_attention_kv_loader,
+)
+
+from kernels.common._attention_validation import (
+    require_attention_int,
+    require_attention_bool,
+    require_attention_string,
+    validate_attention_problem_types,
+)
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -30,6 +43,7 @@ TILE_POLICIES: Tuple[str, ...] = (
     "64",
     "128",
 )
+TILE_POLICIES_3D: tuple[str, ...] = (*TILE_POLICIES, "32")
 NUM_WARPS: Tuple[int, ...] = (1, 2, 4, 8)
 BLOCK_M_PER_WARP: Tuple[int, ...] = (16, 32)
 WAVES_PER_EU: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
@@ -69,6 +83,9 @@ class ExplicitAttention2DConfig:
     builder_kind: str = "tiled"
     knobs: Tuple[Tuple[str, object], ...] = ()
 
+    def __post_init__(self):
+        _validate_explicit_config_types(self, path="2d")
+
     def knob_dict(self) -> dict[str, object]:
         return dict(self.knobs)
 
@@ -83,30 +100,68 @@ class ExplicitAttention3DConfig:
     waves_per_eu: Optional[int] = None
     knobs: Tuple[Tuple[str, object], ...] = ()
 
+    def __post_init__(self):
+        _validate_explicit_config_types(self, path="3d")
+
     def knob_dict(self) -> dict[str, object]:
         return dict(self.knobs)
 
 
-def resolve_tile_policy(block_size: int, policy: str) -> int:
-    """Resolve a finite dispatcher tile token without a production heuristic."""
-    token = str(policy).strip().lower()
+def _config_field(config, name):
+    try:
+        return getattr(config, name)
+    except AttributeError as exc:
+        raise ValueError(f"config.{name} is required") from exc
+
+
+def _validate_explicit_config_types(config, *, path):
+    names = ("num_segments",) if path == "3d" else ("num_warps", "block_m_per_warp")
+    for name in names:
+        require_attention_int(_config_field(config, name), f"config.{name}")
+    require_attention_int(
+        _config_field(config, "waves_per_eu"), "config.waves_per_eu", optional=True
+    )
+    require_attention_string(_config_field(config, "tile_policy"), "config.tile_policy")
+    if path == "2d":
+        require_attention_string(
+            _config_field(config, "compile_backend"), "config.compile_backend"
+        )
+        require_attention_string(
+            _config_field(config, "builder_kind"), "config.builder_kind"
+        )
+
+
+def resolve_tile_policy(block_size: int, policy: str, *, path: str = "2d") -> int:
+    """Resolve a tile token; the 3D vocabulary also permits subpage T32 tiles.
+
+    The default retains the original 2D policy contract. Concrete specs still
+    validate whether the resolved geometry is supported on the target.
+    """
+    require_attention_int(block_size, "block_size")
+    require_attention_string(policy, "tile_policy")
+    if path not in ("2d", "3d"):
+        raise ValueError(f"tile policy path must be '2d' or '3d', got {path!r}")
+    policies = TILE_POLICIES_3D if path == "3d" else TILE_POLICIES
+    token = policy.strip().lower()
+    if token == "32" and path == "3d":
+        return 32
     if token == "half":
-        if int(block_size) < 32:
+        if block_size < 32:
             raise ValueError("half-block tile requires block_size >= 32")
-        return int(block_size) // 2
+        return block_size // 2
     if token.endswith("x") and token[:-1].isdigit():
         mult = int(token[:-1])
         if mult not in (1, 2, 4, 8):
             raise ValueError(f"unsupported tile multiplier {policy!r}")
-        return int(block_size) * mult
+        return block_size * mult
     if token in ("64", "128"):
         tile = int(token)
-        if tile % int(block_size):
+        if tile % block_size:
             raise ValueError(
                 f"tile {tile} is not a multiple of block_size={block_size}"
             )
         return tile
-    raise ValueError(f"tile_policy must be one of {TILE_POLICIES}, got {policy!r}")
+    raise ValueError(f"tile_policy must be one of {policies}, got {policy!r}")
 
 
 def resolve_num_segments(
@@ -133,29 +188,27 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
 def _semantic_fields(
     problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
 ) -> dict:
+    validate_attention_problem_types(problem)
     kv_storage_dtype = "fp8e4m3" if problem.use_fp8 else None
     elem_bytes = 1 if problem.use_fp8 else 2
     block_stride = (
-        int(problem.block_size)
-        * int(problem.num_kv_heads)
-        * int(problem.head_size)
-        * elem_bytes
+        problem.block_size * problem.num_kv_heads * problem.head_size * elem_bytes
     )
     use_i64 = kv_addr_width_for_builder(
         builder_kind, int(problem.num_kv_blocks), block_stride, elem_bytes
     )
     return {
-        "head_size": int(problem.head_size),
-        "block_size": int(problem.block_size),
-        "num_query_heads": int(problem.num_query_heads),
-        "num_kv_heads": int(problem.num_kv_heads),
-        "dtype": str(problem.dtype),
-        "use_sinks": bool(problem.use_sinks),
-        "sliding_window": int(problem.sliding_window),
+        "head_size": problem.head_size,
+        "block_size": problem.block_size,
+        "num_query_heads": problem.num_query_heads,
+        "num_kv_heads": problem.num_kv_heads,
+        "dtype": problem.dtype,
+        "use_sinks": problem.use_sinks,
+        "sliding_window": problem.sliding_window,
         "has_softcap": bool(problem.softcap > 0),
-        "use_alibi": bool(problem.use_alibi),
-        "use_qq_bias": bool(problem.use_qq_bias),
-        "num_seqs": int(problem.num_seqs),
+        "use_alibi": problem.use_alibi,
+        "use_qq_bias": problem.use_qq_bias,
+        "num_seqs": problem.num_seqs,
         "kv_storage_dtype": kv_storage_dtype,
         "use_i64_kv_addr": use_i64,
     }
@@ -179,6 +232,7 @@ _SEMANTIC_FIELDS = frozenset(
         "kv_layout",
         "use_i64_kv_addr",
         "use_decode_grid",
+        "metadata_containment",
         "causal_top_left",
         "right_bound",
     }
@@ -195,6 +249,25 @@ def _checked_knobs(knobs: Mapping[str, object]) -> dict[str, object]:
     return dict(knobs)
 
 
+@lru_cache(maxsize=None)
+def _spec_field_types(spec_type):
+    return get_type_hints(spec_type)
+
+
+def _validate_knob_types(spec_type, knobs):
+    # Tuning spaces already canonicalize axis values; direct configs do not.
+    hints = _spec_field_types(spec_type)
+    for name, value in knobs.items():
+        annotation = hints.get(name)
+        args = get_args(annotation)
+        if annotation is bool:
+            require_attention_bool(value, f"kernel_spec.{name}")
+        elif annotation is int or int in args:
+            require_attention_int(
+                value, f"kernel_spec.{name}", optional=type(None) in args
+            )
+
+
 def make_explicit_attention_2d_spec(
     problem: UnifiedAttentionProblem,
     config: ExplicitAttention2DConfig,
@@ -202,6 +275,8 @@ def make_explicit_attention_2d_spec(
     arch: str,
 ):
     """Construct one explicit 2D kernel spec and reject unsupported geometry."""
+    validate_attention_problem_types(problem)
+    _validate_explicit_config_types(config, path="2d")
     if arch not in ("gfx942", "gfx950"):
         raise ValueError(
             f"explicit 2D attention tuning requires gfx942/gfx950, got {arch}"
@@ -227,6 +302,7 @@ def make_explicit_attention_2d_spec(
     spec_type, _, supports = _tiled_2d_impl(arch)
     tile_size = resolve_tile_policy(problem.block_size, config.tile_policy)
     knobs = _checked_knobs(config.knob_dict())
+    _validate_knob_types(spec_type, knobs)
     spec = spec_type(
         **_semantic_fields(problem, config.builder_kind),
         **_mask_fields(problem, arch),
@@ -279,6 +355,8 @@ def make_explicit_attention_3d_specs(
 ):
     """Construct explicit segment and reduce specs. The segment count is the
     config's, or the split rule's for 0."""
+    validate_attention_problem_types(problem)
+    _validate_explicit_config_types(config, path="3d")
     if arch not in ("gfx942", "gfx950"):
         raise ValueError(
             f"explicit 3D attention tuning requires gfx942/gfx950, got {arch}"
@@ -292,19 +370,13 @@ def make_explicit_attention_3d_specs(
     if config.waves_per_eu not in WAVES_PER_EU:
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
-    tile = resolve_tile_policy(problem.block_size, config.tile_policy)
-    if arch == "gfx950" and (tile % int(problem.block_size) or tile > 128):
-        raise ValueError(
-            "gfx950 3D implements tiles that are a multiple of block_size, up to 128"
-        )
-    if arch == "gfx942" and tile not in (
-        int(problem.block_size),
-        max(1, int(problem.block_size) // 2),
-    ):
-        raise ValueError("gfx942 3D implements only full- or half-block tiles")
-
+    tile = resolve_tile_policy(problem.block_size, config.tile_policy, path="3d")
+    allowed_tiles = (16, 32, 64, 128) if arch == "gfx950" else (16, 32, 64)
+    if tile not in allowed_tiles:
+        raise ValueError(f"unsupported tile_size={tile} for {arch} tiled 3D")
     spec_type, reduce_type, _, _, supports = _tiled_3d_impl(arch)
     knobs = _checked_knobs(config.knob_dict())
+    _validate_knob_types(spec_type, knobs)
     if arch == "gfx950" and any(
         bool(knobs.get(name, False))
         for name in ("use_invariant_hoist", "use_wide_kv_load")
@@ -312,6 +384,16 @@ def make_explicit_attention_3d_specs(
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
     # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
     knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
+    containment = (
+        resolve_attention_kv_loader(
+            arch,
+            "paged",
+            problem.block_size,
+            tile,
+            use_i64_kv_addr=_semantic_fields(problem)["use_i64_kv_addr"],
+        )
+        is AttentionKVLoaderKind.PAGED_TOKEN_GATHER
+    )
     segment = spec_type(
         **_semantic_fields(problem),
         **_mask_fields(problem, arch),
@@ -321,6 +403,7 @@ def make_explicit_attention_3d_specs(
         # Both explicit 3D arches implement the all-decode grid
         # (``_use_decode_grid``); it follows the problem, never the config.
         use_decode_grid=bool(problem.all_decode),
+        metadata_containment=containment,
         **knobs,
     )
     ok, why = supports(
@@ -344,6 +427,7 @@ def make_explicit_attention_3d_specs(
         dtype=problem.dtype,
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
+        metadata_containment=containment,
     )
     return segment, reduce
 

@@ -93,9 +93,16 @@ def _paged_cache(torch, logical, block_size):
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize(
     "dim,block,tile",
-    [(256, 16, None), (256, 32, None), (128, 64, None), (256, 64, 16), (256, 64, None)],
+    [
+        (256, 16, None),
+        (256, 32, None),
+        (128, 64, None),
+        (256, 64, 16),
+        (256, 64, None),
+        (256, 64, 64),
+    ],
 )
-def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
+def test_strided_lds_admission_numeric(gpu, monkeypatch, dtype, dim, block, tile):
     from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
@@ -125,14 +132,14 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     v_cpu = torch.randn(3, 2, 65, dim).to(storage_dtype)
     lengths = [0, 64, 65]
     reference = _reference(torch, q_cpu, k_cpu, v_cpu, lengths, 0)
-    tensors = dict(
-        q=q_cpu.cuda(),
-        k=_cache(torch, k_cpu, "bshd"),
-        v=_cache(torch, v_cpu, "bhsd"),
-        out=torch.empty_like(q_cpu).cuda(),
-        cu_seqlens_q=torch.arange(4, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths, dtype=torch.int32).cuda(),
-    )
+    tensors = {
+        "q": q_cpu.cuda(),
+        "k": _cache(torch, k_cpu, "bshd"),
+        "v": _cache(torch, v_cpu, "bhsd"),
+        "out": torch.empty_like(q_cpu).cuda(),
+        "cu_seqlens_q": torch.arange(4, dtype=torch.int32).cuda(),
+        "seqused_k": torch.tensor(lengths, dtype=torch.int32).cuda(),
+    }
     spec = None
     if tile is not None:
         supported = dispatch_attention(replace(request, kv_block_size=32)).spec
@@ -150,6 +157,16 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
         softcap=0,
         kv_layout="strided",
     )
+    if arch == "gfx942" and dim == 256 and tile == 64:
+        monkeypatch.setattr(
+            au,
+            "compile_kernel",
+            lambda *a, **kw: pytest.fail("must reject before compile"),
+        )
+        for explicit in (spec,):
+            with pytest.raises(ValueError, match="106496 B LDS"):
+                au.run_unified_attention_torch(**kwargs, tuning_spec=explicit)
+        return
     if tile is None:
         selected = dispatch_attention(request)
         binding = selected.candidate.bind_torch(
@@ -279,15 +296,15 @@ def test_strided_kv_decode(
         binding = result.candidate.bind_torch(
             request,
             result.spec,
-            dict(
-                problem=problem,
-                q=q,
-                k=k,
-                v=v,
-                out=output,
-                cu_seqlens_q=cu_q,
-                seqused_k=lengths,
-            ),
+            {
+                "problem": problem,
+                "q": q,
+                "k": k,
+                "v": v,
+                "out": output,
+                "cu_seqlens_q": cu_q,
+                "seqused_k": lengths,
+            },
             stream=stream.cuda_stream,
         )
     graphs_before = set(au._3D_GRAPHS)
@@ -549,7 +566,7 @@ def test_decode_concurrent_workspace(
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("kv_layout", ["paged", "strided"])
+@pytest.mark.parametrize("kv_layout", ["paged", "strided", "paged_gather"])
 @pytest.mark.parametrize("graph", [False, True])
 def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
     """Changing bindings/lengths, graph eviction and scratch reuse on hardware."""
@@ -574,8 +591,8 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
         v, _ = _paged_cache(torch, v_host, 16)
     lengths = torch.tensor([capacity, 0], dtype=torch.int32).cuda()
     stream = torch.cuda.Stream()
-    args = dict(
-        problem=au.UnifiedAttentionProblem(
+    args = {
+        "problem": au.UnifiedAttentionProblem(
             total_q=batch,
             num_seqs=batch,
             num_query_heads=heads,
@@ -587,20 +604,39 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             dtype=dtype,
             target_ctas=8,
         ),
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=torch.empty_like(q_host).cuda(),
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=lengths,
-        block_table=table,
-        softmax_scale=1 / math.sqrt(dim),
-        softcap=0.0,
-        kv_layout=kv_layout,
-        backend="3d",
-        stream=stream.cuda_stream,
-        use_graph=graph,
-    )
+        "q": q_host.cuda(),
+        "k": k,
+        "v": v,
+        "out": torch.empty_like(q_host).cuda(),
+        "cu_seqlens_q": torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        "seqused_k": lengths,
+        "block_table": table,
+        "softmax_scale": 1 / math.sqrt(dim),
+        "softcap": 0.0,
+        "kv_layout": kv_layout,
+        "backend": "3d",
+        "stream": stream.cuda_stream,
+        "use_graph": graph,
+    }
+    if kv_layout == "paged_gather":
+        from dispatch.attention import AttentionRequest, dispatch_attention
+
+        request = AttentionRequest(
+            batch=batch,
+            nhead_q=heads,
+            nhead_k=1,
+            seqlen_q=1,
+            seqlen_k=capacity,
+            hdim_q=dim,
+            hdim_v=dim,
+            arch=arch,
+            dtype=dtype,
+            kv_block_size=16,
+            algorithm="paged_decode_t32",
+            target_ctas=8,
+        )
+        args["tuning_spec"] = dispatch_attention(request).spec
+        args["kv_layout"] = "paged"
     torch.cuda.synchronize()
     allocations = []
     launch = au._launch_3d_pipeline
@@ -611,7 +647,16 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
                 capturing,
                 tuple(
                     int(segment[n].data_ptr())
-                    for n in ("segm_output_ptr", "segm_max_ptr", "segm_expsum_ptr")
+                    for n in (
+                        "segm_output_ptr",
+                        "segm_max_ptr",
+                        "segm_expsum_ptr",
+                        *(
+                            ("metadata_status_ptr",)
+                            if "metadata_status_ptr" in segment
+                            else ()
+                        ),
+                    )
                 ),
             )
         )

@@ -12,6 +12,7 @@
 # parents[1] -> rocke/library
 # parents[2] -> rocke
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -38,6 +39,11 @@ if str(_PYROOT) not in sys.path:
 _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
+
+# Native installed lanes stage the extension beside the captured test assets.
+_NATIVE_ROOT = _LIBROOT.parent / "native"
+if _NATIVE_ROOT.is_dir():
+    sys.path.insert(0, str(_NATIVE_ROOT))
 
 # pytest rewrites asserts only in test modules and conftest files. Every
 # operation's pinned GPU tests come from this helper, so register it before a
@@ -151,6 +157,15 @@ def _restore_attention_arch_state():
 
 
 def pytest_sessionstart(session):
+    if os.environ.get("ROCKE_REQUIRE_ATTENTION_NATIVE", "").strip() == "1":
+        try:
+            importlib.import_module("rocke_engine")
+        except ImportError as exc:
+            raise pytest.UsageError(
+                "native attention lane requires the installed rocke_engine extension "
+                "for this Python interpreter"
+            ) from exc
+
     from reference_common.pytest_support import start_reference_session
 
     start_reference_session(session.config)

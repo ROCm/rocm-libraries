@@ -34,6 +34,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -318,7 +319,9 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
-    if(ctx->strided_kv)
+    if(ctx->metadata_containment)
+        rocke_bounds_declare(B, &ctx->bounds, CFG.SLIDING_WINDOW);
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
         ctx->v_strides = rocke_declare_strided_kv_params(B, "v");
@@ -340,11 +343,15 @@ static void rocke__build_paged_kv_desc(rocke_gfx942_attention_tiled_3d_build_ctx
     const int NUM_KV = CFG.NUM_KV;
 
     /* seq_base = seq_idx * bt_stride_p (line 569) */
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+    {
+        return;
+    }
 
     /* _kv_base = TensorDescriptor.naive("paged_kv_bytes",
      *   lengths=[1<<24, BS, NUM_KV, HD],
@@ -443,10 +450,35 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
     }
 
     /* ---- cu_q bounds / per-sequence geometry (lines 344-350) ---- */
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(B, ctx->seq_idx, ctx->num_seqs_p);
+        rocke_value_t* t2 = rocke_b_const_i32(B, CFG.NUM_KV);
+        rocke_value_t* t3 = rocke_b_cmp_ge(B, ctx->kv_head_idx, t2);
+        rocke_value_t* t4 = rocke_b_const_i32(B, CFG.NUM_SEG);
+        rocke_value_t* t5 = rocke_b_cmp_ge(B, ctx->seg_idx, t4);
+        rocke_value_t* t6 = rocke_b_lor(B, t3, t5);
+        rocke_value_t* t7 = rocke_b_lor(B, t1, t6);
+        {
+            rocke_if_t g8 = rocke_b_scf_if(B, t7);
+            rocke_b_region_enter(B, g8.then_region);
+            rocke_b_ret(B);
+            rocke_b_region_leave(B);
+        }
+        rocke_bounds_start(B,
+                           &ctx->bounds,
+                           ctx->seq_idx,
+                           ctx->kv_head_idx,
+                           ctx->seg_idx,
+                           ctx->tid,
+                           CFG.NUM_KV,
+                           CFG.NUM_SEG);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(B, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         B, ctx->cu_q, rocke_b_add(B, ctx->seq_idx, rocke_b_const_i32(B, 1)), 0);
-    ctx->cur_batch_q_len = rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
+    ctx->cur_batch_q_len
+        = ctx->metadata_containment ? NULL : rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
     if(CFG.DECODE_GRID)
     {
         ctx->q_block_start_idx = NULL;
@@ -459,6 +491,48 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
     }
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ne(B, ctx->cu_q_start, ctx->seq_idx);
+        rocke_value_t* t2 = rocke_b_const_i32(B, 1);
+        rocke_value_t* t3 = rocke_b_add(B, ctx->seq_idx, t2);
+        rocke_value_t* t4 = rocke_b_cmp_ne(B, ctx->cu_q_stop, t3);
+        rocke_value_t* t5 = rocke_b_lor(B, t1, t4);
+        rocke_value_t* bad_cu = t5;
+        rocke_value_t* t6 = rocke_b_const_i32(B, 0);
+        rocke_value_t* t7 = rocke_b_cmp_lt(B, ctx->seq_len, t6);
+        rocke_value_t* t8 = rocke_b_cmp_gt(B, ctx->seq_len, ctx->bounds.capacity);
+        rocke_value_t* t9 = rocke_b_lor(B, t7, t8);
+        rocke_value_t* bad_length = t9;
+        rocke_value_t* t10 = rocke_b_lor(B, bad_cu, bad_length);
+        rocke_value_t* invalid_metadata = t10;
+        rocke_bounds_mark(B, &ctx->bounds, invalid_metadata);
+        ctx->cu_q_start = ctx->seq_idx;
+        rocke_value_t* t11 = rocke_b_const_i32(B, 1);
+        ctx->cur_batch_q_len = t11;
+        rocke_value_t* t12 = rocke_b_const_i32(B, 0);
+        rocke_value_t* t13 = rocke_b_select(B, invalid_metadata, t12, ctx->seq_len);
+        ctx->seq_len = t13;
+        {
+            rocke_if_t g14 = rocke_b_scf_if(B, invalid_metadata);
+            rocke_b_region_enter(B, g14.then_region);
+            rocke_bounds_neutral(B,
+                                 ctx->seq_idx,
+                                 ctx->kv_head_idx,
+                                 ctx->seg_idx,
+                                 ctx->tid,
+                                 ctx->segm_output_ptr,
+                                 ctx->segm_max_ptr,
+                                 ctx->segm_expsum_ptr,
+                                 CFG.HD,
+                                 CFG.NQK,
+                                 CFG.NUM_QH,
+                                 CFG.NUM_SEG);
+            rocke_bounds_finish(B, &ctx->bounds);
+            rocke_b_ret(B);
+            rocke_b_region_leave(B);
+        }
+    }
     ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
     /* qb_start_pos = q_block_local_idx * BLOCK_Q (line 352) */
@@ -571,7 +645,7 @@ void rocke_gfx942_attention_tiled_3d_emit_async_infra(
 {
     /* ---- async DMA infra (lines 538-567) ---- */
     ctx->big_bytes = rocke_b_const_i32(B, 0x7FFF0000);
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->key_rsrc = rocke_strided_kv_resource(
             B, ctx->key, &ctx->k_strides, ctx->seq_idx, ctx->kv_head_idx);
@@ -580,8 +654,10 @@ void rocke_gfx942_attention_tiled_3d_emit_async_infra(
     }
     else
     {
-        ctx->key_rsrc = rocke_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
-        ctx->value_rsrc = rocke_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+        ctx->key_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->key, ctx->metadata_containment ? ctx->bounds.k_bytes : ctx->big_bytes);
+        ctx->value_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->value, ctx->metadata_containment ? ctx->bounds.v_bytes : ctx->big_bytes);
     }
     ctx->lane_half_base = rocke_b_mul(B, ctx->tid, rocke_b_const_i32(B, CFG.HALVES_PER_LANE));
     ctx->K_lds_addr = rocke_b_smem_addr_of(B, ctx->K_lds);
@@ -603,6 +679,29 @@ void rocke_gfx942_attention_tiled_3d_emit_early_zero_fill(
     const int PV_N_TILES = CFG.PV_N_TILES;
     int n, reg;
 
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(B, ctx->seg_start_tile_pos, ctx->seq_len);
+        {
+            rocke_if_t g2 = rocke_b_scf_if(B, t1);
+            rocke_b_region_enter(B, g2.then_region);
+            rocke_bounds_neutral(B,
+                                 ctx->seq_idx,
+                                 ctx->kv_head_idx,
+                                 ctx->seg_idx,
+                                 ctx->tid,
+                                 ctx->segm_output_ptr,
+                                 ctx->segm_max_ptr,
+                                 ctx->segm_expsum_ptr,
+                                 CFG.HD,
+                                 CFG.NQK,
+                                 CFG.NUM_QH,
+                                 CFG.NUM_SEG);
+            rocke_bounds_finish(B, &ctx->bounds);
+            rocke_b_ret(B);
+            rocke_b_region_leave(B);
+        }
+    }
     rocke_if_t guard = rocke_b_scf_if(B, rocke_b_cmp_ge(B, ctx->seg_start_tile_pos, ctx->seq_len));
     rocke_b_region_enter(B, guard.then_region);
     {
@@ -722,7 +821,6 @@ void rocke_gfx942_attention_tiled_3d_emit_q_to_lds(rocke_gfx942_attention_tiled_
  * Load issuers (Python closures, lines 604-719).
  * ============================================================ */
 
-/* _issue_k_load(kv_tile_idx, buf_idx) -- lines 604-617. */
 void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
                                                   rocke_value_t* buf_idx,
@@ -761,6 +859,37 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
                 CFG.HD,
                 CFG.T);
         }
+        else if(ctx->metadata_containment)
+        {
+            voff = rocke_bounds_offset(
+                B,
+                &ctx->bounds,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+        {
+            voff = rocke_paged_kv_offset(
+                B,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
         else if(page_id != NULL)
         {
             rocke_value_t* src_half
@@ -789,7 +918,6 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
     }
 }
 
-/* _issue_v_load(kv_tile_idx, buf_idx) -- lines 619-632. */
 void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
                                                   rocke_value_t* buf_idx,
@@ -827,6 +955,37 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
                 ctx->seq_len,
                 CFG.HD,
                 CFG.T);
+        }
+        else if(ctx->metadata_containment)
+        {
+            voff = rocke_bounds_offset(
+                B,
+                &ctx->bounds,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+        {
+            voff = rocke_paged_kv_offset(
+                B,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
         }
         else if(page_id != NULL)
         {

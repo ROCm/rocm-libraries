@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from kernels.common.attention_paged_decode import _default_paged_metadata_containment
+
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _has_score_bias,
@@ -398,6 +400,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         use_decode_grid=_use_decode_grid(problem, arch),
+        metadata_containment=_default_paged_metadata_containment(problem, arch),
         # Additive bias is gfx950-only for now; gfx942's spec has no such field.
         **(
             {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
