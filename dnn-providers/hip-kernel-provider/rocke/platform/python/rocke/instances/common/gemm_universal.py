@@ -532,6 +532,23 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
 
+    # DirectToLDS: the emitter bakes a fixed per-lane chunk width into the
+    # kernel at build time (see build_universal_gemm), capped at the arch's
+    # own buffer_load_lds width (ArchTarget.async_lds_max_dwords). Asking for
+    # a wider one than the arch has is not a build-time error -- the AMDGPU
+    # backend aborts the whole process -- so an arch with too little width to
+    # satisfy tile_k, or none at all, must be rejected here.
+    if spec.trait.direct_to_lds:
+        if target.async_lds_max_dwords < 1:
+            return False, f"direct_to_lds: {arch} has no DRAM->LDS DMA instruction"
+        _dtl_halves = min(4, target.async_lds_max_dwords) * 2
+        if t.tile_k % _dtl_halves != 0:
+            return False, (
+                f"direct_to_lds requires tile_k % {_dtl_halves} == 0 (got "
+                f"{t.tile_k}) with {target.async_lds_max_dwords} dword(s)/lane "
+                f"on {arch}"
+            )
+
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
         return False, "tile_m not divisible by warp_m * warp_tile_m"
@@ -857,6 +874,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     if spec.trait.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
+    # EXPERIMENT (gated): accumulator-pinning knob -> `amdgpu-agpr-alloc=min,max`.
+    # On CDNA2/CDNA3 (gfx90a/gfx942) MFMA accumulators live in AGPRs, so bounding
+    # the AGPR allocation rebalances the register file. On gfx950 (CDNA4) the
+    # backend natively accumulates in arch-VGPRs and IGNORES this attribute (0
+    # AGPRs allocated regardless, s_nop and TFLOPS unchanged -- verified), so it
+    # is a no-op there. Default off -> byte-identical.
+    import os as _os_agpr
+
+    _agpr_alloc = _os_agpr.environ.get("ROCKE_EXP_AGPR_ALLOC")
+    if _agpr_alloc:
+        b.kernel.attrs["agpr_alloc"] = _agpr_alloc
     storage_dtype = _storage_dtype(spec)
     _split_k = spec.trait.split_k
     _is_split_k = _split_k > 1
@@ -958,6 +986,29 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if spec.trait.emit_sched_hints is not None
         else (arch != "gfx950")
     )
+    # EXPERIMENT (ROCKE_EXP_HOIST_SWZ=1): feed the ds_read swizzle mask a
+    # PARITY-FREE row so it is loop-invariant and LLVM/LICM hoists the
+    # lshr/mod/shl out of the K-loop (only the per-read xor with col_base
+    # remains). Measured bit-exact +~2% (750->765 TFLOPS) on the grouped bf16
+    # 256x256x64 DTL kernel. Default OFF keeps emission byte-identical; correct
+    # iff the double-buffer parity offset adds an even multiple to the swizzle
+    # bit (block_m>>R even) -- verify before promoting to a TraitSpec lever.
+    import os as _os_hsw
+
+    _hoist_swz = _SWZ and _os_hsw.environ.get("ROCKE_EXP_HOIST_SWZ", "0") == "1"
+    # EXPERIMENT (ROCKE_EXP_UNROLL_K=<K>): fully Python-unroll the DTL-prefetch
+    # K-loop for a fixed, compile-time K (= the env value, a multiple of
+    # tile_k), eliminating the scf.for backedge and giving static double-buffer
+    # parity offsets. Only valid for split_k==1 and when the launch K matches.
+    # 0 = off (runtime scf.for, default).
+    _unroll_k = int(_os_hsw.environ.get("ROCKE_EXP_UNROLL_K", "0"))
+    # EXPERIMENT (ROCKE_EXP_PREFETCH_DEPTH=D>1): D+1-buffer LDS ring in the
+    # fully-unrolled fixed-K path (requires ROCKE_EXP_UNROLL_K). Issues loads D
+    # tiles ahead. NOTE: buffer_load_lds (DTL) completes OUT OF ORDER, so the
+    # per-tile drain must stay vmcnt(0) for correctness -> deeper buffering keeps
+    # no extra loads usefully in flight (verified in gemm_wsp3). Kept as a gated
+    # lever for measurement / the non-DTL ordered path. Costs D+1x AB LDS.
+    _pf_depth = int(_os_hsw.environ.get("ROCKE_EXP_PREFETCH_DEPTH", "1"))
     # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
@@ -1097,8 +1148,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # AB LDS double-buffer plan, shared with the validity gate via
     # :func:`_ab_lds_plan` so the reserved/used budget stays in lock-step.
     _, _db, _two_buf = _ab_lds_plan(spec, arch)
-    _A_LDS_M = 2 * block_m if _two_buf else block_m
-    _B_LDS_N = 2 * block_n if _two_buf else block_n
+    # depth-N prefetch ring needs (depth+1) AB buffers (only in the unrolled
+    # fixed-K path); otherwise the usual 2 (ping-pong) or 1 (single-buffer).
+    if _pf_depth > 1 and _unroll_k > 0:
+        _nbuf = _pf_depth + 1
+    else:
+        _nbuf = 2 if _two_buf else 1
+    _A_LDS_M = _nbuf * block_m
+    _B_LDS_N = _nbuf * block_n
     # LDS K-padding (non-DTL only): widen each row's stride to break the
     # bank-conflict alias. The logical column range stays [0, block_k); only
     # the row stride grows, so the read GEP (alloc shape[1]) and the
@@ -1188,10 +1245,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
     # remaining chunks_total / block_size iterations.
     if spec.trait.direct_to_lds:
+        from ...core.arch import ArchTarget
         from ...core.ir import I64 as _I64
 
-        _DTL_DWORDS = 4  # 16 bytes/lane
-        _DTL_HALVES = _DTL_DWORDS * 2  # 8 elements (bf16 halves) per lane chunk
+        # Capped at the arch's own buffer_load_lds width (is_valid_spec has
+        # already checked tile_k divides it): CDNA4 (gfx950) has the full
+        # dword=4 (16 bytes/lane) form, CDNA3 (gfx942) only dword=1.
+        _DTL_DWORDS = min(4, ArchTarget.from_gfx(arch).async_lds_max_dwords)
+        _DTL_HALVES = _DTL_DWORDS * 2  # dwords*2 halves (bf16 elements) per lane chunk
         _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
         if (block_k % _DTL_HALVES) != 0:
             raise ValueError(
@@ -1737,8 +1798,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             )
             if a_par_row_v is not None:
                 a_row = b.add(a_row, a_par_row_v)
+            # Parity-free row for the swizzle mask (loop-invariant -> LICM hoists
+            # the lshr/mod/shl); the address still uses the parity-full a_row.
+            swz_row = (
+                b.add(warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom))
+                if _hoist_swz
+                else a_row
+            )
             return _emit_smem_load(
-                b, A_src, a_row, _swz_col(col_base, a_row), a_per_lane, storage_dtype
+                b, A_src, a_row, _swz_col(col_base, swz_row), a_per_lane, storage_dtype
             )
 
         def _read_b(kk: int, ni: int) -> Value:
@@ -1749,8 +1817,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             )
             if b_par_row_v is not None:
                 b_row = b.add(b_row, b_par_row_v)
+            swz_row = (
+                b.add(warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom))
+                if _hoist_swz
+                else b_row
+            )
             return _emit_smem_load(
-                b, B_src, b_row, _swz_col(col_base, b_row), b_per_lane, storage_dtype
+                b, B_src, b_row, _swz_col(col_base, swz_row), b_per_lane, storage_dtype
             )
 
         def _mma_cluster(a_rows, b_cols) -> None:
@@ -1932,6 +2005,41 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_kloop_simple()
             return
 
+        nonlocal _for_results
+
+        # Fully-unrolled fixed-K variant (ROCKE_EXP_UNROLL_K): no scf.for
+        # backedge; Python-unroll the K-tiles with static (compile-time) parity
+        # so the double-buffer LDS offsets fold to constants. Same single-barrier
+        # software pipeline (prologue load tile0; per tile: drain + barrier +
+        # load next + MFMA current; epilogue MFMA last). split_k==1 only.
+        if _unroll_k > 0 and not _is_split_k:
+            tk = t.tile_k
+            trip = _unroll_k // tk
+            D = max(1, _pf_depth)  # tiles loaded ahead
+            nbuf = _nbuf  # ring size (= D+1 when depth>1, else 2)
+            acc = [a for (_n, a) in accs]
+            # Prologue: issue the first D tiles' loads into rings 0..D-1.
+            for j in range(min(D, trip)):
+                emit_load_phase(
+                    A_smem, B_smem, b.const_i32(j * tk), lds_parity=j % nbuf
+                )
+            # Steady state: per tile i, drain (vmcnt(0): buffer_load_lds is
+            # out-of-order, so a partial drain would be incorrect), barrier,
+            # issue tile i+D's load, then MFMA tile i from ring i%nbuf. With the
+            # mandatory full drain, depth>1 keeps no extra loads usefully in
+            # flight -- the empirical confirmation of the wsp3 finding.
+            for i in range(trip):
+                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+                b.s_barrier_bare()
+                nj = i + D
+                if nj < trip:
+                    emit_load_phase(
+                        A_smem, B_smem, b.const_i32(nj * tk), lds_parity=nj % nbuf
+                    )
+                acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=i % nbuf)
+            _for_results = acc
+            return
+
         # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
 
@@ -1978,7 +2086,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         epi_accs = emit_mfma_phase(
             A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
         )
-        nonlocal _for_results
         _for_results = epi_accs
 
     _for_results: Sequence[Value] = ()

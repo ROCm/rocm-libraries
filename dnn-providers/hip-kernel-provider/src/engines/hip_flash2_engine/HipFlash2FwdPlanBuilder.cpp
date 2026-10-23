@@ -6,6 +6,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 
 #include <cmath>
+#include <fstream>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 #include "core/Utils.hpp"
 
 #include "../asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "Flash2Dispatch.hpp"
 #include "HipFlash2FwdPlan.hpp"
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
 #include "HipFlash2KernelUtils.hpp"
@@ -69,14 +71,6 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
-    {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
-    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
@@ -92,6 +86,29 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
+
+    // K2: reject mask types the kernel does not implement
+    {
+        auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+                asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+                qTensor->dims()->Get(2),
+                kTensor->dims()->Get(2));
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(
+                band.leftBound, band.rightBound, band.alignment);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+            return false;
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
 
     // Data type: FP16 only
     const auto qType = qTensor->data_type();
@@ -195,12 +212,56 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     Flash2FwdParams params = extractParams(handle, opGraph);
     params.archString = archId;
 
-    const std::string coPath = flash2CoPath(archId);
-    const char* funcName = flash2KernelName(params.head_dim);
+    // ---- Select the kernel variant for this shape --------------------------
+    // Falls back to the legacy single-kernel object when a per-variant .co is
+    // not installed, so an engine built from an older kernels/ directory keeps
+    // exactly its previous behaviour. This makes the dispatcher inert until a
+    // matching variant set is shipped -- it cannot regress the current engine.
+    int cuCount = 304; // gfx942 default; overridden from the device below
+    {
+        hipDeviceProp_t prop{};
+        int dev = 0;
+        if(hipGetDevice(&dev) == hipSuccess && hipGetDeviceProperties(&prop, dev) == hipSuccess
+           && prop.multiProcessorCount > 0)
+        {
+            cuCount = prop.multiProcessorCount;
+        }
+    }
+
+    const Flash2Selection sel = selectFlash2Config(
+        params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.causal, cuCount);
+
+    // Split-K execution is not yet plumbed through execute() (it needs a second
+    // merge launch plus a workspace pointer). Record the decision, run single
+    // pass for now.
+    params.splitK = 1;
+    params.workspaceBytes = 0;
+
+    std::string coPath = flash2CoPath(archId, sel.variant.tag);
+    {
+        const std::ifstream probe(coPath, std::ios::binary);
+        if(probe.good())
+        {
+            params.variantTag = sel.variant.tag;
+            params.blockDim = sel.variant.blockDim;
+            params.qPerCta = sel.variant.qPerCta;
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder -- variant '"
+                                   << sel.variant.tag
+                                   << "' not installed, using legacy kernel object");
+            coPath = flash2CoPath(archId);
+            params.variantTag = K_FLASH2_LEGACY.tag;
+            params.blockDim = K_FLASH2_LEGACY.blockDim;
+            params.qPerCta = K_FLASH2_LEGACY.qPerCta;
+        }
+    }
+    const char* funcName = flash2KernelName(params.headDim);
     if(funcName == nullptr)
     {
         const std::string msg = "HipFlash2FwdPlanBuilder::buildPlan -- unsupported head_dim="
-                                + std::to_string(params.head_dim);
+                                + std::to_string(params.headDim);
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -215,6 +276,48 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
             = "HipFlash2FwdPlanBuilder::buildPlan -- failed to load kernel from: " + coPath;
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
+    }
+
+    // Verify the object was actually built with the geometry the variant table
+    // claims. The file probe above only proves a file exists at that path --
+    // it says nothing about how the object was compiled. A mismatch is not
+    // benign in EITHER direction: an object built for fewer threads than the
+    // table claims fails every launch with hipError 719, and one built for
+    // more threads launches fine and computes silently wrong results.
+    //
+    // The comparison is therefore exact, not an upper bound. An earlier
+    // revision used `<`, which caught only the loud direction; S. Reeder
+    // demonstrated the gap by copying the 512-thread w8q2k4 object over the
+    // w4q1k4 filename (table: 256 threads) and running the integration suite:
+    // `<` threw 0 times and produced 4 wrong results, `!=` threw 4 times and
+    // produced 0. Exact comparison cannot false-positive here because every
+    // variant carries __launch_bounds__(F2_BLOCK, 1), so
+    // max_flat_workgroup_size equals the compiled block size exactly on all
+    // five (measured 256/512/512/512/512 against a table of the same).
+    if(!params.variantTag.empty())
+    {
+        int maxThreads = 0;
+        const hipError_t attrErr = hipFuncGetAttribute(
+            &maxThreads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernelOpt->function());
+        if(attrErr != hipSuccess)
+        {
+            const std::string msg
+                = "HipFlash2FwdPlanBuilder::buildPlan -- hipFuncGetAttribute failed for " + coPath
+                  + ": " + std::string(hipGetErrorString(attrErr));
+            HIPDNN_PLUGIN_LOG_ERROR(msg);
+            throw std::runtime_error(msg);
+        }
+        if(maxThreads != static_cast<int>(params.blockDim))
+        {
+            const std::string msg
+                = "HipFlash2FwdPlanBuilder::buildPlan -- variant '" + params.variantTag
+                  + "' geometry mismatch: " + coPath + " was built for "
+                  + std::to_string(maxThreads) + " threads/block but the variant table claims "
+                  + std::to_string(params.blockDim)
+                  + ". The installed kernel object does not match the variant it is named for.";
+            HIPDNN_PLUGIN_LOG_ERROR(msg);
+            throw std::runtime_error(msg);
+        }
     }
 
     executionContext.setPlan(
@@ -232,11 +335,10 @@ std::vector<data_objects::KnobT>
 }
 
 // ---------------------------------------------------------------------------
-// extractParams (private helper) -- Finding 1 fix: restored missing body
+// extractParams -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
-Flash2FwdParams
-    HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
-                                           const flatbuffer_utilities::IGraph& opGraph) const
+Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
+                                                       const flatbuffer_utilities::IGraph& opGraph)
 {
     Flash2FwdParams p{};
 
@@ -249,38 +351,41 @@ Flash2FwdParams
     p.vUid = attrs.v_tensor_uid();
     p.oUid = attrs.o_tensor_uid();
 
-    auto* Q = tensorMap.at(p.qUid);
-    auto* K = tensorMap.at(p.kUid);
-    auto* V = tensorMap.at(p.vUid);
-    auto* O = tensorMap.at(p.oUid);
+    auto* q = tensorMap.at(p.qUid);
+    auto* k = tensorMap.at(p.kUid);
+    auto* v = tensorMap.at(p.vUid);
+    auto* o = tensorMap.at(p.oUid);
 
-    p.batch = static_cast<int>(Q->dims()->Get(0));
-    p.num_heads_q = static_cast<int>(Q->dims()->Get(1));
-    p.seq_len_q = static_cast<int>(Q->dims()->Get(2));
-    p.head_dim = static_cast<int>(Q->dims()->Get(3));
+    p.batch = static_cast<int>(q->dims()->Get(0));
+    p.numHeadsQ = static_cast<int>(q->dims()->Get(1));
+    p.seqLenQ = static_cast<int>(q->dims()->Get(2));
+    p.headDim = static_cast<int>(q->dims()->Get(3));
 
-    p.num_heads_k = static_cast<int>(K->dims()->Get(1));
-    p.seq_len_kv = static_cast<int>(K->dims()->Get(2));
+    p.numHeadsK = static_cast<int>(k->dims()->Get(1));
+    p.seqLenKv = static_cast<int>(k->dims()->Get(2));
 
-    p.attn_scale = 0.0f;
-    if(attrs.attn_scale_value().has_value())
-        p.attn_scale = attrs.attn_scale_value().value();
+    p.attnScale = attnScaleFor(attrs);
 
-    p.causal = attrs.causal_mask();
+    const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+        asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+        q->dims()->Get(2),
+        k->dims()->Get(2));
+    p.causal
+        = asm_sdpa_engine::plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment)
+          == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 
-    auto toI64 = [](int64_t v) { return static_cast<int64_t>(v); };
-    p.q_stride_batch = toI64(Q->strides()->Get(0));
-    p.q_stride_head = toI64(Q->strides()->Get(1));
-    p.q_stride_seq = toI64(Q->strides()->Get(2));
-    p.k_stride_batch = toI64(K->strides()->Get(0));
-    p.k_stride_head = toI64(K->strides()->Get(1));
-    p.k_stride_seq = toI64(K->strides()->Get(2));
-    p.v_stride_batch = toI64(V->strides()->Get(0));
-    p.v_stride_head = toI64(V->strides()->Get(1));
-    p.v_stride_seq = toI64(V->strides()->Get(2));
-    p.o_stride_batch = toI64(O->strides()->Get(0));
-    p.o_stride_head = toI64(O->strides()->Get(1));
-    p.o_stride_seq = toI64(O->strides()->Get(2));
+    p.qStrideBatch = q->strides()->Get(0);
+    p.qStrideHead = q->strides()->Get(1);
+    p.qStrideSeq = q->strides()->Get(2);
+    p.kStrideBatch = k->strides()->Get(0);
+    p.kStrideHead = k->strides()->Get(1);
+    p.kStrideSeq = k->strides()->Get(2);
+    p.vStrideBatch = v->strides()->Get(0);
+    p.vStrideHead = v->strides()->Get(1);
+    p.vStrideSeq = v->strides()->Get(2);
+    p.oStrideBatch = o->strides()->Get(0);
+    p.oStrideHead = o->strides()->Get(1);
+    p.oStrideSeq = o->strides()->Get(2);
 
     return p;
 }

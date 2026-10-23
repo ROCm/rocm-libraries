@@ -70,12 +70,14 @@ TEST(TestIngestorArchGate, AdmitsWhenAnyListedArchMatches)
 TEST(TestIngestorArchGate, PrunesAPackWhoseArchExcludesTheDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     const StateManager manager(makeSchema(),
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx950"})},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(0x71));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
@@ -85,18 +87,24 @@ TEST(TestIngestorArchGate, PrunesAPackWhoseArchExcludesTheDevice)
 
 TEST(TestIngestorArchGate, PrunesBeforeRunningAnyMatcher)
 {
+    // Every pack this engine has is excluded, so nothing downstream of the gate runs at
+    // all: not the engine's graph match, not a criterion, not a kernel matcher. An engine
+    // with even one admissible pack does evaluate its graph match.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     const StateManager manager(makeSchema(),
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx950"})},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(0x72));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
     static_cast<void>(manager.unsortedDefinitions(MatchContext{graph, 0, properties}));
 
+    EXPECT_EQ(counters().graphMatchCalls, 0);
     EXPECT_EQ(counters().graphCalls, 0);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
@@ -104,18 +112,21 @@ TEST(TestIngestorArchGate, PrunesBeforeRunningAnyMatcher)
 TEST(TestIngestorArchGate, AdmitsAPackWhoseArchIncludesTheDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     const StateManager manager(
         makeSchema(),
         makeTestMatchers(),
         makeTestDispatches(),
         {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx90a", "gfx942"})},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
 
     const TestGraph graph(makeGraphId(0x73));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
 
     EXPECT_EQ(manager.unsortedDefinitions(MatchContext{graph, 0, properties}).size(), 2U);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(counters().graphCalls, 1);
 }
 
@@ -124,12 +135,14 @@ TEST(TestIngestorArchGate, GatesPerDeviceRatherThanPerGraph)
     // On a mixed-architecture box the answer depends on the targeted device, not on
     // what the machine has installed; the catalog cache is keyed on (graph, device).
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     const StateManager manager(makeSchema(),
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx942"})},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(0x74));
     const auto supported = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);

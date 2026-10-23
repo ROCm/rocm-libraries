@@ -17,6 +17,7 @@
  */
 
 #include <stddef.h>
+#include <string.h> /* strcmp -- operand dtype string -> transpose-read elem type */
 
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
@@ -56,6 +57,124 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  *       frag = chunk if frag is None else b.vec_concat(frag, chunk)
  *   return frag
  * ====================================================================== */
+
+/* K-outer transpose-read fragment feed (wgrad's lds_k_outer path).
+ *
+ * For a K-outer tile T[k][mn] the MFMA operand of lane l is n/4
+ * ds_read_b64_tr_b16 at
+ *     row(r) = k_base  + (l // MN)*n + ((l % 16)//4) + 4*r    r in [0, n/4)
+ *     col    = mn_base + ((l % MN)//16)*16 + (l % 4)*4
+ * after which lane l holds T[k_base .. k_base+n-1][mn_base + l % MN].
+ *
+ * n is the per-lane operand length, which is what sets the k-stride between
+ * lane groups: MFMA lane l owns k = (l // MN)*n .. +n-1. It is 8 for 32x32x16
+ * and 16x16x32, and 4 for 16x16x16. Hardcoding the stride at 8 made the
+ * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
+ * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
+ * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
+/* Element type for the K-outer transpose read, from the operand dtype string.
+ * Mirrors Python's
+ *   _smem_dtype = BF16 if a_dtype == "bf16" else F32 if a_dtype == "fp32" else None
+ *   tr_dtype    = _smem_dtype if _smem_dtype is not None else F16
+ * Never returns NULL: rocke_b_ds_read_tr16_b128 defaults a NULL dtype to f16,
+ * and the gfx1250 opcode is element-typed, so a bf16 kernel would silently
+ * select .v8f16 and feed half fragments to a bf16 WMMA. The wave64
+ * ds_read_b64_tr_b16 is type-agnostic, which is why gfx950 parity never caught
+ * a NULL here. */
+const rocke_type_t* rocke_conv_tr_elem_dtype(const char* a_dtype)
+{
+    if(a_dtype != NULL && strcmp(a_dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(a_dtype != NULL && strcmp(a_dtype, "fp32") == 0)
+        return rocke_f32();
+    return rocke_f16();
+}
+
+rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  rocke_value_t* tr_lane_mod4,
+                                  rocke_value_t* tr_grp16,
+                                  rocke_value_t* smem,
+                                  rocke_value_t* mn_base,
+                                  rocke_value_t* k_base,
+                                  int mn_atom,
+                                  int n,
+                                  int wave_size,
+                                  const rocke_type_t* dtype)
+{
+    /* wave32 (gfx1250 WMMA 16x16x32): the RESULT layout is lane l owning column
+     * l % 16 and K-half l // 16 -- but that is what the lane must end up
+     * holding, not the address it supplies. ds_load_tr16_b128 transposes an 8x8
+     * element block within each group of 8 lanes: the 8 lanes of a group each
+     * read 8 contiguous elements, and lane j of the group receives element j
+     * from all 8 of those runs. So the group addresses the 8-column block
+     * containing l % 16, and lane l supplies the (l % 8)-th K row of the run:
+     *     col  = mn_base + ((l % 16) / 8) * 8
+     *     row0 = k_base  + (l / 16) * n + (l % 8)
+     * Verified on silicon. Mirrors the wave32 branch of _tr_frag() in Python. */
+    if(wave_size == 32)
+    {
+        /* Python binds ONE const_i32(16) and ONE const_i32(8) and reuses each;
+         * emitting a duplicate here consumes an extra SSA id and drifts every
+         * later number. Keep the op order identical to the Python branch. */
+        rocke_value_t* c16w = rocke_b_const_i32(b, 16);
+        rocke_value_t* c8w = rocke_b_const_i32(b, 8);
+        rocke_value_t* lane_mod16 = rocke_b_mod(b, lane, c16w);
+        rocke_value_t* col_grp = rocke_b_div(b, lane_mod16, c8w);
+        rocke_value_t* col_off = rocke_b_mul(b, col_grp, c8w);
+        rocke_value_t* col32 = rocke_b_add(b, mn_base, col_off);
+        rocke_value_t* lane_div16 = rocke_b_div(b, lane, c16w);
+        rocke_value_t* c_n32 = rocke_b_const_i32(b, n);
+        rocke_value_t* row_mul32 = rocke_b_mul(b, lane_div16, c_n32);
+        rocke_value_t* lane_mod8 = rocke_b_mod(b, lane, c8w);
+        rocke_value_t* row_sum32 = rocke_b_add(b, row_mul32, lane_mod8);
+        rocke_value_t* row032 = rocke_b_add(b, k_base, row_sum32);
+        rocke_value_t* out32 = NULL;
+        for(int r = 0; r < n / 8; ++r)
+        {
+            rocke_value_t* row = rocke_b_add(b, row032, rocke_b_const_i32(b, 8 * r));
+            rocke_value_t* idx32[2];
+            idx32[0] = row;
+            idx32[1] = col32;
+            rocke_value_t* part = rocke_b_ds_read_tr16_b128(b, smem, idx32, 2, dtype);
+            out32 = (out32 == NULL) ? part : rocke_b_vec_concat(b, out32, part);
+        }
+        return out32;
+    }
+    /* Every operand is sequenced into a temporary: Python evaluates these
+     * builder calls strictly left-to-right (innermost first) and C argument
+     * evaluation order is unspecified, so nesting them would drift the SSA ids. */
+    rocke_value_t* c_mn = rocke_b_const_i32(b, mn_atom);
+
+    /* col = mn_base + (((lane % MN) / 16) * 16 + tr_lane_mod4) */
+    rocke_value_t* lane_mod_mn = rocke_b_mod(b, lane, c_mn);
+    rocke_value_t* c16a = rocke_b_const_i32(b, 16);
+    rocke_value_t* grp = rocke_b_div(b, lane_mod_mn, c16a);
+    rocke_value_t* c16b = rocke_b_const_i32(b, 16);
+    rocke_value_t* col_mul = rocke_b_mul(b, grp, c16b);
+    rocke_value_t* col_inner = rocke_b_add(b, col_mul, tr_lane_mod4);
+    rocke_value_t* col = rocke_b_add(b, mn_base, col_inner);
+
+    /* row0 = k_base + ((lane / MN) * n + tr_grp16) */
+    rocke_value_t* lane_div_mn = rocke_b_div(b, lane, c_mn);
+    rocke_value_t* c_n = rocke_b_const_i32(b, n);
+    rocke_value_t* row_mul = rocke_b_mul(b, lane_div_mn, c_n);
+    rocke_value_t* row_inner = rocke_b_add(b, row_mul, tr_grp16);
+    rocke_value_t* row0 = rocke_b_add(b, k_base, row_inner);
+
+    rocke_value_t* out = NULL;
+    for(int r = 0; r < n / 4; ++r)
+    {
+        rocke_value_t* row = rocke_b_add(b, row0, rocke_b_const_i32(b, 4 * r));
+        rocke_value_t* idx[2];
+        idx[0] = row;
+        idx[1] = col;
+        rocke_value_t* part = rocke_b_ds_read_tr16_b64(b, smem, idx, 2, dtype);
+        out = (out == NULL) ? part : rocke_b_vec_concat(b, out, part);
+    }
+    return out;
+}
+
 rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* src,
                                               rocke_value_t* mn_in_atom,
@@ -130,6 +249,22 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+            if(ctx->lds_k_outer)
+            {
+                /* Python skips the frag load entirely on this path. */
+                a_rows[mi] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                A_src,
+                                                atom_row,
+                                                k_tile_base,
+                                                spec->warp_tile_m,
+                                                ctx->a_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
             a_rows[mi] = rocke_conv_emit_frag_smem_load(
                 b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
         }
@@ -138,6 +273,21 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
         {
             rocke_value_t* atom_row
                 = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+            if(ctx->lds_k_outer)
+            {
+                b_cols[ni] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                B_src,
+                                                atom_row,
+                                                k_tile_base,
+                                                spec->warp_tile_n,
+                                                ctx->b_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
             b_cols[ni] = rocke_conv_emit_frag_smem_load(
                 b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
         }
@@ -216,6 +366,28 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
 
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
+            if(ctx->lds_k_outer)
+            {
+                /* Python skips the a_row computation entirely on this path
+                 * (it `continue`s before it), so emitting it here would add
+                 * ops the Python engine never emits. Operands sequenced into
+                 * temporaries to preserve left-to-right evaluation. */
+                rocke_value_t* mn_c = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+                rocke_value_t* mn_base = rocke_b_add(b, warp_m_off, mn_c);
+                rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+                a_rows[mi] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                A_src,
+                                                mn_base,
+                                                k_c,
+                                                spec->warp_tile_m,
+                                                ctx->a_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
             /* a_row = warp_m_off + (mi*warp_tile_m + m_in_atom) */
             rocke_value_t* a_row = rocke_b_add(
                 b,
@@ -241,6 +413,24 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
+            if(ctx->lds_k_outer)
+            {
+                rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+                rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
+                rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+                b_cols[ni] = rocke_conv_tr_frag(b,
+                                                ctx->lane,
+                                                ctx->tr_lane_mod4,
+                                                ctx->tr_grp16,
+                                                B_src,
+                                                mn_base,
+                                                k_c,
+                                                spec->warp_tile_n,
+                                                ctx->b_per_lane,
+                                                spec->wave_size,
+                                                ctx->tr_dtype);
+                continue;
+            }
             /* b_row = warp_n_off + (ni*warp_tile_n + n_in_atom) */
             rocke_value_t* b_row = rocke_b_add(
                 b,

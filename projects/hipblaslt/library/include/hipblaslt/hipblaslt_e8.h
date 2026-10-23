@@ -26,9 +26,6 @@
 
 #pragma once
 
-#ifndef _HIPBLASLT_E8_H_
-#define _HIPBLASLT_E8_H_
-
 #include <iostream>
 
 #define HIP_HOST_DEVICE __host__ __device__
@@ -119,5 +116,3 @@ namespace std
         return stream;
     }
 } // namespace std
-
-#endif

@@ -18,7 +18,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Container.hpp"
@@ -42,15 +42,15 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
-/// Bindings a real plan build would hand the handler, from running the graph matcher.
+/// Bindings a real plan build would hand the handler, from running the graph match.
 BoundTokens bindingsFor(const MatchContext& context)
 {
-    BoundTokens bound;
-    if(!matchesGraph(POINTWISE_ADD, context, bound))
+    auto bound = matchesGraph(POINTWISE_ADD, context);
+    if(!bound.has_value())
     {
         throw std::logic_error("test graph does not match the pack it is dispatched against");
     }
-    return bound;
+    return std::move(*bound);
 }
 
 /// Device buffers for one 1-element add, freed on scope exit.

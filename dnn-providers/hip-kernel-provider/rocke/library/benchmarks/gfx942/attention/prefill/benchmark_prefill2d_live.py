@@ -59,6 +59,13 @@ from typing import Any
 
 from rocke.assets import shape_utils_dir
 
+from benchmarks.common.attention_sweep import (
+    all_variant_keys,
+    expand_variant_keys,
+    record_sweep_entries,
+    run_sweep,
+)
+
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
 
 ARCH = "gfx942"
@@ -416,7 +423,9 @@ class CkVariantBench:
         self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
-    def _problem(self, shape, sliding_window: int, is_fp8: bool):
+    def _problem(
+        self, shape, sliding_window: int, is_fp8: bool, num_kv_blocks: int = 0
+    ):
         from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
@@ -437,9 +446,17 @@ class CkVariantBench:
             use_fp8=is_fp8,
             num_cus=self.num_cus,
             compile_backend=self.compile_backend,
+            num_kv_blocks=num_kv_blocks,
         )
 
-    def build(self, shape, variant: str, sliding_window: int, is_fp8: bool):
+    def build(
+        self,
+        shape,
+        variant: str,
+        sliding_window: int,
+        is_fp8: bool,
+        num_kv_blocks: int = 0,
+    ):
         from rocke import compile_kernel
         from kernels import (
             UnifiedAttention2DTiledSpec,
@@ -448,6 +465,7 @@ class CkVariantBench:
         )
         from kernels.common.attention_unified import (
             _attn_signature,
+            _enable_i64_kv_addr,
             _tiled_2d_impl,
         )
         from rocke.runtime import KernelLauncher
@@ -456,7 +474,7 @@ class CkVariantBench:
         spec_cls, _, _ = _tiled_2d_impl(ARCH)
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
-        problem = self._problem(shape, sliding_window, is_fp8)
+        problem = self._problem(shape, sliding_window, is_fp8, num_kv_blocks)
         flags = _variant_flags(
             variant, sliding_window=sliding_window, dtype=dtype, is_fp8=is_fp8
         )
@@ -503,10 +521,18 @@ class CkVariantBench:
             use_fast_paged_kv_desc=flags["use_fast_paged_kv_desc"],
             use_early_v_schedule=flags["use_early_v_schedule"],
             use_k_single_buffer=flags["use_k_single_buffer"],
-            use_i64_kv_addr=flags["use_i64_kv_addr"],
+            # A cache past the i32 buffer range needs i64 whatever the variant asks.
+            use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
             use_register_pv=flags["use_register_pv"],
         )
-        key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
+        # kernel_name() does not encode the KV addressing width, so key on it too.
+        key = (
+            shape.signature,
+            variant,
+            spec.kernel_name(),
+            spec.use_i64_kv_addr,
+            self.compile_backend,
+        )
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec, arch=ARCH)
             artifact = compile_kernel(kernel, arch=ARCH, capture_ir_text=False)
@@ -526,10 +552,16 @@ class CkVariantBench:
 
     def run(self, shape, data, variant, sliding_window, is_fp8, *, warmup, iters):
         import torch
-        from kernels.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values, _spec_kv_addr_limit
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
-        launcher, spec, problem = self.build(shape, variant, sliding_window, is_fp8)
+        launcher, spec, problem = self.build(
+            shape,
+            variant,
+            sliding_window,
+            is_fp8,
+            num_kv_blocks=int(data["key_cache"].shape[0]),
+        )
         hip_stream = _bench_stream_handle()
         out = torch.empty_like(data["query"])
         vals = _attn_values(
@@ -552,6 +584,7 @@ class CkVariantBench:
             include_qq_bias_stride=True,
             k_scale=1.0,
             v_scale=1.0,
+            kv_addr_limit=_spec_kv_addr_limit(problem, spec),
         )
         cfg = LaunchConfig(
             grid=(
@@ -747,9 +780,43 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=None,
-        help="rocke variants to sweep: prod combo combo_nw1 combo_nw2 fallback. "
+        help="rocke variants to sweep: prod combo combo_nw1 combo_nw2 fallback sweep. "
         "Defaults to [prod, combo, fallback] for fp16/all, [prod, fallback] for bf16 "
-        "(combo is fp16-only on gfx942).",
+        "(combo is fp16-only on gfx942). 'sweep' times every engine the dispatcher "
+        "registry offers for each problem (one entry per launched path).",
+    )
+    ap.add_argument(
+        "--sweep-candidate-prefix",
+        default="",
+        help="restrict the 'sweep' lane to candidates whose name starts with this "
+        "(e.g. attention_gfx942_u2d_transposed_x8).",
+    )
+    ap.add_argument(
+        "--sweep-level",
+        choices=("production", "full"),
+        default="production",
+        help="production walks the curated unified-tuning stacks in the 'sweep' "
+        "lane (unified specs only; dense runs in the combo / table sweeps). "
+        "full samples every kernel knob; see --sweep-tuning-sample",
+    )
+    ap.add_argument(
+        "--sweep-tuning-sample",
+        type=int,
+        default=256,
+        help="with --sweep-level full: random legal specs per tuning candidate "
+        "(0 = the full stream). Ignored for production",
+    )
+    ap.add_argument("--sweep-seed", type=int, default=0)
+    ap.add_argument(
+        "--sweep-tuning-id-prefix",
+        default="",
+        help="restrict the 'sweep' lane to tuning ids with this prefix",
+    )
+    ap.add_argument(
+        "--sweep-limit",
+        type=int,
+        default=0,
+        help="cap how many specs the 'sweep' lane times per shape (0 = no cap)",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -893,6 +960,40 @@ def main() -> int:
         best = None
         for v in args.variants:
             try:
+                if v == "sweep":
+                    # Multi-engine lane: time every engine the registry offers for
+                    # this problem (one entry per launched path). Emitted as
+                    # "sweep:<path>" sub-records so each is comparable to the
+                    # single-kernel variants above.
+                    sweep_entries = run_sweep(
+                        shape,
+                        data,
+                        sw,
+                        is_fp8,
+                        bench,
+                        arch=ARCH,
+                        stream_handle=_bench_stream_handle(),
+                        warmup=args.warmup,
+                        iters=args.iterations,
+                        candidate_prefix=args.sweep_candidate_prefix,
+                        tuning_id_prefix=args.sweep_tuning_id_prefix,
+                        limit=args.sweep_limit,
+                        tuning_sample=args.sweep_tuning_sample,
+                        seed=args.sweep_seed,
+                        sweep_level=args.sweep_level,
+                    )
+                    if not sweep_entries:
+                        print(f"  [sweep] no eligible engines for {tag} sw={sw}")
+                    best = record_sweep_entries(
+                        rec,
+                        sweep_entries,
+                        tri_out=tri_out,
+                        tri_ms=tri_ms,
+                        tol=args.tol,
+                        compare=_compare,
+                        best=best,
+                    )
+                    continue
                 if v in ("prod", "ck3d"):
                     ck_out, ck_ms, kname = _run_prod(
                         shape,
@@ -964,7 +1065,9 @@ def main() -> int:
 
         tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
-        vs = "  ".join(_fmt_variant(v) for v in args.variants)
+        vs = "  ".join(
+            _fmt_variant(v) for v in expand_variant_keys(args.variants, rec["variants"])
+        )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
         fly_str = ""
@@ -1027,7 +1130,7 @@ def main() -> int:
             f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
-    for v in args.variants:
+    for v in all_variant_keys(args.variants, results):
         sp = [
             r["variants"][v]["speedup"]
             for r in results
@@ -1142,7 +1245,9 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
 
     run_backend = "tiled" if dispatched_path == "2d" else dispatched_path
 
-    problem = bench._problem(shape, sw, is_fp8)
+    problem = bench._problem(
+        shape, sw, is_fp8, num_kv_blocks=int(data["key_cache"].shape[0])
+    )
     out = torch.empty_like(data["query"])
     hip_stream = _bench_stream_handle()
 
@@ -1152,14 +1257,16 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         from kernels import supports_native_unified_attention_tiled
         from kernels.common.attention_unified import _tiled_spec_from_problem
 
-        ok_t, _ = supports_native_unified_attention_tiled(problem)
+        ok_t, _ = supports_native_unified_attention_tiled(problem, "gfx942")
         instance_name = (
-            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
+            _tiled_spec_from_problem(problem, "gfx942").kernel_name()
+            if ok_t
+            else "scalar"
         )
     elif run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled
 
-        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem, "gfx942")
         instance_name = "3d" if ok_3d else "scalar"
     else:
         instance_name = "scalar"
