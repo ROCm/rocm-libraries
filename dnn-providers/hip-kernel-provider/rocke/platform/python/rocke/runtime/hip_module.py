@@ -806,9 +806,13 @@ class Runtime:
         *,
         shared_bytes: int = 0,
         stream: int = 0,
+        cluster: Optional[Tuple[int, int, int]] = None,
     ) -> "Callable[[], None]":
         """Build every ctypes argument of one launch once; return a
         zero-argument callable that only enqueues it.
+
+        ``cluster`` launches workgroup clusters of that shape, as in
+        :meth:`launch` (``hipDrvLaunchKernelEx`` with a cluster attribute).
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
@@ -844,6 +848,24 @@ class Runtime:
             extra,
         )
         keep = (args_buf, size_buf, extra)
+
+        if cluster is not None:
+            cluster = check_launch_cluster(grid, cluster)
+
+            def enqueue_cluster(_keep=keep) -> None:
+                self._enqueue(
+                    fn,
+                    grid,
+                    block,
+                    shared_bytes,
+                    int(stream),
+                    None,
+                    extra,
+                    cluster,
+                    "prepare_launch",
+                )
+
+            return enqueue_cluster
 
         def enqueue(_keep=keep) -> None:
             _check(_hipModuleLaunchKernel(*call_args), "hipModuleLaunchKernel")

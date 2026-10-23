@@ -219,6 +219,51 @@ def test_support_query_is_cached_per_device():
             assert hip_module.device_supports_cluster_launch(2) is False
 
 
+def test_prepared_launch_without_cluster_is_unchanged(hip):
+    enqueue = Runtime().prepare_launch(
+        object(), (4, 1, 1), (64, 1, 1), b"\0" * 8, stream=_STREAM
+    )
+    enqueue()
+    enqueue()
+    assert not hip.ex
+    assert [c["grid"] for c in hip.plain] == [(4, 1, 1), (4, 1, 1)]
+
+
+def test_prepared_launch_with_cluster_goes_through_launch_kernel_ex(hip):
+    enqueue = Runtime().prepare_launch(
+        object(),
+        (8, 2, 1),
+        (64, 1, 1),
+        b"\0" * 8,
+        shared_bytes=256,
+        stream=_STREAM,
+        cluster=(4, 2, 1),
+    )
+    assert not hip.ex  # nothing is enqueued until the callable runs
+    enqueue()
+    enqueue()
+    assert not hip.plain
+    assert [c["cluster"] for c in hip.ex] == [(4, 2, 1), (4, 2, 1)]
+    call = hip.ex[0]
+    assert call["grid"] == (8, 2, 1) and call["shared"] == 256
+    assert call["stream"] == _STREAM and call["extra"] is not None
+
+
+def test_prepared_launch_validates_the_cluster(hip):
+    # A grid that is not a whole number of clusters is refused when the launch
+    # is prepared, not later inside a timed loop.
+    with pytest.raises(ValueError):
+        Runtime().prepare_launch(
+            object(),
+            (6, 1, 1),
+            (64, 1, 1),
+            b"\0" * 8,
+            stream=_STREAM,
+            cluster=(4, 1, 1),
+        )
+    assert not hip.ex and not hip.plain
+
+
 class _FakeRuntime:
     def __init__(self):
         self.calls = []
@@ -234,6 +279,10 @@ class _FakeRuntime:
 
     def retain_for_stream(self, *a):
         pass
+
+    def prepare_launch(self, fn, grid, block, args, **kw):
+        self.calls.append(("prepared", kw.get("cluster")))
+        return lambda: None
 
 
 def _launcher(rt, cluster_dims):
@@ -272,6 +321,19 @@ def test_launcher_without_cluster_dims():
     _call(rt, kl, grid=(4, 1, 1), block=(64, 1, 1))
     _call(rt, kl, grid=(4, 1, 1), block=(64, 1, 1), cluster=(4, 1, 1))
     assert rt.calls == [("blocking", None), ("blocking", (4, 1, 1))]
+
+
+def test_bind_keeps_the_compiled_cluster():
+    # bind() pre-packs a launch for timed loops; it must launch the same
+    # clusters as a plain call, or a cluster kernel silently runs as 1x1x1
+    # clusters (its cluster barrier then synchronises nothing).
+    rt = _FakeRuntime()
+    kl = _launcher(rt, (1, 1, 4))
+    with mock.patch.object(launcher, "_runtime", return_value=rt):
+        kl.bind({}, config=launcher.LaunchConfig(stream=_STREAM, grid=(2, 2, 4)))
+        plain = _launcher(rt, None)
+        plain.bind({}, config=launcher.LaunchConfig(stream=_STREAM, grid=(2, 2, 4)))
+    assert rt.calls == [("prepared", (1, 1, 4)), ("prepared", None)]
 
 
 def test_launcher_validates_cluster_dims_at_construction():
