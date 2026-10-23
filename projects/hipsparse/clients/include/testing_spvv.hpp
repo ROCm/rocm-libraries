@@ -92,8 +92,8 @@ void testing_spvv_bad_arg(const Arguments& argus)
         "Error: bufferSize is nullptr");
 
     // SpVV
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, 100));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(100), device_free};
+    void* buffer         = buffer_managed.get();
 
     verify_hipsparse_status_invalid_handle(
         hipsparseSpVV(nullptr, opType, x, y, &result, computeType, buffer));
@@ -114,7 +114,6 @@ void testing_spvv_bad_arg(const Arguments& argus)
     verify_hipsparse_status_success(hipsparseDestroySpVec(x), "Success");
     verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 
-    CHECK_HIP_ERROR(hipFree(buffer));
 #endif
 }
 
@@ -184,8 +183,8 @@ void testing_spvv(Arguments argus)
     CHECK_HIPSPARSE_ERROR(
         testing::hipsparseSpVV_bufferSize(handle, trans, x, y, &hresult, computeType, &bufferSize));
 
-    void* externalBuffer;
-    CHECK_HIP_ERROR(hipMalloc(&externalBuffer, bufferSize));
+    auto  externalBuffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* externalBuffer         = externalBuffer_managed.get();
 
     if(argus.unit_check)
     {
@@ -252,8 +251,6 @@ void testing_spvv(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(externalBuffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));

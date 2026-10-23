@@ -217,8 +217,8 @@ void testing_dense_to_sparse_csc(Arguments argus)
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));
 
@@ -364,7 +364,6 @@ void testing_dense_to_sparse_csc(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif

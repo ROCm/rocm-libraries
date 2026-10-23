@@ -175,8 +175,8 @@ void testing_gtsv2_strided_batch(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseXgtsv2StridedBatch_bufferSizeExt(
         handle, m, ddl, dd, ddu, dx, batch_count, batch_stride, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.unit_check)
     {
@@ -246,8 +246,6 @@ void testing_gtsv2_strided_batch(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 #endif // TESTING_GTSV2_NOPIVOT_STRIDED_BATCH_HPP

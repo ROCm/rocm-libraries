@@ -80,6 +80,11 @@ namespace
                         }
                     }
                 }
+                catch(const hipError_t& status)
+                {
+                    FAIL() << "Test '" << name_ROUTINE << "' threw " << hipGetErrorString(status)
+                           << " (" << static_cast<int>(status) << ").";
+                }
                 catch(const std::exception& e)
                 {
                     hipError_t hip_err = hipGetLastError();

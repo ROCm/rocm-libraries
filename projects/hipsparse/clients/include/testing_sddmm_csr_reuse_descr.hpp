@@ -86,7 +86,7 @@ static void sddmm_reuse_dense_dims(J                    m,
 
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern for a
 // single (transA, transB, orderA, orderB) configuration: query
-// hipsparseSDDMM_bufferSize, hipMalloc a fresh tempBuffer of that size,
+// hipsparseSDDMM_bufferSize, allocate a fresh tempBuffer of that size,
 // optionally run hipsparseSDDMM_preprocess, then run hipsparseSDDMM in both
 // host- and device-pointer modes. The sparse-matrix descriptor is reused and
 // its values are reset before every call.
@@ -151,8 +151,8 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     // required.
     bufferSize = std::max(bufferSize, size_t(4));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Compute the host reference once: it is identical for both pointer modes.
     std::vector<T> hval_gold(hcsr_val);
@@ -206,7 +206,6 @@ static void call_sddmm(hipsparseHandle_t&     handle,
     unit_check_near(1, nnz, 1, hval_gold.data(), hval_1.data());
     unit_check_near(1, nnz, 1, hval_gold.data(), hval_2.data());
 
-    CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 }
@@ -311,8 +310,8 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
     // Ensure a non-null buffer even if no scratch space is required.
     buffer_size_max = std::max(buffer_size_max, size_t(4));
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(buffer_size_max), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Step 2: repeatedly loop over every configuration and call hipsparseSDDMM
     // with the shared buffer, never calling bufferSize again. Verify each
@@ -423,8 +422,6 @@ static void call_sddmm_shared_buffer(hipsparseHandle_t&                       ha
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 template <typename I, typename J, typename T>

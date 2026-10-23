@@ -267,8 +267,8 @@ void testing_spsv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_bufferSize(
         handle, transA, &h_alpha, A, x, y1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -368,8 +368,6 @@ void testing_spsv_coo(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
