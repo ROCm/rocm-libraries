@@ -32,6 +32,7 @@ const std::set<NodeAttributes>& cpuSupportedOps()
         NodeAttributes::RMSNormBackwardAttributes,
         NodeAttributes::PointwiseAttributes,
         NodeAttributes::SdpaAttributes,
+        NodeAttributes::SdpaBackwardAttributes,
     };
     return s_ops;
 }
@@ -44,6 +45,7 @@ const std::set<NodeAttributes>& gpuSupportedOps()
     static const std::set<NodeAttributes> s_ops = {
         NodeAttributes::ConvolutionFwdAttributes,
         NodeAttributes::SdpaAttributes,
+        NodeAttributes::SdpaBackwardAttributes,
     };
     return s_ops;
 }
