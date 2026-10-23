@@ -95,13 +95,17 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `conv_implicit_gemm` | ✅ | ✅ | ✅ | gfx1151: WMMA 16x16x16, `mem`+`default`, `wave_size=32`, `groups=1` |
 | `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
-| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
+| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog; fp16 and bf16 (`_1k` atom) |
+| `direct_conv_4c` dgrad (`direct_grouped_dgrad_4c`) | ✅ | ✅ | ❌ | `cpg=kpg=4`, 1x1/3x3 "same" padding, stride 1, fused weights (no pre-pass); LDS-staged weights and `stage_rows` need `ds_read_b64_tr_b16` (gfx950). In the AOT direct cache; not yet wired into dispatch |
+| `direct_conv` (generic) dgrad, fused weights (`direct_grouped_dgrad_fused`) | ✅ | ✅ | ❌ | stride 1, "same" padding, 1x1..7x7, `cpg`/`kpg` multiples of 4 up to 32 (`cpg != kpg` too), single kernel (no pre-pass); LDS-staged weights need `ds_read_b64_tr_b16` (gfx950), `fold_k32` the 16x16x32 atom; row-stream knobs (`prefetch_rows`, `lds_only_sync`, `waves_m`, `lds_pad`, `stage_out`, `row_exit`), `xcd_tiles` gfx950 only. In the AOT direct cache; not yet wired into dispatch |
+| `direct_depthwise_dgrad_win` | ✅ | ✅ | ❌ | `cpg=kpg=1`, stride 1, any padding; VALU form (scalar FMA, channel vectors); `dot2` tap pairing (`arith.fdot2`) and the Toeplitz MFMA form (`mfma_f32_16x16x32`, `groups % 8 == 0`) gfx950 only. In the AOT direct cache; not yet wired into dispatch |
+| `conv_implicit_gemm_dgrad` stride-1 knobs | ✅ | ✅ | ❌ | folded sub-GEMM record (stride capability), `tap_outer_k` (wave64 MFMA, `kpg % tile_k == 0`), `dy_halo` / `dy_halo_setprio` / `dy_halo_kouter_pad` / `halo_max_wo` (on the tap-outer path, `Ho == Hi`, `Wo == Wi`; the pad needs `lds_k_outer`, gfx950); `xcd_tile_order` remaps only on gfx950. AOT grid: stride-1 tap-outer binaries next to the tilde ones, halo sub-grid on gfx950; not yet wired into dispatch |
 | `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `default` epilogue, `split_k=1` |
 | `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
 | `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
-| `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA, wave64. Built from `library/kernels`; not yet wired into dispatch |
+| `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 
 ---
 
@@ -182,8 +186,10 @@ parity runs on the matching device and is not implied by the ✅ here.
   contract, so it stays MFMA-only.
 - **Merged groups (`group_merge`)** is available in the forward
   (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
-  **depthwise** problems only (`cpg == kpg == 1`), on `wave_size == 64` (MFMA)
-  only, and is inert at its default of `1`. The degree must be a power of two
+  **depthwise** problems only (`cpg == kpg == 1`), and is inert at its default
+  of `1`. Forward builds it on MFMA (wave64) and WMMA (wave32) targets alike
+  (GPU-numeric-verified on gfx1250; the gfx11 WMMA targets are covered by the
+  parity gate only); wgrad is `wave_size == 64` (MFMA) only. The degree must be a power of two
   in {2, 4, 8, 16, 32, 64} and divide `groups`. Beyond that the two directions
   restrict differently. Forward additionally rejects `async_dma`, an explicit
   `vector_size_b` other than 1, a `vector_size_a`/`vector_size_c` that does not
@@ -200,7 +206,10 @@ parity runs on the matching device and is not implied by the ✅ here.
   struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
   boundary, and the fwd parity emitters build eight depthwise configs
   (`conv_implicit_gemm_emit.{py,c}` indices 21–28: 22–27 merged, 21 and 28 the
-  unmerged default/cshuffle controls) spanning both epilogues, the 1-wide
+  unmerged default/cshuffle controls), plus four merged WMMA ones (29–32:
+  gfx1250 `mem` and `wavelet` with cshuffle, gfx1250 with the direct epilogue,
+  and gfx1151) and three unmerged grouped gfx1250 controls (33–35), spanning
+  both epilogues, the 1-wide
   cshuffle store, `unroll_k`, and degrees with `groups/Gm > 1` as well as
   `Gm == groups` (one merged group; the grouped decode stays engaged). Byte-identity is therefore a
   real gate on merged emission, not a vacuous one. **wgrad is Python-engine
