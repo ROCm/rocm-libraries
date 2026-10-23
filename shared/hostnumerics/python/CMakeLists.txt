@@ -19,7 +19,7 @@ if(NOT nanobind_FOUND)
     find_package(nanobind CONFIG REQUIRED)
 endif()
 
-nanobind_add_module(hostnumerics-python NB_STATIC src/bindings.cpp)
+nanobind_add_module(hostnumerics-python NB_STATIC src/bindings.cpp src/shape_bindings.cpp)
 target_link_libraries(hostnumerics-python PRIVATE roc::hostnumerics)
 set_target_properties(hostnumerics-python
     PROPERTIES
@@ -33,11 +33,11 @@ file(GENERATE
 )
 
 if(HOSTNUMERICS_BUILD_TESTING)
-    add_test(NAME hostnumerics-python-import
+    add_test(NAME hostnumerics-python-tests
         COMMAND "${Python_EXECUTABLE}" -m unittest discover
                 -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -p "test_*.py"
     )
-    set_tests_properties(hostnumerics-python-import
+    set_tests_properties(hostnumerics-python-tests
         PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
 endif()

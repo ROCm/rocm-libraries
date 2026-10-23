@@ -434,6 +434,70 @@ def _spec_raw(idx: int):
             ),
             "gfx942",
         )
+    # --- depthwise + merged groups -------------------------------------------
+    # Every config below is depthwise (C == K == groups, so cpg == kpg == 1),
+    # which is the only shape group_merge admits. 21 is the unmerged control:
+    # without it the merged configs would have nothing to differ *from*, and the
+    # depthwise path itself carried no structural coverage at all.
+    #
+    # 22-26 span the axes that change emitted IR under merge:
+    #   - the shift/mask width (log2 Gm) of the merged k decode,
+    #   - Gm == groups (one merged group, the grouped decode still engaged),
+    #   - which epilogue consumes the merged dims,
+    #   - and the unroll_k K loop over the in-kernel merged extent.
+    if idx in (21, 22, 23, 24, 25, 26):
+        # groups=64, C=64 -> cpg=1, K=64 -> kpg=1. M = 2*14*14 = 392.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        # 21 is the unmerged depthwise control. 24 keeps the *direct* epilogue by
+        # pinning vector_size_c=1 -- merged kpg would otherwise auto-derive
+        # vec_c > 1, which the validator turns into a cshuffle requirement, so
+        # without the pin no merged config would exercise the direct epilogue.
+        gm = {21: 1, 22: 8, 23: 32, 24: 4, 25: 64, 26: 8}[idx]
+        epi = "default" if idx in (21, 24) else "cshuffle"
+        kw = {"vector_size_c": 1} if idx == 24 else {}
+        if idx == 26:
+            kw["unroll_k"] = True
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue=epi,
+                group_merge=gm,
+                **kw,
+            ),
+            "gfx950",
+        )
+    if idx in (27, 28):
+        # The 1-wide cshuffle store (store_vec == 1): 27 is merged Gm=8 pinned
+        # to vector_size_c=1, 28 the unmerged depthwise control whose open
+        # store width derives from kpg == 1. Same depthwise problem as 21-26.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        kw = {"group_merge": 8, "vector_size_c": 1} if idx == 27 else {}
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                **kw,
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

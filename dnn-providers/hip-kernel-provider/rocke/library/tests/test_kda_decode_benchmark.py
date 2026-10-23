@@ -10,6 +10,15 @@ import pytest
 from benchmarks.gfx950.gdn import benchmark_kda_decode as bench
 
 
+def test_main_reports_unavailable_device_backend(monkeypatch, capsys):
+    monkeypatch.setattr(bench, "_load_device_backend", lambda: False)
+
+    assert bench.main([]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "requires ROCm torch and a visible HIP device\n"
+
+
 def test_parse_variants_accepts_known_names_and_deduplicates():
     assert bench.parse_variants("fused,precomputed,fused,simple") == (
         "fused",

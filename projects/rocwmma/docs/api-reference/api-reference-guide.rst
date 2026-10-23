@@ -39,11 +39,16 @@ Supported RDNA architectures (wave32):
 * gfx1100
 * gfx1101
 * gfx1102
+* gfx1170
+* gfx1171
 * gfx1200
 * gfx1201
 
 .. note::
-    gfx11 refers to gfx1100, gfx1101, and gfx1102.
+    gfx1170 and gfx1171 use ``ROCWMMA_ARCH_GFX12`` for compile-time backend
+    selection, including the packed WMMA register layout. This grouping indicates
+    backend compatibility, not hardware generation. Their individual target macros
+    and architecture IDs remain distinct.
 
 
 Supported data types

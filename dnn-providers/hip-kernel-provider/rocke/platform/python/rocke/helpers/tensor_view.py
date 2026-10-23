@@ -371,6 +371,8 @@ class TensorView:
             return b.global_load_i32(self.base, off)
         if self.dtype.name == "i64":
             return b.global_load_i64(self.base, off)
+        if self.dtype.name == "f64":
+            return b.global_load_f64(self.base, off)
         return b.global_load(self.base, off, dtype=self.dtype)
 
     def store_scalar(
@@ -384,9 +386,11 @@ class TensorView:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
         ``align`` (global address space only) sets the store's byte-alignment
-        hint; the default (``None``) lets the IR builder pick. Pass the element
-        size (2 for f16) to match a hand-rolled ``global_store(..., align=2)``
-        and let the backend coalesce neighbouring f16 stores.
+        hint. The default (``None``) is 8 for f64, its element size, so the
+        store does not depend on the target's unaligned-access mode; for every
+        other dtype the IR builder picks. Pass the element size (2 for f16) to
+        match a hand-rolled ``global_store(..., align=2)`` and let the backend
+        coalesce neighbouring f16 stores.
         """
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
@@ -411,6 +415,9 @@ class TensorView:
                 f"buffer scalar store not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
+        if align is None and self.dtype.name == "f64":
+            # Same 8-byte element alignment as the f64 load_scalar.
+            align = 8
         if align is None:
             b.global_store(self.base, off, value)
         else:
@@ -421,8 +428,8 @@ class TensorView:
     def load_vec(self, b: IRBuilder, indices: Sequence[Value], n: int) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
         ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
-        LDS); buffer ops use ``dwords = n // 2`` for f16 and support
-        ``n in {2, 4, 8}`` accordingly."""
+        LDS) and ``n = 2`` for f64 (global); buffer ops use ``dwords =
+        n // 2`` for f16 and support ``n in {2, 4, 8}`` accordingly."""
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
                 return b.smem_load_vN(self.base, *indices, dtype=self.dtype, n=n)
@@ -447,7 +454,7 @@ class TensorView:
                 f"buffer vec load not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
-        if self.dtype.name in ("f16", "bf16"):
+        if self.dtype.name in ("f16", "bf16", "f64"):
             return b.global_load_vN(self.base, off, self.dtype, n)
         if self.dtype.name == "f32":
             # f32 global vec loads aren't wired through ``global_load_vN``
@@ -879,6 +886,20 @@ class TileWindow:
         self, b: IRBuilder, *local_indices: Value, value: Value, n: int
     ) -> None:
         self.view.store_vec(b, self._global_indices(b, local_indices), value=value, n=n)
+
+    def load_vec_scalars(
+        self, b: IRBuilder, *local_indices: Value, n: int
+    ) -> list[Value]:
+        """Vector load split into ``n`` scalars in the window's own dtype.
+
+        The no-promotion counterpart of :meth:`load_vec_as_f32`, used when
+        compute stays in the storage dtype (f64). ``n == 1`` routes through
+        :meth:`load_scalar`.
+        """
+        if n == 1:
+            return [self.load_scalar(b, *local_indices)]
+        v = self.load_vec(b, *local_indices, n=n)
+        return [b.vec_extract(v, i) for i in range(n)]
 
     # ---- compute-promoting vector ops ----
 

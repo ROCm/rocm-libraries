@@ -2,15 +2,15 @@
 # name: test_gfx942_gg_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_GG_HA_S_UserArgs_MT12-0_lU8I_bJ9bPPtTJMGpg92ERO8WhCLJdLfMu8SY9Fc=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_GG_HA_S_UserArgs_MT12Ey8u_SAqy7c6l6aiAkrGPG6JHAE3I_quhiHRMjfpd70=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_GG_HA_S_UserArgs_MT12Oi2PBcSrSE9Lt3khdy5ss9DZJ80heDMIVg4Tg2bnQ5U=',
       'err': 0,
     }),
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_GG_HA_S_UserArgs_MT12ZXEokB4p4rSzX0QkPHfsGjaByKlE98Yhcl9ajf9OktU=',
-      'err': 0,
-    }),
-    dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_GG_HA_S_UserArgs_MT12wnZdeizRoPdDh1K6m1DHZtzT5nl5VppM8jCorYZ1-6w=',
       'err': 0,
     }),
     dict({

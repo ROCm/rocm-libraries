@@ -1075,15 +1075,45 @@ kd_tree_batch_1_again:
                                     iter->second.begin(), iter->second.end(), bval, lowerB);
                                 bEnd++;
                             }
+                            // The 2-D index carries no batch dimension, so a cell is reached on
+                            // (M, N) alone and may hold no row for this problem's batch count --
+                            // b == 1 against a cell whose rows are all batched leaves bStart ==
+                            // bEnd. There is nothing here to return: the cell's solutions are all
+                            // for a different batch size. Skip it and let the remaining cells, or
+                            // the binary search below, resolve the problem.
+                            if(bStart == bEnd)
+                            {
+                                if(Debug)
+                                    std::cout << "No entry for batch " << b << " in cell "
+                                              << result.node->pt.coord[0] << ", "
+                                              << result.node->pt.coord[1] << std::endl;
+                                continue;
+                            }
+
                             if(Debug)
-                                std::cout << "bStart " << bStart->b << ", bEnd " << bEnd->b
-                                          << " k at bStart " << bStart->k << ", k at bEnd "
-                                          << bEnd->k << std::endl;
+                            {
+                                std::cout << "bStart " << bStart->b << ", bEnd ";
+                                if(bEnd == iter->second.end())
+                                    std::cout << "<end>";
+                                else
+                                    std::cout << bEnd->b;
+                                std::cout << " k at bStart " << bStart->k << ", k at bEnd ";
+                                if(bEnd == iter->second.end())
+                                    std::cout << "<end>";
+                                else
+                                    std::cout << bEnd->k;
+                                std::cout << std::endl;
+                            }
 
                             auto lower = std::lower_bound(bStart, bEnd, k, compK);
                             if(lower == bEnd)
                                 lower--;
-                            auto prev = lower == bStart ? lower : lower--;
+                            // Keep the clamped candidate as prev, step lower back one entry, and
+                            // take whichever k is nearer. The step is guarded against bStart so
+                            // it cannot walk before the first entry of the b-group.
+                            auto prev = lower;
+                            if(lower != bStart)
+                                --lower;
                             if(prev != lower)
                             {
                                 if(std::abs(prev->k - k) < std::abs(lower->k - k))

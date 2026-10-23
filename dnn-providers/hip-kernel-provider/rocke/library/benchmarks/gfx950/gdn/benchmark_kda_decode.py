@@ -35,22 +35,14 @@ import dataclasses as dc
 import statistics
 import sys
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
-import torch
-
-from builders.gfx950.gdn.gdn_decode import (
-    TOL,
-    drain,
-    launch,
-    launcher_for,
-    make_inputs,
-    precompute_kda_log_decay,
-    prepare,
-    ref_fp32,
+from builders.gfx950.gdn.tune import (
+    device_is_visible as tuning_device_is_visible,
+    legal_configs,
+    sweep_batch,
 )
-from builders.gfx950.gdn.tune import legal_configs, sweep_batch
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_grid
 from rocke.runtime.hip_module import get_device_arch
@@ -58,6 +50,31 @@ from rocke.runtime.hip_module import get_device_arch
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 8, 32, 128)
 KNOWN_VARIANTS = ("fused", "precomputed", "simple")
+
+
+def _load_device_backend() -> bool:
+    """Load Torch launch helpers when the benchmark is actually executed."""
+    global TOL, drain, launch, launcher_for, make_inputs
+    global precompute_kda_log_decay, prepare, ref_fp32, torch
+    try:
+        import torch as torch_module
+        from builders.gfx950.gdn.gdn_decode import (
+            TOL,
+            drain,
+            launch,
+            launcher_for,
+            make_inputs,
+            precompute_kda_log_decay,
+            prepare,
+            ref_fp32,
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name == "torch":
+            return False
+        raise
+    torch = torch_module
+    # sweep_batch has its own lazy device backend; initialize it for --sweep-tiles.
+    return tuning_device_is_visible()
 
 
 @dataclass(frozen=True)
@@ -364,6 +381,10 @@ def main(argv: Iterable[str] | None = None) -> int:
         batches = tuple(int(x) for x in args.batches.split(","))
     except ValueError as exc:
         parser.error(str(exc))
+
+    if not _load_device_backend():
+        print("requires ROCm torch and a visible HIP device", file=sys.stderr)
+        return 2
 
     device_arch = get_device_arch()
     if not device_arch or not device_arch.startswith(ARCH):

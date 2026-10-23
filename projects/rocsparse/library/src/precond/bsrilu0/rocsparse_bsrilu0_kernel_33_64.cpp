@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsrilu0_kernel_33_64.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -48,7 +49,8 @@ namespace rocsparse
                                                    rocsparse_index_base idx_base,
                                                    int                  boost,
                                                    double               boost_tol,
-                                                   T                    boost_val)
+                                                   T                    boost_val,
+                                                   J                    idx)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -56,8 +58,14 @@ namespace rocsparse
         constexpr static uint32_t DIMX = BSRDIM;
         constexpr static uint32_t DIMY = BLOCKSIZE / BSRDIM;
 
+        // Keep the row map read in bounds.
+        if(idx >= mb)
+        {
+            return;
+        }
+
         // Current row this wavefront is working on
-        J row = map[blockIdx.x];
+        J row = map[idx];
 
         // Diagonal entry point of the current row
         I row_diag = bsr_diag_ind[row];
@@ -382,21 +390,35 @@ namespace rocsparse
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
-        rocsparse::bsrilu0_device_33_64<BLOCKSIZE, WFSIZE, BBDIM>(
-            dir,
-            mb,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            bsr_dim,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base,
-            enable_boost,
-            boost_tol,
-            boost_val);
+        static_assert(BLOCKSIZE == WFSIZE, "The row loop relies on a one-wavefront block.");
+
+        //
+        // grid.x is clamped, so walk the contiguous chunk of rows grid_x_chunk gives
+        // this block. The block is a single wavefront, so the next row can reuse the
+        // shared arrays without a barrier.
+        //
+        int64_t first, last;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first, last);
+
+        for(int64_t idx = first; idx < last; ++idx)
+        {
+            rocsparse::bsrilu0_device_33_64<BLOCKSIZE, WFSIZE, BBDIM>(
+                dir,
+                mb,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val + batch_index * bsr_val_stride,
+                bsr_diag_ind,
+                bsr_dim,
+                done_array + batch_index * done_array_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                idx_base,
+                enable_boost,
+                boost_tol,
+                boost_val,
+                static_cast<J>(idx));
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -433,7 +455,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_33_64<BLOCKSIZE, WFSIZE, BBDIM>),
-            dim3(A->rows, A->batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, BBDIM), A->batch_count),
             dim3(BBDIM, 64 / BBDIM),
             0,
             handle->stream,

@@ -228,6 +228,7 @@ def _run_one(
     dtype: str,
     pipeline: str,
     epilogue: str,
+    group_merge: int = 1,
     **spec_extra,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one conv kernel.
@@ -236,6 +237,12 @@ def _run_one(
     the spec; they are tagged into the test kernel's name.
 
     Returns ``(passed, reason)`` where ``reason`` is non-empty on skip or failure.
+
+    ``group_merge`` folds ``Gm`` depthwise groups into one GEMM tile. It changes
+    only the *launch geometry* and the emitted kernel -- the reference, the
+    tensors, and the tolerance are untouched, because a merged kernel must
+    produce bit-comparable output to the unmerged one. That is the entire claim
+    this test exists to check.
     """
     import torch
 
@@ -310,6 +317,7 @@ def _run_one(
         epilogue=epilogue,
         groups=shape.groups,
         num_load_waves=_num_load_waves,
+        group_merge=group_merge,
         **spec_extra,
     )
 
@@ -370,9 +378,17 @@ def _run_one(
         rt.free(D_dev)
         return False, f"kernel load failed: {e}"
 
-    gx = (problem.N_gemm + tile_n - 1) // tile_n
-    gy = (problem.M + tile_m - 1) // tile_m
-    grid = (gx, gy, problem.groups)
+    # Launch over the MERGED dims. These are identical to the true dims at
+    # ``group_merge == 1``, so this is not a behaviour change for the existing
+    # cases -- but under merge the true ``N_gemm`` is 1 while the tile covers
+    # ``Gm`` columns, and the true ``groups`` is ``Gm x`` the number of tiles
+    # that exist. Launching off ``problem`` would under-cover N and over-launch
+    # z, i.e. Gm-1 of every Gm outputs never written and Gm CTAs racing on the
+    # ones that are. Host and device must agree here; see the same computation
+    # in ``implicit_gemm_conv_grid``.
+    gx = (spec.grid_N_gemm + tile_n - 1) // tile_n
+    gy = (spec.grid_M + tile_m - 1) // tile_m
+    grid = (gx, gy, spec.grid_groups)
     block = (spec.launch_block_size, 1, 1)
 
     values = ConvArgs.from_problem(
@@ -463,6 +479,152 @@ class TestConvFwdCorrectness(unittest.TestCase):
         if _IS_MFMA:
             self.skipTest("wavelet is WMMA/gfx1250 only")
         self._sweep_pipeline("wavelet")
+
+
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
+
+    ``_run_one`` reports an unbuildable spec as ``(True, "skip (...)")`` so a
+    sweep can step past configs an arch does not support. A test that only
+    asserts ``ok`` therefore passes when every one of its cases was skipped.
+    The wgrad copy of this guard exists because the merged cases there silently
+    skipped their entire ``group_merge > 1`` axis; the same trap is live here,
+    since the gate rejects every merged spec on a ``groups == 1`` shape.
+    """
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+# Depthwise shapes for the merged-groups axis. ``groups == C == K`` is the case
+# the whole feature exists for: the per-group channel count is 1, so unmerged
+# loads and stores are both single-element.
+_DW_SHAPES: List[_Shape] = [
+    _Shape(
+        "dw3x3_N2H14W14C64",
+        N=2,
+        Hi=14,
+        Wi=14,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
+    ),
+    # stride-2: Ho/Wo halved, so the M decode differs from the A-load's Hi/Wi.
+    _Shape(
+        "dw3x3_s2_N1H16W16C32",
+        N=1,
+        Hi=16,
+        Wi=16,
+        C=32,
+        K=32,
+        Y=3,
+        X=3,
+        sH=2,
+        sW=2,
+        pH=1,
+        pW=1,
+        groups=32,
+    ),
+    # Non-square filter with asymmetric pad: catches a (y, x) decode that was
+    # only ever exercised on Y == X.
+    _Shape(
+        "dw5x3_N1H12W12C32",
+        N=1,
+        Hi=12,
+        Wi=12,
+        C=32,
+        K=32,
+        Y=5,
+        X=3,
+        pH=2,
+        pW=1,
+        groups=32,
+    ),
+]
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestConvFwdGroupMergeNumerics(unittest.TestCase):
+    """On-GPU numerics for ``group_merge`` -- the claim the host-side gate cannot make.
+
+    Merging computes ``Gm x`` more MACs than it needs and relies on the diagonal
+    mask on the B load to zero every redundant one. Nothing host-side proves
+    that: the IR shows a wider load fired, not that the extra products cancel.
+    Only comparing against the same reference the unmerged path uses does.
+    """
+
+    def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
+        ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
+        _assert_case_ran(self, ok, f"{shape.id} {dtype} {epilogue} gm={gm}: {why}")
+
+    def test_merged_matches_reference(self):
+        if not _IS_MFMA:
+            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+        ran = 0
+        for shape in _DW_SHAPES:
+            for gm in (2, 4, 8, 16):
+                if shape.groups % gm:
+                    continue
+                for dtype in _DTYPES:
+                    with self.subTest(shape=shape.id, dtype=dtype, gm=gm):
+                        self._check(shape, dtype, "cshuffle", gm)
+                        ran += 1
+        self.assertGreater(ran, 0, "no merged case ran -- the axis is vacuous")
+
+    def test_unmerged_baseline_still_passes(self):
+        # Pins the comparison: if the depthwise shapes themselves were broken,
+        # the merged test above would be comparing two wrongs.
+        if not _IS_MFMA:
+            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+        for shape in _DW_SHAPES:
+            with self.subTest(shape=shape.id):
+                self._check(shape, _DTYPES[0], "cshuffle", 1)
+
+    def test_merged_double_buffered_loops(self):
+        # unroll_k steps the K loop two tiles at a time over the runtime
+        # extent, which under merge is the in-kernel product K_gemm*Gm; an odd
+        # merged tile count (Y*X*Gm = 9*Gm over tile_k = 32 at Gm = 2) leaves
+        # the trailing phase past it, which must read zero.
+        if not _IS_MFMA:
+            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+        shape = _DW_SHAPES[0]
+        for gm in (2, 8):
+            with self.subTest(gm=gm):
+                ok, why = _run_one(
+                    GPU_ARCH,
+                    shape,
+                    _DTYPES[0],
+                    "mem",
+                    "cshuffle",
+                    group_merge=gm,
+                    unroll_k=True,
+                )
+                _assert_case_ran(self, ok, f"{shape.id} unroll_k gm={gm}: {why}")
+
+    def test_merged_direct_epilogue(self):
+        # Every case above stores through cshuffle, because merged kpg derives
+        # vec_c > 1. _run_one pins vector_size_c=1 for the default epilogue,
+        # which reaches the direct epilogue -- its store bound and group base
+        # are merge-routed too.
+        if not _IS_MFMA:
+            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+        for shape in _DW_SHAPES:
+            for gm in (4, 8):
+                if shape.groups % gm:
+                    continue
+                with self.subTest(shape=shape.id, gm=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        _DTYPES[0],
+                        "mem",
+                        "default",
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, f"{shape.id} default gm={gm}: {why}")
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())

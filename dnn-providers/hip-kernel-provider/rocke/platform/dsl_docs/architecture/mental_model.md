@@ -64,7 +64,7 @@ CK Tile is powerful, but several pieces are hard to iterate on in C++:
 - raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 selected by the
   exact gfx backend, not inferred from accelerator family:
   gfx90a/gfx942/gfx950 use `0x00027000`,
-  gfx11-generic/gfx1151/gfx1201 use `0x31014000`, and the gfx1250 backend
+  gfx11-generic/gfx1151/gfx12-generic/gfx1201 use `0x31014000`, and the gfx1250 backend
   currently inherits `0x31014000` as a bring-up placeholder pending
   validation of its 57-bit SRD model);
 - async DRAM-to-LDS via `raw_ptr_buffer_load_lds`;
@@ -192,7 +192,7 @@ The verified test `test_ssa_value_cannot_be_used_as_python_bool` pins this.
 Default target: `amdgcn-amd-amdhsa--gfx950`. `known_arches()` lists the catalog.
 Each `ArchTarget` records one rocKE-validated wavefront mode; it does not imply that
 every target can switch modes. gfx942/gfx950 are wave64-only; gfx1250 is wave32-only.
-gfx1151, gfx11-generic, and gfx1201 also support wave64, but their catalog rows admit
+gfx1151, gfx11-generic, gfx1201, and gfx12-generic also support wave64, but their catalog rows admit
 wave32. Validators accept only catalog atoms, and `backend_for()` selects the ISA
 rules. Atom availability is therefore an exact-gfx property, not a result of wave
 width.

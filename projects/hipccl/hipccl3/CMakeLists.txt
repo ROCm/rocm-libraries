@@ -34,15 +34,14 @@
 cmake_minimum_required(VERSION 3.25.2)
 
 # --- hipCCL umbrella version ---
-# NOTE(hipccl3): placeholder starting point. This versions the hipCCL
-# umbrella only - the CPack package and find_package(hipccl) - NOT the
-# individual components, which keep their own 4.7.0 line (see the Component
-# versioning note below). The intent is for this to eventually track the
-# CCCL version it corresponds to, so that find_package(hipccl 3.0.0) lines up
-# with find_package(CCCL 3.0.0); that change belongs with the CCCL 3.0
-# merge-forward work, not before it.
-set(HIPCCL_VERSION_MAJOR 0)
-set(HIPCCL_VERSION_MINOR 1)
+# NOTE(hipccl3): this versions the hipCCL umbrella only - the CPack package
+# and find_package(hipccl) - NOT the individual components, which keep their
+# own 4.x line (see the Component versioning note below). It tracks the CCCL
+# major line this layout snapshots (3.0, matching HIPCUB_CCCL_VERSION_*), so
+# find_package(hipccl 3.0.0) lines up with find_package(CCCL 3.0.0). hipccl2
+# is the CCCL 2.x snapshot and is versioned 2.8.0.
+set(HIPCCL_VERSION_MAJOR 3)
+set(HIPCCL_VERSION_MINOR 0)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 

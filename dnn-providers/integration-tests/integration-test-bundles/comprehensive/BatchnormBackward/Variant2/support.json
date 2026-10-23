@@ -1,0 +1,89 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "16_3_8_14_14_bfp16_ndhwc",
+          "16_3_8_14_14_fp16_ncdhw",
+          "32_1_14_14_bfp16_nchw",
+          "32_1_14_14_bfp16_nhwc",
+          "32_1_14_14_fp16_nchw",
+          "32_1_14_14_fp16_nhwc",
+          "32_1_14_14_fp32_nchw",
+          "32_1_14_14_fp32_nhwc"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "16_3_8_14_14_bfp16_ndhwc",
+          "16_3_8_14_14_fp16_ncdhw",
+          "1_64_1024_bfp16_nlc",
+          "1_64_1024_fp16_ncl",
+          "32_1_14_14_bfp16_nchw",
+          "32_1_14_14_bfp16_nhwc",
+          "32_1_14_14_fp16_nchw",
+          "32_1_14_14_fp16_nhwc",
+          "32_1_14_14_fp32_nchw",
+          "32_1_14_14_fp32_nhwc"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -12,7 +12,7 @@
  *
  * Binds strictly to rocke/ir.h (frozen IR) and the shared helpers declared in
  * rocke/lower_hip_internal.h (defined in bucket 0). Shared helpers (rocke_h_emit*,
- * rocke_h_name, rocke_h_type_to_hip, rocke_h_hip_scalar, rocke_h_vec_prefix,
+ * rocke_h_name, rocke_h_type_to_hip, rocke_h_require_hip_scalar, rocke_h_vec_prefix,
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
 #include "rocke/dtypes.h"
@@ -126,14 +126,7 @@ static rocke_status_t _op_tile_smem_alloc(rocke_h_lowerer_t* lw, const rocke_op_
         return rocke_h_fail(lw, ROCKE_ERR_TYPE, "tile.smem_alloc: result is not an smem type");
     }
 
-    elem = rocke_h_hip_scalar(st->elem ? st->elem->name : "");
-    if(!elem)
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.smem_alloc: no HIP type for elem '%s'",
-                            st->elem ? st->elem->name : "(null)");
-    }
+    elem = rocke_h_require_hip_scalar(lw, st->elem ? st->elem->name : NULL);
     nice = rocke_h_name(lw, res);
 
     /* dims = "][".join(str(d) for d in st.shape) */

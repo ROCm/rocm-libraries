@@ -34,7 +34,7 @@ happy paths; this module fills the negative-coverage gap.
 
 import pytest
 
-from Tensile.SolutionStructs.Solution import (
+from tensilelite.SolutionStructs.Solution import (
     _deriveAndValidateMXScaleLayoutAndTransport,
 )
 

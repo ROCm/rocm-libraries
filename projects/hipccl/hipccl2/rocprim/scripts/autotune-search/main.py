@@ -277,7 +277,13 @@ def tune_alg(alg_name: str, arch: str, max_samples: int, num_workers: int, size:
                 log.info(f'[{worker_id}] Benchmarking: {result_id}')
                 bench = subprocess.call(
                     [
-                        os.path.join(build_dir, 'benchmark', build_target),
+                        # The target name is unchanged, but the binary is named
+                        # benchmark_rocprim_<name> (see benchmark/CMakeLists.txt).
+                        os.path.join(
+                            build_dir,
+                            'benchmark',
+                            build_target.replace('benchmark_', 'benchmark_rocprim_', 1),
+                        ),
                         '--seed',
                         'random',  # Random is better... I think? Otherwise we might overfit.
                         '--size',

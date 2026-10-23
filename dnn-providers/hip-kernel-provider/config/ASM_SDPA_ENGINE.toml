@@ -41,12 +41,14 @@ reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a r
 # than the forward pass and need the provider-local backward tolerance instead
 # — ported verbatim from the deleted provider-local
 # asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1, fp16: 2.5e-1).
+# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
+# in "_fp16_" keeps it from also matching "bfp16_".
 [[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdBfp16*"]
-atol = 5e-1
-rtol = 5e-1
-
-[[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdFp16*"]
+filters = ["*_SdpaBackward_*.*_fp16_*"]
 atol = 2.5e-1
 rtol = 2.5e-1
+
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*"]
+atol = 5e-1
+rtol = 5e-1

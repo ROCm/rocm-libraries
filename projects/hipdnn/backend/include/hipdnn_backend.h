@@ -189,6 +189,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * the descriptor_type argument with which the descriptor was created using
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
 *
+* @note An engine descriptor validates its graph and engine applicability here, but loads
+* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
+* fetches and validates EngineDetails, including count-only queries. Successful finalization
+* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
+* validation should issue such a query after finalization.
+*
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
 * @retval  HIPDNN_STATUS_SUCCESS           The descriptor was finalized successfully
@@ -209,6 +215,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
+ * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
+ * Retrieval or validation errors are reported by this call, not engine finalization. A failed
+ * metadata load publishes no partial result and can be retried by a later attribute query.
+ *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve
  * @param  [in]   attributeName            The name of the attribute being get from the descriptor
@@ -226,6 +236,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
  *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
+ * @retval  HIPDNN_STATUS_PLUGIN_ERROR      An engine plugin failed to provide valid metadata.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
  *
  */
