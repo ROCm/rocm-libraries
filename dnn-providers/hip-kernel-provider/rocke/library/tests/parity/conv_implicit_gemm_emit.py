@@ -16,6 +16,7 @@ from kernels.common.conv_implicit_gemm import (
 from _emit_common import run_emit
 
 import inspect as _inspect
+from dataclasses import replace
 
 # The filter-window dimensions are spelled R/S in some trees and Y/X in others
 # (same dimensions: filter height/width). Build against whichever this tree's
@@ -32,7 +33,21 @@ def _cp(*, fy: int, fx: int, **kw):
 
 
 def _spec(idx: int):
-    """Return (spec, arch) for config index `idx`."""
+    """Return (spec, arch) for config index `idx`.
+
+    The default epilogue stores one element per lane, so the validator rejects
+    it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
+    leave vector_size_c unset therefore get vector_size_c=1 -- otherwise they
+    do not build and the gate only compares two rejections. Mirrored in
+    make_cfg() of conv_implicit_gemm_emit.c.
+    """
+    spec, arch = _spec_raw(idx)
+    if spec.epilogue == "default" and spec.vector_size_c is None:
+        spec = replace(spec, vector_size_c=1)
+    return spec, arch
+
+
+def _spec_raw(idx: int):
     if idx == 0:
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
@@ -328,6 +343,216 @@ def _spec(idx: int):
                 epilogue="default",
             ),
             "gfx950",
+        )
+    if idx == 17:
+        # Pointwise + cshuffle: the pointwise d_addr closure on the cshuffle
+        # store (idx 5 covers it on the direct store).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=1, fx=1)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+            ),
+            "gfx950",
+        )
+    if idx == 19:
+        # unroll_k: the double-buffered 2x K loop over a runtime extent, and its
+        # "unroll" name tag. K_gemm = 3*3*64 = 576 is 9 tiles of 64 -- odd, so
+        # the last step's second tile reads past K_gemm and must read zero.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                unroll_k=True,
+            ),
+            "gfx950",
+        )
+    if idx == 18:
+        # Rejected by both validators: an explicit vector_size_a/b of 8 on a
+        # 16x32 A tile gives 64 chunks for a 128-thread block, which the loader
+        # cannot split evenly (coalesced_load_reason).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=16,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+                vector_size_a=8,
+                vector_size_b=8,
+            ),
+            "gfx950",
+        )
+    if idx == 20:
+        # gfx942 (CDNA3) async_dma: same shape as config 3, but on an arch whose
+        # buffer_load_lds moves only a dword (not CDNA4's b128) per lane --
+        # covers the arch-width cap in the C++ async-conv port, which previously
+        # had parity coverage only on gfx950. warp_tile is 16x16x16 (not config
+        # 3's 32x32x16): that atom is CDNA4-only, gfx942's MFMA catalog tops
+        # out at 16x16x16 / 32x32x8.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                async_dma=True,
+            ),
+            "gfx942",
+        )
+    # --- depthwise + merged groups -------------------------------------------
+    # Every config below is depthwise (C == K == groups, so cpg == kpg == 1),
+    # which is the only shape group_merge admits. 21 is the unmerged control:
+    # without it the merged configs would have nothing to differ *from*, and the
+    # depthwise path itself carried no structural coverage at all.
+    #
+    # 22-26 span the axes that change emitted IR under merge:
+    #   - the shift/mask width (log2 Gm) of the merged k decode,
+    #   - Gm == groups (one merged group, the grouped decode still engaged),
+    #   - which epilogue consumes the merged dims,
+    #   - and the unroll_k K loop over the in-kernel merged extent.
+    if idx in (21, 22, 23, 24, 25, 26):
+        # groups=64, C=64 -> cpg=1, K=64 -> kpg=1. M = 2*14*14 = 392.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        # 21 is the unmerged depthwise control. 24 keeps the *direct* epilogue by
+        # pinning vector_size_c=1 -- merged kpg would otherwise auto-derive
+        # vec_c > 1, which the validator turns into a cshuffle requirement, so
+        # without the pin no merged config would exercise the direct epilogue.
+        gm = {21: 1, 22: 8, 23: 32, 24: 4, 25: 64, 26: 8}[idx]
+        epi = "default" if idx in (21, 24) else "cshuffle"
+        kw = {"vector_size_c": 1} if idx == 24 else {}
+        if idx == 26:
+            kw["unroll_k"] = True
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue=epi,
+                group_merge=gm,
+                **kw,
+            ),
+            "gfx950",
+        )
+    if idx in (27, 28):
+        # The 1-wide cshuffle store (store_vec == 1): 27 is merged Gm=8 pinned
+        # to vector_size_c=1, 28 the unmerged depthwise control whose open
+        # store width derives from kpg == 1. Same depthwise problem as 21-26.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        kw = {"group_merge": 8, "vector_size_c": 1} if idx == 27 else {}
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                **kw,
+            ),
+            "gfx950",
+        )
+    if idx in (29, 30, 31, 32):
+        # Group merging on WMMA (wave32). Same depthwise problem as 21-28.
+        # 29: gfx1250 mem/cshuffle, 30: gfx1250 wavelet/cshuffle, 31: gfx1250
+        # direct epilogue (vector_size_c pinned to 1), 32: gfx1151 (gfx11
+        # WMMA, 16x16x16 atom) mem/cshuffle.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        gm = {29: 8, 30: 16, 31: 4, 32: 8}[idx]
+        kw = {"vector_size_c": 1} if idx == 31 else {}
+        if idx == 30:
+            kw["num_load_waves"] = 2
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16 if idx == 32 else 32,
+                wave_size=32,
+                pipeline="wavelet" if idx == 30 else "mem",
+                epilogue="default" if idx == 31 else "cshuffle",
+                group_merge=gm,
+                **kw,
+            ),
+            "gfx1151" if idx == 32 else "gfx1250",
+        )
+    if idx in (33, 34, 35):
+        # Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+        # 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+        # depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
+        if idx == 34:
+            p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        else:
+            p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=4)
+        kw = {"num_load_waves": 2} if idx == 35 else {}
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="wavelet" if idx == 35 else "mem",
+                epilogue="default" if idx == 34 else "cshuffle",
+                **kw,
+            ),
+            "gfx1250",
         )
     raise SystemExit(f"unknown config index {idx}")
 

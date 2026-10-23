@@ -90,9 +90,16 @@ a grid that is too small to fully saturate the device.
 The kernel ABI is identical across `split_k=1` and `split_k>1` — no extra
 parameters are required.
 
-**Auto mode (`split_k=-1`):** The split degree can be chosen automatically at
-build time using `select_split_k_wgrad` (the CK formula:
-`floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
+**Auto mode (`split_k=-1`):** The degree, and whether the split reduces
+through the packed atomic or the two-stage f32 workspace, is chosen by
+`kernels.common.conv_split_k.resolve_conv_split_k` -- the one resolver the
+dispatcher, the builders and the benchmark share. On arches with a fitted
+split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
+(degree, reduction) under that model; elsewhere it uses the CK formula
+(`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
+clamped to `[1, wg_K]`). The resolver's `override` argument forces it (the
+benchmark sets it from `ROCKE_CONV_SPLIT_K`); the resolver itself reads no
+environment.
 
 ### Split-K cshuffle atomic epilogue
 
@@ -125,10 +132,11 @@ The cshuffle path avoids this entirely:
   the existing `cpg % 2 == 0` constraint).
 - The caller must zero-initialise `dW` before launch (atomic-adds only).
 
-The benchmark driver (`benchmark_implicit_gemm_conv.py`) was updated to generate
-only `split_k=0` (runtime-atomic) combos by default instead of `(1, 0)`, so the
-`epilogue="cshuffle"` requirement is respected without filtering cshuffle combos
-out of the sweep.
+The split degree is never compiled in: every `split_k > 1` builds the same
+kernel (named `..._spk`), which takes the degree as the `ks_count` / `ks`
+kernargs. The benchmark driver (`benchmark_implicit_gemm_conv.py --split-k 0`)
+therefore compiles one split-K kernel per configuration and times it at every
+degree, instead of compiling one kernel per degree.
 
 ### Pointwise explicit-GEMM fast path
 
@@ -222,8 +230,7 @@ per lane); gfx1250 wave32 admits only the `16x16x32` atom and
 **Not a knob.** The spec field still defaults `False` (existing goldens are
 unmoved); the value is deduced by the keyword-only
 `WgradConvSpec.default_lds_k_outer(*, arch, dtype_a, dtype_b, warp_tile_m,
-warp_tile_n, wave_size=64)`, which both library dispatch
-(`library/dispatch/grouped_convolution.py`) and the sweep driver call.
+warp_tile_n, wave_size=64)`, which the sweep driver calls.
 
 ### Async DMA on the K-outer tile
 
@@ -244,6 +251,137 @@ the K-outer row pad to 0. It remains incompatible with `pipeline="basic"`.
 Both loops that Python-unroll the K iteration — `pipeline="basic"` and
 `async_dma` — are bounded by `_MAX_UNROLLED_K_ITERS` (128). Over the cap the spec
 is rejected; raise `split_k` or `tile_k` rather than the constant.
+
+### Derived LDS row pad (`default_lds_k_pad`)
+
+Left unset, the M-outer tile takes a flat `lds_k_pad` of 8 for every
+`tile_k >= 16`. That is not a derived number: the row stride is `tile_k + pad`,
+and the stride is what decides how many of the 32 banks an operand fetch
+touches. `WgradConvSpec.default_lds_k_pad` derives it instead, from two
+constraints — the `ds_read_b64` fragment must stay 8-byte aligned on every row
+(`pad % 4 == 0`), and the stride in dwords should share as little as possible
+with the 32-dword bank period (`tile_k + pad ≡ 4 mod 8`, giving 16 banks). The
+flat 8 reaches only 8 on the whole `tile_k` ladder. Among the pads satisfying
+both, the smallest wins: the pad is charged per row of *both* operand tiles, so
+a larger one can cost an occupancy step.
+
+It is selection policy, not a body change — the field still defaults to `None`,
+so untouched specs keep their name and golden. Callers that build specs
+(dispatch, the sweep driver, the AOT cache grid) ask it what to pass, the same
+arrangement as `default_lds_k_outer`.
+
+Gated on `arch` rather than on `wave_size` alone: gfx950 is wave64 CDNA too,
+but has 64 banks and a 64-dword `ds_read_b64` period, so the congruence above
+solves for the wrong modulus there. Relying on gfx950 deducing the K-outer
+layout to keep it out is not enough — the AOT cache grid leaves `lds_k_outer`
+at its `False` default for every arch, so gfx950 does reach the M-outer path.
+
+### LDS budget is a max, not a sum
+
+`is_valid_wgrad_spec` charged `ab_lds + c_lds`. The cshuffle C tile is built
+with `no_alias=False` (wgrad never passes the flag), so `make_lds_view` gives it
+`exclusive=False` and it *aliases* onto the A/B bytes rather than adding to
+them. Charging the sum rejected specs that fit — it capped `tile_k` well below
+what the emitted code object actually asks for, and `tile_k` is what amortises
+the K-loop address decode over each LDS row. Now `max(ab_lds, c_lds)`, matching
+what the forward and dgrad validators already did; wgrad was the outlier. The
+one case that would genuinely be additive, `pipeline="wavelet"`, is rejected for
+wgrad earlier in the same function.
+
+### Stream-K (`streamk`, `streamk_reduction`, `streamk_ctas`)
+
+Split-K cuts `K_wg` into `split_k` equal slices and gives every output tile the
+same number of them. That is the right shape when the tiles outnumber the CUs,
+but a wgrad is usually the opposite: `wg_M x wg_N` is filter-sized while
+`K_wg = N*Ho*Wo` is huge, so the tile count can be a handful and the leftover
+CUs idle no matter how the slices are cut.
+
+Stream-K (CK Tile's `StreamKTilePartitioner`) balances *MAC iterations* instead.
+Output tiles that divide the CTA pool evenly run data-parallel — one CTA, the
+whole K loop, no reduction at all — and only the remainder is spread over
+`streamk_ctas` stream-K CTAs, each owning a contiguous, balanced range of
+iterations that may straddle tile boundaries. The partition is resolved
+host-side (`rocke.helpers.streamk.StreamKIterPartition`, reached through
+`ConvArgs.streamk_partition`) and passed in as the `sk_*` kernargs; the device
+only maps `blockIdx.x` onto its iteration range. Like the split-K degree, the
+CTA pool is a launch parameter rather than a build-time constant, so one AOT
+binary serves any shape and any pool.
+
+`streamk="dp_sk"` launches `dp_tiles + sk_ctas` CTAs. `streamk="persistent"`
+launches only the pool: each CTA round-robins the data-parallel tiles
+(`tile = cta + t*pool`, CK's static `StreamKDispatch`, no work queue) and then
+runs its stream-K range. Both walk their work with one bounded `scf.for` whose
+trip count is CTA-uniform, so the barriers inside the GEMM body stay uniform and
+the body is emitted once.
+
+`streamk_reduction` picks how the CTAs sharing a tile combine partial sums:
+
+| | Determinism | dW zeroing | Workspace |
+|---|---|---|---|
+| `linear` | yes | not needed | flags + one f32 tile per SK CTA |
+| `tree` | yes | not needed | same |
+| `atomic` | no | required | none (fp32 dW only) |
+| `workspace` | no | not needed | the two-stage f32 scratch + Stage 2 reduce |
+
+`linear` and `tree` hand partials over explicitly: a non-owner stores its tile
+to its own slot, issues a release fence and sets a per-wave flag; the consumer
+spins on an acquire load of that flag and then adds. Both are deterministic
+because the fold order is fixed by the partition, not by arrival. `linear` has
+the owner walk its later contributors in turn; `tree` fans in pairwise over
+`ceil(log2)` rounds. The flag protocol is three core IR ops (`memref.fence`,
+`memref.global_flag_store`, `memref.global_flag_wait_eq`) rather than raw cache
+hints, so the AMDGPU memory model supplies the L2 writeback/invalidate that
+makes a partial visible across XCDs.
+
+Size the buffer with `wgrad_streamk_workspace_nbytes`; split it with
+`wgrad_streamk_workspace_layout` (`sk_flags` at the base, `sk_partials` at
+`base + flags_bytes`). **Only the flag region has to be zeroed before each
+launch** — partials are always written before they are read.
+
+Constraints, all enforced by `validate()` / `is_valid_wgrad_spec` in both
+engines: gfx942/gfx950 (MFMA wave64) only; `split_k=1` and no `two_stage`
+(stream-K owns the K range); `epilogue="default"`; no `async_dma` / `unroll_k`
+(they pipeline the K loop across work items, which stream-K re-enters per tile); no `chiplet_swizzle` or
+`group_merge` (both remap tiles, which stream-K owns). Conv groups are folded
+into GEMM-M instead of riding `block_id_z`: `m_tiles = ceil(wg_M/tile_m) *
+groups`, decoded group-fastest. Defining the tile count per group makes the fold
+exact for any `wg_M`, avoiding CK's `GemmM % MPerBlock` caveat.
+
+`streamk_ctas` sizes the host partition only; `-1` resolves per reduction
+(`wgrad_streamk_default_ctas`):
+
+* `workspace` / `atomic` never wait on another CTA, so their pool is sized for
+  throughput: four CTAs per CU (`_STREAMK_CTAS_PER_CU`). Each resident CTA
+  streams its own K range, so this counts independent reduction streams per CU,
+  and is counted in CTAs rather than waves: a wider CTA adds no streams. One
+  CTA per CU leaves a single stream per CU with nothing to hide memory latency
+  behind, which is what made a CU-sized pool lose to split-K on most shapes;
+  past four the CTAs mostly contend for the same caches.
+* `linear` / `tree` stay at one CTA per CU, because these fixups get slower
+  with a larger pool: the tile owner folds every additional contributor. The
+  pool does not have to be resident at once. A CTA waits only on CTAs with
+  higher indices and publishes its own partial before it waits, so with
+  workgroups dispatched in ascending order only the CTAs of the one tile that
+  straddles the dispatch front (its owner for `linear`, about one per round
+  for `tree`) can wait on a CTA that has not started yet.
+
+Not selected by the grouped-convolution dispatcher: `ConvGroupedRequest` has
+no stream-K field and the dispatcher only builds the grid-per-tile kernels, so
+stream-K is reached by building a `WgradConvSpec` with `streamk` set. To
+measure it, use the implicit-GEMM sweep
+(`library/benchmarks/common/benchmark_implicit_gemm_conv.py`, also driven by
+`benchmark_conv_compare.py`) with `--direction wgrad --streamk {dp_sk,persistent,all}`,
+optionally narrowed with `--streamk-reductions` and pinned to a pool with
+`--streamk-ctas` (default `-1`, the per-reduction pool above). The JIT sweep then
+adds a stream-K leg, one kernel per geometry x pipeline x mode x reduction
+(`atomic` only for fp32 dW); `--compile-all --streamk ...` adds stream-K kernels
+to the AOT cache (`kernel_sweep.py`, opt-in) and `--run-from-cache --streamk ...`
+runs the cached ones. The cache keeps a subset: the widest vector width of the
+dtype without `tree`, plus a scalar `dp_sk` `tree`/`workspace` slice on wide
+tiles for large-filter depthwise layers; other narrow-channel shapes fall to the
+split-K kernels. Every
+launch follows the zeroing contract above, and `workspace` launches are timed
+together with their Stage 2 reduce.
 
 ## Next steps
 

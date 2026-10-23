@@ -108,6 +108,34 @@ inline const char* toString(FailureOrigin origin)
     }
 }
 
+/// The oracle the engine's outputs were compared against. NONE when nothing was
+/// compared: a skip, a failure before the comparison, or a bundle whose
+/// enforcement_level stops short of comparing.
+enum class Verifier : uint8_t
+{
+    NONE,
+    GOLDEN,
+    GPU_REFERENCE,
+    CPU_REFERENCE,
+};
+
+inline const char* toString(Verifier verifier)
+{
+    switch(verifier)
+    {
+    case Verifier::NONE:
+        return "none";
+    case Verifier::GOLDEN:
+        return "golden";
+    case Verifier::GPU_REFERENCE:
+        return "gpu_ref";
+    case Verifier::CPU_REFERENCE:
+        return "cpu_ref";
+    default:
+        return "unknown";
+    }
+}
+
 /// What one test body did, as a value.
 ///
 /// Everything under TestBody() returns one of these instead of calling GTEST_SKIP()
@@ -132,27 +160,35 @@ struct VerificationOutcome
     /// pass this harness exists to rule out. Only alreadyReported() sets it.
     bool alreadyReported = false;
 
+    /// Which oracle graded the outputs, pass or fail. Only a comparison sets it.
+    Verifier verifier = Verifier::NONE;
+
     static VerificationOutcome passed(VerificationDepth depth)
     {
-        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false};
+        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false, Verifier::NONE};
     }
 
     static VerificationOutcome skipped(VerificationDepth depth, std::string message)
     {
-        return {OutcomeStatus::SKIPPED, depth, FailureOrigin::NONE, std::move(message), false};
+        return {OutcomeStatus::SKIPPED,
+                depth,
+                FailureOrigin::NONE,
+                std::move(message),
+                false,
+                Verifier::NONE};
     }
 
     static VerificationOutcome
         failed(VerificationDepth depth, FailureOrigin origin, std::string message)
     {
-        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false};
+        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false, Verifier::NONE};
     }
 
     /// A failure whose detail is already on the record. The caller MUST have issued
     /// at least one gtest failure before building this.
     static VerificationOutcome alreadyReportedFailure(VerificationDepth depth, FailureOrigin origin)
     {
-        return {OutcomeStatus::FAILED, depth, origin, {}, true};
+        return {OutcomeStatus::FAILED, depth, origin, {}, true, Verifier::NONE};
     }
 };
 

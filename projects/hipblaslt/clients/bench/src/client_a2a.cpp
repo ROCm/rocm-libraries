@@ -149,7 +149,7 @@ try
             {
                 launch(0);
                 if(hipStreamSynchronize(res.stream) != hipSuccess
-                   || !check_recv(env, arg, res, hostGold, hostLanded))
+                   || !check_recv(env, arg, res, 0, hostGold, hostLanded))
                     verified = false;
             }
 
@@ -167,14 +167,19 @@ try
                 launch(0);
 
         hipblaslt_bench::TimingResult result;
-        hipblaslt_bench::run_measurement(
+        if(cfg.adaptive)
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(cfg); !err.empty())
+                hipblaslt_cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
+        const bool measured = hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
             launch, cfg, nullptr, nullptr, res.stream, result, {}, agreement);
 
-        const bool ok = lastStatus == HIPBLAS_STATUS_SUCCESS;
+        const bool ok = measured && lastStatus == HIPBLAS_STATUS_SUCCESS;
         if(!agreement.agree(ok, std::logical_and<>{}))
         {
             if(ok)
                 hipblaslt_cerr << "error: peer rank failed\n";
+            else if(!measured)
+                hipblaslt_cerr << "error: the matmul could not be timed\n";
             else
                 hipblaslt_cerr << "error: matmul -> " << int(lastStatus) << "\n";
             return 1;
@@ -203,7 +208,7 @@ try
         bool ok = hipStreamSynchronize(res.stream) == hipSuccess
                   && lastStatus == HIPBLAS_STATUS_SUCCESS;
         if(ok && (arg.norm_check || arg.allclose_check)
-           && !check_recv(env, arg, res, hostGold, hostLanded))
+           && !check_recv(env, arg, res, 0, hostGold, hostLanded))
             ok = false;
 
         if(!agreement.agree(ok, std::logical_and<>{}))

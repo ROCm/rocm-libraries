@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import generic_targets as gtmod
+
 #: KMD field types the loader accepts (``DescriptorLoader.hpp``'s ``MetadataField``).
 KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list")
 
@@ -14,7 +16,8 @@ KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list"
 #: ``kernel_source`` key names, the ``kind`` vocabulary and the consumer.
 #: ``direct_load`` is read by ``DescriptorLoader.hpp`` from the installed
 #: ``test_descriptors/`` tree; ``packaged`` is read by ``hkp_pack``, which
-#: compiles the kernel and rewrites the descriptor to ``kind: kpack``.
+#: compiles ``hip``/``rocke`` kernels, packs an ``hsaco`` code object as-is
+#: without compiling, and rewrites the descriptor to ``kind: kpack``.
 DIALECT_DIRECT_LOAD = "direct_load"
 DIALECT_PACKAGED = "packaged"
 DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
@@ -38,6 +41,23 @@ KERNEL_SOURCE_KIND_HIP = "hip"
 KERNEL_SOURCE_KIND_ROCKE = "rocke"
 KERNEL_SOURCE_KIND_HSACO = "hsaco"
 
+#: ``rocke`` ``kernel_source.target`` values, matching ``hkp_pack``'s
+#: ``ROCKE_TARGETS`` exactly: compile for the shard arch itself, or for its LLVM
+#: generic processor.
+ROCKE_TARGET_NATIVE = "native"
+ROCKE_TARGET_GENERIC = "generic"
+ROCKE_TARGETS: tuple[str, ...] = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
+
+#: A launch name, and a rocKE ``role``: ``rocke.helpers.KernelModule`` roles and
+#: the packer's ``sources`` keys share this rule (RFC 0017 §15.1).
+LAUNCH_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+#: A multi-launch kernel needs at least this many launches: one launch is
+#: spelled ``kernel_source``, and two spellings of one fact drift.
+MIN_LAUNCHES = 2
+#: The UKD version a plain UKD carries, and the one ``sources`` needs.
+UKD_VERSION_BASE = "1.0"
+UKD_VERSION_SOURCES = "1.1"
+
 #: Every kind either dialect's format accepts, emittable here or not.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
@@ -52,7 +72,11 @@ KERNEL_SOURCE_KINDS: tuple[str, ...] = (
 #: Kinds each dialect emits. Anything else is a ConfigError naming the dialect.
 EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
     DIALECT_DIRECT_LOAD: (KERNEL_SOURCE_KIND_EMBEDDED,),
-    DIALECT_PACKAGED: (KERNEL_SOURCE_KIND_HIP, KERNEL_SOURCE_KIND_ROCKE),
+    DIALECT_PACKAGED: (
+        KERNEL_SOURCE_KIND_HIP,
+        KERNEL_SOURCE_KIND_ROCKE,
+        KERNEL_SOURCE_KIND_HSACO,
+    ),
 }
 
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
@@ -88,6 +112,11 @@ PATH_STEM_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 #: (``gfx94``) passes this shape check and only trips pre-mint check #5.
 ARCH_BASE_ID_PATTERN = re.compile(r"^gfx[a-z0-9_-]+$")
 
+#: Arch bucket for a kernel that names no architecture and sits in a pack that names
+#: none: it ships on every arch its pack target carries. One spelling, so the budget
+#: and reduction accounting cannot split across two.
+EVERY_ARCH = "every arch"
+
 #: Known real base target ids, for pre-mint check #5's warning. Unrecognized
 #: is a warning, never an error, so a missing entry cannot block a new arch.
 KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
@@ -104,8 +133,15 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
         "gfx1100",
         "gfx1101",
         "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
         "gfx1200",
         "gfx1201",
+        "gfx1250",
+        "gfx1250-strict",
     }
 )
 
@@ -189,12 +225,89 @@ class KernelSource:
     #: ``hkp_pack`` hydrates it with ``Spec(**fields)``, so every non-defaulted
     #: field must be present.
     spec: dict = field(default_factory=dict)
+    #: ``packaged`` / ``rocke``: the processor ``hkp_pack`` compiles for, one
+    #: of `ROCKE_TARGETS`. ``native`` is the shard arch; ``generic`` is the shard
+    #: arch's LLVM generic processor (``gfx11-generic`` ...), so one object
+    #: serves the family. Empty omits the key, which ``hkp_pack`` reads as
+    #: ``native``.
+    target: str = ""
+    #: ``packaged`` / ``hsaco``: a prebuilt code object's path relative to the
+    #: descriptor naming it, and its kernel symbol.
+    file: str = ""
+    symbol: str = ""
+    #: ``packaged`` / ``rocke``, authored-only: the name of one of the builder
+    #: module's kernels. Empty takes the builder's primary kernel. Only a launch
+    #: entry carries it; a single-launch ``kernel_source`` never does.
+    role: str = ""
+    #: ``packaged`` / ``rocke``: the launches of a multi-stage kernel, each a
+    #: FULL ``rocke`` source (this source with the launch's overrides merged
+    #: on), keyed by launch name. Non-empty makes this source a template: the
+    #: UKD carries ``sources`` in place of ``kernel_source`` and this source's
+    #: own fields are never emitted. A launch carries no launches of its own.
+    launches: dict = field(default_factory=dict)
+
+    def descriptor_fields(self) -> dict:
+        """The UKD key this source is written under: ``kernel_source``, or the
+        ``sources`` map of a multi-launch kernel. Every writer and every
+        identity comparison goes through here, so none reads one spelling and
+        ignores the other."""
+        if self.launches:
+            return {
+                "sources": {
+                    name: launch.as_document() for name, launch in self.launches.items()
+                }
+            }
+        return {"kernel_source": self.as_document()}
+
+    @property
+    def ukd_version(self) -> str:
+        """``sources`` needs UKD 1.1; every other UKD stays at 1.0."""
+        return UKD_VERSION_SOURCES if self.launches else UKD_VERSION_BASE
+
+    def authored_document(self) -> dict:
+        """The ``kernel_source`` mapping a config would state to get this source
+        back: this source's own object plus, for a multi-launch source, each
+        launch as the override it needs, i.e. only the keys that differ from this
+        source. A role-only launch is written as ``{role: ...}``, so it keeps
+        inheriting each variant's spec; writing its spec in full would make it a
+        static override that differs per kernel and cannot be factorised."""
+        document = self._own_document()
+        if self.launches:
+            document["launches"] = {
+                name: self._launch_override(name, launch)
+                for name, launch in self.launches.items()
+            }
+        return document
+
+    def _launch_override(self, name: str, launch: "KernelSource") -> dict:
+        base = self._own_document()
+        own = launch.as_document()
+        dropped = sorted(set(base) - set(own))
+        if dropped:
+            raise ValueError(
+                f"launch {name!r} drops {dropped} from its base kernel_source; an "
+                f"override can only set a key, not remove one"
+            )
+        # An override never states `kind`: a launch is a rocke source.
+        return {k: v for k, v in own.items() if k != "kind" and base.get(k) != v}
 
     def as_document(self) -> dict:
-        """The ``kernel_source`` JSON object for this kind, and nothing more.
+        """The single ``kernel_source`` JSON object for this source. A
+        multi-launch source has none: it is written as a ``sources`` map, so
+        this refuses rather than emit the template's own fields as if they were
+        a kernel (use `descriptor_fields`)."""
+        if self.launches:
+            raise ValueError(
+                f"a kernel_source with launches {sorted(self.launches)} has no "
+                f"single kernel_source object; it is written as a 'sources' map "
+                f"(KernelSource.descriptor_fields)"
+            )
+        return self._own_document()
 
-        The runtime loader hard-fails an unknown key and ``hkp_pack`` validates
-        a closed field set per kind.
+    def _own_document(self) -> dict:
+        """This source's own fields for its kind, and nothing more. The runtime
+        loader hard-fails an unknown key and ``hkp_pack`` validates a closed
+        field set per kind.
         """
         if self.kind == KERNEL_SOURCE_KIND_EMBEDDED:
             return {
@@ -210,12 +323,19 @@ class KernelSource:
                 "build": self.build,
             }
         if self.kind == KERNEL_SOURCE_KIND_ROCKE:
-            return {
+            document = {
                 "kind": self.kind,
                 "source": self.source,
                 "builder": self.builder,
-                "spec": self.spec,
             }
+            if self.target:
+                document["target"] = self.target
+            document["spec"] = self.spec
+            if self.role:
+                document["role"] = self.role
+            return document
+        if self.kind == KERNEL_SOURCE_KIND_HSACO:
+            return {"kind": self.kind, "file": self.file, "symbol": self.symbol}
         raise ValueError(
             f"kernel_source kind '{self.kind}' has no emitter; the config "
             f"loader should have rejected it before generation"
@@ -236,6 +356,8 @@ class KernelSpec:
     priority: int = 0
     #: Empty inherits the pack's arch, per the KDP/UKD convention.
     arch: list[str] = field(default_factory=list)
+    #: The cell's declared default variant; never emitted into a descriptor.
+    default: bool = False
 
 
 @dataclass
@@ -284,6 +406,9 @@ class EngineSpec:
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model.
     heuristic: str = "native"
+    #: Optional IngestorPacks.hpp engine-name constant used by the generated
+    #: census test; the descriptor still carries ``name`` above.
+    census_name_symbol: str | None = None
 
     @property
     def namespace(self) -> str:
@@ -339,10 +464,28 @@ class IngestorConfig:
     #: the consuming binary's choice.
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
+    #: The ``reduction`` block, for selection tooling; never emitted.
+    reduction: dict = field(default_factory=dict)
 
     @property
     def is_packaged(self) -> bool:
         return self.dialect == DIALECT_PACKAGED
+
+    @property
+    def launch_names(self) -> tuple[str, ...]:
+        """The launch names the engine's dispatch handler declares, sorted; empty
+        for a single-launch engine. The loader requires every kernel to name the
+        same set (``_check_launch_names_agree``), so this is each kernel's set."""
+        return tuple(
+            sorted(
+                {
+                    name
+                    for pack in self.packs
+                    for kernel in pack.kernels
+                    for name in kernel.kernel_source.launches
+                }
+            )
+        )
 
     @property
     def is_multi_pack(self) -> bool:
@@ -374,9 +517,13 @@ class IngestorConfig:
     def device_fixture_arch(self) -> str:
         """Architecture named by the emitted matcher-test device fixture: the
         first pack's first arch, or `DEFAULT_FIXTURE_ARCH` when the config
-        restricts none."""
+        restricts none; a generic stands for its first member."""
         first_pack_arch = self.packs[0].arch if self.packs else []
-        return first_pack_arch[0] if first_pack_arch else DEFAULT_FIXTURE_ARCH
+        if not first_pack_arch:
+            return DEFAULT_FIXTURE_ARCH
+        first = first_pack_arch[0]
+        table = gtmod.default_table()
+        return table.members(first)[0] if table.has(first) else first
 
     @property
     def device_fixture_wave_size(self) -> int:

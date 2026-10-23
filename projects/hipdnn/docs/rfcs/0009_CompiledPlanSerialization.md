@@ -1,14 +1,10 @@
 # Execution Plan Serialization
 
 - Contributors: hipDNN maintainers
-- Status: Implemented initial slice
-- Scope: frontend, backend, engine plugin API, fusilli sample implementation
-
-> **Status note:** The fusilli sample implementation referenced throughout
-> this RFC was removed from rocm-libraries / TheRock after the design was
-> implemented. The serialization envelope and plugin-payload contract
-> described here remain authoritative; the fusilli code blocks are
-> retained as the original worked example.
+- **Status**: Implemented
+- **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. No shipped provider exports the plugin hooks; only the hipDNN test plugins implement them.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- Scope: frontend, backend, engine plugin API, test plugin implementation
 
 ## Summary
 
@@ -90,6 +86,10 @@ Serialization follows the normal two-call size-query pattern. Deserialization us
 `hipdnnHandle_t` to find the engine plugin resource manager, restore the plugin execution context,
 and return a finalized execution plan descriptor.
 
+`hipdnnBackendCreateAndDeserializeExecutionPlan_ext()` also accepts a graph-and-plan container
+blob made by `hipdnnBackendGetSerializedBinaryGraphAndPlan_ext()` (#7975). It extracts the embedded
+execution plan. A graph-only container fails with `HIPDNN_STATUS_BAD_PARAM`.
+
 ## Envelope Format
 
 The hipDNN envelope is a FlatBuffer schema in `flatbuffers_sdk/schemas/execution_plan.fbs`:
@@ -103,6 +103,10 @@ table SerializedExecutionPlan {
     workspace_size: int64;
     tensor_uids: [int64];
     plugin_payload: [ubyte];
+    is_override_shape_enabled: bool = false;
+    // Required byte alignment of each tensor's device pointer. Parallel to
+    // tensor_uids: tensor_alignments[i] applies to tensor_uids[i].
+    tensor_alignments: [int64];
 }
 
 root_type SerializedExecutionPlan;
@@ -110,34 +114,38 @@ root_type SerializedExecutionPlan;
 
 Field ownership:
 
-- `version`: hipDNN envelope version.
+- `version`: hipDNN envelope version. The current version is 2 (`PLAN_SERIALIZATION_VERSION` in
+  `backend/src/descriptors/ExecutionPlanDescriptor.cpp`). Version 1 plans have no
+  `tensor_alignments` and still deserialize.
 - `engine_id`: selected backend engine ID.
 - `workspace_size`: workspace size reported for the compiled plan.
 - `tensor_uids`: hipDNN-level tensor UID metadata needed for UID-based execution.
 - `plugin_payload`: opaque plugin-specific execution context bytes.
+- `is_override_shape_enabled`: whether the plan was built with override shapes enabled (RFC 0008).
+- `tensor_alignments`: required device-pointer byte alignment per tensor, parallel to `tensor_uids`.
 
 There is deliberately no operation graph in the envelope. A backend may not use graph execution, and
 plugins that need graph-derived data must store it in their own payload.
 
 ## Plugin API
 
-Engine plugins may implement these optional C API entry points:
+Engine plugins may implement these optional C API entry points
+(`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`):
 
 ```cpp
-hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext_ext(
+hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
     hipdnnEnginePluginHandle_t handle,
-    hipdnnEnginePluginExecutionContext_t executionContext,
-    const hipdnnPluginConstData_t* engineConfig,
-    hipdnnPluginConstData_t* serializedContext);
+    hipdnnEnginePluginExecutionContext_t execution_context,
+    hipdnnPluginConstData_t* serialized_context);
 
-hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext_ext(
+hipdnnPluginStatus_t hipdnnEnginePluginDestroySerializedExecutionContext(
     hipdnnEnginePluginHandle_t handle,
-    hipdnnPluginConstData_t* serializedContext);
+    hipdnnPluginConstData_t* serialized_context);
 
-hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized_ext(
+hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
     hipdnnEnginePluginHandle_t handle,
-    const hipdnnPluginConstData_t* serializedContext,
-    hipdnnEnginePluginExecutionContext_t* executionContext);
+    const hipdnnPluginConstData_t* serialized_context,
+    hipdnnEnginePluginExecutionContext_t* execution_context);
 ```
 
 These functions are optional. Plugins that do not export them still load normally, but compiled-plan
@@ -145,7 +153,7 @@ serialization returns `HIPDNN_STATUS_NOT_SUPPORTED` for plans using those plugin
 
 The plugin payload contract is byte-level:
 
-- The plugin allocates and owns `serializedContext` for the duration of the serialize call.
+- The plugin allocates and owns `serialized_context` for the duration of the serialize call.
 - hipDNN copies the bytes into `plugin_payload`.
 - hipDNN calls the plugin destroy hook after copying.
 - hipDNN passes the same bytes back during deserialization.
@@ -163,45 +171,24 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 
 - Engine ID.
 - Workspace size.
-- Tensor UIDs.
+- Tensor UIDs and tensor alignments.
+- Override-shape-enabled flag.
 - Plugin resource manager.
 - Plugin execution context wrapper.
 
 Execution reads the engine ID and execution context directly from the execution plan descriptor.
 This is what makes a graph-less restored plan executable.
 
-## Fusilli Implementation
+## Plugin Implementations
 
-The fusilli provider implements the optional plugin hooks as the sample backend. Its
-`plugin_payload` is fusilli-owned and starts with a small fusilli compatibility header:
+No provider in `dnn-providers/` exports the serialization hooks. The hipDNN test plugins implement
+them in `tests/test_plugins/TestPluginCommon.hpp`. Their `plugin_payload` is a fixed one-byte
+placeholder. The test plugins also advertise
+`HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`.
 
-```text
-magic: "FUSPLAN\0"
-format_major: uint16
-format_minor: uint16
-payload_kind: uint32
-header_size: uint32
-payload_bytes: uint8[]
-```
-
-The initial `payload_kind` stores the hipDNN graph FlatBuffer bytes needed to reconstruct and
-compile a fusilli execution context. Fusilli rejects payloads with an unknown magic value, an
-unsupported major format version, an unsupported payload kind, or an empty/malformed payload before
-attempting graph import. This keeps the hipDNN envelope byte-level while giving fusilli an explicit
-breaking-change boundary for future native compiled-artifact serialization.
-
-The sample at
-`dnn-providers/fusilli-provider/test/integration/matmul/serialized_matmul.cpp`:
-
-1. Builds a simple matmul graph.
-2. Builds the compiled execution plan.
-3. Serializes the compiled plan.
-4. Deserializes it into a fresh frontend `Graph`.
-5. Executes with UID bindings.
-6. Validates the output against the CPU reference.
-
-This sample demonstrates the intended contract: the original graph performs compilation; the
-restored graph owns only an executable compiled plan.
+Round-trip coverage lives in `frontend/tests/TestGraph.cpp`,
+`tests/frontend/IntegrationOverrideExecute.cpp`, and
+`backend/tests/TestGraphAndPlanSerializationApi.cpp`.
 
 ## Current Limitations
 
@@ -210,7 +197,7 @@ restored graph owns only an executable compiled plan.
 2. Deserialized execution-plan attribute semantics are only partially defined. In particular,
    `HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG` may not be reconstructable for graph-less plans.
 3. The envelope does not include plugin identity. The current deserialization path relies on the
-   handle's loaded engine plugin resource manager and the serialized engine ID/config.
+   handle's loaded engine plugin resource manager and the serialized engine ID.
 
 ## Proposed Improvements
 
@@ -233,7 +220,7 @@ unsupported or not-available status.
 ### Add File-Level Compatibility Tests
 
 Add integration tests that persist compiled-plan files across process boundaries and plugin
-versions once the fusilli payload compatibility policy is stable. The current unit coverage checks
+versions once a provider implements the serialization hooks. The current unit coverage checks
 malformed envelopes, missing and empty required fields, invalid workspace metadata, unsupported
 plugin serialization, and plugin callback failures.
 
@@ -242,11 +229,6 @@ plugin serialization, and plugin callback failures.
 Consider adding a small hipDNN-owned plugin identity section in a future envelope version. It should
 be used only for routing and diagnostics, not for structuring the plugin payload. A conservative
 first version could include plugin name, plugin version, and engine ID compatibility expectations.
-
-### Improve Fusilli Payload Stability
-
-The fusilli sample should eventually serialize a stable compiled artifact when fusilli exposes one.
-Until then, fusilli owns compatibility for its payload bytes and may reject incompatible payloads.
 
 ## Non-Goals
 

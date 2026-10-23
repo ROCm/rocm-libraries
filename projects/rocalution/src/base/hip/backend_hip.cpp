@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,6 +90,10 @@ namespace rocalution
         _get_backend_descriptor()->HIP_stream_current
             = _get_backend_descriptor()->HIP_stream_default;
 
+        // HIP_dev may already be set by set_device_rocalution(), so it cannot be used
+        // to tell whether the handles below have been created
+        bool handles_created = false;
+
         int num_dev;
         hip_status_t = hipGetDeviceCount(&num_dev);
 
@@ -138,12 +142,18 @@ namespace rocalution
 
                 if(hip_status_t == hipSuccess)
                 {
-                    if((rocblas_create_handle(static_cast<rocblas_handle*>(
-                            _get_backend_descriptor()->ROC_blas_handle))
-                        == rocblas_status_success)
-                       && (rocsparse_create_handle(static_cast<rocsparse_handle*>(
-                               _get_backend_descriptor()->ROC_sparse_handle))
-                           == rocsparse_status_success)
+                    rocblas_handle* blas_handle
+                        = static_cast<rocblas_handle*>(_get_backend_descriptor()->ROC_blas_handle);
+                    rocsparse_handle* sparse_handle = static_cast<rocsparse_handle*>(
+                        _get_backend_descriptor()->ROC_sparse_handle);
+
+                    bool blas_created
+                        = (rocblas_create_handle(blas_handle) == rocblas_status_success);
+                    bool sparse_created
+                        = blas_created
+                          && (rocsparse_create_handle(sparse_handle) == rocsparse_status_success);
+
+                    if(sparse_created
 #ifdef SUPPORT_MULTINODE
                        && (hipStreamCreate(static_cast<hipStream_t*>(
                                _get_backend_descriptor()->HIP_stream_interior))
@@ -155,10 +165,21 @@ namespace rocalution
                     )
                     {
                         _get_backend_descriptor()->HIP_dev = dev;
+                        handles_created                    = true;
                         break;
                     }
                     else
                     {
+                        if(sparse_created)
+                        {
+                            rocsparse_destroy_handle(*sparse_handle);
+                        }
+
+                        if(blas_created)
+                        {
+                            rocblas_destroy_handle(*blas_handle);
+                        }
+
                         LOG_INFO("HIP device "
                                  << dev
                                  << " cannot create rocBLAS/rocSPARSE context and HIP streams");
@@ -167,15 +188,14 @@ namespace rocalution
             }
         }
 
-        if(_get_backend_descriptor()->HIP_dev == -1)
+        if(handles_created == false)
         {
             LOG_INFO("HIP and rocBLAS/rocSPARSE have NOT been initialized!");
             return false;
         }
 
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
 
         if(dev_prop.major < 3)
         {
@@ -258,27 +278,46 @@ namespace rocalution
     void rocalution_info_hip(const struct Rocalution_Backend_Descriptor& backend_descriptor)
     {
         // Print rocblas version
-        char rocblas_ver[64];
-        rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
+        char           rocblas_ver[64] = {};
+        rocblas_status blas_ver_status
+            = rocblas_get_version_string(rocblas_ver, sizeof(rocblas_ver));
 
-        LOG_INFO("rocBLAS ver " << rocblas_ver);
+        if(blas_ver_status == rocblas_status_success)
+        {
+            LOG_INFO("rocBLAS ver " << rocblas_ver);
+        }
+        else
+        {
+            LOG_INFO("rocBLAS ver unknown");
+        }
 
         // Print rocsparse versions
-        int rocsparse_ver;
-        rocsparse_get_version(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              &rocsparse_ver);
+        int              rocsparse_ver     = 0;
+        rocsparse_status sparse_ver_status = rocsparse_get_version(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), &rocsparse_ver);
 
-        char rocsparse_rev[64];
-        rocsparse_get_git_rev(ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle),
-                              rocsparse_rev);
+        char             rocsparse_rev[64] = {};
+        rocsparse_status sparse_rev_status = rocsparse_get_git_rev(
+            ROCSPARSE_HANDLE(_get_backend_descriptor()->ROC_sparse_handle), rocsparse_rev);
 
-        LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
-                                  << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        if(sparse_ver_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver unknown");
+        }
+        else if(sparse_rev_status != rocsparse_status_success)
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100);
+        }
+        else
+        {
+            LOG_INFO("rocSPARSE ver " << rocsparse_ver / 100000 << "." << rocsparse_ver / 100 % 1000
+                                      << "." << rocsparse_ver % 100 << "-" << rocsparse_rev);
+        }
 
         int num_dev;
 
-        DISCARD_HIP_ERROR(hipGetDeviceCount(&num_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceCount(&num_dev));
 
         if(_get_backend_descriptor()->HIP_dev >= 0)
         {
@@ -287,8 +326,7 @@ namespace rocalution
             LOG_INFO("Selected HIP device: " << backend_descriptor.HIP_dev);
 
             struct hipDeviceProp_t dev_prop;
-            DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, backend_descriptor.HIP_dev));
 
             // LOG_INFO("Device number: " << backend_descriptor.HIP_dev);
             LOG_INFO("Device name: " << dev_prop.name);                                        // char name[256];
@@ -358,8 +396,7 @@ namespace rocalution
     std::string rocalution_get_arch_hip(void)
     {
         struct hipDeviceProp_t dev_prop;
-        DISCARD_HIP_ERROR(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipGetDeviceProperties(&dev_prop, _get_backend_descriptor()->HIP_dev));
         return dev_prop.gcnArchName;
     }
 
@@ -467,32 +504,28 @@ namespace rocalution
 
     void rocalution_hip_sync(void)
     {
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
     }
 
     void rocalution_hip_sync_default(void)
     {
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_default))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
     }
 
     void rocalution_hip_sync_interior(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_interior))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 
     void rocalution_hip_sync_ghost(void)
     {
 #ifdef SUPPORT_MULTINODE
-        DISCARD_HIP_ERROR(hipStreamSynchronize(
+        CHECK_HIP_STATUS(hipStreamSynchronize(
             *(static_cast<hipStream_t*>(_get_backend_descriptor()->HIP_stream_ghost))));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 #endif
     }
 

@@ -6,9 +6,9 @@
 Torch-reference-only correctness + latency harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel
 (``kernels.gfx942.attention_tiled_2d``). It is the gfx942 sibling of
-``examples/gfx950/attention/parity_unified_attention.py``, but with **no**
-Triton/AITER dependency: the oracle is a fp32 torch reference, so the example
-runs on any box with torch + a gfx942 GPU.
+``builders/gfx950/attention/prefill/parity_unified_attention.py``, but with
+**no** Triton/AITER dependency: the oracle is a fp32 torch reference, so the
+harness runs on any box with torch + a gfx942 GPU.
 
 The harness:
 
@@ -33,16 +33,16 @@ The harness:
   5. Reports per shape: correctness PASS/FAIL (tol ~2e-2 fp16 / ~4e-2 bf16),
      latency (us), and achieved TFLOPS.
 
-Run (needs torch + a gfx942 GPU):
+Run from the ``rocke/platform/`` root (needs torch + a gfx942 GPU):
 
-    PYTHONPATH=python .venv/bin/python \\
-        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    PYTHONPATH=python:../library python -m \\
+        builders.gfx942.attention.prefill.parity_unified_attention \\
         --scenario default
 
     # force the L4 (WG=64) fallback instead of the default wide4:
-    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
-        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
-        --scenario Fp16_Prefill_GQA_S2048_D128
+    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python:../library python -m \\
+        builders.gfx942.attention.prefill.parity_unified_attention \\
+        --scenario fmha_gqa_4to1_prefill_2k_b1
 """
 
 from __future__ import annotations
@@ -827,7 +827,7 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
     """
     import torch
     from kernels import UnifiedAttentionProblem
-    from kernels.common.attention_unified import _attn_values
+    from kernels.common.attention_unified import _attn_values, _spec_kv_addr_limit
     from rocke.runtime import (
         LaunchConfig,
         synchronize_and_release,
@@ -853,6 +853,9 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         use_qq_bias=False,
         use_fp8=False,
         num_cus=120,
+        # This lane bypasses run_unified_attention_torch, which is what normally
+        # fills num_kv_blocks from the K cache.
+        num_kv_blocks=int(data["key_cache"].shape[0]),
     )
     hip_stream = int(torch.cuda.current_stream().cuda_stream)
     vals = _attn_values(
@@ -873,6 +876,9 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         qq_bias=None,
         qq_bias_stride_0=0,
         include_qq_bias_stride=True,
+        # The spec is hand-built from the Shape, not from this problem, so check
+        # the cache against what the kernel was actually compiled with.
+        kv_addr_limit=_spec_kv_addr_limit(problem, spec),
     )
     block_q = spec.block_q
     total_num_q_blocks = q.shape[0] // block_q + s.batch

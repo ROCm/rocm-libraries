@@ -64,12 +64,12 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   // class is provided for assistance. This class ensures sufficient memory is
   // allocated on the host and GPU for each tensor and uses the MigratableMemory
   // class to facilitate synchronizing data between host and device.
-  utilities::Tensor<DataType_t::FLOAT> xTensor(x->get_dim(), TensorLayout::NCHW);
-  utilities::Tensor<DataType_t::FLOAT> scaleTensor(scale->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> biasTensor(bias->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> meanTensor(mean->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> invVarianceTensor(inv_var->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> yTensor(y->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> xTensor(x->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> scaleTensor(scale->get_dim());
+  utilities::Tensor<float> biasTensor(bias->get_dim());
+  utilities::Tensor<float> meanTensor(mean->get_dim());
+  utilities::Tensor<float> invVarianceTensor(inv_var->get_dim());
+  utilities::Tensor<float> yTensor(y->get_dim(), TensorLayout::NCHW);
 
   // [... populate Tensor input data on host ...]
 
@@ -87,7 +87,7 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   variantPack[y->get_uid()] = yTensor.memory().deviceData();
 
   // Execute the graph
-  graph.execute(handle, variant_pack, workspace);
+  graph.execute(handle, variantPack, workspace);
 
   // Make graph output avaialble on host.
   yTensor.memory().markDeviceModified();
@@ -149,9 +149,12 @@ Autotune and ingestor benchmarking discard a stalled pass on timeout or a valid
 unstalled sample, then rerun every candidate unstalled once. Each new comparison
 attempts device-only timing again. A finite negative elapsed reading during a timed
 run is instead treated as a transient invalid sample: it is replaced with a fresh
-measurement, up to two extra attempts per candidate, without disturbing the requested
-sample count or the convergence window. A third negative reading for the same
-candidate exhausts that budget, even if valid readings occurred between negatives.
+measurement, up to two extra attempts per candidate in each pass, without disturbing
+the requested sample count or the convergence window. A third negative reading for
+the same candidate within one pass exhausts that budget, even if valid readings
+occurred between negatives. In a stalled pass, that discards the pass and reruns
+every candidate unstalled, so that bad stalled readings do not remove the fastest
+candidates. In an unstalled pass, the candidate fails.
 
 See :ref:`backend-api-attribute` for the low-level profiling attributes and
 backend context reuse.

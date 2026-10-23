@@ -42,6 +42,7 @@
 #include "handle.h"
 //#include "tuple_helper.hpp"
 #include "UserDrivenTuningParser.hpp"
+#include "tensile_type_map.hpp"
 #include "utility.hpp"
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -180,6 +181,30 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      rocblaslt_matmul_algo*       algo,
                                      size_t*                      workspaceSizeInBytes);
 
+/**
+ * isSolutionSupported without leaving gemmData's Tensile problem modified. A
+ * cache probe may test a math mode or algorithm other than the one the call
+ * goes on to launch.
+ */
+rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob,
+                                               std::shared_ptr<void>              gemmData,
+                                               rocblaslt_matmul_algo*             algo,
+                                               size_t* workspaceSizeInBytes);
+
+/**
+ * isSolutionSupported, leaving gemmData's Tensile problem as
+ * updateTensileProblem(prob) makes it rather than as the check leaves it. It
+ * copies no problem, as isSolutionSupportedNoMutation does at an allocation per
+ * tensor, so it suits a caller that goes on to launch prob, as cache replay
+ * does.
+ */
+rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   handle,
+                                            const RocblasltContractionProblem& prob,
+                                            std::shared_ptr<void>              gemmData,
+                                            rocblaslt_matmul_algo*             algo,
+                                            size_t* workspaceSizeInBytes);
+
 template <typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                      const rocblaslt::RocGemmType& gemmType,
@@ -210,82 +235,23 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
-                                  const int              workspaceBytes,
+                                  const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
-/******************************************************
- * Map a hipblaslt data type to a corresponding Tensile type *
- ******************************************************/
-inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_16F:
-        return rocisa::DataType::Half;
-    case HIP_R_32F:
-        return rocisa::DataType::Float;
-    case HIP_R_64F:
-        return rocisa::DataType::Double;
-    case HIP_R_16BF:
-        return rocisa::DataType::BFloat16;
-    case HIP_R_8F_E4M3_FNUZ:
-        return rocisa::DataType::Float8_fnuz;
-    case HIP_R_8F_E5M2_FNUZ:
-        return rocisa::DataType::BFloat8_fnuz;
-    case HIP_R_8F_E4M3:
-        return rocisa::DataType::Float8;
-    case HIP_R_8F_E5M2:
-        return rocisa::DataType::BFloat8;
-    case HIP_R_8I:
-        return rocisa::DataType::Int8;
-    case HIP_R_32I:
-        return rocisa::DataType::Int32;
-    case HIP_C_32F:
-        return rocisa::DataType::ComplexFloat;
-    case HIP_C_64F:
-        return rocisa::DataType::ComplexDouble;    
-    // MX 6/4 data types
-    case HIP_R_6F_E2M3:
-        return rocisa::DataType::Float6;
-    case HIP_R_6F_E3M2:
-        return rocisa::DataType::BFloat6;
-    case HIP_R_4F_E2M1:
-        return rocisa::DataType::Float4;
-    default:
-        assert(!"hipDataType_to_tensile_type: non-supported type");
-        return rocisa::DataType::None;
-    }
-}
-
-inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type type)
-{
-    switch(type)
-    {
-    case rocblaslt_compute_f32_fast_xf32:
-        return rocisa::DataType::XFloat32;
-    case rocblaslt_compute_f16:
-    case rocblaslt_compute_f32:
-    case rocblaslt_compute_f32_fast_f16:
-    case rocblaslt_compute_f32_fast_bf16:
-    case rocblaslt_compute_f32_fast_f8_fnuz:
-    case rocblaslt_compute_f32_fast_bf8_fnuz:
-    case rocblaslt_compute_f32_fast_f8bf8_fnuz:
-    case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-    case rocblaslt_compute_f32_fast_f8:
-    case rocblaslt_compute_f32_fast_bf8:
-    case rocblaslt_compute_f32_fast_f8bf8:
-    case rocblaslt_compute_f32_fast_bf8f8:
-        return rocisa::DataType::Float;
-    case rocblaslt_compute_f64:
-        return rocisa::DataType::Double;
-    case rocblaslt_compute_i32:
-        return rocisa::DataType::Int32;
-    default:
-        assert(!"rocDataType_to_tensile_type: non-supported type");
-        return rocisa::DataType::None;
-    }
-}
+/**
+ * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
+ * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries
+ * return fewer: in their order, skipping indexes the array already holds and
+ * algorithms prob does not support. Returns whether those libraries could be read.
+ */
+bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
+                                       RocblasltContractionProblem&      prob,
+                                       std::shared_ptr<void>             gemmData,
+                                       rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                       int*                              returnAlgoCount,
+                                       int                               requestedAlgoCount,
+                                       size_t                            maxWorkSpaceBytes);
 
 namespace TensileLite
 {
@@ -296,6 +262,84 @@ TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/**
+ * The solution index of the first entry for this key that still resolves to its
+ * recorded kernel and supports this problem, or -1 when there is none.
+ *
+ * Which entries still resolve to their recorded kernels is worked out once per
+ * key and kept until the loaded entries change; support depends on the call and
+ * is checked every time, leaving gemmData's problem as updateTensileProblem
+ * makes it from problem.
+ *
+ * A pure probe: the caller counts the lookup, because only it knows whether the
+ * probe decided which kernel the call launches.
+ */
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
+
+/**
+ * Cache replay for a matmul that passed no algo: tuning_cache_find_valid_entry
+ * within the problem's workspace, filling *algo to launch the entry it finds.
+ * Counts the lookup, except a miss when countMiss is false: a call that can go
+ * on to tune is counted by what it finds once it can.
+ */
+int tuning_cache_replay(rocblaslt_handle                    handle,
+                        const TensileLite::ProblemOverride& key,
+                        const RocblasltContractionProblem&  problem,
+                        std::shared_ptr<void>               gemmData,
+                        rocblaslt_matmul_algo*              algo,
+                        bool                                countMiss);
+
+/**
+ * The solution index this thread last launched through runContractionProblem,
+ * or -1, clearing it.
+ */
+int tuningLastLaunchedIndexForTest();
+
+/**
+ * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
+ * enumeration, 3 throws after the first measured candidate, 4 stops the search
+ * after the first measured candidate the way an expiring budget does, 5 makes
+ * a configured budget read as already spent; 0 restores normal behaviour.
+ */
+void tuningInjectFailureForTest(int stage);
+
+/** The span tuning gives a tensor it copies or writes, as its scratch plan sizes it. */
+size_t tuningTensorSpanForTest(size_t elementSize,
+                               size_t rows,
+                               size_t cols,
+                               size_t colStride,
+                               size_t batchCount,
+                               size_t batchStride,
+                               bool*  expanded);
+
+/**
+ * The scratch tuning would lay out for prob, given the rotating budget and cap,
+ * as values in the order hipblaslt_tuning_scratch_plan_for_test documents.
+ * Returns how many there are.
+ */
+size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
+                                size_t                             rotatingBytes,
+                                size_t                             cap,
+                                int32_t                            coldIters,
+                                int32_t                            hotIters,
+                                uint64_t*                          values,
+                                size_t                             count);
+
+/**
+ * The indexes tune mode would measure for prob, in order and before the
+ * baseline is moved to the front; the first count go to indexes. Returns how
+ * many there are, 0 when they cannot be enumerated.
+ */
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
