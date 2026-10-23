@@ -17,14 +17,12 @@ constexpr ScalarConversionOptions reject;
 constexpr ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
 constexpr ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
 
-TEST(ScalarConversion, OmittedOptionsTruncateAndWrapWhileCheckedDefaultsReject) {
+TEST(ScalarConversion, OmittedOptionsTruncateAndWrap) {
     EXPECT_EQ(convertScalar<int32_t>(3.75), 3);
     EXPECT_EQ(convertScalar<int32_t>(-3.75), -3);
     EXPECT_EQ(convertScalar<int8_t>(128.75), -128);
     EXPECT_EQ(convertScalar<uint8_t>(-1.75), 255);
     EXPECT_EQ(convertScalar<uint8_t>(uint16_t{256}), 0);
-    EXPECT_FALSE(getConvertScalar<int8_t>(128.75));
-    EXPECT_FALSE(getConvertScalar<uint8_t>(-1.75));
 }
 
 template <typename T>
@@ -33,30 +31,29 @@ using Integers =
     ::testing::Types<int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t>;
 TYPED_TEST_SUITE(IntegerConversion, Integers);
 
-TYPED_TEST(IntegerConversion, PreservesLimitsAndRejectsSignednessOverflow) {
+TYPED_TEST(IntegerConversion, PreservesLimitsAndAppliesSignednessPolicies) {
     using T = TypeParam;
     constexpr T minimum = std::numeric_limits<T>::min();
     constexpr T maximum = std::numeric_limits<T>::max();
     EXPECT_EQ(convertScalar<T>(minimum, reject), minimum);
     EXPECT_EQ(convertScalar<T>(maximum, reject), maximum);
     if constexpr (std::is_signed_v<T>) {
-        EXPECT_FALSE(getConvertScalar<T>(std::numeric_limits<uint64_t>::max(), reject));
         EXPECT_EQ(convertScalar<T>(std::numeric_limits<uint64_t>::max(), saturate), maximum);
         EXPECT_EQ(convertScalar<T>(std::numeric_limits<uint64_t>::max(), wrap), -1);
     } else {
-        EXPECT_FALSE(getConvertScalar<T>(int64_t{-1}, reject));
         EXPECT_EQ(convertScalar<T>(int64_t{-1}, saturate), 0);
         EXPECT_EQ(convertScalar<T>(int64_t{-1}, wrap), maximum);
     }
 }
 
-TEST(ScalarConversion, RejectsValuesImmediatelyOutsideNarrowIntegerLimits) {
+TEST(ScalarConversion, PreservesNarrowIntegerLimits) {
     EXPECT_EQ(convertScalar<int8_t>(int16_t{-128}, reject), -128);
     EXPECT_EQ(convertScalar<int8_t>(int16_t{127}, reject), 127);
-    EXPECT_FALSE(getConvertScalar<int8_t>(int16_t{-129}, reject));
-    EXPECT_FALSE(getConvertScalar<int8_t>(int16_t{128}, reject));
+
     EXPECT_EQ(convertScalar<uint8_t>(uint16_t{255}, reject), 255);
-    EXPECT_FALSE(getConvertScalar<uint8_t>(uint16_t{256}, reject));
+    EXPECT_EQ(convertScalar<int8_t>(-128.75, reject), -128);
+    EXPECT_EQ(convertScalar<int8_t>(127.75, reject), 127);
+    EXPECT_EQ(convertScalar<uint8_t>(-0.75, reject), 0);
 }
 
 template <typename T>
@@ -64,15 +61,12 @@ class FloatingIntegerConversion : public ::testing::Test {};
 using FloatingTypes = ::testing::Types<float, double, long double>;
 TYPED_TEST_SUITE(FloatingIntegerConversion, FloatingTypes);
 
-TYPED_TEST(FloatingIntegerConversion, ChecksWideBoundsBeforeCasting) {
+TYPED_TEST(FloatingIntegerConversion, ConvertsWideBounds) {
     using T = TypeParam;
     const T twoTo63 = std::ldexp(T{1}, 63);
     const T twoTo64 = std::ldexp(T{1}, 64);
-    const T infinity = std::numeric_limits<T>::infinity();
     EXPECT_EQ(convertScalar<int64_t>(-twoTo63, reject), std::numeric_limits<int64_t>::min());
-    EXPECT_FALSE(getConvertScalar<int64_t>(twoTo63, reject));
-    EXPECT_FALSE(getConvertScalar<int64_t>(std::nextafter(-twoTo63, -infinity), reject));
-    EXPECT_FALSE(getConvertScalar<uint64_t>(twoTo64, reject));
+
     // The previous representable value is 2^64 minus one floating-point ULP.
     constexpr int precision =
         std::numeric_limits<T>::digits < 64 ? std::numeric_limits<T>::digits : 64;
@@ -108,38 +102,21 @@ TEST(ScalarConversion, SaturatesOrWrapsAfterRounding) {
     EXPECT_EQ(convertScalar<int8_t>(-std::numeric_limits<double>::max(), wrap), 0);
 }
 
-TEST(ScalarConversion, RejectsNaNAndOnlySaturatesInfinity) {
-    const double nan = std::numeric_limits<double>::quiet_NaN();
+TEST(ScalarConversion, SaturatesInfinity) {
     const double infinity = std::numeric_limits<double>::infinity();
-    for (const auto overflow :
-         {IntegerOverflow::Reject, IntegerOverflow::Saturate, IntegerOverflow::ModuloWrap}) {
-        const ScalarConversionOptions options{IntegerRounding::TowardZero, overflow};
-        EXPECT_FALSE(getConvertScalar<int32_t>(nan, options));
-    }
-    for (const auto options : {reject, wrap}) {
-        EXPECT_FALSE(getConvertScalar<int32_t>(infinity, options));
-        EXPECT_FALSE(getConvertScalar<int32_t>(-infinity, options));
-    }
     EXPECT_EQ(convertScalar<int8_t>(infinity, saturate), 127);
     EXPECT_EQ(convertScalar<int8_t>(-infinity, saturate), -128);
     EXPECT_EQ(convertScalar<uint64_t>(infinity, saturate), std::numeric_limits<uint64_t>::max());
     EXPECT_EQ(convertScalar<uint8_t>(-infinity, saturate), 0);
-    EXPECT_FALSE(getConvertScalar<int8_t>(nan));
-    EXPECT_FALSE(getConvertScalar<int8_t>(infinity));
 }
 
-TEST(ScalarConversion, ConvertsComplexComponentsAndRejectsNonrealInputs) {
+TEST(ScalarConversion, ConvertsComplexComponents) {
     const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Reject};
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, nearest), 4);
     EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0}), -2.25);
     EXPECT_EQ(convertScalar<std::complex<double>>(1.25f), std::complex<double>(1.25, 0.0));
     EXPECT_EQ(convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5}),
               std::complex<float>(1.25f, -2.5f));
-    EXPECT_FALSE(getConvertScalar<int32_t>(std::complex<double>{3.5, 1.0}, nearest));
-    EXPECT_FALSE(getConvertScalar<double>(std::complex<double>{3.5, 1.0}));
-    EXPECT_FALSE(getConvertScalar<bool>(std::complex<double>{0.0, 1.0}));
-    EXPECT_FALSE(getConvertScalar<double>(
-        std::complex<double>{1.0, std::numeric_limits<double>::quiet_NaN()}));
 }
 
 TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
@@ -156,79 +133,39 @@ TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
     EXPECT_TRUE(std::isinf(convertScalar<float>(std::numeric_limits<double>::infinity())));
 }
 
-TEST(ScalarConversion, ReturnsTypedFailuresWithoutFormattingDiagnostics) {
-    using ConversionError = ScalarConversionError;
-    struct Case {
-        double value;
-        ScalarConversionOptions options;
-        ConversionError error;
-    };
-    const Case cases[]{
-        {300.0, reject, ConversionError::RoundedOutOfRange},
-        {std::numeric_limits<double>::quiet_NaN(), reject, ConversionError::NaN},
-        {std::numeric_limits<double>::infinity(), reject, ConversionError::Infinity},
-        {2.0, {IntegerRounding::Count, IntegerOverflow::Reject}, ConversionError::InvalidRounding},
-        {300.0,
-         {IntegerRounding::TowardZero, IntegerOverflow::Count},
-         ConversionError::InvalidOverflow},
-    };
-    for (const auto& test : cases) {
-        const auto result = getConvertScalar<int8_t>(test.value, test.options);
-        ASSERT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().code, test.error);
-        EXPECT_EQ(result.error().destinationBits, 8u);
-        EXPECT_TRUE(result.error().signedDestination);
-        EXPECT_FALSE(detail::message(result.error()).empty());
-    }
-    const auto integral = getConvertScalar<uint8_t>(-1, reject);
-    ASSERT_FALSE(integral.has_value());
-    EXPECT_EQ(integral.error().code, ConversionError::IntegerOutOfRange);
-    EXPECT_EQ(integral.error().destinationBits, 8u);
-    EXPECT_FALSE(integral.error().signedDestination);
-    const auto nonreal = getConvertScalar<int64_t>(std::complex<double>{2.0, 1.0}, reject);
-    ASSERT_FALSE(nonreal.has_value());
-    EXPECT_EQ(nonreal.error().code, ConversionError::Nonreal);
-    EXPECT_EQ(nonreal.error().destinationBits, 64u);
-    const auto invalid = getConvertScalar<uint8_t>(
-        -1, {IntegerRounding::TowardZero, static_cast<IntegerOverflow>(255)});
-    ASSERT_FALSE(invalid.has_value());
-    EXPECT_EQ(invalid.error().code, ConversionError::InvalidOverflow);
-}
-
-TEST(ScalarConversion, DefaultReturnsAValueAndCheckedConversionIsOptIn) {
+TEST(ScalarConversion, ReturnsANoexceptValue) {
     static_assert(std::is_same_v<decltype(convertScalar<int8_t>(128)), int8_t>);
     static_assert(noexcept(convertScalar<int8_t>(128)));
     static_assert(noexcept(convertScalar<int8_t>(2.5, reject)));
     static_assert(noexcept(convertScalar<double>(std::declval<std::complex<double>>())));
     static_assert(noexcept(convertScalar<std::complex<float>>(1.0)));
-    static_assert(noexcept(getConvertScalar<int8_t>(128)));
-    static_assert(std::is_same_v<decltype(getConvertScalar<int8_t>(128)),
-                                 detail::Expected<int8_t, ScalarConversionFailure>>);
     EXPECT_EQ(convertScalar<int8_t>(128), -128);
-    const auto rejected = getConvertScalar<int8_t>(128);
-    ASSERT_FALSE(rejected);
-    EXPECT_EQ(rejected.error().code, ScalarConversionError::IntegerOutOfRange);
-    const auto rounded = getConvertScalar<int8_t>(2.5);
-    ASSERT_TRUE(rounded);
-    EXPECT_EQ(*rounded, 2);
-    const auto complex = getConvertScalar<std::complex<double>>(1.5);
-    ASSERT_TRUE(complex);
-    EXPECT_EQ(*complex, std::complex<double>(1.5, 0.0));
+    EXPECT_EQ(convertScalar<int8_t>(2.5, reject), 2);
+    EXPECT_EQ(convertScalar<std::complex<double>>(1.5), std::complex<double>(1.5, 0.0));
 }
 
-TYPED_TEST(IntegerConversion, CheckedAndValueReturningPoliciesAgreeOnTheirDomain) {
+TYPED_TEST(IntegerConversion, PoliciesMatchIndependentIntegerExpectations) {
+    using T = TypeParam;
+    const auto check = [](auto value, int rounded, const ScalarConversionOptions& options) {
+        const bool fits = std::in_range<T>(rounded);
+        if (options.integerOverflow == IntegerOverflow::Reject && !fits) return;
+        T expected = static_cast<T>(rounded);
+        if (options.integerOverflow == IntegerOverflow::Saturate && !fits)
+            expected = std::cmp_less(rounded, std::numeric_limits<T>::min())
+                           ? std::numeric_limits<T>::min()
+                           : std::numeric_limits<T>::max();
+        EXPECT_EQ(convertScalar<T>(value, options), expected);
+    };
     for (int input = -300; input <= 300; ++input) {
         for (const auto options : {reject, saturate, wrap}) {
-            const auto integral = getConvertScalar<TypeParam>(input, options);
-            if (integral) EXPECT_EQ(convertScalar<TypeParam>(input, options), *integral);
+            check(input, input, options);
             for (const double offset : {-0.75, -0.5, 0.0, 0.5, 0.75}) {
-                for (const auto rounding :
-                     {IntegerRounding::TowardZero, IntegerRounding::NearestEven}) {
-                    const ScalarConversionOptions policy{rounding, options.integerOverflow};
-                    const double value = input + offset;
-                    const auto result = getConvertScalar<TypeParam>(value, policy);
-                    if (result) EXPECT_EQ(convertScalar<TypeParam>(value, policy), *result);
-                }
+                const double value = input + offset;
+                const int lower = static_cast<int>(std::floor(value));
+                const double fraction = value - lower;
+                const int nearest = lower + (fraction > 0.5 || (fraction == 0.5 && lower % 2 != 0));
+                check(value, static_cast<int>(value), options);
+                check(value, nearest, {IntegerRounding::NearestEven, options.integerOverflow});
             }
         }
     }

@@ -40,14 +40,21 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
             if (options.integerOverflow == IntegerOverflow::Reject) {
                 assert(!std::isnan(source) && "Integer conversion requires a non-NaN value.");
                 assert(std::isfinite(source) && "Infinity requires saturating integer conversion.");
-                assert(getConvertToInteger<Destination>(source, options).has_value() &&
-                       "Reject conversion requires a representable rounded value and valid "
-                       "rounding policy.");
-                // A native cast already truncates; do not round toward zero twice.
-                return static_cast<Destination>(
+                // A native cast already truncates; only round explicitly for nearest-even.
+                const Value rounded =
                     options.integerRounding == IntegerRounding::TowardZero
                         ? source
-                        : roundForIntegerConversion(source, options.integerRounding));
+                        : roundForIntegerConversion(source, options.integerRounding);
+#ifndef NDEBUG
+                constexpr int rangeExponent = std::numeric_limits<Destination>::digits;
+                const Value upperExclusive = std::ldexp(Value{1}, rangeExponent);
+                const Value lowerInclusive =
+                    std::is_signed_v<Destination> ? -upperExclusive : Value{0};
+                const Value truncated = std::trunc(rounded);
+                assert((truncated >= lowerInclusive && truncated < upperExclusive) &&
+                       "Reject conversion requires a representable rounded value.");
+#endif
+                return static_cast<Destination>(rounded);
             }
         }
         constexpr uint32_t bits = std::numeric_limits<std::make_unsigned_t<Destination>>::digits;
@@ -82,16 +89,4 @@ Target convertScalar(Source source, const ScalarConversionOptions& options) noex
     return detail::convertScalarValue<Target>(std::move(source), options);
 }
 
-using ScalarConversionError = detail::ConversionError;
-using ScalarConversionFailure = detail::ConversionFailure;
-
-// Opt-in checked conversion. Returns a value or a typed failure without throwing
-// or allocating. Explicit Reject options are the default: getConvertScalar<int8_t>(128)
-// returns IntegerOutOfRange, while getConvertScalar<int8_t>(2.5) contains 2.
-// Floating-to-floating conversion follows static_cast rather than checking precision loss.
-template <typename Target, typename Source>
-detail::Expected<Target, ScalarConversionFailure> getConvertScalar(
-    Source source, const ScalarConversionOptions& options = {}) noexcept {
-    return detail::getConvertScalarValue<Target>(std::move(source), options);
-}
 }  // namespace roc::hostnumerics
