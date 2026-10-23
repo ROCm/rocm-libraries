@@ -130,8 +130,9 @@ from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 #
 # GFX1250-only extensions (tile=512, warp=16) are omitted: they require a
 # minimum register file that gfx950 and gfx942 do not have, so those kernels
-# fail spec validation and are silently skipped on those targets. They can be
-# added when a gfx1250 cache path is implemented.
+# fail spec validation and are silently skipped on those targets. The grid
+# below does build for gfx1250 (WMMA: "mem" and "wavelet" pipelines, group-
+# merged depthwise kernels included); only those extensions are left out.
 # ---------------------------------------------------------------------------
 
 CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
