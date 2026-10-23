@@ -1067,9 +1067,11 @@ std::optional<DecodePlan> catalogDecodePlan(const Problem& problem,
     ObjectTraits traits;
     traits.decode = true;
     traits.blockSize = DECODE_BLOCK_SIZE;
-    traits.dvSplit = decodeBucket(problem.headDimQ, problem.headDimV) == MAX_HEAD_DIM
-                         ? (isGfx12(device) ? 4 : 2)
-                         : 1;
+    traits.dvSplit = 1;
+    if(decodeBucket(problem.headDimQ, problem.headDimV) == MAX_HEAD_DIM)
+    {
+        traits.dvSplit = isGfx12(device) ? 4 : 2;
+    }
     return decodePlanFor(problem, mask, traits, device);
 }
 
