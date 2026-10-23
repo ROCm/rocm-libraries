@@ -5,10 +5,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -19,14 +22,18 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file ConvNative.cpp
@@ -60,6 +67,18 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
+
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
+constexpr std::string_view X_ROOT = "conv_fwd.x";
+constexpr std::string_view W_ROOT = "conv_fwd.w";
+constexpr std::string_view Y_ROOT = "conv_fwd.y";
+
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
+constexpr std::string_view FLOPS_TOKEN = "conv_fwd.flops";
+constexpr std::string_view BYTES_TOKEN = "conv_fwd.bytes";
 
 /// x and y are 4-D NCHW/NKPQ; w is 4-D KCRS. All three are rank 4, which is the only
 /// fact this constant states -- the per-tensor role is fixed by which uid is read.
@@ -152,6 +171,10 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
+using pack_features::bindTensorFields;
+using pack_features::checkedProduct;
+using pack_features::movedBytes;
+
 /// The node this engine's matchers read, or nullptr if the graph is not a single
 /// conv-forward node.
 const data_objects::ConvolutionFwdAttributes* convFwdNode(const MatchContext& context)
@@ -189,18 +212,19 @@ std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
  *        can launch? One pack, one operation, so this matcher (unlike Pointwise's)
  *        both admits the node type and validates it in one pass.
  */
-bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
+std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
 {
+
     const auto* attributesPtr = convFwdNode(context);
     if(attributesPtr == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
 
     if(attributes.conv_mode() != data_objects::ConvMode::CROSS_CORRELATION)
     {
-        return false;
+        return std::nullopt;
     }
 
     // Deliberately narrow: stride 1, dilation 1, no padding is the only shape the
@@ -210,7 +234,7 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
        || !allEqual(attributes.pre_padding(), SUPPORTED_SPATIAL_RANK, 0)
        || !allEqual(attributes.post_padding(), SUPPORTED_SPATIAL_RANK, 0))
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* x = findTensor(context, attributes.x_tensor_uid());
@@ -218,18 +242,18 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     const auto* y = findTensor(context, attributes.y_tensor_uid());
     if(x == nullptr || w == nullptr || y == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
 
     if(!isSupportedOperand(*x) || !isSupportedOperand(*w) || !isSupportedOperand(*y))
     {
-        return false;
+        return std::nullopt;
     }
 
     // Uniform dtype across operands; mixed precision is a different kernel.
     if(x->data_type() != w->data_type() || x->data_type() != y->data_type())
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* xDims = x->dims();
@@ -248,14 +272,14 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     // past the end.
     if(wDims->Get(1) != xC)
     {
-        return false;
+        return std::nullopt;
     }
 
     // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
     // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
     if(wR > xH || wS > xW)
     {
-        return false;
+        return std::nullopt;
     }
 
     // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
@@ -264,15 +288,37 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != wK || yDims->Get(2) != xH - wR + 1
        || yDims->Get(3) != xW - wS + 1)
     {
-        return false;
+        return std::nullopt;
     }
 
     // Binds operand uids for the dispatch handler to read back rather than re-deriving
     // them from the graph.
+    BoundTokens bound;
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
     bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
     bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
-    return true;
+
+    // The validated dims and dtypes are the features a UHD ranks a conv on.
+    bindTensorFields(bound, X_ROOT, *x);
+    bindTensorFields(bound, W_ROOT, *w);
+    bindTensorFields(bound, Y_ROOT, *y);
+
+    // 2 x N x K x P x Q x C x R x S: two flops per MAC over every output element and filter
+    // tap. No masking, so the effective and dense flop conventions agree.
+    const auto flops
+        = checkedProduct({2, xDims->Get(0), wK, yDims->Get(2), yDims->Get(3), xC, wR, wS});
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+
+    const auto bytes = movedBytes({x, w, y});
+    if(bytes.has_value())
+    {
+        bound[std::string(BYTES_TOKEN)] = *bytes;
+    }
+
+    return bound;
 }
 
 /**
@@ -280,7 +326,9 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  */
-bool convFwdKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
+bool convFwdKernelMatches(const MatchContext& context,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
     if(!dataType.has_value())
@@ -291,7 +339,9 @@ bool convFwdKernelMatches(const MatchContext& context, const KernelDefinition& k
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double convFwdScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
+double convFwdScore(const MatchContext& /*context*/,
+                    const BoundTokens& /*bound*/,
+                    const KernelDefinition& kernel)
 {
     // A stand-in for a trained model: prefers the larger block size.
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
@@ -304,8 +354,8 @@ double convFwdScore(const KernelDefinition& kernel, const MatchContext& /*contex
  */
 ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 {
-    // Every token was written by the graph matcher that admitted this graph; a missing
-    // one means the catalog was built by a matcher other than ours.
+    // Every token was written by the engine's graph match, which admitted this graph; a
+    // missing one means the catalog was built by an engine other than ours.
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
         if(!value.has_value())
@@ -331,8 +381,7 @@ ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 class PreparedConvFwd : public PreparedDispatch
 {
 public:
-    PreparedConvFwd(std::unique_ptr<compilation::ICompiledProgram> program,
-                    std::unique_ptr<compilation::IRunnableKernel> kernel,
+    PreparedConvFwd(IngestorKernelCode code,
                     ConvFwdBinding binding,
                     int n,
                     int c,
@@ -341,8 +390,7 @@ public:
                     int k,
                     int r,
                     int s)
-        : _program(std::move(program))
-        , _kernel(std::move(kernel))
+        : _code(std::move(code))
         , _binding(binding)
         , _n(n)
         , _c(c)
@@ -354,9 +402,11 @@ public:
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// The kernel for the device this dispatch is running on. Resolved here rather than
+    /// at prepare() because a plan outlives the handle it was built from.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_kernel;
+        return _code.kernelForStream(stream);
     }
 
     const ConvFwdBinding& binding() const
@@ -394,10 +444,9 @@ public:
     }
 
 private:
-    // The runnable kernel is a view into its program's module, so the program must
-    // outlive it; both are held here for the plan's lifetime.
-    std::unique_ptr<compilation::ICompiledProgram> _program;
-    std::unique_ptr<compilation::IRunnableKernel> _kernel;
+    // Owns each device's program alongside the kernel viewing into it, so a module
+    // outlives every function resolved from it for the plan's lifetime.
+    IngestorKernelCode _code;
     ConvFwdBinding _binding;
     int _n;
     int _c;
@@ -440,18 +489,48 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
     return *it->second;
 }
 
+/// The argument list this pack launches ConvFwd with, mirroring the launch() below one
+/// for one. It sits here rather than in the adapter that consumes it so that it is edited
+/// alongside that launch -- a stale copy rejects the correct kernel rather than the
+/// drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& convFwdKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    // The seven trailing extents (n, c, h, width, k, r, s), each an int.
+    static const KernelArgument s_extent{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer,
+                                                         s_buffer,
+                                                         s_buffer,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent};
+    return s_signature;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches the conv
- *        kernel. Splits per RFC 0017 §8.5: everything graph/kernel-derived resolves
- *        once at prepare(); execute() only resolves buffers and launches, so nothing
- *        mutates once prepared and concurrent execution is safe.
+ *        kernel. Everything graph/kernel-derived resolves once at prepare(); execute()
+ *        only resolves buffers and launches, so nothing mutates once prepared and
+ *        concurrent execution is safe.
  */
 class ConvFwdDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    explicit ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted
+    /// depends on the selected kernel's source kind, decided in buildIngestorKernelCode.
+    ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                           const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -468,7 +547,7 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        // Reads the operand uids the matcher bound rather than re-deriving them.
+        // Reads the operand uids the graph match bound rather than re-deriving them.
         const auto binding = convFwdBinding(bound);
 
         const auto& xTensor = requireTensor(context, binding.x);
@@ -492,24 +571,22 @@ public:
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_CONV_BLOCK_SIZE", blockSize);
 
-        // The only KernelSourceKind this dispatch handler knows how to load.
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, convFwdKernelSignature());
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
         // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
-        // product here previously wrapped silently, corrupting both the grid size and
-        // the kernel's own bounds guard (ConvFwd.cpp).
+        // product would wrap, corrupting both the grid size and the kernel's own bounds
+        // guard (ConvFwd.cpp).
         const int64_t total = static_cast<int64_t>(n) * k * p * q;
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(gridSize, 1, 1);
+        code.setBlockSize(blockSize, 1, 1);
+        code.setGridSize(gridSize, 1, 1);
 
-        return std::make_unique<PreparedConvFwd>(
-            std::move(program), std::move(runnableKernel), binding, n, c, h, width, k, r, s);
+        return std::make_unique<PreparedConvFwd>(std::move(code), binding, n, c, h, width, k, r, s);
     }
 
     void launch(const Handle& handle,
@@ -528,30 +605,49 @@ public:
         const auto y
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
 
-        preparedConvFwd.kernel().launch(handle.getStream(),
-                                        x.ptr,
-                                        w.ptr,
-                                        y.ptr,
-                                        preparedConvFwd.n(),
-                                        preparedConvFwd.c(),
-                                        preparedConvFwd.h(),
-                                        preparedConvFwd.width(),
-                                        preparedConvFwd.k(),
-                                        preparedConvFwd.r(),
-                                        preparedConvFwd.s());
+        preparedConvFwd.kernelForStream(handle.getStream())
+            .launch(handle.getStream(),
+                    x.ptr,
+                    w.ptr,
+                    y.ptr,
+                    preparedConvFwd.n(),
+                    preparedConvFwd.c(),
+                    preparedConvFwd.h(),
+                    preparedConvFwd.width(),
+                    preparedConvFwd.k(),
+                    preparedConvFwd.r(),
+                    preparedConvFwd.s());
     }
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
+
+} // namespace
+
+compilation::KpackModuleCache& convFwdKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetConvFwdModuleCache()
+{
+    convFwdKpackModuleCache().clear();
+}
+
+namespace
+{
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const ConvFwdDispatchHandler& convFwdDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const compilation::KpackKernelLoader s_kpackLoader(convFwdKpackModuleCache());
+    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 

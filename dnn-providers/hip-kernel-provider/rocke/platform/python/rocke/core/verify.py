@@ -35,6 +35,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
+    _assume_range_errors,
+    _int_add_wrap_error,
+    _int_cmp_pred_error,
+    _is_flag_ptr,
     KernelDef,
     Op,
     Region,
@@ -117,9 +124,13 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "arith.constant": ["value", "ity"],
     "arith.cmp": ["pred"],
     "arith.fcmp": ["pred"],
+    "arith.assume_range": ["multiple_of", "residue"],
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
+    "memref.fence": ["scope", "ordering"],
+    "memref.global_flag_store": ["scope", "ordering"],
+    "memref.global_flag_wait_eq": ["scope"],
 }
 
 
@@ -276,6 +287,18 @@ class _Verifier:
     # ---- contracts ----
 
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
+        from .tf32 import tf32_op_error
+
+        from .arch.mfma_scale import scaled_mfma_error
+
+        mx_error = (
+            scaled_mfma_error(op.attrs.get("op_id", ""), op.operands, op.results)
+            if op.name == "tile.mma"
+            else None
+        )
+        error = mx_error or tf32_op_error(op)
+        if error:
+            self.err(error, op)
         name = op.name
         if name in _BINARY_SAME_TYPE:
             if len(op.operands) != 2 or len(op.results) != 1:
@@ -297,6 +320,10 @@ class _Verifier:
                     f"{name}: result type {r.type.name} != operand type {a.type.name}",
                     op,
                 )
+            if name == "arith.add":
+                wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), a.type.name)
+                if wrap_error:
+                    self.err(wrap_error, op)
         elif name in _UNARY_SAME_TYPE:
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(
@@ -309,6 +336,12 @@ class _Verifier:
                 self.err(
                     f"{name}: result type {op.results[0].type.name} != "
                     f"operand type {op.operands[0].type.name}",
+                    op,
+                )
+            if name == "math.tanh" and op.operands[0].type.name != "f32":
+                self.err(
+                    f"math.tanh requires f32 operand, got "
+                    f"{op.operands[0].type.name}",
                     op,
                 )
         elif name in _CMP_OPS:
@@ -326,6 +359,33 @@ class _Verifier:
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
+            if name == "arith.cmp":
+                pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+                if pred_error:
+                    self.err(pred_error, op)
+        elif name == "arith.assume_range":
+            if len(op.operands) not in (1, 2) or len(op.results) != 1:
+                self.err(
+                    f"{name}: expected 1 or 2 operands / 1 result, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            v = op.operands[0]
+            if op.results[0].type != v.type:
+                self.err(
+                    f"{name}: result type {op.results[0].type.name} != "
+                    f"operand type {v.type.name}",
+                    op,
+                )
+            if len(op.operands) == 2 and op.operands[1].type != v.type:
+                self.err(
+                    f"{name}: hi_value type {op.operands[1].type.name} != "
+                    f"operand type {v.type.name}",
+                    op,
+                )
+            for message in _assume_range_errors(op.attrs, len(op.operands)):
+                self.err(message, op)
         elif name == "arith.select":
             if len(op.operands) != 3 or len(op.results) != 1:
                 self.err(f"{name}: expected 3 operands / 1 result", op)
@@ -370,6 +430,41 @@ class _Verifier:
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
+        elif name == "memref.fence":
+            if op.operands or op.results:
+                self.err(f"{name}: must have no operands and no results", op)
+            self._check_sync_attrs(op, _FENCE_ORDERINGS)
+        elif name in ("memref.global_flag_store", "memref.global_flag_wait_eq"):
+            if len(op.operands) != 3 or op.results:
+                self.err(
+                    f"{name}: expected 3 operands / 0 results, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            ptr, idx, val = op.operands
+            if not _is_flag_ptr(ptr.type):
+                self.err(
+                    f"{name}: expected a global i32 pointer, got {ptr.type.name}", op
+                )
+            for what, v in (("index", idx), ("value", val)):
+                if v.type.name != "i32":
+                    self.err(f"{name}: {what} must be i32, got {v.type.name}", op)
+            orderings = (
+                _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
+            )
+            self._check_sync_attrs(op, orderings)
+
+    def _check_sync_attrs(self, op: Op, orderings) -> None:
+        """Scope / ordering values of a fence or flag op (presence is checked
+        by the required-attrs pass, so a missing key is not reported twice)."""
+        scope = op.attrs.get("scope")
+        if isinstance(scope, str) and scope not in _FENCE_SCOPES:
+            self.err(f"{op.name}: unknown scope '{scope}'", op)
+        ordering = op.attrs.get("ordering")
+        if orderings is not None and isinstance(ordering, str):
+            if ordering not in orderings:
+                self.err(f"{op.name}: unknown ordering '{ordering}'", op)
 
     # ---- scf.for ----
 

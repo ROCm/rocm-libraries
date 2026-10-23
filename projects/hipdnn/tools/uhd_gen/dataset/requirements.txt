@@ -1,0 +1,6 @@
+# Reading the collected CSVs and publishing the Parquet dataset (RFC 0019.13 §8.3).
+pandas>=1.5
+# Parquet needs an engine; pandas has none of its own. Declared explicitly rather than left to
+# whatever a environment happens to carry, because its absence surfaces as an ImportError deep
+# inside to_parquet rather than as a missing dependency.
+pyarrow>=12

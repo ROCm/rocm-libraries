@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "2e4b62b0-7394-5682-a2b0-d7313b2ba59c",
+  "name": "example tiled-attention variant fields",
+  "fields": [
+    { "name": "block_size", "type": "int", "default_value": 16 },
+    { "name": "dtype", "type": "string" },
+    { "name": "operation", "type": "string" }
+  ]
+}

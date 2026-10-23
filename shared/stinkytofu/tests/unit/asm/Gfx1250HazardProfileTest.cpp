@@ -63,6 +63,7 @@ std::string runPassAndCaptureReport(StinkyAsmModule& module) {
     // The pass's only gate; TensileLite forwards rocisa's archCaps here.
     AsmCapsConfig caps;
     caps.requiresXCntForVolatileVMEM = true;
+    caps.enableXnackReplay = true;
 
     PassContext ctx;
     ctx.setGemmTileConfig(config);

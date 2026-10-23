@@ -68,6 +68,59 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     return wrapper;
 }
 
+// A finalized virtual tensor, used as an invalid ragged-offset aux.
+inline std::unique_ptr<HipdnnBackendDescriptor> createFinalizedVirtualTensor(int64_t uid)
+{
+    auto wrapper = createDescriptor<TensorDescriptor>();
+    auto desc = wrapper->asDescriptor<TensorDescriptor>();
+    auto dims = toVec(K_PW_TENSOR_DIMS);
+    auto strides = toVec(K_PW_TENSOR_STRIDES);
+    auto dataType = HIPDNN_DATA_INT64;
+    bool isVirtual = true;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(dims.size()),
+                       dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(strides.size()),
+                       strides.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, 1, &isVirtual);
+    desc->finalize();
+    return wrapper;
+}
+
+// A finalized (non-virtual) tensor whose ragged-offset points at auxDesc. A plain
+// auxDesc yields a valid primary; an auxDesc that itself carries a ragged offset
+// yields the nested case.
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedTensorWithRaggedOffset(int64_t uid, HipdnnBackendDescriptor* auxDesc)
+{
+    auto wrapper = createDescriptor<TensorDescriptor>();
+    auto desc = wrapper->asDescriptor<TensorDescriptor>();
+    auto dims = toVec(K_PW_TENSOR_DIMS);
+    auto strides = toVec(K_PW_TENSOR_STRIDES);
+    auto dataType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(dims.size()),
+                       dims.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(strides.size()),
+                       strides.data());
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&auxDesc));
+    desc->finalize();
+    return wrapper;
+}
+
 class TestGraphDescriptorPointwise : public ::testing::Test
 {
 public:
@@ -175,6 +228,50 @@ TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+}
+
+// Aux UIDs 9001/9002 do not collide with K_PW_TENSOR_{IN0,IN1,IN2,OUT0}_UID.
+TEST_F(TestGraphDescriptorPointwise, BuildRejectsVirtualRaggedAux)
+{
+    auto aux = createFinalizedVirtualTensor(9001);
+    auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, aux.get());
+    auto out0 = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
+
+    auto desc = getDescriptor();
+    setHandle();
+    std::array<HipdnnBackendDescriptor*, 1> ops = {op.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestGraphDescriptorPointwise, BuildRejectsNestedRaggedAux)
+{
+    auto auxInner = createFinalizedTensor(9002);
+    auto auxOuter = createFinalizedTensorWithRaggedOffset(9001, auxInner.get());
+    auto in0 = createFinalizedTensorWithRaggedOffset(K_PW_TENSOR_IN0_UID, auxOuter.get());
+    auto out0 = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1 = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2 = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
+    auto op = createFinalizedPointwiseOp(in0.get(), out0.get(), in1.get(), in2.get());
+
+    auto desc = getDescriptor();
+    setHandle();
+    std::array<HipdnnBackendDescriptor*, 1> ops = {op.get()};
+    desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(ops.data()));
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace

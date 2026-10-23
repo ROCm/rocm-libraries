@@ -28,6 +28,7 @@ HIPSOLVER_BEGIN_NAMESPACE
 
 fp_rocsparse_create_handle      g_rocsparse_create_handle;
 fp_rocsparse_destroy_handle     g_rocsparse_destroy_handle;
+fp_rocsparse_set_stream         g_rocsparse_set_stream;
 fp_rocsparse_create_mat_descr   g_rocsparse_create_mat_descr;
 fp_rocsparse_destroy_mat_descr  g_rocsparse_destroy_mat_descr;
 fp_rocsparse_get_mat_type       g_rocsparse_get_mat_type;
@@ -60,6 +61,8 @@ static bool load_rocsparse()
     if(!load_function(handle, "rocsparse_create_handle", g_rocsparse_create_handle))
         return false;
     if(!load_function(handle, "rocsparse_destroy_handle", g_rocsparse_destroy_handle))
+        return false;
+    if(!load_function(handle, "rocsparse_set_stream", g_rocsparse_set_stream))
         return false;
     if(!load_function(handle, "rocsparse_create_mat_descr", g_rocsparse_create_mat_descr))
         return false;
