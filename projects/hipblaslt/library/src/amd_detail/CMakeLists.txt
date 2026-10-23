@@ -26,9 +26,12 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-replay-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp")
-    # The replay backend reads this tree. It is a compile-time path, not an
-    # environment variable. A HipKittens build does not use it for heuristic queries.
-    if(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/clients/tests/jit/data")
+    include("${PROJECT_SOURCE_DIR}/cmake/hipblaslt-jit-hipkittens.cmake")
+    # Replay reads this tree. The path is compiled in. HipKittens does not
+    # replace it: a build can contain both, either, or neither.
+    option(HIPBLASLT_JIT_ENABLE_REPLAY "Build the JIT replay backend." ON)
+    if(HIPBLASLT_JIT_ENABLE_REPLAY
+       AND IS_DIRECTORY "${PROJECT_SOURCE_DIR}/clients/tests/jit/data")
         target_compile_definitions(hipblaslt PRIVATE
             "HIPBLASLT_JIT_REPLAY_DATA=\"${PROJECT_SOURCE_DIR}/clients/tests/jit/data\"")
     endif()

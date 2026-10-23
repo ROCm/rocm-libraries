@@ -71,8 +71,8 @@ application owns its buffers and workspace. The request owns descriptor values
 and host scalars; it does not take ownership of device pointers. Compilation
 and support checks finish before graphics processing unit (GPU) work is
 submitted. A capturing stream may return a solution already in the JIT
-solution library and does not start a build. GEMM is the implemented
-operation.
+solution library and does not start a build. A null stream and the legacy
+stream are not capturing. GEMM is the implemented operation.
 
 Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
 scalar values. A matmul algorithm is a JIT solution library index in
@@ -92,12 +92,12 @@ once and leaves the mode off.
 | `1` | The override file, then the Equality provider rows, then the JIT library, then the other provider rows, then the `getAllSolutions` fill. Each source fills only the remaining request, and a kernel already returned is skipped. |
 | `2` | The JIT library only. The override file is not read. A problem the library does not solve returns success with no algorithms. |
 
-A JIT build with no HipKittens backend replays the committed kernels under
-`clients/tests/jit/data` when that tree is compiled in. Those queries publish
-into the JIT solution library, and a later query in the process reuses the
-index. A build with no such kernels warns once: mode `1` leaves the query
-unchanged, and mode `2` returns no algorithms. The replay backend implements
-generation only.
+A HipKittens build publishes through that backend. A JIT build with no
+HipKittens backend replays the committed kernels under `clients/tests/jit/data`
+when that tree is compiled in. Those queries publish into the JIT solution
+library, and a later query in the process reuses the index. A build with
+neither warns once: mode `1` leaves the query unchanged, and mode `2` returns
+no algorithms. Either backend implements generation only.
 
 The algorithms those queries return are JIT solution library indices, in
 [2^30, 0x60000000), and they run through the same path as a prebuilt index.
@@ -213,6 +213,19 @@ The implementations are:
   it through `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and
   every JIT build compiles it. Each bundle it returns names the request's
   target and code-object version.
+- HipKittens backend: `hipblaslt-jit-hipkittens.cpp`, built when
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on, `GPU_TARGETS` includes gfx950 and
+  the build reads MessagePack libraries. Each gfx950 TN kernel is a
+  `hipkittens::detail::Kernel`: an `Artifact` holding a HIP template from
+  `library/src/amd_detail/hipkittens`, with its compiler flags, that builds
+  its `ContractionSolution` in C++ with typed fields. The solution's
+  predicates decide which problems the kernel solves. Each bundle it returns
+  has that template as its main kernel and that solution, and names the
+  request's target and code-object version; comgr compiles it with its
+  generic HIP path. The HipKittens headers are staged next to the library;
+  `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory. Heuristic queries
+  use this backend when it is compiled in. A build without the option
+  replays the committed kernels.
 
 ### Build
 
@@ -233,8 +246,11 @@ cmake --build "$project_build" --parallel
 ```
 
 `GPU_TARGETS` is `gfx90a`, `gfx942` or `gfx950`. The command above uses
-`gfx950`. The [JIT test guide](clients/tests/jit/README.md) lists the test
-targets and the validation commands.
+`gfx950`. `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` adds the gfx950 HipKittens
+backend. It needs a network fetch of the pinned HipKittens commit unless
+`FETCHCONTENT_SOURCE_DIR_HIPKITTENS` points at an unpacked archive. The
+[JIT test guide](clients/tests/jit/README.md) lists the test targets and the
+validation commands.
 
 ### Algorithm lifetime and failures
 
@@ -348,7 +364,7 @@ path or ROCm path does not reject the directory.
 | Field | Contents |
 | --- | --- |
 | `target_id`, `isa`, `library_arch`, `wavefront_size` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
-| `backend_id`, `backend_version` | Backend identifier and integer version. The replay backend increments its version constant when a replayed solution can change. |
+| `backend_id`, `backend_version` | Backend identifier and integer version. Replay and HipKittens increment their version constants when a solution can change. |
 | `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
 | `code_object_version` | The code-object version that the generator and the builder use (4) |
 | `rocm_path` | The ROCm path that the builder passes to comgr |

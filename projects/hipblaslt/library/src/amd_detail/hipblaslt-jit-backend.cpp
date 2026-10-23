@@ -540,9 +540,7 @@ namespace hipblaslt_jit
             return jit;
         }
 
-        // Heuristic queries publish through this backend. A HipKittens build uses
-        // that backend. Otherwise this is replay of the committed kernels.
-        std::shared_ptr<const Jit> processJit()
+        std::shared_ptr<const Jit> hipkittensProcess()
         {
 #ifdef HIPBLASLT_JIT_HIPKITTENS
             static std::once_flag             once;
@@ -550,14 +548,26 @@ namespace hipblaslt_jit
             std::call_once(once, [] { hipkittens = makeHipKittensJit(); });
             return hipkittens;
 #else
-            return replayProcess();
+            return {};
 #endif
+        }
+
+        // Every backend this build compiled. Replay and HipKittens are
+        // independent; a query asks each one that was built.
+        std::vector<std::shared_ptr<const Jit>> processBackends()
+        {
+            std::vector<std::shared_ptr<const Jit>> backends;
+            if(auto replay = replayProcess())
+                backends.push_back(std::move(replay));
+            if(auto hipkittens = hipkittensProcess())
+                backends.push_back(std::move(hipkittens));
+            return backends;
         }
     }
 
     bool jitHeuristicLibrary()
     {
-        return static_cast<bool>(processJit());
+        return !processBackends().empty();
     }
 
     void warnJitHeuristicUnavailable()
@@ -583,8 +593,8 @@ namespace hipblaslt_jit
     {
         if(room <= 0 || results == nullptr || handle == nullptr)
             return 0;
-        const auto jit = processJit();
-        if(!jit)
+        const auto backends = processBackends();
+        if(backends.empty())
         {
             warnJitHeuristicUnavailable();
             return 0;
@@ -603,38 +613,43 @@ namespace hipblaslt_jit
                 return 0;
 
             namespace detail = hipblaslt_ext::experimental::jit::detail;
-            std::vector<int32_t> indices;
-            hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
-            const auto           status = detail::lookupThenPublish(jit,
-                                                          owned,
-                                                          target,
-                                                          static_cast<size_t>(room),
-                                                          workspaceLimit,
-                                                          excludeKernels,
-                                                          indices,
-                                                          diagnostics);
-            if(status != HIPBLAS_STATUS_SUCCESS && indices.empty())
-            {
-                if(!diagnostics.message.empty())
-                    std::cerr << (capturing ? "hipblaslt error: " : "hipblaslt warning: JIT heuristic ")
-                              << diagnostics.message << std::endl;
-                return 0;
-            }
-
             int written = 0;
-            for(auto index : indices)
+            for(const auto& jit : backends)
             {
-                if(written == room || !isJitIndex(index))
+                if(written == room)
                     break;
-                auto& result = results[written];
-                std::memset(&result, 0, sizeof(result));
-                auto* stored = reinterpret_cast<int32_t*>(result.algo.data);
-                *stored      = index;
-                result.algo.max_workspace_bytes = workspaceLimit;
-                result.workspaceSize = detail::publishedWorkspace(target, *owned, index);
-                result.state         = rocblaslt_status_success;
-                result.wavesCount    = 1.0f;
-                ++written;
+                std::vector<int32_t> indices;
+                hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
+                const auto status = detail::lookupThenPublish(jit,
+                                                              owned,
+                                                              target,
+                                                              static_cast<size_t>(room - written),
+                                                              workspaceLimit,
+                                                              excludeKernels,
+                                                              indices,
+                                                              diagnostics);
+                if(status != HIPBLAS_STATUS_SUCCESS && indices.empty())
+                {
+                    if(!diagnostics.message.empty())
+                        std::cerr << (capturing ? "hipblaslt error: "
+                                                : "hipblaslt warning: JIT heuristic ")
+                                  << diagnostics.message << std::endl;
+                    continue;
+                }
+                for(auto index : indices)
+                {
+                    if(written == room || !isJitIndex(index))
+                        break;
+                    auto& result = results[written];
+                    std::memset(&result, 0, sizeof(result));
+                    auto* stored = reinterpret_cast<int32_t*>(result.algo.data);
+                    *stored      = index;
+                    result.algo.max_workspace_bytes = workspaceLimit;
+                    result.workspaceSize = detail::publishedWorkspace(target, *owned, index);
+                    result.state         = rocblaslt_status_success;
+                    result.wavesCount    = 1.0f;
+                    ++written;
+                }
             }
             return written;
         }
