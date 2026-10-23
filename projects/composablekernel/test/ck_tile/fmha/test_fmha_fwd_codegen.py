@@ -2176,42 +2176,53 @@ class TestGfx125SplitKVCodegen(unittest.TestCase):
 
 
 class TestGfx125BatchPrefillPageSizes(unittest.TestCase):
-    """batch_prefill on gfx1250: the fp16/bf16 TDM pipelines take page 1024 as compiled and
-    any other page size at run time (page views, and TDM gathers for linear K/V); the async
-    pipeline and other archs keep pages of 1, 16 and 1024."""
+    """batch_prefill on gfx1250: the TDM pipelines take page 1024 as compiled and any other
+    page size at run time (page views, else TDM gathers or, for a vectorized KV cache, one box
+    per vector of rows; per-page K/V scales: page views of whole K/V tiles). fp16/bf16 have no
+    async instances; fp8bf16 keeps them with pages of 1, 16 and 1024, as other archs do."""
 
     def test_page_sizes_and_dispatch(self):
         from codegen.ops import fmha_batch_prefill as bp
 
-        pool, kernels = bp.get_fwd_blobs(
-            "*d128_bf16*", 0, [128], "simplified", ["gfx1250"]
-        )
+        pool, kernels = bp.get_fwd_blobs("*d128_*", 0, [128], "simplified", ["gfx1250"])
         tdm = [k for k in kernels if k.F_pipeline.tag in bp.TDM_PIPELINES]
+        runtime = (1024, bp.RUNTIME_PAGE_SIZE, bp.RUNTIME_PAGE_SIZE_GATHER)
         for kernel in kernels:
+            p = kernel.F_pipeline
             with self.subTest(kernel=kernel.name):
-                if kernel.F_pipeline.tag not in bp.TDM_PIPELINES:
+                if p.tag not in bp.TDM_PIPELINES:
+                    self.assertEqual(kernel.F_dtype, "fp8bf16")
                     self.assertIn(kernel.F_page_size, bp.SUPPORTED_PAGE_SIZE)
-                elif kernel.F_pipeline.F_kv_memory_layout == "vectorized":
-                    self.assertIn(kernel.F_page_size, (1024, bp.RUNTIME_PAGE_SIZE))
+                elif p.F_qscale == "kv_blockscale":
+                    self.assertIn(kernel.F_page_size, runtime[:2])
                 else:
-                    self.assertIn(
-                        kernel.F_page_size,
-                        (1024, bp.RUNTIME_PAGE_SIZE, bp.RUNTIME_PAGE_SIZE_GATHER),
+                    self.assertIn(kernel.F_page_size, runtime)
+        for tag in bp.TDM_PIPELINES:
+            for layout in ("linear", "vectorized"):
+                with self.subTest(tag=tag, layout=layout):
+                    self.assertEqual(
+                        {
+                            k.F_page_size
+                            for k in tdm
+                            if k.F_pipeline.tag == tag
+                            and k.F_pipeline.F_kv_memory_layout == layout
+                            and k.F_dtype == "bf16"
+                        },
+                        set(runtime),
                     )
-        self.assertEqual(
-            {k.F_page_size for k in tdm},
-            {1024, bp.RUNTIME_PAGE_SIZE, bp.RUNTIME_PAGE_SIZE_GATHER},
-        )
-        self.assertTrue(any("_psrt_" in k.name for k in tdm))
-        self.assertTrue(any("_psrtg_" in k.name for k in tdm))
+        self.assertTrue(any("_psrt_" in k.name and "fp8bf16" in k.name for k in tdm))
 
         with tempfile.TemporaryDirectory() as output_dir:
             bp.write_fwd_api(pool, Path(output_dir))
             api = (Path(output_dir) / "fmha_batch_prefill_api.cpp").read_text()
-        # page views: each warp's 16 or 32 K/V rows in one page; gathers: page strides in rows
+        # page views: each warp's 16 or 32 K/V rows in one page; per-page scales: whole
+        # 128-row K/V tiles; gathers: page strides in rows; vectorized: whole vectors
         self.assertIn("a.page_block_size % 16 == 0", api)
         self.assertIn("a.page_block_size % 32 == 0", api)
+        self.assertIn("a.page_block_size % 128 == 0", api)
         self.assertIn("a.batch_stride_k % a.stride_k == 0", api)
+        self.assertIn("a.page_block_size % 8 == 0", api)
+        self.assertIn("t.page_size == a.page_block_size", api)
         # the compiled page size is tried before the run-time ones of the same pipeline
         self.assertLess(
             api.index("(t.page_size == 1024)"), api.index("a.page_block_size % 16 == 0")

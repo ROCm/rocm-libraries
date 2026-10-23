@@ -402,7 +402,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         if constexpr(!kHasDropout)
             ignore = dropout_args;
-        static_assert(!KVRows::kIsVectorized, "qr_tdm_pingpong reads row-major K/V");
 
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -594,11 +593,16 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         auto v_lds_write_window = make_tile_window(
             v_lds_view, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
+        // a vectorized KV cache leaves V as [kN0/v][kN1][v], read with plain loads (see
+        // BlockFmhaPipelineQRKSVSTdm::LoadVTile)
+        auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset),
+            Base::template MakeVLdsReadDescriptor<KVRows>());
         auto v_lds_read_window =
-            make_tile_window(v_lds_view,
-                             make_tuple(number<kK1>{}, number<kN1>{}),
+            make_tile_window(v_lds_read_view,
+                             typename Base::template VLdsReadLengths<KVRows>{},
                              {0, 0},
-                             Policy::template MakeVRegTileDistribution<Problem>());
+                             typename Base::template VLdsReadDistribution<KVRows>{});
 
         // retire Q only; K, issued after it, stays in flight
         s_wait_tensorcnt_barrier<kKTdmInsts>();
@@ -880,7 +884,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             // running under the PV gemm.
             s_wait_tensorcnt_barrier<kKTdmInsts>();
 
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            auto v_tile = Base::template LoadVTile<KVRows>(v_lds_read_window);
 
             if constexpr(1 < k1_loops)
             {
@@ -892,11 +896,15 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                            v_tile);
 
                     // loop over along the [V]alue Sequence length
-                    move_tile_window(v_lds_read_window, {kK1, 0});
-                    v_tile = load_tile_transpose(v_lds_read_window);
+                    move_tile_window(
+                        v_lds_read_window,
+                        {KVRows::kIsVectorized ? 0 : kK1, KVRows::kIsVectorized ? kK1 : 0});
+                    v_tile = Base::template LoadVTile<KVRows>(v_lds_read_window);
                 });
                 // move back to the origin
-                move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                move_tile_window(v_lds_read_window,
+                                 {KVRows::kIsVectorized ? 0 : -kK1 * (k1_loops - 1),
+                                  KVRows::kIsVectorized ? -kK1 * (k1_loops - 1) : 0});
             }
 
             gemm_1(o_acc,

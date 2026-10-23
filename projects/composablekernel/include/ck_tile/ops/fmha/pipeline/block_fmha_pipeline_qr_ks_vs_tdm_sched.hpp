@@ -183,8 +183,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                           const DramWindow& dram_window,
                                           const KVRows& kv_rows)
     {
-        static_assert(!KVRows::kIsVectorized, "qr_tdm_sched reads row-major K/V");
-        if constexpr(KVRows::kIsGather)
+        if constexpr(KVRows::kIsVectorized)
+            kv_rows.template load_vectorized<kIsK>(config, lds_window, dram_window);
+        else if constexpr(KVRows::kIsGather)
             kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
         else
         {
@@ -192,6 +193,36 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             load_tile_tdm(config, lds_window, dram_window);
         }
     }
+
+    // V LDS reads: row-major V read with transposed loads, or, from a vectorized KV cache,
+    // [kN0/v][kN1][v] read with plain loads into the same register layout.
+    template <typename KVRows>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadDescriptor()
+    {
+        if constexpr(KVRows::kIsVectorized)
+            return Policy::template MakeVLdsVectorizedDescriptor<Problem>();
+        else
+            return Policy::template MakeVLdsBlockDescriptor<Problem>();
+    }
+
+    template <typename KVRows>
+    using VLdsReadLengths = std::conditional_t<KVRows::kIsVectorized,
+                                               tuple<number<kN1>, number<kK1>>,
+                                               tuple<number<kK1>, number<kN1>>>;
+
+    using VRegTileDistribution =
+        remove_cvref_t<decltype(Policy::template MakeVRegTileDistribution<Problem>())>;
+    using VTransposedDistribution = remove_cvref_t<decltype(make_static_tile_distribution(
+        typename OutputTileDistributionTraits<typename VRegTileDistribution::DstrEncode,
+                                              VDataType>::TransposedDstrEncode{}))>;
+
+    template <typename KVRows>
+    using VLdsReadDistribution =
+        std::conditional_t<KVRows::kIsVectorized, VTransposedDistribution, VRegTileDistribution>;
+
+    // V register tile: what load_tile_transpose of a row-major V window returns
+    template <typename KVRows>
+    using VTile = static_distributed_tensor<VDataType, VTransposedDistribution>;
 
     // Advance a K/V DRAM window by `delta` sequence rows. Paged K/V re-map the new
     // sequence position through the page table instead of moving linearly.
@@ -480,20 +511,19 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(smem_ptrv0)),
             Policy::template MakeVLdsBlockDescriptor<Problem>());
 
+        // A vectorized KV cache leaves V as [kN0/v][kN1][v]: plain loads then read, in
+        // (hdim_v, seq) coordinates, the layout the transposed loads produce.
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(smem_ptrv0)),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            MakeVLdsReadDescriptor<KVRows>());
 
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
                              Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
                              {0, 0});
 
-        auto v_lds_read_window =
-            make_tile_window(v_lds_read_view,
-                             make_tuple(number<kK1>{}, number<kN1>{}),
-                             {0, 0},
-                             Policy::template MakeVRegTileDistribution<Problem>());
+        auto v_lds_read_window = make_tile_window(
+            v_lds_read_view, VLdsReadLengths<KVRows>{}, {0, 0}, VLdsReadDistribution<KVRows>{});
 
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
@@ -553,7 +583,13 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             // first K/V column of this iteration's tile (dropout)
             [[maybe_unused]] index_t kv_tile_start = 0;
 
-            decltype(load_tile_transpose(v_lds_read_window)) v_tile;
+            VTile<KVRows> v_tile;
+            if constexpr(KVRows::kIsVectorized)
+                static_assert(
+                    std::is_same_v<decltype(load_tile(v_lds_read_window)), VTile<KVRows>>);
+            else
+                static_assert(std::is_same_v<decltype(load_tile_transpose(v_lds_read_window)),
+                                             VTile<KVRows>>);
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
             [[maybe_unused]] float pv_output_scale_m1 = 1.0f;
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -623,7 +659,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 if constexpr(1 < k1_loops)
                 {
                     static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                        move_tile_window(v_lds_read_window, {kK1, 0});
+                        move_tile_window(
+                            v_lds_read_window,
+                            {KVRows::kIsVectorized ? 0 : kK1, KVRows::kIsVectorized ? kK1 : 0});
                         decltype(v_tile) v_tile_switch;
                         auto p_tile_stage = get_slice_tile(
                             p_tile, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{});
@@ -631,7 +669,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             i_k1, p_tile_stage, v_tile, v_tile_switch, v_lds_read_window);
                         v_tile = v_tile_switch;
                     });
-                    move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                    move_tile_window(v_lds_read_window,
+                                     {KVRows::kIsVectorized ? 0 : -kK1 * (k1_loops - 1),
+                                      KVRows::kIsVectorized ? -kK1 * (k1_loops - 1) : 0});
                 }
 
                 auto p_tile_last = get_slice_tile(
@@ -672,7 +712,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 MoveKVRows<false>(v_dram_window, v_row, kN0, kv_rows);
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
                 if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
-                             std::is_same_v<VDataType, bf16_t> && !KVRows::kIsGather)
+                             std::is_same_v<VDataType, bf16_t> && !KVRows::kIsGather &&
+                             !KVRows::kIsVectorized)
                 {
                     v_dram_window.tdm_load_to_lds(
                         tdm_config_v,

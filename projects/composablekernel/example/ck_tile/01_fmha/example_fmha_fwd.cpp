@@ -133,6 +133,10 @@ auto create_args(int argc, char* argv[])
                 "0",
                 "group mode, fwd/pagedkv: skip the sequences of at most this many query rows "
                 "(their O and LSE are left unwritten); 0: off")
+        .insert("kv_pad",
+                "0",
+                "batch_prefill, nhd/hnd: K/V rows of hdim + kv_pad elements and pages kv_pad "
+                "elements longer (strides that are not the packed sizes); 0: packed")
         .insert("kv_gappy",
                 "0",
                 "-api=pagedkv, group mode: each sequence starts some rows into its first page "
@@ -253,7 +257,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         arg_parser.get_str("api"),
                                         arg_parser.get_str("pipeline"),
                                         arg_parser.get_int("min_seqlen_q"),
-                                        arg_parser.get_bool("kv_gappy"));
+                                        arg_parser.get_bool("kv_gappy"),
+                                        arg_parser.get_int("kv_pad"));
 }
 
 int main(int argc, char* argv[])

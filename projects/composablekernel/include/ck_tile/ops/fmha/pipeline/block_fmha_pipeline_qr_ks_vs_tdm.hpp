@@ -453,10 +453,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                           const DramWindow& dram_window,
                                           const KVRows& kv_rows)
     {
-        if constexpr(KVRows::kIsGather)
-            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
-        else if constexpr(KVRows::kIsVectorized)
+        if constexpr(KVRows::kIsVectorized)
             kv_rows.template load_vectorized<kIsK>(config, lds_window, dram_window);
+        else if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
         else
         {
             ignore = kv_rows;
@@ -474,10 +474,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                       const DramWindow& dram_window,
                                                       const KVRows& kv_rows)
     {
-        if constexpr(KVRows::kIsGather)
-            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
-        else if constexpr(KVRows::kIsVectorized)
+        if constexpr(KVRows::kIsVectorized)
             kv_rows.template load_vectorized<kIsK>(config, lds_window, dram_window);
+        else if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
         else
         {
             ignore = kv_rows;

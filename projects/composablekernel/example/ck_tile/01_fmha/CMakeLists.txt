@@ -30,11 +30,11 @@ foreach(api ${FMHA_FWD_OPTIONAL_APIS})
   endif()
 endforeach()
 if(BUILD_TESTING)
-  # Build instances of all APIs for tests
+  # Build instances of all APIs for tests, batch_prefill with the instances its tests take
+  # (see the filters below)
   message(DEBUG "Enabling all FWD APIs of CK Tile FMHA for because testing is enabled")
-  set(FMHA_FWD_ENABLE_APIS "all")
-endif()
-if(FMHA_FWD_ENABLE_APIS STREQUAL "all")
+  set(FMHA_FWD_ENABLE_APIS ${FMHA_FWD_KNOWN_APIS} ${FMHA_FWD_OPTIONAL_APIS})
+elseif(FMHA_FWD_ENABLE_APIS STREQUAL "all")
   set(FMHA_FWD_ENABLE_APIS ${FMHA_FWD_KNOWN_APIS} ${FMHA_FWD_REQUESTED_OPTIONAL_APIS})
 endif()
 
@@ -114,15 +114,19 @@ endif()
 # instances for quick CI runs and a larger subset for scheduled runs (the tests skip tests when
 # there is no corresponding instance for parameters).
 if(BUILD_TESTING)
-  # Filters are in the order of FMHA_FWD_KNOWN_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill
+  # Filters are in the order of FMHA_FWD_ENABLE_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill,batch_prefill
   # The split-KV entry says *logits* rather than *_nlogits* so that the soft-cap
   # instances are built too: SplitKvSinkSoftCap needs a soft cap and a sink on the
   # same split, and without these instances it would report success while
   # skipping every case that matters. fnmatch takes one pattern per API, so this
   # also pulls in the soft-cap instances without a sink, for 524 more instances.
   # (pagedkv_prefill: qr_pagedkv, and the d128 instances of the gfx125 TDM pipelines without
-  # bias or sink; "+" separates its alternative patterns)
-  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*logits*_nbias*,*,*_qr_pagedkv_*_nlogits*_nskip*_pagedkv*+*_d128_*_qr_tdm*_nlogits_nbias_*_nskip_*_nsink*)
+  # bias or sink; batch_prefill: without bias, sink or LSE for the head dims of the
+  # BatchPrefill tests, d128 with LSE (block_table) or a logits soft cap, and d128 fp8bf16;
+  # "+" separates alternative patterns)
+  set(FMHA_FWD_TEST_FILTER_BATCH_PREFILL
+    "*_d64_*_nlogits_nbias_*_nlse_ndropout_nqscale_nsink_*+*_d96_*_nlogits_nbias_*_nlse_ndropout_nqscale_nsink_*+*_d128_*_nlogits_nbias_*_nlse_ndropout_nqscale_nsink_*+*_d256_*_nlogits_nbias_*_nlse_ndropout_nqscale_nsink_*+*_d128_*_nbias_*_lse_*_nqscale_nsink_linear_vllm*+*_d128_*_logits_nbias_*_nlse_ndropout_nqscale_nsink_linear_vllm*+*_d128_fp8bf16_*_nlogits_nbias_*_nsink_linear_vllm*")
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*logits*_nbias*,*,*_qr_pagedkv_*_nlogits*_nskip*_pagedkv*+*_d128_*_qr_tdm*_nlogits_nbias_*_nskip_*_nsink*,${FMHA_FWD_TEST_FILTER_BATCH_PREFILL})
 endif()
 
 # generate a list of kernels, but not actually emit files at config sta

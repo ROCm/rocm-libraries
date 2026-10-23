@@ -353,17 +353,19 @@ class FmhaFwdApiTrait:
     def page_check(self) -> str:
         # The run-time page size kernels read a.page_block_size: check it, and that it is the
         # page size the caller asked for.
+        same = "t.page_size == a.page_block_size && a.page_block_size > 0"
         if self.page_size == RUNTIME_PAGE_SIZE:
-            # each warp's K/V rows lie in one page
-            return (
-                "t.page_size == a.page_block_size && a.page_block_size > 0"
-                f" && a.page_block_size % {self.kv_warp_rows} == 0"
-            )
+            # each warp's K/V rows lie in one page; per-page K/V descales: each K/V tile
+            rows = self.bn0 if self.qscale == "kv_blockscale" else self.kv_warp_rows
+            return f"{same} && a.page_block_size % {rows} == 0"
         if self.page_size == RUNTIME_PAGE_SIZE_GATHER:
+            if self.kv_memory_layout == "vectorized":
+                # one box per vector of rows
+                return f"{same} && a.page_block_size % {128 // DTYPE_BITS[self.dtype]} == 0"
             # a gather row index counts K/V rows from the start of the cache
             return (
-                "t.page_size == a.page_block_size && a.page_block_size > 0"
-                " && a.batch_stride_k % a.stride_k == 0 && a.batch_stride_v % a.stride_v == 0"
+                f"{same} && a.batch_stride_k % a.stride_k == 0"
+                " && a.batch_stride_v % a.stride_v == 0"
             )
         return f"t.page_size == {self.page_size}"
 
@@ -941,10 +943,10 @@ class CustomFactory(KernelComponentFactory):
 
 
 class KernelComponentFactoryGfx125(KernelComponentFactory):
-    # gfx125 runs the same async pipeline with WMMA warp tiles; K is copied with
-    # global_load_async_to_lds instead of the gfx9 M0-based buffer_load...lds.
-    # KV first tries the TDM pipelines of fmha_fwd (qr_tdm_sched and qr_tdm; qr_tdm only
-    # for fp8bf16 d128 and a vectorized KV cache) on fmha_fwd's tiles of the same head dims.
+    # fp16/bf16 run the TDM pipelines of fmha_fwd (qr_tdm_pingpong, qr_tdm_sched, qr_tdm;
+    # qr_tdm only for a vectorized KV cache) on fmha_fwd's tiles of the same head dims.
+    # fp8bf16 runs qr_tdm for d128 and the async pipeline (WMMA warp tiles; K copied with
+    # global_load_async_to_lds instead of the gfx9 M0-based buffer_load...lds).
     supports_global_load_lds = False
 
     # Head dims in ascending order: the dispatcher takes the first hdim_q/hdim_v
@@ -1008,11 +1010,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
 
     @classmethod
     def get_page_sizes(cls, pipeline) -> List[int]:
-        # fp16/bf16 TDM pipelines: page 1024 as compiled, any other page size at run time
-        # (a vectorized KV cache: page views only, its pages hold whole warps' rows)
-        if pipeline.tag not in TDM_PIPELINES or pipeline.F_qscale != "no":
+        # TDM pipelines: page 1024 as compiled, any other page size at run time (page views
+        # when each warp's K/V rows lie in one page, else TDM gathers; per-page K/V descales
+        # need pages of whole K/V tiles)
+        if pipeline.tag not in TDM_PIPELINES:
             return SUPPORTED_PAGE_SIZE
-        if pipeline.F_kv_memory_layout == "vectorized":
+        if pipeline.F_qscale == "kv_blockscale":
             return [1024, RUNTIME_PAGE_SIZE]
         return [1024, RUNTIME_PAGE_SIZE, RUNTIME_PAGE_SIZE_GATHER]
 
@@ -1094,13 +1097,14 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
             and p.F_bias == "no"
             and p.F_qscale == "no"
         ]
-        # aiter's vectorized KV cache on fp16/bf16 qr_tdm (qr_tdm_sched and qr_tdm_pingpong
-        # read K/V row-major only)
+        # aiter's vectorized KV cache on the fp16/bf16 TDM pipelines
         pipelines += [
             replace(p, F_kv_memory_layout="vectorized")
             for p in pipelines
-            if p.tag == "qr_tdm" and p.F_qscale == "no"
+            if p.F_qscale == "no"
         ]
+        if dtype in ["fp16", "bf16"]:
+            return pipelines
         return pipelines + KernelComponentFactory.get_pipelines(
             dtype, hdim, receipt, mask_impl
         )
@@ -1115,7 +1119,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
                     if hdim in cls._QR_TDM_SCHED_TILES
                     else []
                 )
-                + [tdm_tile, cls._async_tile(tdm_tile.F_bn1, tdm_tile.F_bk0max)]
+                + [tdm_tile]
                 for hdim, tdm_tile in cls._QR_TDM_TILES.items()
             }
         elif dtype in ["fp8bf16"]:
@@ -1208,7 +1212,11 @@ def get_fwd_blobs(
                         continue
                     # kv_blockscale requires page_size >= kN0 (tile.F_bn0)
                     # This ensures all tokens in a main loop iteration belong to the same page
-                    if pipeline.F_qscale == "kv_blockscale" and page_size < tile.F_bn0:
+                    # (run-time page sizes: checked in the dispatch)
+                    if (
+                        pipeline.F_qscale == "kv_blockscale"
+                        and 0 < page_size < tile.F_bn0
+                    ):
                         continue
                     k = FmhaFwdKernel(
                         F_idx=0,
@@ -1222,7 +1230,10 @@ def get_fwd_blobs(
                         F_has_global_load_lds=factory.supports_global_load_lds,
                     )
                     if kernel_filter != "":
-                        if not fnmatch.fnmatch(k.name, kernel_filter):
+                        # "+" separates alternative patterns
+                        if not any(
+                            fnmatch.fnmatch(k.name, f) for f in kernel_filter.split("+")
+                        ):
                             continue
                     if optdim_list != [-1]:
                         if hdim not in optdim_list:

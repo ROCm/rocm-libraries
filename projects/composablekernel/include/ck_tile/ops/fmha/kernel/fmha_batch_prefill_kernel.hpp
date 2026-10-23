@@ -1385,7 +1385,8 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     v_dram_tdm,
                     make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
                     {0, 0});
-                // Pages smaller than a warp's K/V rows are read with TDM gathers.
+                // Pages smaller than a warp's K/V rows are read with TDM gathers (a vectorized
+                // KV cache: one box per vector of rows).
                 constexpr index_t kKVWarpRows =
                     FmhaPipeline::kN0 / (FmhaPipeline::kBlockSize / get_warp_size());
                 constexpr index_t kGatherWarpRows = [] {
@@ -1394,8 +1395,6 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     else
                         return kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
                 }();
-                static_assert(!kVectorizedKV || kGatherWarpRows == 0,
-                              "a vectorized KV cache needs pages of whole warp K/V rows");
                 constexpr index_t kKVRowsPageSize = kIsRuntimePageSize ? 0 : kPageBlockSize;
                 const auto kv_rows =
                     BlockFmhaPagedKVRows<kKVRowsPageSize,

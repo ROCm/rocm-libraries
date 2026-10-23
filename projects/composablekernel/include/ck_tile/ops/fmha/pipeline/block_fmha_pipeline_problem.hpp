@@ -192,8 +192,7 @@ struct BlockFmhaBatchPrefillPipelineProblem
                   "kQKHeaddim must be divisible by kVectorSize");
     static_assert(!(kPageBlockSize == 1 && kIsVectorizedLayout),
                   "page_size=1 only supports linear KV cache layout");
-    static_assert(!kIsVectorizedLayout || (kIsRuntimePageSize ? !kRuntimePageGather
-                                                              : kPageBlockSize % kVectorSize == 0),
+    static_assert(!kIsVectorizedLayout || kIsRuntimePageSize || kPageBlockSize % kVectorSize == 0,
                   "kPageBlockSize must be divisible by kVectorSize for vectorized layout");
     static_assert(kIsGroupMode_, "Batch prefill requires group mode");
 

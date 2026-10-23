@@ -1520,8 +1520,13 @@ INSTANTIATE_TEST_SUITE_P(
         BatchPrefillCase{64, 64, 300, 1000, "0", 16, "auto", "block_table", true, "_qr_tdm_sched_"},
         BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "auto", "indptr", false, "_qr_tdm_vr"},
         BatchPrefillCase{64, 64, 300, 1000, "b", 1, "auto", "block_table", true, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "vec", "block_table", true, "_qr_tdm_vr"},
-        BatchPrefillCase{128, 128, 300, 1000, "b", 64, "vec", "indptr", false, "_qr_tdm_vr"},
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 16, "vec", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 64, "vec", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 1000, "t:64,32", 16, "vec", "indptr", false, "_qr_tdm_vr"},
+        // vectorized pages of a few vectors: one TDM box per vector of rows
+        BatchPrefillCase{128, 128, 77, 2049, "b", 8, "vec", "block_table", true, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "0", 24, "vec", "indptr", false, "_qr_tdm_sched_"},
         // page sizes taken at run time on gfx125: page views, and TDM gathers (page 7)
         BatchPrefillCase{
             128, 128, 300, 1000, "b", 32, "nhd", "block_table", false, "_qr_tdm_sched_"},
@@ -1645,12 +1650,176 @@ TEST(TestCkTileFmhaFwd, TraitsFlatAggregateInit)
 }
 #pragma clang diagnostic pop
 
+// batch_prefill on K/V with strides that are not their packed sizes (-kv_pad, as aiter
+// allows): rows of hdim + 8 elements, pages 8 elements longer. Page strides that are not a
+// multiple of the row stride leave the gfx125 TDM gathers out, so pages smaller than a warp's
+// K/V rows then have no instance (pages of 16: qr_tdm, whose warps read 16 rows, instead of
+// qr_tdm_sched, 32 rows).
+// page_block_size, kv_layout, mask, gfx125 pipeline ("": no instance)
+using BatchPrefillPaddedKVCase = std::tuple<int, const char*, const char*, const char*>;
+
+class BatchPrefillPaddedKV : public TestWithParam<BatchPrefillPaddedKVCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         BatchPrefillPaddedKV,
+                         Values(BatchPrefillPaddedKVCase{1024, "nhd", "b", "_qr_tdm_sched_"},
+                                BatchPrefillPaddedKVCase{16, "hnd", "0", "_qr_tdm_vr"},
+                                BatchPrefillPaddedKVCase{32, "nhd", "t:64,32", "_qr_tdm_sched_"},
+                                BatchPrefillPaddedKVCase{7, "nhd", "b", ""}));
+
+TEST_P(BatchPrefillPaddedKV, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        const auto [page_block_size, kv_layout, mask_str, gfx125_pipeline] = GetParam();
+        if(!ck_tile::is_gfx125_supported() && !(page_block_size == 16 || page_block_size == 1024))
+            GTEST_SKIP() << "other page sizes run on the gfx125 TDM pipelines only";
+
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, 300),
+                                                   std::vector<int>(batch, 1000),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   "block_table",
+                                                   "batch_prefill",
+                                                   "",
+                                                   0,
+                                                   false,
+                                                   8);
+        if(ck_tile::is_gfx125_supported() && std::string(gfx125_pipeline).empty())
+        {
+            EXPECT_EQ(result, fwd_result::no_instance) << selected_kernel;
+            return;
+        }
+        CHECK_RESULT(result);
+        const char* pipeline = ck_tile::is_gfx125_supported() ? gfx125_pipeline : "_qr_async_";
+        EXPECT_NE(selected_kernel.find(pipeline), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "batch_prefill tests run fp16 and bf16";
+    }
+}
+
+// fp8bf16 batch_prefill on gfx125 qr_tdm with page sizes taken at run time: per-tensor
+// scales with page views and TDM gathers, per-page K/V scales with pages of whole K/V tiles
+// (128 rows; smaller pages have no instance).
+// qscale, page_block_size, kv_layout, mask, page size in the kernel name ("": no instance)
+using BatchPrefillFp8Case = std::tuple<const char*, int, const char*, const char*, const char*>;
+
+class BatchPrefillFp8 : public TestWithParam<BatchPrefillFp8Case>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         BatchPrefillFp8,
+                         Values(BatchPrefillFp8Case{"pt", 32, "nhd", "b", "_psrt_"},
+                                BatchPrefillFp8Case{"pt", 7, "hnd", "0", "_psrtg_"},
+                                BatchPrefillFp8Case{"kvbs", 256, "nhd", "b", "_psrt_"},
+                                BatchPrefillFp8Case{"kvbs", 64, "nhd", "0", ""}));
+
+TEST_P(BatchPrefillFp8, DataTypeConfig)
+{
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "run-time page sizes run on the gfx125 TDM pipelines only";
+        const auto [qscale, page_block_size, kv_layout, mask_str, page_name] = GetParam();
+
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, 200),
+                                                   std::vector<int>(batch, 900),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   std::string(kv_layout) == "hnd",
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   "block_table",
+                                                   "batch_prefill");
+        if(std::string(page_name).empty())
+        {
+            EXPECT_EQ(result, fwd_result::no_instance) << selected_kernel;
+            return;
+        }
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_vr"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(page_name), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "fp8bf16 only";
+    }
+}
+
 // batch_prefill on qr_tdm_pingpong: its grids (at least 2 (batch, head) pairs per CU, below
 // 640 rows) take the 64-row tile, up to 16 rows the 16-row one. Pages of 1024, 16 (a warp's
-// 16 K/V rows) and 1 (TDM gather), with GQA.
-// seqlen_q, seqlen_k, mask, page_block_size, kv_lookup, i_perm, tile
+// 16 K/V rows) and 1 (TDM gather), with GQA, and vectorized K/V.
+// seqlen_q, seqlen_k, mask, page_block_size, kv_lookup, i_perm, tile, kv_layout
 using BatchPrefillPingPongCase =
-    std::tuple<int, int, const char*, int, const char*, bool, const char*>;
+    std::tuple<int, int, const char*, int, const char*, bool, const char*, const char*>;
 
 class BatchPrefillPingPong : public TestWithParam<BatchPrefillPingPongCase>
 {
@@ -1659,11 +1828,14 @@ class BatchPrefillPingPong : public TestWithParam<BatchPrefillPingPongCase>
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     BatchPrefillPingPong,
-    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "indptr", false, "_b64x"},
-           BatchPrefillPingPongCase{100, 500, "b", 16, "block_table", true, "_b64x"},
-           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "indptr", false, "_b64x"},
-           BatchPrefillPingPongCase{8, 532, "0", 16, "block_table", true, "_b16x"},
-           BatchPrefillPingPongCase{8, 532, "b", 1, "indptr", false, "_b16x"}));
+    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "indptr", false, "_b64x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "block_table", true, "_b64x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "indptr", false, "_b64x", "auto"},
+           BatchPrefillPingPongCase{8, 532, "0", 16, "block_table", true, "_b16x", "auto"},
+           BatchPrefillPingPongCase{8, 532, "b", 1, "indptr", false, "_b16x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "indptr", false, "_b64x", "vec"},
+           BatchPrefillPingPongCase{100, 500, "0", 8, "block_table", true, "_b64x", "vec"},
+           BatchPrefillPingPongCase{8, 532, "b", 64, "block_table", true, "_b16x", "vec"}));
 
 TEST_P(BatchPrefillPingPong, DataTypeConfig)
 {
@@ -1672,8 +1844,14 @@ TEST_P(BatchPrefillPingPong, DataTypeConfig)
         if(!ck_tile::is_gfx125_supported())
             GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
 
-        const auto [seqlen_q, seqlen_k, mask_str, page_block_size, kv_lookup, i_perm, tile] =
-            GetParam();
+        const auto [seqlen_q,
+                    seqlen_k,
+                    mask_str,
+                    page_block_size,
+                    kv_lookup,
+                    i_perm,
+                    tile,
+                    kv_layout]    = GetParam();
         const auto [batch, nhead] = PingPongGrid(mode_enum::batch, 4);
 
         std::string selected_kernel;
@@ -1696,7 +1874,7 @@ TEST_P(BatchPrefillPingPong, DataTypeConfig)
                                                    0,
                                                    0,
                                                    true,
-                                                   true,
+                                                   i_perm, // lse (with the block_table cases)
                                                    page_block_size,
                                                    false,
                                                    "n",
@@ -1711,7 +1889,7 @@ TEST_P(BatchPrefillPingPong, DataTypeConfig)
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel,
-                                                   "auto",
+                                                   kv_layout,
                                                    kv_lookup);
         CHECK_RESULT(result);
         EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;

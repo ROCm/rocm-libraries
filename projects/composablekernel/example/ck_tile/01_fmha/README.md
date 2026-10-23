@@ -278,21 +278,22 @@ Each attention API the forward example links can be run on its own, and within i
 `fmha_fwd_pagedkv()` reads K/V through `block_table[batch, max_pages]` in batch and group mode (`-page_block_size=<n>`, K/V `[num_pages, page_block_size, nhead_k, hdim]` with `-iperm=0`). On gfx1250, fp16/bf16 run the TDM pipelines of `fmha_fwd` (`qr_tdm_pingpong`, `qr_tdm_sched`, `qr_tdm`, chosen as in `fmha_fwd`) with any page size: pages that hold the K/V rows of a warp are read with TDM box loads, other pages with TDM gathers (`_gather` in the kernel name). `qr_pagedkv` needs pages of a multiple of 128. With `-api=pagedkv` the example takes any page size.
 
 ### batch_prefill (paged KV cache)
-`fmha_batch_prefill()` is the group-mode, paged-KV forward that aiter's `mha_batch_prefill` calls. It is not part of `all`; enable it explicitly, e.g. `-DFMHA_FWD_ENABLE_APIS="fwd;batch_prefill"`. `tile_example_fmha_fwd` then runs it for `-mode=1 -page_block_size=<n>`:
+`fmha_batch_prefill()` is the group-mode, paged-KV forward that aiter's `mha_batch_prefill` calls. It is not part of `all`; enable it explicitly, e.g. `-DFMHA_FWD_ENABLE_APIS="fwd;batch_prefill"` (test builds, `BUILD_TESTING`, take the instances its gtests use). `tile_example_fmha_fwd` then runs it for `-mode=1 -page_block_size=<n>`:
 
 | option | values |
 |---|---|
-| `-page_block_size` | page size: 1, 16 or 1024 on every arch; on gfx1250 the fp16/bf16 TDM pipelines take any page size (page views when each warp's K/V rows lie in one page, else TDM gathers; `vec` needs a multiple of 16) |
+| `-page_block_size` | page size: 1, 16 or 1024 on gfx9; on gfx1250 the TDM pipelines take any page size (`vec`: a multiple of x; fp8bf16 `kvbs`: 1024 or a multiple of 128) |
 | `-kv_layout` | `nhd`: K/V `[num_pages, page_block_size, nhead_k, hdim]`; `hnd`: K/V `[num_pages, nhead_k, page_block_size, hdim]`; `vec`: K `[num_pages, nhead_k, hdim/x, page_block_size, x]`, V `[num_pages, nhead_k, page_block_size/x, hdim, x]`, x = 16 bytes of elements; `auto` (default): `nhd` with `-iperm=0`, `hnd` with `-iperm=1`. `nhd`/`hnd` also apply to pagedkv and splitkv |
 | `-kv_lookup` | `block_table` (default): int32 `block_table[batch, max_pages_per_seq]` + per-sequence `seqlen_k`; `indptr`: int32 `kv_indptr[batch + 1]` into `kv_page_indices[num_pages_used]` + `kv_last_page_lens[batch]` |
 | `-qscale` | `pt` or `kvbs` for `-prec=fp8bf16` |
+| `-kv_pad` | `nhd`/`hnd` K/V whose strides are not their packed sizes, as aiter allows: rows of hdim + kv_pad elements and pages kv_pad elements longer (a multiple of x) |
 
 Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For example, an `nhd` KV cache with an `indptr` page table and a causal mask:
 ```
 ./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
     -page_block_size=1024 -kv_layout=nhd -kv_lookup=indptr -iperm=0 -mask=b
 ```
-On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), all for `nhd`/`hnd` KV, then the async pipeline (the only one on gfx9). A vectorized KV cache (`-kv_layout=vec`, fp16/bf16, pages of a multiple of 16) runs on `qr_tdm`: a 3D TDM box puts K row-major in LDS and V as `[rows/kVec][hdim][kVec]`, which plain LDS loads read for the PV gemm. Logits soft cap and dropout run on all of them. Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
+On gfx1250 the dispatcher tries, in order: `qr_tdm_pingpong` (fp16/bf16 hdim 128, `max_seqlen_q < 640` with at least 2 (sequence, head) pairs per CU; its 16-row tile up to 16 rows), `qr_tdm_sched` (fp16/bf16 hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), for `nhd`, `hnd` and `vec` KV; fp8bf16 then falls back to the async pipeline (the only one on gfx9). Logits soft cap and dropout run on all of them. Page sizes are taken at run time, except the compiled page 1024: pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction, which need page strides that are multiples of the row stride (with `-kv_pad` such pages have no instance). A vectorized KV cache: a 3D TDM box puts K row-major in LDS and V as `[rows/x][hdim][x]`, which plain LDS loads read for the PV gemm; pages smaller than a warp's rows take one box per vector of rows. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
 
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:

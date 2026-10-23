@@ -279,7 +279,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         std::string api                   = "auto",
                         std::string pipeline              = "",
                         ck_tile::index_t min_seqlen_q     = 0,
-                        bool kv_gappy                     = false)
+                        bool kv_gappy                     = false,
+                        ck_tile::index_t kv_pad           = 0)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -466,6 +467,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     const bool kv_vectorized = (kv_layout == "vec");
     const bool kv_indptr     = (kv_lookup_str == "indptr");
+    // -kv_pad: batch_prefill nhd/hnd K/V with strides that are not their packed sizes, as
+    // aiter allows: kv_pad more elements after each row of hdim elements and after each page.
     // K/V tensors head-major (as -iperm=1): the paged layouts by -kv_layout, the others by
     // -iperm
     const bool kv_perm                        = 0 < page_block_size ? kv_layout != "nhd" : i_perm;
@@ -488,6 +491,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                       << kv_vector_size << std::endl;
             return fwd_result::invalid_args;
         }
+    }
+    if(kv_pad != 0 && !(0 < kv_pad && kv_pad % kv_vector_size == 0 && !kv_vectorized &&
+                        is_v_rowmajor && 0 < page_block_size && mode == mode_enum::group &&
+                        num_splits == 1 && (api == "batch_prefill" || auto_runs_batch_prefill)))
+    {
+        std::cerr << "kv_pad needs batch_prefill (group mode, page_block_size > 0, num_splits = "
+                     "1), nhd/hnd K/V with row-major V, and a multiple of "
+                  << kv_vector_size << std::endl;
+        return fwd_result::invalid_args;
     }
 
 #if !(CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API)
@@ -1262,6 +1274,33 @@ fwd_result fmha_fwd_run(mode_enum mode,
             self(i) = v_logical(i[0], i[1], i[2] * kv_vector_size + i[4], i[3]);
         });
     }
+    // -kv_pad: K/V rows of hdim + kv_pad elements and pages kv_pad elements longer, the
+    // padding filled with a value that shows up in O if it is read
+    const auto kv_padded_strides = [&](ck_tile::index_t hdim) {
+        const ck_tile::index_t row = hdim + kv_pad;
+        // row (stride_k/v), head (nhead_stride_k/v) and page (batch_stride_k/v) strides
+        return kv_perm ? std::array<ck_tile::index_t, 3>{row,
+                                                         page_block_size * row,
+                                                         nhead_k * page_block_size * row + kv_pad}
+                       : std::array<ck_tile::index_t, 3>{
+                             nhead_k * row, row, nhead_k * page_block_size * row + kv_pad};
+    };
+    const auto make_padded_kv = [&](auto& logical, ck_tile::index_t hdim, auto zero) {
+        using T            = decltype(zero);
+        const auto strides = kv_padded_strides(hdim);
+        std::vector<T> image(0 < kv_pad ? static_cast<std::size_t>(max_num_page_blocks) * strides[2]
+                                        : 0,
+                             ck_tile::type_convert<T>(100.f));
+        for(ck_tile::index_t p = 0; 0 < kv_pad && p < max_num_page_blocks; ++p)
+            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                for(ck_tile::index_t s = 0; s < page_block_size; ++s)
+                    for(ck_tile::index_t d = 0; d < hdim; ++d)
+                        image[static_cast<std::size_t>(p) * strides[2] + h * strides[1] +
+                              s * strides[0] + d] = logical(p, h, s, d);
+        return image;
+    };
+    const auto k_padded_host = make_padded_kv(k_logical, hdim_q, KDataType{});
+    const auto v_padded_host = make_padded_kv(v_logical, hdim_v, VDataType{});
     if(init_sink_value != 0)
     {
         // Keep the sink small and centered near zero. A sink far above rowmax makes
@@ -1272,8 +1311,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
         ck_tile::FillUniformDistribution<SMPLComputeDataType>{-1.f, 1.f, next_seed()}(sink_host);
     }
     ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem v_buf(v_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem k_buf(0 < kv_pad ? k_padded_host.size() * sizeof(KDataType)
+                                        : k_host.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem v_buf(0 < kv_pad ? v_padded_host.size() * sizeof(VDataType)
+                                        : v_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem sink_buf(sink_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem knew_buf(knew_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem vnew_buf(vnew_host.get_element_space_size_in_bytes());
@@ -1327,8 +1368,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem kv_last_page_lens_buf(kv_last_page_lens_host.size() * sizeof(int32_t));
 
     q_buf.ToDevice(q_host.data());
-    k_buf.ToDevice(kv_vectorized ? k_device_host.data() : k_host.data());
-    v_buf.ToDevice(kv_vectorized ? v_device_host.data() : v_host.data());
+    k_buf.ToDevice(0 < kv_pad      ? static_cast<const void*>(k_padded_host.data())
+                   : kv_vectorized ? static_cast<const void*>(k_device_host.data())
+                                   : static_cast<const void*>(k_host.data()));
+    v_buf.ToDevice(0 < kv_pad      ? static_cast<const void*>(v_padded_host.data())
+                   : kv_vectorized ? static_cast<const void*>(v_device_host.data())
+                                   : static_cast<const void*>(v_host.data()));
     kv_indptr_buf.ToDevice(kv_indptr_host.data());
     kv_page_indices_buf.ToDevice(kv_page_indices_host.data());
     kv_last_page_lens_buf.ToDevice(kv_last_page_lens_host.data());
@@ -1979,6 +2024,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.nhead_stride_k = page_block_size * hdim_q;
                     args.nhead_stride_v = page_block_size * hdim_v;
                 }
+                if(0 < kv_pad)
+                {
+                    const auto k_strides = kv_padded_strides(hdim_q);
+                    const auto v_strides = kv_padded_strides(hdim_v);
+                    args.stride_k        = k_strides[0];
+                    args.nhead_stride_k  = k_strides[1];
+                    args.batch_stride_k  = k_strides[2];
+                    args.stride_v        = v_strides[0];
+                    args.nhead_stride_v  = v_strides[1];
+                    args.batch_stride_v  = v_strides[2];
+                }
 
                 // pertensor: one Q/K/V scale each; kv_blockscale: Q per tensor, K/V per
                 // (page, kv head) in [num_pages, nhead_k]
@@ -2030,9 +2086,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
             init_args(bp_args);
 
             const float ave_time = fmha_batch_prefill(bp_traits, bp_args, sc);
-            // the other APIs read neither the vec layout, the indptr page table nor
-            // dropout
-            if(ave_time >= 0.0f || !api_auto || kv_vectorized || kv_indptr || 0 < p_drop)
+            // the other APIs read neither the vec layout, the indptr page table, padded K/V
+            // nor dropout
+            if(ave_time >= 0.0f || !api_auto || kv_vectorized || kv_indptr || 0 < kv_pad ||
+               0 < p_drop)
                 return ave_time;
         }
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API

@@ -31,9 +31,11 @@ struct BlockFmhaDenseKVRows
 // kPageSize 0 (pagedkv_prefill) takes the page size at run time, and the sequence may then
 // start `row_offset` rows into its first page (gappy paged K/V); page view needs the page
 // size and row_offset to be multiples of a warp's K/V rows.
-// kVectorized: aiter's vectorized KV cache (batch_prefill), page view only (see
-// load_vectorized()). MakeKView/MakeVView then give (rows, hdim) views whose data pointer is
-// the page and whose lengths bound the TDM boxes; their strides are not used.
+// kVectorized: aiter's vectorized KV cache (batch_prefill), see load_vectorized().
+// MakeKView/MakeVView then give (rows, hdim) views whose data pointer is the page and whose
+// lengths bound the TDM boxes; their strides are not used. With kGatherWarpRows > 0 (pages
+// smaller than a warp's rows, a multiple of the vector) each vector of rows is loaded from
+// its own page, and the gather row indices hold physical page ids.
 template <index_t kPageSize, // 0: page_size at run time
           typename MakeKView,
           typename MakeVView,
@@ -46,8 +48,8 @@ struct BlockFmhaPagedKVRows
     static constexpr bool kIsGather     = kGather;
     static constexpr bool kIsVectorized = kVectorized;
     static constexpr index_t kPageSize_ = kPageSize;
-    static_assert(!(kGather && kVectorized), "a vectorized KV cache is read through page views");
-    // One TDM gather takes eight 32-bit row indices.
+    // One TDM gather takes eight 32-bit row indices; a vectorized KV cache in gather mode
+    // issues one box per vector of rows, 8 rows for fp16/bf16.
     static constexpr index_t kGatherRows = 8;
 
     CK_TILE_HOST_DEVICE BlockFmhaPagedKVRows(const index_t* page_idx_,
@@ -181,9 +183,14 @@ struct BlockFmhaPagedKVRows
                 const index_t r    = first_row + static_cast<index_t>(__lane_id());
                 const index_t pr   = page_row(r);
                 const index_t page = page_idx[min(page_of(pr), max_page)];
-                // unsigned: TDM row indices span 32 bits
-                return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + row_in_page(pr)
-                                    : 0xffffffffu;
+                if constexpr(kVectorized)
+                {
+                    ignore = page_rows;
+                    return static_cast<uint32_t>(page);
+                }
+                else // unsigned: TDM row indices span 32 bits
+                    return r < seqlen_k ? static_cast<uint32_t>(page) * page_rows + row_in_page(pr)
+                                        : 0xffffffffu;
             };
             if(seq_row == g.next_row)
                 g.cur = g.next;
@@ -231,7 +238,7 @@ struct BlockFmhaPagedKVRows
     CK_TILE_DEVICE void
     load_gather(const TDMConfig& config, LdsWindow& lds_window, const Window& window) const
     {
-        static_assert(kGather);
+        static_assert(kGather && !kVectorized);
         constexpr auto ys_to_d  = typename Window::TileDstr{}.get_ys_to_d_descriptor();
         constexpr index_t kRows = ys_to_d.get_lengths()[number<0>{}];
         static_assert(ys_to_d.get_num_of_dimension() == 2 && kRows == kGatherWarpRows,
@@ -303,11 +310,12 @@ struct BlockFmhaPagedKVRows
 #endif
     }
 
-    // vectorized: TDM-load this warp's rows of the K/V tile at `window` (page view: origin =
-    // page row, column) from aiter's vectorized KV cache. A K page is [D/v][page][v] (v =
-    // 16 bytes of elements) and lands row-major in LDS, as a box load writes it; a V page is
-    // [page/v][D][v] and lands as [rows/v][kN1][v] (no LDS padding), which the pipeline reads
-    // with plain loads (see the pipeline's vectorized V read).
+    // vectorized: TDM-load this warp's rows of the K/V tile at `window` from aiter's vectorized
+    // KV cache (page view: origin = page row, column; gather mode: origin = sequence row,
+    // column, one box per vector of rows). A K page is [D/v][page][v] (v = 16 bytes of
+    // elements) and lands row-major in LDS, as a box load writes it; a V page is [page/v][D][v]
+    // and lands as [rows/v][kN1][v] (no LDS padding), which the pipeline reads with plain
+    // loads (see the pipeline's vectorized V read).
     template <bool kIsK, typename LdsWindow, typename Window>
     CK_TILE_DEVICE void
     load_vectorized(const TDMConfig& config, LdsWindow& lds_window, const Window& window) const
@@ -320,73 +328,112 @@ struct BlockFmhaPagedKVRows
         constexpr index_t kCols = ys_to_d.get_lengths()[number<1>{}];
         static_assert(ys_to_d.get_num_of_dimension() == 2 && kRows % kVec == 0 && kCols % kVec == 0,
                       "vectorized: one (rows x cols) box per warp, whole vectors");
+        static_assert(!kGather || (kRows == kGatherWarpRows && kVec == kGatherRows),
+                      "vectorized gather: one box per vector of a warp's rows");
 #if CK_TILE_ENABLE_TDM_FEATURE
         const index_t warp_row = warp_row_of(window);
         const auto origin      = window.get_window_origin();
-        const index_t row      = origin[number<0>{}] + warp_row; // page row
         const index_t col      = origin[number<1>{}];
-
-        const auto& view        = window.get_bottom_tensor_view();
-        const auto& desc        = view.get_tensor_descriptor();
-        const index_t rows      = desc.get_length(number<0>{}); // valid rows of the page
-        const index_t hdim      = desc.get_length(number<1>{});
-        const index_t psize     = rows_per_page();
-        const index_t rows_left = max(index_t{0}, rows - row);
+        const auto& view       = window.get_bottom_tensor_view();
+        const index_t hdim     = view.get_tensor_descriptor().get_length(number<1>{});
+        const index_t psize    = rows_per_page();
 
         const auto& lds_view = lds_window.get_bottom_tensor_view();
         const auto& lds_desc = lds_view.get_tensor_descriptor();
 
-        TDM_GROUP1 g1;
-        g1.workgroup_mask = config.workgroup_mask;
-        g1.data_size      = sizeof(DataType) == 4 ? 2 : (sizeof(DataType) == 2 ? 1 : 0);
-        TDM_GROUP2 g2;
-        const DataType* gptr;
-        CK_TILE_LDS_ADDR DataType* smem;
-        if constexpr(kIsK)
+        // One box of `kBoxRows` rows from page row `row` of the page at `page_ptr`, of which
+        // `rows_left` are valid, to the LDS rows from the warp's row `lds_row`.
+        const auto load_box = [&](auto box_rows,
+                                  const DataType* page_ptr,
+                                  index_t row,
+                                  index_t rows_left,
+                                  index_t lds_row) {
+            constexpr index_t kBoxRows = decltype(box_rows)::value;
+            TDM_GROUP1 g1;
+            g1.workgroup_mask = config.workgroup_mask;
+            g1.data_size      = sizeof(DataType) == 4 ? 2 : (sizeof(DataType) == 2 ? 1 : 0);
+            TDM_GROUP2 g2;
+            const DataType* gptr;
+            CK_TILE_LDS_ADDR DataType* smem;
+            if constexpr(kIsK)
+            {
+                // (v, D/v, rows) with strides (1, page * v, v): row-major rows of D in LDS
+                gptr            = page_ptr + row * kVec + (col / kVec) * psize * kVec;
+                g1.pad_enable   = config.pad_enable;
+                g1.pad_interval = config.pad_config.pad_interval;
+                g1.pad_amount   = config.pad_config.pad_amount;
+                g1.tensorDim0(kVec);
+                g1.tensorDim1(max(index_t{0}, hdim - col) / kVec);
+                g1.tensorDim0Stride(psize * kVec);
+                g1.tensorDim1Stride(kVec);
+                g1.tileDim(0, kVec);
+                g1.tileDim(1, kCols / kVec);
+                g1.tileDim(2, kBoxRows);
+                g2.mode0.tensor_dim2 = rows_left;
+                auto lds_idx         = lds_window.get_window_origin();
+                lds_idx(number<0>{}) = lds_idx[number<0>{}] + lds_row;
+                smem = lds_view.get_buffer_view().p_data_ + lds_desc.calculate_offset(lds_idx);
+            }
+            else
+            {
+                // (v, D, rows/v) with strides (1, v, D * v): [rows/v][kCols][v] in LDS
+                gptr          = page_ptr + (row / kVec) * hdim * kVec + col * kVec;
+                g1.pad_enable = 0;
+                g1.tensorDim0(kVec);
+                g1.tensorDim1(max(index_t{0}, hdim - col));
+                g1.tensorDim0Stride(kVec);
+                g1.tensorDim1Stride(hdim * kVec);
+                g1.tileDim(0, kVec);
+                g1.tileDim(1, kCols);
+                g1.tileDim(2, kBoxRows / kVec);
+                g2.mode0.tensor_dim2 = integer_divide_ceil(rows_left, kVec);
+                smem                 = lds_view.get_buffer_view().p_data_ +
+                       lds_desc.calculate_offset(lds_window.get_window_origin()) + lds_row * kCols;
+            }
+            TDM_GROUP0 g0(
+                reinterpret_cast<uintptr_t>(smem), reinterpret_cast<uintptr_t>(gptr), 0u, 0u);
+            TDM_GROUP3 g3;
+            int32x8_t zeros = {};
+            __builtin_amdgcn_tensor_load_to_lds(
+                bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
+                amd_wave_read_first_lane(g1.bitfield),
+                amd_wave_read_first_lane(g2.bitfield),
+                amd_wave_read_first_lane(g3.bitfield),
+                zeros,
+                0);
+        };
+
+        if constexpr(kGather)
         {
-            // (v, D/v, rows) with strides (1, page * v, v): row-major rows of D in LDS
-            gptr = view.get_buffer_view().p_data_ + row * kVec + (col / kVec) * psize * kVec;
-            g1.pad_enable   = config.pad_enable;
-            g1.pad_interval = config.pad_config.pad_interval;
-            g1.pad_amount   = config.pad_config.pad_amount;
-            g1.tensorDim0(kVec);
-            g1.tensorDim1(max(index_t{0}, hdim - col) / kVec);
-            g1.tensorDim0Stride(psize * kVec);
-            g1.tensorDim1Stride(kVec);
-            g1.tileDim(0, kVec);
-            g1.tileDim(1, kCols / kVec);
-            g1.tileDim(2, kRows);
-            g2.mode0.tensor_dim2 = rows_left;
-            auto lds_idx         = lds_window.get_window_origin();
-            lds_idx(number<0>{}) = lds_idx[number<0>{}] + warp_row;
-            smem = lds_view.get_buffer_view().p_data_ + lds_desc.calculate_offset(lds_idx);
+            const index_t seq_row = origin[number<0>{}] + warp_row;
+            const uint32_t pages  = (kIsK ? k_gather : v_gather).cur;
+            static_for<0, kRows / kVec, 1>{}([&](auto i_box) {
+                const index_t r    = seq_row + i_box * kVec;
+                const index_t page = static_cast<index_t>(
+                    __builtin_amdgcn_readlane(pages, static_cast<int>(i_box * kVec)));
+                const DataType* page_ptr = [&]() {
+                    if constexpr(kIsK)
+                        return make_k_view(page, psize).get_buffer_view().p_data_;
+                    else
+                        return make_v_view(page, psize).get_buffer_view().p_data_;
+                }();
+                load_box(number<kVec>{},
+                         page_ptr,
+                         row_in_page(page_row(r)),
+                         max(index_t{0}, min(kVec, seqlen_k - r)),
+                         warp_row + i_box * kVec);
+            });
         }
         else
         {
-            // (v, D, rows/v) with strides (1, v, D * v): [rows/v][kCols][v] in LDS
-            gptr = view.get_buffer_view().p_data_ + (row / kVec) * hdim * kVec + col * kVec;
-            g1.pad_enable = 0;
-            g1.tensorDim0(kVec);
-            g1.tensorDim1(max(index_t{0}, hdim - col));
-            g1.tensorDim0Stride(kVec);
-            g1.tensorDim1Stride(hdim * kVec);
-            g1.tileDim(0, kVec);
-            g1.tileDim(1, kCols);
-            g1.tileDim(2, kRows / kVec);
-            g2.mode0.tensor_dim2 = integer_divide_ceil(rows_left, kVec);
-            smem                 = lds_view.get_buffer_view().p_data_ +
-                   lds_desc.calculate_offset(lds_window.get_window_origin()) + warp_row * kCols;
+            const index_t row  = origin[number<0>{}] + warp_row; // page row
+            const index_t rows = view.get_tensor_descriptor().get_length(number<0>{});
+            load_box(number<kRows>{},
+                     view.get_buffer_view().p_data_,
+                     row,
+                     max(index_t{0}, rows - row),
+                     warp_row);
         }
-        TDM_GROUP0 g0(reinterpret_cast<uintptr_t>(smem), reinterpret_cast<uintptr_t>(gptr), 0u, 0u);
-        TDM_GROUP3 g3;
-        int32x8_t zeros = {};
-        __builtin_amdgcn_tensor_load_to_lds(
-            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
-            amd_wave_read_first_lane(g1.bitfield),
-            amd_wave_read_first_lane(g2.bitfield),
-            amd_wave_read_first_lane(g3.bitfield),
-            zeros,
-            0);
 #else
         ignore = config;
         ignore = lds_window;
