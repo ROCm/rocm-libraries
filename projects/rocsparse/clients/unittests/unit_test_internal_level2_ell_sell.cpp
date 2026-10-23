@@ -44,9 +44,9 @@
 //    (sellmvn_device / sellmvt_device) for sell_slice_size <= 128, the
 //    large-slice kernel (sellmvn_large_slice_device /
 //    sellmvt_large_slice_device) above that, and falls back to csrmv when
-//    sell_slice_size == 1. This file exercises all three, in both
-//    directions, including a transpose case whose matrix size is not a
-//    multiple of the slice size (a partial last slice).
+//    sell_slice_size == 1. This file exercises all three; the two sliced
+//    kernels in both directions on both sides of the 128 boundary, with
+//    partial last slices.
 //
 #include "unit_test_utils.hpp"
 
@@ -356,21 +356,21 @@ namespace
         return x;
     }
 
-    // Builds a tiny general (non-triangular) sliced-ELL matrix with a main
-    // diagonal (value row+1) and a sub-diagonal (value row, for row >= 1),
-    // depth 2, padded with -1 / 0 where a slot has no entry (row 0's missing
-    // sub-diagonal, and every slot in a slice's padding rows). Suitable for
-    // any sell_slice_size >= 2; for sell_slice_size == 1 use
-    // build_bidiagonal_sell_csr_exact instead (slice_size == 1 is dispatched
+    // Builds a lower-banded sliced-ELL matrix: slot p of row r holds column
+    // r - p with value r + 1 - p, for p < depth and r - p >= 0. Missing entries
+    // (the first rows' missing sub-diagonals and every slot in a slice's padding
+    // rows) are padded with -1 / 0. depth == 2 is the bidiagonal matrix used by
+    // most cases. Suitable for any sell_slice_size >= 2; for sell_slice_size == 1
+    // use build_bidiagonal_sell_csr_exact instead (slice_size == 1 is dispatched
     // straight to the CSR fallback, which does not skip padded entries).
-    void build_bidiagonal_sell(int64_t               m,
-                               int64_t               sell_slice_size,
-                               std::vector<int32_t>& slice_offsets,
-                               std::vector<int32_t>& col_ind,
-                               std::vector<float>&   val)
+    void build_banded_sell(int64_t               m,
+                           int64_t               sell_slice_size,
+                           int64_t               depth,
+                           std::vector<int32_t>& slice_offsets,
+                           std::vector<int32_t>& col_ind,
+                           std::vector<float>&   val)
     {
-        constexpr int64_t depth   = 2;
-        const int64_t     nslices = (m + sell_slice_size - 1) / sell_slice_size;
+        const int64_t nslices = (m + sell_slice_size - 1) / sell_slice_size;
 
         slice_offsets.assign(static_cast<size_t>(nslices + 1), 0);
         for(int64_t s = 0; s <= nslices; ++s)
@@ -393,17 +393,11 @@ namespace
                 {
                     continue;
                 }
-                // slot 0: main diagonal.
-                const int64_t idx0                 = start + 0 * sell_slice_size + r;
-                col_ind[static_cast<size_t>(idx0)] = static_cast<int32_t>(row);
-                val[static_cast<size_t>(idx0)]     = static_cast<float>(row + 1);
-
-                // slot 1: sub-diagonal (none for row 0).
-                if(row >= 1)
+                for(int64_t p = 0; p < depth && row - p >= 0; ++p)
                 {
-                    const int64_t idx1                 = start + 1 * sell_slice_size + r;
-                    col_ind[static_cast<size_t>(idx1)] = static_cast<int32_t>(row - 1);
-                    val[static_cast<size_t>(idx1)]     = static_cast<float>(row);
+                    const int64_t idx                 = start + p * sell_slice_size + r;
+                    col_ind[static_cast<size_t>(idx)] = static_cast<int32_t>(row - p);
+                    val[static_cast<size_t>(idx)]     = static_cast<float>(row + 1 - p);
                 }
             }
         }
@@ -440,7 +434,8 @@ namespace
 
     // Creates the SELL spmat descriptor from host data, runs the two-stage
     // (analysis, compute) rocsparse_v2_spmv pipeline with alg = sell, and
-    // checks the result against `expected`.
+    // checks the result against `expected`. y is allocated with a sentinel tail
+    // past its length, so a write past the last row fails the check.
     void run_v2_spmv_sell(rocsparse_handle            handle,
                           rocsparse_operation         trans,
                           int64_t                     m,
@@ -485,8 +480,13 @@ namespace
         ASSERT_EQ(static_cast<int64_t>(hy_init.size()), y_size);
         ASSERT_EQ(static_cast<int64_t>(expected.size()), y_size);
 
+        constexpr size_t   y_tail     = 512;
+        constexpr float    y_sentinel = -12345.0f;
+        std::vector<float> hy(hy_init);
+        hy.resize(hy_init.size() + y_tail, y_sentinel);
+
         device_vector<float> x{hx};
-        device_vector<float> y{hy_init};
+        device_vector<float> y{hy};
         ASSERT_TRUE(x.ptr && y.ptr);
 
         rocsparse_dnvec_descr dx = nullptr, dy = nullptr;
@@ -570,13 +570,66 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        expect_vectors_eq(expected, to_host(y));
+        const std::vector<float> hy_out = to_host(y);
+        expect_vectors_eq(expected, std::vector<float>(hy_out.begin(), hy_out.begin() + y_size));
+        for(size_t i = expected.size(); i < hy_out.size(); ++i)
+        {
+            EXPECT_EQ(hy_out[i], y_sentinel) << "write past y at index " << i;
+        }
 
         EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv_descr), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dx), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_dnvec_descr(dy), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
     }
+
+    // Runs build_banded_sell(m, sell_slice_size, depth) with x[i] = i + 1 through
+    // run_v2_spmv_sell and checks it against host_sellmv.
+    void check_banded_sellmv(rocsparse_handle          handle,
+                             rocsparse_operation       trans,
+                             int64_t                   m,
+                             int64_t                   n,
+                             int64_t                   sell_slice_size,
+                             int64_t                   depth,
+                             float                     alpha,
+                             float                     beta,
+                             const std::vector<float>& hy_init)
+    {
+        std::vector<int32_t> offs, cols;
+        std::vector<float>   vals;
+        build_banded_sell(m, sell_slice_size, depth, offs, cols, vals);
+
+        const std::vector<float> hx = make_varying_x(trans == rocsparse_operation_none ? n : m);
+        const std::vector<float> expected
+            = host_sellmv(m, n, sell_slice_size, offs, cols, vals, hx, alpha, beta, hy_init, trans);
+
+        ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
+                                                 trans,
+                                                 m,
+                                                 n,
+                                                 offs,
+                                                 cols,
+                                                 vals,
+                                                 sell_slice_size,
+                                                 hx,
+                                                 alpha,
+                                                 beta,
+                                                 hy_init,
+                                                 expected));
+    }
+
+    // sell_slice_size > 128 selects the large-slice kernel (256 threads per
+    // slice). Slice 128 is the largest small-slice size, slice 129 leaves threads
+    // 129..255 outside the slice, and slice 300 needs two passes (iter == 2). m
+    // is not a multiple of the slice, so the last slice is partial; at m = 600
+    // the sqrt-shaped launch grid also has a surplus block.
+    struct SellSliceCase
+    {
+        int64_t m;
+        int64_t sell_slice_size;
+    };
+
+    constexpr SellSliceCase slice_boundary_cases[] = {{600, 128}, {600, 129}, {700, 300}};
 
 } // namespace
 
@@ -831,7 +884,7 @@ TEST_F(SellMv, none_small_slice)
     const int64_t        m = 32, n = 32, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
-    build_bidiagonal_sell(m, slice, offs, cols, vals);
+    build_banded_sell(m, slice, 2, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
     std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
@@ -864,7 +917,7 @@ TEST_F(SellMv, transpose_small_slice_partial_last_slice)
     const int64_t        m = 40, n = 40, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
-    build_bidiagonal_sell(m, slice, offs, cols, vals);
+    build_banded_sell(m, slice, 2, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(m);
     std::vector<float> hy0(static_cast<size_t>(n), 0.0f);
@@ -888,69 +941,69 @@ TEST_F(SellMv, transpose_small_slice_partial_last_slice)
                                              expected));
 }
 
-// Non-transpose, slice size 256 (>128, large-slice kernel
-// sellmvn_large_slice_device). rocsparse_create_sell_descr requires
-// sell_slice_size <= rows, which rules out keeping this one under 64 rows (as
-// the other cases are); m = n = slice = 256 is the smallest matrix that still
-// reaches this kernel, one exactly-full slice.
-TEST_F(SellMv, none_large_slice)
+TEST_F(SellMv, none_slice_size_boundaries)
 {
-    const int64_t        m = 256, n = 256, slice = 256;
-    std::vector<int32_t> offs, cols;
-    std::vector<float>   vals;
-    build_bidiagonal_sell(m, slice, offs, cols, vals);
-
-    std::vector<float> hx = make_varying_x(n);
-    std::vector<float> hy0(static_cast<size_t>(m), 0.0f);
-    const float        alpha = 1.0f, beta = 0.0f;
-
-    std::vector<float> expected = host_sellmv(
-        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_none);
-
-    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
-                                             rocsparse_operation_none,
-                                             m,
-                                             n,
-                                             offs,
-                                             cols,
-                                             vals,
-                                             slice,
-                                             hx,
-                                             alpha,
-                                             beta,
-                                             hy0,
-                                             expected));
+    for(const SellSliceCase& c : slice_boundary_cases)
+    {
+        SCOPED_TRACE(testing::Message() << "m = " << c.m << ", slice = " << c.sell_slice_size);
+        ASSERT_NO_FATAL_FAILURE(
+            check_banded_sellmv(handle,
+                                rocsparse_operation_none,
+                                c.m,
+                                c.m,
+                                c.sell_slice_size,
+                                2,
+                                1.0f,
+                                0.0f,
+                                std::vector<float>(static_cast<size_t>(c.m), 7.0f)));
+    }
 }
 
-// Transpose, slice size 256 (large-slice kernel sellmvt_large_slice_device).
-// Same sell_slice_size <= rows constraint as none_large_slice above.
-TEST_F(SellMv, transpose_large_slice)
+TEST_F(SellMv, transpose_slice_size_boundaries)
 {
-    const int64_t        m = 256, n = 256, slice = 256;
-    std::vector<int32_t> offs, cols;
-    std::vector<float>   vals;
-    build_bidiagonal_sell(m, slice, offs, cols, vals);
+    for(const SellSliceCase& c : slice_boundary_cases)
+    {
+        SCOPED_TRACE(testing::Message() << "m = " << c.m << ", slice = " << c.sell_slice_size);
+        ASSERT_NO_FATAL_FAILURE(
+            check_banded_sellmv(handle,
+                                rocsparse_operation_transpose,
+                                c.m,
+                                c.m,
+                                c.sell_slice_size,
+                                2,
+                                1.0f,
+                                0.0f,
+                                std::vector<float>(static_cast<size_t>(c.m), 7.0f)));
+    }
+}
 
-    std::vector<float> hx = make_varying_x(m);
-    std::vector<float> hy0(static_cast<size_t>(n), 0.0f);
-    const float        alpha = 1.0f, beta = 0.0f;
+// Ten entries per row in the small-slice kernel, which gives each row 8
+// threads: threads 0 and 1 take a second strided step, and the non-transpose
+// reduction combines real data at every level. The last slice holds 8 rows.
+TEST_F(SellMv, none_small_slice_depth10)
+{
+    ASSERT_NO_FATAL_FAILURE(check_banded_sellmv(handle,
+                                                rocsparse_operation_none,
+                                                40,
+                                                40,
+                                                32,
+                                                10,
+                                                2.0f,
+                                                0.0f,
+                                                std::vector<float>(40, 7.0f)));
+}
 
-    std::vector<float> expected = host_sellmv(
-        m, n, slice, offs, cols, vals, hx, alpha, beta, hy0, rocsparse_operation_transpose);
-
-    ASSERT_NO_FATAL_FAILURE(run_v2_spmv_sell(handle,
-                                             rocsparse_operation_transpose,
-                                             m,
-                                             n,
-                                             offs,
-                                             cols,
-                                             vals,
-                                             slice,
-                                             hx,
-                                             alpha,
-                                             beta,
-                                             hy0,
-                                             expected));
+TEST_F(SellMv, transpose_small_slice_depth10)
+{
+    ASSERT_NO_FATAL_FAILURE(check_banded_sellmv(handle,
+                                                rocsparse_operation_transpose,
+                                                40,
+                                                40,
+                                                32,
+                                                10,
+                                                2.0f,
+                                                0.0f,
+                                                std::vector<float>(40, 7.0f)));
 }
 
 // Slice size 1: rocsparse_sellmv_impl dispatches this straight to the CSR
@@ -994,7 +1047,7 @@ TEST_F(SellMv, none_small_slice_nonzero_beta)
     const int64_t        m = 32, n = 32, slice = 32;
     std::vector<int32_t> offs, cols;
     std::vector<float>   vals;
-    build_bidiagonal_sell(m, slice, offs, cols, vals);
+    build_banded_sell(m, slice, 2, offs, cols, vals);
 
     std::vector<float> hx = make_varying_x(n);
     std::vector<float> hy0(static_cast<size_t>(m));
