@@ -4,7 +4,6 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/vector.h>
 
-#include <limits>
 #include <roc/hostnumerics/output_selection.hpp>
 #include <utility>
 #include <vector>
@@ -30,35 +29,35 @@ element count by indices and selected_count. Prime stride uses the smallest
 prime at least allocated_elements / requested_elements, so its sample count is
 approximate. Zero requests or requests at least logical_elements select all.
 
+Every factory requires index_order; strided also requires max_elements.
 Selections copy index_order and return a copy from the property. Axes run from
-slowest to fastest; empty means ascending axes (C order). The selection stores
-the order without checking it against a shape. Invalid logical arguments raise
-RuntimeError; values that cannot be converted to size_t raise TypeError.
+slowest to fastest, as in Shape and Layout. An empty order resolves to ascending
+axes (C order) when a consumer supplies the rank. The consumer validates a
+nonempty order as a permutation of that rank's axes. Invalid logical arguments
+raise RuntimeError; values that cannot be converted to size_t raise TypeError.
 )doc")
         .def_static(
             "all", [](const std::vector<size_t>& order) { return OutputSelection::all(order); },
-            "index_order"_a = std::vector<size_t>{})
+            "index_order"_a)
         .def_static(
             "strided",
             [](size_t first, size_t stride, size_t maxElements, const std::vector<size_t>& order) {
                 return OutputSelection::strided(first, stride, maxElements, order);
             },
-            "first"_a, "stride"_a, "max_elements"_a = std::numeric_limits<size_t>::max(),
-            "index_order"_a = std::vector<size_t>{})
+            "first"_a, "stride"_a, "max_elements"_a, "index_order"_a)
         .def_static(
             "explicit_indices",
             [](std::vector<size_t> indices, const std::vector<size_t>& order) {
                 return OutputSelection::explicitIndices(std::move(indices), order);
             },
-            "indices"_a, "index_order"_a = std::vector<size_t>{})
+            "indices"_a, "index_order"_a)
         .def_static(
             "prime_stride",
             [](size_t logical, size_t allocated, size_t requested,
                const std::vector<size_t>& order) {
                 return OutputSelection::primeStride(logical, allocated, requested, order);
             },
-            "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a,
-            "index_order"_a = std::vector<size_t>{})
+            "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a, "index_order"_a)
         .def_prop_ro("kind", &OutputSelection::kind)
         .def_prop_ro("selects_all", &OutputSelection::selectsAll)
         .def_prop_ro("first", &OutputSelection::first)
