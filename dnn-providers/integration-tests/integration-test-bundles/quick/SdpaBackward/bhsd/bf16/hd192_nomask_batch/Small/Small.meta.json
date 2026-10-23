@@ -1,13 +1,13 @@
 {
     "format_version": 1,
     "generator": "generate_sdpa_bwd_golden.py",
-    "generator_version": "1.1.0",
-    "generator_sha256": "010e9ae84fbd929c8ac7ea11a770f8050bb0a0e4a7e6d07bc5e6961d7c4f761e",
-    "generated_at": "2026-10-20T14:56:55Z",
-    "reference_source": "PyTorch 2.14.1+cu130",
+    "generator_version": "1.2.0",
+    "generator_sha256": "87f342429fdac345ffbc1b95d80994bf6a537282ff1253af6b766bd326e7442f",
+    "generated_at": "2026-10-23T16:36:30Z",
+    "reference_source": "PyTorch 2.10.0+rocm7.13.0a20260513",
     "reference_backend": "pytorch_explicit_fp32_backward",
     "reference_strategy": "matched_precision",
-    "rocm_version": "",
+    "rocm_version": "7.13.0a20260513",
     "direction": "backward",
     "seed": 42,
     "input_range": [
@@ -35,8 +35,8 @@
     "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
     "forward_source": {
         "method": "pytorch_math_backend",
-        "version": "2.14.1+cu130",
-        "generated_at": "2026-10-20T14:56:55Z",
+        "version": "2.10.0+rocm7.13.0a20260513",
+        "generated_at": "2026-10-23T16:36:30Z",
         "bundle": "../../hd192_nomask_batch_fwd_pair/Small/Small.json"
     }
 }
