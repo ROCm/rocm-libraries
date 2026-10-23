@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,15 @@
 
 namespace hipdnn_plugin_sdk::ingestor
 {
+
+struct KernelDefinition;
+
+/// A pack's own decoding of one kernel's metadata, computed once when the engine's shared
+/// state is built rather than on every graph. A pack registers one under the symbol of a
+/// kernel-scoped matcher it declares (NativeHooks.hpp); its matcher, score and candidate
+/// filter then read `KernelDefinition::prepared` instead of parsing the metadata map
+/// again. Returns null when it has nothing to precompute. Must not throw.
+using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&);
 
 /// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
 /// in an immutable set; catalogs and rankings reference them by pointer, valid for the
@@ -54,6 +64,13 @@ struct KernelDefinition
     /// the same reason as treeRoot. A native handler reaches one entry through the
     /// provider's launchKernelDefinition(), which returns a single-launch definition.
     std::map<std::string, KernelSource> sources;
+    /// What the pack's KernelPrepareFn returned for this kernel, or null when its pack has
+    /// none. Appended for the same reason as treeRoot.
+    std::shared_ptr<const void> prepared;
+    /// The KernelPrepareFn that produced `prepared`. A reader compares it with its own
+    /// before casting the payload, so a payload another pack's preparer made is never
+    /// reinterpreted.
+    KernelPrepareFn preparedBy = nullptr;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -120,7 +137,7 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, eleven initializers at a time, so its field count
+// KernelDefinition is built positionally, thirteen initializers at a time, so its field count
 // is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
 // implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
 // would otherwise compile and silently rebind every initializer after it. Only the count
@@ -136,7 +153,9 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::filesystem::path,
                                                std::string,
                                                std::filesystem::path,
-                                               std::map<std::string, KernelSource>>
+                                               std::map<std::string, KernelSource>,
+                                               std::shared_ptr<const void>,
+                                               KernelPrepareFn>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -149,6 +168,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::string,
                                                        std::filesystem::path,
                                                        std::map<std::string, KernelSource>,
+                                                       std::shared_ptr<const void>,
+                                                       KernelPrepareFn,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");
