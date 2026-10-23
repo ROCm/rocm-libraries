@@ -46,6 +46,64 @@ Definitions:
     - { M: 1200, N: 1200 }
 
 Tests:
+# Quick
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 50, N: 50 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_zero]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+    - { M: 6144, N: 6144 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 20480, N: 20480 }
+    - { M: 32768, N: 32768 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+  indextype: *i32
+  batch_count: [1]
+
+- name: spildlt0
+  category: quick
+  function: spildlt0
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3, nos7]
+  indextype: *i32
+  batch_count: [1]
+
+# Pre_checkin
 - name: spildlt0_bad_arg
   category: pre_checkin
   function: spildlt0_bad_arg
@@ -60,57 +118,6 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   formatA: [rocsparse_format_csr]
   function: spildlt0_extra
-  indextype: *i32
-  batch_count: [1]
-
-- name: spildlt0
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_zero]
-  indextype: *i32
-  batch_count: [1]
-
-- name: spildlt0
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  indextype: *i32
-  batch_count: [1, 2]
-
-- name: spildlt0
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  indextype: *i32
-  batch_count: [3, 4]
-
-- name: spildlt0
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  numericboost: [0, 1]
-  boosttol: [0.05, 0.5]
-  boostval: [1.0]
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: [rocsparse_index_base_zero]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
   indextype: *i32
   batch_count: [1]
 
@@ -143,34 +150,6 @@ Tests:
   indextype: *i32
   batch_count: [1]
 
-- name: spildlt0
-  category: nightly
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_nightly
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  indextype: *i32
-  batch_count: [1]
-
-- name: spildlt0_file
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos1,
-             nos4,
-             nos6,
-             scircuit]
-  indextype: *i32
-
 - name: spildlt0_file
   category: pre_checkin
   function: spildlt0
@@ -186,6 +165,48 @@ Tests:
              nos2,
              nos3]
   indextype: *i32
+
+- name: spildlt0_file
+  category: pre_checkin
+  function: spildlt0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+  indextype: *i32
+
+- name: spildlt0_graph_test
+  category: pre_checkin
+  function: spildlt0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+  indextype: *i32
+
+- name: spildlt0_extra
+  category: pre_checkin
+  function: spildlt0_extra
+
+# Nightly
+- name: spildlt0
+  category: nightly
+  function: spildlt0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [1]
 
 - name: spildlt0_file
   category: nightly
@@ -218,32 +239,6 @@ Tests:
   indextype: *i32
 
 - name: spildlt0_file
-  category: quick
-  function: spildlt0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
-  indextype: *i32
-
-- name: spildlt0_file
-  category: pre_checkin
-  function: spildlt0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-  indextype: *i32
-
-- name: spildlt0_file
   category: nightly
   function: spildlt0
   precision: *single_double_precisions_complex
@@ -256,21 +251,7 @@ Tests:
   filename: [Chevron4]
   indextype: *i32
 
-- name: spildlt0_graph_test
-  category: pre_checkin
-  function: spildlt0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-  indextype: *i32
-
-- name: spildlt0_extra
-  category: pre_checkin
-  function: spildlt0_extra
+# Stress
 
 - name: spildlt0_file
   category: stress
