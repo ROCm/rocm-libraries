@@ -890,7 +890,7 @@ class SweepTests(unittest.TestCase):
         for name in ("rocjitsu", "client", "config", "library-dir", "reports"):
             required += ["--" + name, "."]
         for backend, flags, size in (
-            ("bench", [], 8),
+            ("bench", [], 32),
             ("tensile", [], 1),
             (
                 "bench",

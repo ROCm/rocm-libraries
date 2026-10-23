@@ -101,7 +101,7 @@ shard, orders the groups by their first selected index, and preserves selection
 order within each group. Packaged lazy-library shards occupy disjoint index
 ranges, so this orders them by range. It cuts the resulting list into batches
 of at most `--batch-size B` solutions, allowing a batch to cross a shard boundary.
-The default is 8. Neither batching nor worker count changes the selected indices
+The default is 32. Neither batching nor worker count changes the selected indices
 or the problem generated for each index. Original selection IDs stay in the
 manifest, alongside the ordered `batches` list and each job's `batch_id`.
 
@@ -124,12 +124,25 @@ workload and machine; the model guides measurement rather than predicting all
 indices from one shard.
 
 Larger batches reduce repeated startup but leave fewer opportunities to balance
-work between workers. With 200 indices and eight workers, B=8 gives 25 batches,
-B=16 gives 13, and B=32 gives only seven. Compare B=8 and B=16 on that workload;
-32 and 64 are useful candidates for a larger sweep with many batches. The batch
-result files record conversion, native execution and total elapsed seconds.
-Per-solution rows display their shared batch time, not a measured individual
-runtime; do not sum those rows to estimate total work.
+work between workers. The default B=32 is based on a 1,000-index gfx942 sample
+with eight workers and all numerical, race and memory-wait checks enabled:
+
+| Batch size | Native processes | Execution | Including preparation |
+|---|---:|---:|---:|
+| 8 | 125 | 195.43 s | 218.44 s |
+| 16 | 63 | 164.59 s | 187.80 s |
+| 32 | 32 | 128.81 s | 151.67 s |
+
+Every run completed all 1,000 numerical and exact-dispatch checks. Each reproduced
+the same diagnostic at index 119763; the affected batch remained failed. These
+are single measurements on a shared host, not a full-library performance guarantee.
+
+For smaller selections, reducing B can keep more workers occupied. With 200
+indices and eight workers, B=8 gives 25 batches, B=16 gives 13, and B=32 gives
+only seven. Use `--batch-size` to compare settings for the intended workload.
+The batch result files record conversion, native execution and total elapsed
+seconds. Per-solution rows display their shared batch time, not a measured
+individual runtime; do not sum those rows to estimate total work.
 
 ## Known failures
 
@@ -259,7 +272,8 @@ python3 -B "$sweep/rocjitsu_race_sweep.py" \
 
 For the nightly bench policy, change `--backend` to `bench`, add
 `--policy regular-v1 --known-failures "$sweep/known_failures_regular.yaml"`, set
-`--client "$ROCM_PATH/bin/hipblaslt-bench"` and use a fresh `--reports` directory. Use `--batch-size 8` (the bench default) to share startup across indices, or
+`--client "$ROCM_PATH/bin/hipblaslt-bench"` and use a fresh `--reports` directory.
+Use `--batch-size 32` (the bench default) to share startup across indices, or
 `--batch-size 1` for a separate process per index. For specific
 solutions, replace `--solutions 100` with e.g. `--solution-index 7 --solution-index 9`.
 For source-tree development, put `projects/hipblaslt/tensilelite` on `PYTHONPATH`
