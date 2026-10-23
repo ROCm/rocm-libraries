@@ -2202,8 +2202,8 @@ namespace TensileLite
                 const auto destination
                     = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
                         generated.data.type(),
-                        roc::hostnumerics::Layout(generated.data.shape(),
-                                                  {layout.stride(0), layout.stride(1)}),
+                        roc::hostnumerics::Layout(
+                            generated.data.shape(), {layout.stride(0), layout.stride(1)}, 0),
                         pristine.cpuInput.valid,
                         std::span<std::byte>(output,
                                              dataDesc.totalAllocatedBytes() - batch * batchBytes));

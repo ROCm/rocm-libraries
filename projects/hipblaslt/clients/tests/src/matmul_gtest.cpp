@@ -234,7 +234,7 @@ TEST(HostNumericsEpilogue, SupportsTensorBackedProductComposition)
 
     std::array<float, 4> input{-2, 1, 3, -4};
     std::array<float, 2> bias{1, 2};
-    const Layout         matrixLayout(Shape{2, 2}, {1, 2});
+    const Layout         matrixLayout(Shape{2, 2}, {1, 2}, 0);
     const Tensor         inputTensor = Tensor::copyNativeStorage<float>(matrixLayout, input);
     Tensor               output(ScalarType::Float32, matrixLayout);
     Tensor               rawOutput(ScalarType::Float32, matrixLayout);
@@ -270,7 +270,7 @@ TEST(HostNumericsEpilogue, RoutesGradientAuxiliaryInput)
 
     std::array<float, 4> gradient{10, 20, 30, 40};
     std::array<float, 4> activationInput{-1, 1, 2, -2};
-    const Layout         layout(Shape{2, 2}, {1, 2});
+    const Layout         layout(Shape{2, 2}, {1, 2}, 0);
     const Tensor         gradientTensor = Tensor::copyNativeStorage<float>(layout, gradient);
     const Tensor activationTensor       = Tensor::copyNativeStorage<float>(layout, activationInput);
     Tensor       output(ScalarType::Float32, layout);
@@ -296,7 +296,7 @@ TEST(HostNumericsEpilogue, SaturatesInt8Output)
     using namespace roc::hostnumerics;
 
     std::array<float, 4> input{-200.0f, -128.5f, 126.5f, 300.0f};
-    const Layout         layout(Shape{2, 2}, {1, 2});
+    const Layout         layout(Shape{2, 2}, {1, 2}, 0);
     const Tensor         inputTensor = Tensor::copyNativeStorage<float>(layout, input);
     Tensor               output(ScalarType::Int8, layout);
     EpilogueOptions      options(ScalarType::Float32);
@@ -316,7 +316,7 @@ TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
     using namespace roc::hostnumerics;
 
     std::array<float, 4> input{-2, 1, 3, -4};
-    const Layout         layout(Shape{2, 2}, {1, 2});
+    const Layout         layout(Shape{2, 2}, {1, 2}, 0);
     const Tensor         inputTensor = Tensor::copyNativeStorage<float>(layout, input);
     Tensor               output(ScalarType::Float32, layout);
     Tensor               auxiliary(ScalarType::Float32, layout);
@@ -335,8 +335,9 @@ TEST(HostNumericsReduction, SumsStridedTensor)
     using namespace roc::hostnumerics;
 
     const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
-    const Tensor inputTensor = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 3}), input);
-    Tensor       output(ScalarType::Float32, Shape{2});
+    const Tensor               inputTensor
+        = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 3}, 0), input);
+    Tensor output(ScalarType::Float32, Shape{2});
     referenceSumInto(inputTensor, output, {1}, ScalarType::Float32);
 
     EXPECT_EQ(output.loadAs<float>({0}), 9);

@@ -552,7 +552,8 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     const Layout metadataLayout = layout(metadataDescriptor);
     const Layout logicalMetadataLayout(
         logicalMetadataShape,
-        {metadataLayout.stride(1), metadataLayout.stride(0), metadataLayout.stride(2)});
+        {metadataLayout.stride(1), metadataLayout.stride(0), metadataLayout.stride(2)},
+        0);
 
     StructuredSparsityPattern pattern;
     pattern.axis                 = sparseAxis;
@@ -1463,7 +1464,7 @@ TEST(TensileMxGenerationTranslation, IndependentDataMatchesOrdinaryInitializatio
                                                      {17, 0});
                 const auto ordinaryScale = Tensor::copyEncodedBackingStorage(
                     toHostNumericsScalarType(rocisa::DataType::E8),
-                    Layout(Shape{scaleRows, scaleCols}, {1, static_cast<ptrdiff_t>(scaleRows)}),
+                    Layout(Shape{scaleRows, scaleCols}, {1, static_cast<ptrdiff_t>(scaleRows)}, 0),
                     expectedScale);
                 for(size_t row = 0; row < 8; ++row)
                     for(size_t col = 0; col < 12; ++col)

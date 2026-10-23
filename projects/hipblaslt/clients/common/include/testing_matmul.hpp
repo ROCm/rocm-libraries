@@ -1727,7 +1727,8 @@ void testing_matmul_with_bias(const Arguments&                                  
             const roc::hostnumerics::Layout layout
                 = separateBatchStorage ? roc::hostnumerics::Layout(
                       roc::hostnumerics::Shape{rows, columns},
-                      {matrix.layout.stride(0), matrix.layout.stride(1)})
+                      {matrix.layout.stride(0), matrix.layout.stride(1)},
+                      0)
                                        : hostInputLayout(matrix);
             auto tensor
                 = buffer.tensor(hipblaslt::hostnumerics::scalarType(matrix.apiType), layout);
@@ -1816,7 +1817,8 @@ void testing_matmul_with_bias(const Arguments&                                  
             refA.push_back({roc::hostnumerics::Tensor::copyNativeStorage(
                 roc::hostnumerics::Layout(roc::hostnumerics::Shape{static_cast<size_t>(problem.k),
                                                                    static_cast<size_t>(problem.m)},
-                                          {1, problem.a.leadingDimension()}),
+                                          {1, problem.a.leadingDimension()},
+                                          0),
                 std::span<const float>(dequantized))});
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
@@ -2175,7 +2177,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                             roc::hostnumerics::Shape{static_cast<size_t>(arg.bias_stride),
                                                      1,
                                                      static_cast<size_t>(problem.batchCount)},
-                            {1, arg.bias_stride, arg.bias_stride}),
+                            {1, arg.bias_stride, arg.bias_stride},
+                            0),
                         randomInitializationRecipe(
                             Tbias, hipblaslt::hostnumerics::initialization::OperandSequence::Bias));
                 else
@@ -3963,7 +3966,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                            To,
                            Layout(Shape{static_cast<size_t>(matrix.rows()),
                                         static_cast<size_t>(matrix.columns())},
-                                  {matrix.layout.stride(0), matrix.layout.stride(1)})));
+                                  {matrix.layout.stride(0), matrix.layout.stride(1)},
+                                  0)));
             }
             validationCases.push_back(std::move(validationCase));
             return validationCases;
@@ -4493,7 +4497,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                             hb.shareStorageWithLayout(
                                 Layout(Shape{size_t(source == 'a' ? matmulProblems[i].m
                                                                   : matmulProblems[i].n)},
-                                       {1})));
+                                       {1},
+                                       0)));
                         if(!grad.passed)
                             reportFailure("freivalds bias gradient", grad.message);
                     }

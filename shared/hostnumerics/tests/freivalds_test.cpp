@@ -173,7 +173,7 @@ TEST(Freivalds, StridedObservationsValidateTypeResiduesAndCompleteBackingStorage
     observation.columnSums = Tensor(ScalarType::UInt64, Shape{1, 3});
     EXPECT_EQ(plan.check(observation).status, VerificationStatus::Incomplete);
     observation.columnSums = Tensor::takeOwnershipOfEncodedBackingStorage(
-        ScalarType::UInt64, Layout(Shape{3}, {1}), std::vector<std::byte>(1024));
+        ScalarType::UInt64, Layout(Shape{3}, {1}, 0), std::vector<std::byte>(1024));
     const auto result = plan.check(observation);
     EXPECT_EQ(result.status, VerificationStatus::Incomplete);
     EXPECT_NE(result.reason.find("storage budget"), std::string::npos);

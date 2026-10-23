@@ -132,8 +132,8 @@ namespace TensileLite::Client
             }
             strides.push_back(static_cast<ptrdiff_t>(stride));
         }
-        return roc::hostnumerics::Layout(roc::hostnumerics::Shape(descriptor.sizes()),
-                                         std::move(strides));
+        return roc::hostnumerics::Layout(
+            roc::hostnumerics::Shape(descriptor.sizes()), std::move(strides), 0);
     }
 
     inline roc::hostnumerics::Layout hostnumericsLayout(TensorDescriptor const& descriptor)

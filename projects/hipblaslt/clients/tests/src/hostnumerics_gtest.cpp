@@ -144,7 +144,8 @@ namespace
                                      hipblasOperation_t operation) {
             return roc::hostnumerics::Layout(roc::hostnumerics::Shape{rows, columns},
                                              {operation == HIPBLAS_OP_N ? 1 : leadingDimension,
-                                              operation == HIPBLAS_OP_N ? leadingDimension : 1});
+                                              operation == HIPBLAS_OP_N ? leadingDimension : 1},
+                                             0);
         };
         const auto layoutA = matrixLayout(m, k, lda, transA);
         const auto layoutB = matrixLayout(k, n, ldb, transB);
@@ -281,7 +282,7 @@ TEST(HostNumericsTensorStorage, EncodedStorageBridgeCopiesOwnershipAndBackingPad
 
     std::array<float, 3> storage{1.0f, -7.0f, 2.0f};
     Tensor               tensor
-        = copyTensorFromEncodedStorage(storage.data(), storage.size(), Layout(Shape{2}, {2}));
+        = copyTensorFromEncodedStorage(storage.data(), storage.size(), Layout(Shape{2}, {2}, 0));
 
     storage[0] = 9.0f;
     tensor.storeFrom({1}, 4.0f);
@@ -602,7 +603,7 @@ TEST(HostNumericsDataInitializationBridge, DirectMatrixNormalGenerationIsRepeata
     using namespace roc::hostnumerics;
     using namespace hipblaslt::hostnumerics;
 
-    const Layout layout(Shape{4, 4}, {1, 4});
+    const Layout layout(Shape{4, 4}, {1, 4}, 0);
     auto         initialize = [&] {
         Tensor result(ScalarType::Float32, layout);
         initializeMatrix(result,
@@ -623,7 +624,7 @@ TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToCompon
     using namespace roc::hostnumerics;
     using namespace hipblaslt::hostnumerics;
 
-    const Layout layout(Shape{2, 2}, {1, 3});
+    const Layout layout(Shape{2, 2}, {1, 3}, 0);
     const Tensor values = generate(ScalarType::Float32,
                                    layout,
                                    initializationRecipe(ScalarType::Float32,
@@ -633,12 +634,12 @@ TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToCompon
     for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
     {
         const float value
-            = values.shareStorageWithLayout(Layout(Shape{5}, {1})).loadAs<float>({index});
+            = values.shareStorageWithLayout(Layout(Shape{5}, {1}, 0)).loadAs<float>({index});
         EXPECT_EQ(value, std::trunc(value));
         EXPECT_GE(value, 1);
         EXPECT_LE(value, 10);
     }
-    EXPECT_EQ(values.shareStorageWithLayout(Layout(Shape{5}, {1})).loadAs<float>({2}), 0);
+    EXPECT_EQ(values.shareStorageWithLayout(Layout(Shape{5}, {1}, 0)).loadAs<float>({2}), 0);
 
     const Tensor nanValues = generate(ScalarType::Float32,
                                       Shape{8},
@@ -697,7 +698,7 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     using namespace roc::hostnumerics;
     using namespace hipblaslt::hostnumerics;
 
-    const Layout exactLayout(Shape{2, 3, 2}, {1, 4, 12});
+    const Layout exactLayout(Shape{2, 3, 2}, {1, 4, 12}, 0);
     const auto   initializeExact = [&] {
         Tensor result(ScalarType::Float32, exactLayout);
         initializeMatrix(result,
@@ -725,7 +726,7 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     const size_t exactStorageElements
         = exactMatrix.rawEncodedBackingStorage().size() / sizeof(float);
     Tensor exactAllocation
-        = exactMatrix.shareStorageWithLayout(Layout(Shape{exactStorageElements}, {1}));
+        = exactMatrix.shareStorageWithLayout(Layout(Shape{exactStorageElements}, {1}, 0));
     for(const size_t index : {size_t{2},
                               size_t{3},
                               size_t{6},
@@ -738,7 +739,7 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
                               size_t{19}})
         EXPECT_EQ(exactAllocation.loadAs<float>({index}), 0);
 
-    Tensor probeMatrix(ScalarType::Float16, Layout(Shape{4, 2}, {1, 4}));
+    Tensor probeMatrix(ScalarType::Float16, Layout(Shape{4, 2}, {1, 4}, 0));
     initializeMatrix(probeMatrix,
                      MatrixRole::B,
                      hipblaslt_initialization::fp16_accumulator_probe,
@@ -754,7 +755,7 @@ TEST(HostNumericsDataInitializationBridge,
     using namespace roc::hostnumerics;
     using namespace hipblaslt::hostnumerics;
 
-    const Layout expectedLayout(Shape{2, 3, 2}, {1, 4, 16});
+    const Layout expectedLayout(Shape{2, 3, 2}, {1, 4, 16}, 0);
     Tensor       actual(ScalarType::Float32, expectedLayout);
     initializeMatrix(actual,
                      MatrixRole::A,
@@ -799,7 +800,7 @@ TEST(HostNumericsDataInitializationBridge,
             }
     EXPECT_EQ(infinityCount, 1);
 
-    const Tensor allocation = actual.shareStorageWithLayout(Layout(Shape{storageElements}, {1}));
+    const Tensor allocation = actual.shareStorageWithLayout(Layout(Shape{storageElements}, {1}, 0));
     for(size_t storageIndex = 0; storageIndex < logicalStorageElements.size(); ++storageIndex)
         if(!logicalStorageElements[storageIndex])
             EXPECT_EQ(allocation.loadAs<float>({storageIndex}), 0.0f);
@@ -824,7 +825,7 @@ TEST(HostNumericsDataInitializationBridge,
                      OneSpecialValue::NaN);
     EXPECT_TRUE(std::isnan(nan.loadAs<float>({0, 0, 1})));
 
-    Tensor fiveElements(ScalarType::Float32, Layout(Shape{5, 1}, {1, 7}));
+    Tensor fiveElements(ScalarType::Float32, Layout(Shape{5, 1}, {1, 7}, 0));
     initializeMatrix(fiveElements,
                      MatrixRole::A,
                      hipblaslt_initialization::norm_dist_one_special,
@@ -952,7 +953,7 @@ TEST(HostNumericsDataInitializationBridge, PinnedTensorInitializationUploadsToDe
 {
     using namespace hipblaslt::hostnumerics;
 
-    const Layout     layout(Shape{2, 3, 2}, {1, 4, 12});
+    const Layout     layout(Shape{2, 3, 2}, {1, 4, 12}, 0);
     constexpr size_t elements = 22;
     HipHostBuffer    host(HIP_R_32F, elements);
     Tensor           expected = host.tensor(ScalarType::Float32, layout);
@@ -1596,7 +1597,8 @@ TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
 {
     using namespace roc::hostnumerics;
 
-    const hipblaslt::client::MatmulMatrix matrix{HIP_R_32F, Layout(Shape{4, 0, 3}, {1, 4, 17}), 51};
+    const hipblaslt::client::MatmulMatrix matrix{
+        HIP_R_32F, Layout(Shape{4, 0, 3}, {1, 4, 17}, 0), 51};
 
     const Layout emptyColumns = matrix.logicalBatchLayout(HIPBLAS_OP_N, 2, false);
     EXPECT_EQ(emptyColumns, Layout(Shape{4, 0}, {1, 4}, 34));
@@ -1605,7 +1607,7 @@ TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
     EXPECT_EQ(emptyRows, Layout(Shape{0, 4}, {4, 1}, 34));
 
     const Layout separate = matrix.logicalBatchLayout(HIPBLAS_OP_N, 2, true);
-    EXPECT_EQ(separate, Layout(Shape{4, 0}, {1, 4}));
+    EXPECT_EQ(separate, Layout(Shape{4, 0}, {1, 4}, 0));
 }
 
 TEST(HostNumericsCblasBridge, EmptyOutputShapesAreNoOps)
@@ -1962,7 +1964,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_patterns_keep_their_r
     for(bool k_is_row : {false, true})
     {
         const size_t rows = k_is_row ? K : M, cols = k_is_row ? M : K, ld = rows + pad;
-        Tensor       values(ScalarType::Float32, Layout(Shape{rows, cols}, {1, ptrdiff_t(ld)}));
+        Tensor       values(ScalarType::Float32, Layout(Shape{rows, cols}, {1, ptrdiff_t(ld)}, 0));
         initializeMatrix(
             values,
             MatrixRole::A,
@@ -2031,7 +2033,7 @@ TEST(HostNumericsInitialization_pre_checkin, sparse_k_fill_stays_inside_overlapp
     const size_t       used = ld * K + (batches - 1) * stride;
     std::vector<float> h(used + guard, 77.f);
     auto               values = Tensor::copyNativeStorage(
-        Layout(Shape{M, K, batches}, {1, ptrdiff_t(ld), ptrdiff_t(stride)}),
+        Layout(Shape{M, K, batches}, {1, ptrdiff_t(ld), ptrdiff_t(stride)}, 0),
         std::span<const float>(h));
     initializeMatrix(values,
                      MatrixRole::A,

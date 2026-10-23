@@ -451,8 +451,8 @@ namespace TensileLite
             strides.reserve(tensor.strides().size());
             for(const auto stride : tensor.strides())
                 strides.push_back(static_cast<ptrdiff_t>(stride));
-            const roc::hostnumerics::Layout layout(roc::hostnumerics::Shape(std::move(dimensions)),
-                                                   std::move(strides));
+            const roc::hostnumerics::Layout layout(
+                roc::hostnumerics::Shape(std::move(dimensions)), std::move(strides), 0);
 
             if(tensor.totalAllocatedElements() > std::numeric_limits<size_t>::max() / elementBytes)
                 throw std::overflow_error("Validation tensor byte count overflow.");
