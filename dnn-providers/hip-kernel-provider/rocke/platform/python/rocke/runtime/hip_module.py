@@ -20,7 +20,10 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from threading import RLock, Thread, current_thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
@@ -34,6 +37,36 @@ HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
 
 hipMemcpyHostToDevice = 1
 hipMemcpyDeviceToHost = 2
+
+
+_HIP_STREAM_DEFAULT = 0
+_HIP_STREAM_LEGACY = 1
+_HIP_STREAM_PER_THREAD = 2
+_HIP_DEFAULT_STREAMS = (_HIP_STREAM_DEFAULT, _HIP_STREAM_LEGACY, _HIP_STREAM_PER_THREAD)
+
+
+class _SubmissionCoordinator:
+    """Keep snapshots and whole submissions indivisible with completion cleanup."""
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._submissions = 0
+
+    @contextmanager
+    def submission(self) -> Iterator[None]:
+        with self._lock:
+            self._submissions += 1
+            try:
+                yield
+            finally:
+                self._submissions -= 1
+
+    @contextmanager
+    def drain(self) -> Iterator[None]:
+        with self._lock:
+            if self._submissions:
+                raise RuntimeError("cannot drain during an active submission")
+            yield
 
 
 class HipError(RuntimeError):
@@ -483,8 +516,24 @@ class Runtime:
     # observes a half-finished kernel. The Python analogue is
     # :meth:`_reap_completed` (eager non-blocking drain) and
     # :meth:`wait_stream` (event-blocking drain per stream).
-    _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
-    _pending_bound_args: "Dict[Tuple[int, int], Dict[int, Any]]" = {}
+    _pending_args: dict[
+        int | tuple[int, int] | tuple[int, int, Thread],
+        list[tuple[tuple[Any, ...], Event | None]],
+    ] = {}
+    _pending_bound_args: dict[
+        tuple[int, int] | tuple[int, int, Thread], dict[int, Any]
+    ] = {}
+    _coordination = _SubmissionCoordinator()
+
+    @staticmethod
+    def submission() -> AbstractContextManager[None]:
+        """Guard retention and a complete enqueue sequence against runtime drains.
+
+        Nested submissions on this host thread share the guard. Other threads
+        wait; a reentrant drain raises before synchronizing or releasing refs.
+        This coordinates host work and inserts no GPU wait or completion event.
+        """
+        return Runtime._coordination.submission()
 
     def load_module(self, blob: bytes) -> Module:
         _ensure_hip_init()
@@ -533,7 +582,7 @@ class Runtime:
         (a non-fenced legacy retain, only droppable by :meth:`sync`).
         """
         s = int(stream)
-        bucket = self._pending_args.get(s)
+        bucket = self._pending_args.get(self._pending_stream_key(s))
         if not bucket:
             return
         while bucket:
@@ -543,7 +592,7 @@ class Runtime:
             evt.destroy()
             bucket.pop(0)
         if not bucket:
-            self._pending_args.pop(s, None)
+            self._pending_args.pop(self._pending_stream_key(s), None)
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
@@ -574,15 +623,16 @@ class Runtime:
         time the stream-sync returns, and we destroy them as we drop
         the bucket.
         """
-        s = int(stream)
-        self.stream_sync(s)
-        self._release_bound_for_stream(s)
-        bucket = self._pending_args.pop(s, None)
-        if not bucket:
-            return
-        for _refs, evt in bucket:
-            if evt is not None:
-                evt.destroy()
+        with self._coordination.drain():
+            s = int(stream)
+            self.stream_sync(s)
+            self._release_bound_for_stream(s)
+            bucket = self._pending_args.pop(self._pending_stream_key(s), None)
+            if not bucket:
+                return
+            for _refs, evt in bucket:
+                if evt is not None:
+                    evt.destroy()
 
     def sync(self) -> None:
         """Device-wide drain: ``hipDeviceSynchronize`` + release everything.
@@ -593,16 +643,18 @@ class Runtime:
         between independent lanes (e.g. Triton 2D -> CK 2D -> Triton 3D
         -> CK 3D in the parity harness).
         """
-        _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
-        for stream_id in list(self._pending_args.keys()):
-            for _refs, evt in self._pending_args[stream_id]:
-                if evt is not None:
-                    evt.destroy()
-        self._pending_args.clear()
-        device = current_device()
-        for key in list(self._pending_bound_args):
-            if key[0] == device:
-                self._pending_bound_args.pop(key, None)
+        with self._coordination.drain():
+            _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
+            device = current_device()
+            for stream_id in list(self._pending_args):
+                if isinstance(stream_id, tuple) and stream_id[0] != device:
+                    continue
+                for _refs, evt in self._pending_args.pop(stream_id):
+                    if evt is not None:
+                        evt.destroy()
+            for key in list(self._pending_bound_args):
+                if key[0] == device:
+                    self._pending_bound_args.pop(key, None)
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -614,17 +666,18 @@ class Runtime:
         callers that did their own sync via a different mechanism and
         only need the bookkeeping cleanup.
         """
-        s = int(stream)
-        self._release_bound_for_stream(s)
-        bucket = self._pending_args.pop(s, None)
-        if not bucket:
-            return
-        for _refs, evt in bucket:
-            if evt is not None:
-                evt.destroy()
+        with self._coordination.drain():
+            s = int(stream)
+            self._release_bound_for_stream(s)
+            bucket = self._pending_args.pop(self._pending_stream_key(s), None)
+            if not bucket:
+                return
+            for _refs, evt in bucket:
+                if evt is not None:
+                    evt.destroy()
 
     def _release_bound_for_stream(self, stream: int) -> None:
-        if stream in (0, 1, 2):
+        if stream in _HIP_DEFAULT_STREAMS:
             # HIP default-stream sentinels are shared across devices.
             self._pending_bound_args.pop(self._bound_stream_key(stream), None)
             return
@@ -635,10 +688,22 @@ class Runtime:
                 self._pending_bound_args.pop(key, None)
 
     @staticmethod
-    def _bound_stream_key(stream: int):
+    def _bound_stream_key(stream: int) -> tuple[int, int] | tuple[int, int, Thread]:
         # The HIP null and per-thread default streams have shared handles
-        # across devices. Device synchronization drains only the current one.
-        return (current_device(), int(stream))
+        # across devices. Thread objects keep PTDS identities distinct even
+        # when Python recycles a numeric thread ID after a thread exits.
+        key = (current_device(), int(stream))
+        return key + (current_thread(),) if stream == _HIP_STREAM_PER_THREAD else key
+
+    @staticmethod
+    def _pending_stream_key(
+        stream: int,
+    ) -> int | tuple[int, int] | tuple[int, int, Thread]:
+        return (
+            Runtime._bound_stream_key(stream)
+            if stream in _HIP_DEFAULT_STREAMS
+            else stream
+        )
 
     def retain_until_drain(self, stream: int, owner: Any, *, resources=None) -> None:
         """Retain an immutable bound launch owner through an explicit drain.
@@ -647,9 +712,12 @@ class Runtime:
         release it: its latest submission may be later than those events.
         Call before enqueue so partial submission failures retain their buffers.
         """
-        bucket = self._pending_bound_args.setdefault(self._bound_stream_key(stream), {})
-        if id(owner) not in bucket:
-            bucket[id(owner)] = owner if resources is None else (owner, resources())
+        with self._coordination.submission():
+            bucket = self._pending_bound_args.setdefault(
+                self._bound_stream_key(stream), {}
+            )
+            if id(owner) not in bucket:
+                bucket[id(owner)] = owner if resources is None else (owner, resources())
 
     def retain_for_stream(self, stream: int, *objects: Any) -> None:
         """Keep ``objects`` alive until the most-recent launch on
@@ -665,18 +733,19 @@ class Runtime:
         caching allocator: launcher code should call this for every
         tensor argument and workspace tensor it passes into a kernel.
         """
-        keep = tuple(
-            obj for obj in objects if obj is not None and not isinstance(obj, int)
-        )
-        if not keep:
-            return
-        s = int(stream)
-        bucket = self._pending_args.setdefault(s, [])
-        if bucket:
-            refs, evt = bucket[-1]
-            bucket[-1] = (refs + keep, evt)
-        else:
-            bucket.append((keep, None))
+        with self._coordination.submission():
+            keep = tuple(
+                obj for obj in objects if obj is not None and not isinstance(obj, int)
+            )
+            if not keep:
+                return
+            s = int(stream)
+            bucket = self._pending_args.setdefault(self._pending_stream_key(s), [])
+            if bucket:
+                refs, evt = bucket[-1]
+                bucket[-1] = (refs + keep, evt)
+            else:
+                bucket.append((keep, None))
 
     def event(self) -> Event:
         h = _HipEventHandle()
@@ -828,7 +897,7 @@ class Runtime:
         # Hold refs (args_buf MUST outlive the kernel for the "extra"
         # path) alongside the completion event. ``retain_for_stream``
         # appends tensors to the same entry.
-        bucket = self._pending_args.setdefault(s, [])
+        bucket = self._pending_args.setdefault(self._pending_stream_key(s), [])
         bucket.append(((args_buf, size_buf, extra) + cluster_refs, evt))
         return evt
 
@@ -1008,6 +1077,6 @@ class Runtime:
         # Belt-and-suspenders: keep keep_alive + params alive until the
         # completion event has fired, even though the driver should
         # have copied each parameter at enqueue.
-        bucket = self._pending_args.setdefault(s, [])
+        bucket = self._pending_args.setdefault(self._pending_stream_key(s), [])
         bucket.append(((tuple(keep_alive), params) + cluster_refs, evt))
         return evt

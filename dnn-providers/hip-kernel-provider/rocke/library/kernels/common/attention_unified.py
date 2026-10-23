@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from threading import Lock, RLock, get_ident
+from threading import Lock, RLock, current_thread, get_ident
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from rocke.core.arch import validate_arch
@@ -30,6 +30,7 @@ from rocke.core.ir import (
     Value,
 )
 from rocke.helpers.compile import compile_kernel
+from rocke.runtime import Runtime
 from rocke.runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
@@ -4195,7 +4196,8 @@ class _Attention3DReplay:
     def __call__(self):
         if self._operation is None or get_ident() != self._thread:
             raise RuntimeError("replay must run on its thread inside replay_scope")
-        self._operation()
+        with Runtime.submission():
+            self._operation()
 
 
 class Attention3DExecution:
@@ -4430,6 +4432,8 @@ def clear_attention_3d_eager_cache() -> None:
             raise RuntimeError("cannot clear the eager cache during capture")
         groups = {}
         for key, owner in _3D_EAGER_WORKSPACES.items():
+            if key[-1] is not current_thread():
+                raise RuntimeError("cannot clear eager owners from another host thread")
             if owner.lock.locked():
                 raise RuntimeError("cannot clear the eager cache during submission")
             groups.setdefault((str(owner.device), owner.stream), []).append(key)
@@ -4699,7 +4703,7 @@ def _run_3d_tiled_on_stream(
         and _launch_arch in ("gfx942", "gfx950")
         and not capturing
     ):
-        key = (prepared_key, num_segments, str(q.device), int(stream))
+        key = (prepared_key, num_segments, str(q.device), int(stream), current_thread())
         with _3D_EAGER_LOCK:
             owner = _3D_EAGER_WORKSPACES.get(key)
             if owner is None:
@@ -4935,6 +4939,8 @@ def _run_3d_graph(
     )
     graphs = _3D_GRAPHS if execution is None else execution._graphs
     optimized = arch in ("gfx942", "gfx950")
+    if optimized:
+        graph_key = graph_key + (current_thread(),)
     if not optimized:
         # gfx1250 keeps live storage in the key and the prior eviction policy.
         graph_key = graph_key[:5] + (bindings,) + graph_key[5:]
@@ -5071,11 +5077,13 @@ def _run_3d_graph(
     # The boundary established the caller's effective Torch stream.
     if execution is not None and execution._bind_replay:
         execution._scope_operation = entry.graph.replay
-    entry.graph.replay()
-    if _resolved_fence(True):
+    fence = _resolved_fence(True)
+    with Runtime.submission():
+        entry.graph.replay()
+        if not fence:
+            retain_for_stream(int(stream), entry)
+    if fence:
         wait_stream_and_release(int(stream))
-    else:
-        retain_for_stream(int(stream), entry)
     return LaunchSummary(launches=2)
 
 
@@ -5129,8 +5137,9 @@ def _submit_eager_3d_pair(operation, stream, prepared, tensors):
         # per bound operation between completion drains.
         return tuple(t.detach() if hasattr(t, "detach") else t for t in tensors)
 
-    retain_until_drain(stream, operation, resources=resources)
-    operation()
+    with Runtime.submission():
+        retain_until_drain(stream, operation, resources=resources)
+        operation()
     if _resolved_fence(prepared.red_config.fence):
         wait_stream_and_release(stream)
     return LaunchSummary(launches=2)
@@ -5139,17 +5148,18 @@ def _submit_eager_3d_pair(operation, stream, prepared, tensors):
 def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
     """Launch segment+reduce, without a stream fence while capturing."""
     if capturing:
-        with no_fence():
+        with Runtime.submission(), no_fence():
             return prepared.pipeline(
                 (seg_vals, red_vals),
                 (prepared.seg_config, prepared.red_config),
                 stream=int(stream),
             )
-    result = prepared.pipeline(
-        (seg_vals, red_vals),
-        (prepared.seg_config, prepared.red_config),
-        stream=int(stream),
-    )
+    with Runtime.submission():
+        result = prepared.pipeline(
+            (seg_vals, red_vals),
+            (prepared.seg_config, prepared.red_config),
+            stream=int(stream),
+        )
     if _resolved_fence(prepared.red_config.fence):
         # The reducer's fence also completes the segment. Release its retained
         # arguments so repeated synchronous calls do not accumulate scratch.
@@ -6148,7 +6158,8 @@ def run_unified_attention_torch(
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
     initialization and both launches use that stream. On gfx942/gfx950, eager
     calls reuse bounded stream-owned scratch under a whole-pair submission lock;
-    this lock does not coordinate completion drains. Submit shared 3D attention
+    a shared runtime guard coordinates retention and enqueue with completion
+    drains. Reentrant drains raise before releasing resources. Submit shared 3D attention
     calls and perform completion cleanup on one host thread. Stop submitting
     before each drain; concurrent or reentrant host calls and cross-thread
     cleanup are unsupported, including calls through different bindings or

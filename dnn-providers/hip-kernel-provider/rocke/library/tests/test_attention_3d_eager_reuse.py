@@ -340,11 +340,12 @@ def test_default_stream_cleanup_stays_device_scoped(monkeypatch, stream, cleanup
     monkeypatch.setattr(hip_module, "current_device", lambda: device[0])
     monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
     first, second = object(), object()
+    first_key = rt._bound_stream_key(stream)
     rt.retain_until_drain(stream, first)
     device[0] = 1
     rt.retain_until_drain(stream, second)
     getattr(rt, cleanup)(stream)
-    assert rt._pending_bound_args == {(0, stream): {id(first): first}}
+    assert rt._pending_bound_args == {first_key: {id(first): first}}
 
 
 def test_cross_device_failed_drain_keeps_retained_storage(monkeypatch):
@@ -602,3 +603,228 @@ def test_clear_rejects_active_submission(eager):
         with pytest.raises(RuntimeError, match="during submission"):
             au.clear_attention_3d_eager_cache()
     assert len(au._3D_EAGER_WORKSPACES) == 1
+
+
+def test_clear_rejects_foreign_thread_owner_before_draining(eager, monkeypatch):
+    from threading import Thread
+
+    args, *_ = eager
+    au._run_3d_tiled(**args)
+    owner = next(iter(au._3D_EAGER_WORKSPACES.values()))
+    drains, errors = [], []
+    monkeypatch.setattr(au, "wait_stream_and_release", drains.append)
+
+    def clear_on_other_thread():
+        try:
+            au.clear_attention_3d_eager_cache()
+        except RuntimeError as error:
+            errors.append(str(error))
+
+    thread = Thread(target=clear_on_other_thread)
+    thread.start()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert errors == ["cannot clear eager owners from another host thread"]
+    assert not drains
+    assert next(iter(au._3D_EAGER_WORKSPACES.values())) is owner
+    au.clear_attention_3d_eager_cache()
+    assert drains == [owner.stream] and not au._3D_EAGER_WORKSPACES
+
+
+@pytest.mark.parametrize("point", ["snapshot", "between_stages"])
+@pytest.mark.parametrize(
+    "cleanup", ["wait_stream", "sync", "release_pending_for_stream"]
+)
+def test_shared_coordinator_excludes_drains_from_pair(monkeypatch, point, cleanup):
+    from threading import Event, Thread
+
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
+    monkeypatch.setattr(hip_module, "_hipDeviceSynchronize", lambda: 0)
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
+    monkeypatch.setattr(au, "retain_until_drain", rt.retain_until_drain)
+    started, completed = Event(), Event()
+    log, errors, threads = [], [], []
+
+    def cleanup_work():
+        started.set()
+        try:
+            getattr(rt, cleanup)(17) if cleanup != "sync" else rt.sync()
+            log.append("drain")
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    def request_cleanup():
+        thread = Thread(target=cleanup_work)
+        threads.append(thread)
+        thread.start()
+        assert started.wait(5)
+        # Without the shared guard, this drain finishes before the next stage.
+        assert not completed.wait(0.05)
+
+    class Storage:
+        def detach(self):
+            log.append("snapshot")
+            if point == "snapshot":
+                request_cleanup()
+            return self
+
+    def operation():
+        assert id(operation) in rt._pending_bound_args[(0, 17)]
+        log.append("segment")
+        if point == "between_stages":
+            request_cleanup()
+        assert id(operation) in rt._pending_bound_args[(0, 17)]
+        log.append("reducer")
+
+    prepared = au._Attention3DPrepared(
+        pipeline=None,
+        seg_config=au.LaunchConfig(fence=False),
+        red_config=au.LaunchConfig(fence=False),
+    )
+    try:
+        au._submit_eager_3d_pair(operation, 17, prepared, (Storage(),))
+    finally:
+        for thread in threads:
+            thread.join(5)
+    assert not errors and completed.is_set()
+    assert log == ["snapshot", "segment", "reducer", "drain"]
+    assert not rt._pending_bound_args
+
+
+@pytest.mark.parametrize("point", ["snapshot", "between_stages"])
+def test_reentrant_drain_rejects_before_releasing_pair(monkeypatch, point):
+    from rocke.runtime import hip_module
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
+    drains, launches = [], []
+    monkeypatch.setattr(rt, "stream_sync", drains.append)
+    monkeypatch.setattr(au, "retain_until_drain", rt.retain_until_drain)
+
+    class Storage:
+        def detach(self):
+            if point == "snapshot":
+                rt.wait_stream(17)
+            return self
+
+    def operation():
+        launches.append("segment")
+        rt.wait_stream(17)
+        launches.append("reducer")
+
+    prepared = au._Attention3DPrepared(
+        pipeline=None,
+        seg_config=au.LaunchConfig(fence=False),
+        red_config=au.LaunchConfig(fence=False),
+    )
+    with pytest.raises(RuntimeError, match="cannot drain during an active submission"):
+        au._submit_eager_3d_pair(operation, 17, prepared, (Storage(),))
+    assert not drains
+    assert launches == ([] if point == "snapshot" else ["segment"])
+    if point == "between_stages":
+        assert id(operation) in rt._pending_bound_args[(0, 17)]
+    rt.wait_stream(17)  # the failed submission released the coordinator
+    assert not rt._pending_bound_args and drains == [17]
+
+
+@pytest.mark.parametrize("retention", ["retain_until_drain", "retain_for_stream"])
+@pytest.mark.parametrize(
+    "cleanup", ["wait_stream_and_release", "release_retained_for_stream"]
+)
+def test_public_zero_stream_retention_matches_cleanup(monkeypatch, retention, cleanup):
+    import gc
+    import sys
+    import weakref
+
+    from rocke.runtime import hip_module, launcher
+
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
+    monkeypatch.setattr(launcher, "_runtime", lambda: rt)
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=SimpleNamespace(
+                current_device=lambda: 0,
+                current_stream=lambda device: SimpleNamespace(cuda_stream=17),
+            )
+        ),
+    )
+    storage = Tensor(8192)
+    storage_ref = weakref.ref(storage)
+    if retention == "retain_until_drain":
+        launcher.retain_until_drain(0, object(), resources=lambda: (storage,))
+    else:
+        launcher.retain_for_stream(0, storage)
+    del storage
+    assert storage_ref() is not None
+    getattr(launcher, cleanup)(0)
+    gc.collect()
+    assert storage_ref() is None
+    assert not rt._pending_args and not rt._pending_bound_args
+
+
+def test_ptds_owners_and_cleanup_are_isolated_between_threads(
+    eager, runtime, monkeypatch
+):
+    from threading import Event, Thread
+
+    from rocke.runtime import hip_module
+
+    args, bindings, _launches, _retained = eager
+    rt = Runtime.__new__(Runtime)
+    rt._pending_args, rt._pending_bound_args = {}, {}
+    monkeypatch.setattr(hip_module, "current_device", lambda: 0)
+    monkeypatch.setattr(rt, "stream_sync", lambda stream: None)
+    monkeypatch.setattr(au, "retain_until_drain", rt.retain_until_drain)
+    ready, cleaned = Event(), Event()
+    errors = []
+    start = len(runtime.allocations)
+
+    def first_thread():
+        try:
+            with au.no_fence():
+                au._run_3d_tiled(**args, stream=2)
+            rt.retain_for_stream(2, object())
+            ready.set()
+            assert cleaned.wait(5)
+            assert len(rt._pending_bound_args) == len(rt._pending_args) == 1
+            rt.wait_stream(2)
+        except BaseException as exc:
+            errors.append(exc)
+            ready.set()
+
+    def second_thread():
+        try:
+            assert ready.wait(5)
+            with au.no_fence():
+                au._run_3d_tiled(**args, stream=2)
+            rt.retain_for_stream(2, object())
+            assert len(rt._pending_bound_args) == len(rt._pending_args) == 2
+            rt.wait_stream(2)
+            assert len(rt._pending_bound_args) == len(rt._pending_args) == 1
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            cleaned.set()
+
+    threads = [Thread(target=first_thread), Thread(target=second_thread)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert not errors and all(not thread.is_alive() for thread in threads)
+    assert not rt._pending_bound_args and not rt._pending_args
+    assert len(runtime.allocations) - start == 6
+    assert len(au._3D_EAGER_WORKSPACES) == 2
+    assert bindings[0]["segm_output_ptr"] is not bindings[2]["segm_output_ptr"]

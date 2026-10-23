@@ -86,7 +86,7 @@ production visible to it and wait before consuming outputs on another stream.
 
 Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
 reuse scratch owned by the resolved pipeline/launch geometry and effective
-device/stream. The cache holds at most eight resident eager owners: this is a
+device/stream and submitting host thread. The cache holds at most eight resident eager owners: this is a
 count bound, not a byte budget. Each owner requires
 `4 * total_q * num_query_heads * num_segments * (head_size + 2)` bytes.
 A changing maximum KV length reuses an owner when its resolved spec and
@@ -103,8 +103,13 @@ host thread. This applies across ordinary calls, dispatcher bindings, prepared
 execution owners and graph-cache cleanup. Stop submitting before each stream
 or device drain, including an external synchronization followed by retention
 cleanup. Concurrent or reentrant host calls and cross-thread cleanup are
-unsupported; the submission locks and private-scratch fallback do not coordinate
-with completion drains. Queued asynchronous GPU launches and sequential host
+unsupported as a general caller contract. A shared runtime coordinator now
+protects storage snapshots and each complete enqueue sequence against runtime
+drains. Cleanup on another thread waits for guarded submission to finish;
+a reentrant drain raises before synchronization or resource release. PTDS
+retention and optimized cache identities distinguish host threads. These guards
+do not synchronize caller-owned tensor updates or external synchronization.
+Queued asynchronous GPU launches and sequential host
 submission to multiple explicit streams remain supported. Keep preparation,
 launch, rebind, replay and close on that same thread.
 
@@ -117,7 +122,8 @@ the eager cache owns only scratch and immutable packed addresses afterward.
 `clear_attention_3d_eager_cache()` drains each unique device/stream with a
 resident eager owner before dropping its scratch and packed bindings. Stop
 submission and call it on the submitting host thread, outside capture. A failed
-drain keeps affected owners for retry. Evicted owners remain in the completion
+drain keeps affected owners for retry. Clearing rejects eager owners belonging
+to another submitting host thread. Evicted owners remain in the completion
 registry while in flight; drain every submitted stream even if it no longer
 has a resident owner. This helper preserves prepared executions and internal
 graphs, which use `close()` and `clear_attention_3d_graph_cache()` respectively.

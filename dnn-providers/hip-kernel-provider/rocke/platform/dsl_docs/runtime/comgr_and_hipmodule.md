@@ -241,13 +241,23 @@ released by completion-event polling. `wait_stream` or `sync` releases it only
 after successful completion; a failed drain preserves owners for retry.
 `release_pending_for_stream` requires caller-confirmed external completion.
 
-The launcher-level `retain_until_drain` delegates to this registry. Submit and
-clean up on the same host thread; stop enqueueing before every drain. This
-registry does not coordinate concurrent retain/enqueue/drain operations.
+The launcher-level `retain_until_drain` resolves the effective stream with the
+same resolver as its cleanup helpers. Resolve and save the handle at a binding
+or batch boundary, then pass that handle through retention, enqueue and cleanup.
+The low-level `Runtime` methods continue to accept raw HIP handles.
+
+`Runtime.submission()` shares a coordinator with `wait_stream`, `sync` and
+`release_pending_for_stream`. Put storage retention and the complete enqueue
+sequence inside this guard. Other threads' runtime drains wait for it to exit;
+a reentrant drain raises before synchronizing or dropping references. The guard
+adds no GPU wait or event. Drain after leaving it, including on failed enqueue.
+External synchronization followed by release still requires stopped submission.
+
 Explicit stream cleanup works after the launch wrapper restores the caller's
-device. Default stream handles (0, 1, 2) remain scoped to the current device;
-select the submitting device before their cleanup. Device-wide synchronization
-releases only that device's owners.
+device. Default stream handles remain device-scoped, and the per-thread default
+stream additionally uses stable host-thread identity in both retention registries.
+A stream drain releases only that thread's PTDS owners. A device drain releases
+bound owners on the synchronized device, including PTDS owners across threads.
 
 ### Launch Mechanism
 

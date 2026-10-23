@@ -331,12 +331,12 @@ def retain_for_stream(stream: int, *objects: Any) -> None:
     Use for non-kernel resources such as graph owners. Retention is required
     even if their Python owner is discarded before the queued replay completes.
     """
-    _runtime().retain_for_stream(int(stream), *objects)
+    _runtime().retain_for_stream(resolve_stream(stream), *objects)
 
 
 def retain_until_drain(stream: int, owner: Any, *, resources=None) -> None:
     """Retain an immutable reusable launch owner before asynchronous enqueue."""
-    _runtime().retain_until_drain(int(stream), owner, resources=resources)
+    _runtime().retain_until_drain(resolve_stream(stream), owner, resources=resources)
 
 
 def release_retained_for_stream(stream: int = 0) -> None:
