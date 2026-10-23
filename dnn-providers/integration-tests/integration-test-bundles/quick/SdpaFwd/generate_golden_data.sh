@@ -197,6 +197,34 @@ if [[ "${GENERATE_TIER_B:-0}" == "1" ]]; then
     echo ""
 fi
 
+# --- Discriminating bundles: seq_len_q != seq_len_kv per batch and Sq != Skv, so a
+# reference that computes the bottom-right offset from the maximum lengths, or swaps
+# the alignments, fails them (the group bundles above have equal lengths and cannot
+# tell). Batch 1 of the padded set has Sq > Skv, so bottom-right gives it dead rows
+# (O = 0, LSE = -inf). No windows: their left_bound convention is still open
+# (SdpaSemanticsRegister.md SEM-001). Generate in isolation with:
+#   GENERATE_DISCRIMINATING=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
+    echo "=== Generating discriminating bundles ==="
+
+    PADNEQ=(--q-dims 3 2 64 64 --v-dims 3 2 96 64 --seq-lens-q 17 64 5 --seq-lens-kv 96 40 33
+            --stats --seed 7 --attn-scale 0.125)
+    for causal in none top_left bottom_right; do
+        case "$causal" in
+            none) name=padneq_nomask ;;
+            top_left) name=padneq_causal_tl ;;
+            bottom_right) name=padneq_causal_br ;;
+        esac
+        generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/$name" "Small" "${PADNEQ[@]}" --causal "$causal"
+    done
+    generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/neq_causal_br_gqa" "Small" --causal bottom_right \
+        --q-dims 1 4 64 64 --v-dims 1 2 96 64 --stats --seed 7 --attn-scale 0.125
+    generate_bundle "$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/neq_causal_tl_gqa" "Small" --causal top_left \
+        --q-dims 1 4 96 64 --v-dims 1 2 64 64 --stats --seed 7 --attn-scale 0.125
+
+    echo ""
+fi
+
 # --- Ragged (RFC-0014) bundles (not validated by the reference executors,
 # which reject ragged tensors). Generate in isolation with:
 #   GENERATE_RAGGED=1 bash generate_golden_data.sh none ---
