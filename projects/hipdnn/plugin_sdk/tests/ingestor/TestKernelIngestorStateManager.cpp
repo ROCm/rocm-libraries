@@ -844,7 +844,8 @@ TEST(TestKernelIngestorStateManager, AKernelWithoutAPreparerCarriesNoPayload)
     const auto properties = testDeviceProperties();
 
     EXPECT_EQ(prepareCalls(), 0);
-    for(const auto* definition : manager->unsortedCatalog(MatchContext{graph, 0, properties}).entries)
+    for(const auto* definition :
+        manager->unsortedCatalog(MatchContext{graph, 0, properties}).entries)
     {
         EXPECT_EQ(definition->prepared, nullptr);
         EXPECT_EQ(definition->preparedBy, nullptr);
