@@ -607,7 +607,11 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
 
 /* Emit the scaled-WMMA intrinsic using the resolved operand contract.
  * The contract supplies packed carrier types, matrix and scale format selectors,
- * and the declaration identity. This instruction family requires LLVM 23. */
+ * and the declaration identity. This instruction family requires LLVM 23.
+ * A and B each reach their <n x i32> register through the f8f6f4 form of their
+ * own matrix format (Python ISABackend.emit_scaled_wmma): the register words
+ * pass unchanged, logical fp8 / bf8 values with one bitcast, and the packed
+ * words of fp6 / bf6 / fp4 values are zero-padded. */
 static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* intrinsic;
@@ -661,6 +665,18 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                       op->operands[4]->type->name);
     }
 
+    /* A before B: each form may emit one instruction, in the order of the
+     * Python engine. */
+    const char* matrix_values[2];
+    const rocke_matrix_arg_kind_t matrix_args[2] = {ROCKE_MATRIX_ARG_A, ROCKE_MATRIX_ARG_B};
+    for(int i = 0; i < 2; ++i)
+    {
+        const rocke_matrix_form_t form = rocke_f8f6f4_operand_form(
+            spec->matrix_formats[i],
+            rocke_matrix_register_t{{"i32", spec->matrix_words[i]}, NULL, 0});
+        matrix_values[i] = rocke_ll_matrix_operand(L, op, spec->op_id, matrix_args[i], &form);
+    }
+
     // Physical declaration identity comes from the resolved backend contract.
     decl_key = spec->declaration_key;
     intrinsic = spec->intrinsic;
@@ -674,10 +690,10 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                    intrinsic,
                    spec->matrix_formats[0],
                    spec->matrix_words[0],
-                   rocke_ll_operand(L, op->operands[0]),
+                   matrix_values[0],
                    spec->matrix_formats[1],
                    spec->matrix_words[1],
-                   rocke_ll_operand(L, op->operands[1]),
+                   matrix_values[1],
                    rocke_ll_operand(L, op->operands[2]),
                    spec->scale_formats[0],
                    scale_ty,
