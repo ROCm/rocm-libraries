@@ -9,6 +9,7 @@ attribute "matcher_opcode";
 attribute "matcher_input_tensor";
 attribute "matcher_output_tensor";
 attribute "matcher_name";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -28,9 +29,11 @@ table SdpaBackwardAttributes (matcher_opcode: "sdpa_bwd") {
 
     // Optional input tensor UIDs
     scale_tensor_uid:          long = null (cache_uid, matcher_input_tensor, matcher_name: "scale");                 // Attention scale tensor (Attn_scale)
+    // Not work_data_dependent, as in SdpaAttributes: the bias is applied to every score.
     attn_mask_tensor_uid:      long = null (cache_uid, matcher_input_tensor, matcher_name: "attn_mask");             // Additive attention bias (Bias)
-    seq_len_q_tensor_uid:      long = null (cache_uid, matcher_input_tensor, matcher_name: "seq_len_q");
-    seq_len_kv_tensor_uid:     long = null (cache_uid, matcher_input_tensor, matcher_name: "seq_len_kv");
+    // Per-batch valid lengths decide the score count, as in SdpaAttributes.
+    seq_len_q_tensor_uid:      long = null (cache_uid, work_data_dependent, matcher_input_tensor, matcher_name: "seq_len_q");
+    seq_len_kv_tensor_uid:     long = null (cache_uid, work_data_dependent, matcher_input_tensor, matcher_name: "seq_len_kv");
     seed_tensor_uid:           long = null (cache_uid, matcher_input_tensor, matcher_name: "seed");                  // Dropout seed
     offset_tensor_uid:         long = null (cache_uid, matcher_input_tensor, matcher_name: "offset");                // Dropout offset
     dropout_mask_tensor_uid:   long = null (cache_uid, matcher_input_tensor, matcher_name: "dropout_mask");

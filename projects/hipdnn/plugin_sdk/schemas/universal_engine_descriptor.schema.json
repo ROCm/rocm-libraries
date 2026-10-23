@@ -2,10 +2,23 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
   "title": "hipDNN UED",
-  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in four ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'); 'sdk_version' is MAJOR.MINOR.PATCH; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' holds at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
+  "description": "Universal Engine Descriptor. Implements RFC 0020 section 4.2, and differs from the RFC's inline schema in three ways: 'revision' is an optional '<major>.<minor>' authored revision; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' holds at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "metadata"],
+  "definitions": {
+    "uhd_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "uhd_ids": {
+      "description": "One UHD id, or a non-empty list of distinct ids with at most one per ranking metric (the metric rule is semantic; see RFC 0019 section 3.1).",
+      "oneOf": [
+        { "$ref": "#/definitions/uhd_id" },
+        { "type": "array", "items": { "$ref": "#/definitions/uhd_id" }, "minItems": 1, "uniqueItems": true }
+      ]
+    }
+  },
   "patternProperties": {
     "^(x-|_)": {},
     "^provenance$": {}
@@ -14,6 +27,12 @@
     "version": {
       "type": "string",
       "enum": ["1.0"],
+      "addedInVersion": "1.0"
+    },
+    "revision": {
+      "description": "Authored revision as '<major>.<minor>'; defaults to 1.0 when absent. Independent of 'version', which gates the file format.",
+      "type": "string",
+      "pattern": "^[0-9]{1,9}\\.[0-9]{1,9}(?![\\s\\S])",
       "addedInVersion": "1.0"
     },
     "id": {
@@ -33,16 +52,53 @@
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "addedInVersion": "1.0"
     },
-    "heuristic": {
-      "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
-      "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+    "sort_kernel_catalog": {
+      "description": "Arch -> UHD id, or a list of UHD ids with at most one per ranking metric (RFC 0019 section 3.1). Kernel-selection heuristics; each id MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/definitions/uhd_ids" },
+      "minProperties": 1,
+      "addedInVersion": "1.0"
+    },
+    "predict_engine": {
+      "description": "Arch -> UHD id, or a list of UHD ids with at most one per ranking metric (RFC 0019 section 3.1). Optional engine-level estimates; each id MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/definitions/uhd_ids" },
+      "minProperties": 1,
+      "addedInVersion": "1.0"
+    },
+    "predict_applicable_kernels": {
+      "description": "Arch -> UHD id. Optional candidate generator; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/definitions/uhd_id" },
+      "minProperties": 1,
       "addedInVersion": "1.0"
     },
     "metadata": {
       "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 13.2).",
       "type": "string",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
+    },
+    "knobs": {
+      "description": "Each entry MUST be a field name declared by the referenced KMD (semantic; see RFC 0020 section 13.2).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
+    },
+    "behavior_notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
+    },
+    "numerical_notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
       "addedInVersion": "1.0"
     },
     "graph_match": {
@@ -135,25 +191,6 @@
           "addedInVersion": "1.0"
         }
       },
-      "addedInVersion": "1.0"
-    },
-    "knobs": {
-      "description": "Each entry MUST be a field name declared by the referenced KMD (semantic; see RFC 0020 section 13.2).",
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true,
-      "addedInVersion": "1.0"
-    },
-    "behavior_notes": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true,
-      "addedInVersion": "1.0"
-    },
-    "numerical_notes": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true,
       "addedInVersion": "1.0"
     }
   }

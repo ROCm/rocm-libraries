@@ -1,0 +1,61 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "linear_attention_common.fbs";
+
+// See graph.fbs for the semantics of these annotations.
+attribute "cache_uid";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Kimi Delta Attention (KDA) forward. Mirrors the cudnn-frontend Python graph
+// op graph.kda (cudnn.linear_attention); cuDNN has no C++ node for it, so the
+// backend names carry the _EXT suffix. Per token t and head, with recurrent
+// state S [V, K], per-key-channel decay alpha_t in R^K, and column vectors
+// k_t, v_t, q_t (the transpose of Kimi Linear Eq. 1, which is K-major):
+//   S_t = S_{t-1} Diag(alpha_t) (I - beta_t k_t k_t^T) + beta_t v_t k_t^T
+//   o_t = scale S_t q_t
+//
+// Layout and cross-field rules match GdnAttributes (see gdn_attributes.fbs;
+// the rules are to be enforced by the frontend), except that g is per key
+// channel, [T, HO, K], dt_bias is [HO, K], and gate_lower_bound also requires
+// safe_gate.
+table KdaAttributes (matcher_opcode: "kda") {
+    // Required input tensor UIDs
+    q_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "q");
+    k_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "k");
+    v_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "v");
+    g_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "g");  // decay per token, head and key channel
+    beta_tensor_uid:       long (cache_uid, matcher_input_tensor, matcher_name: "beta");  // write strength (post-sigmoid by default)
+    cu_seqlens_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "cu_seqlens");  // [N + 1] sequence offsets
+
+    // Optional input tensor UIDs
+    initial_state_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "initial_state");  // absent: zero state
+    a_log_tensor_uid:         long = null (cache_uid, matcher_input_tensor, matcher_name: "a_log");  // [HO], safe_gate only
+    dt_bias_tensor_uid:       long = null (cache_uid, matcher_input_tensor, matcher_name: "dt_bias");  // [HO, K], safe_gate only
+    state_indices_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "state_indices");  // [N], state pool rows
+
+    // Required output tensor UID
+    o_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "o");
+
+    // Optional output tensor UIDs
+    final_state_tensor_uid:       long = null (cache_uid, matcher_output_tensor, matcher_name: "final_state");
+    state_checkpoints_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "state_checkpoints");  // [C, HO, V, K]
+
+    // Scalar attributes
+    scale:                     float = null;  // absent: 1/sqrt(K)
+    output_final_state:        bool = false;
+    use_qk_l2norm:             bool = false;  // L2-normalize q and k rows
+    checkpoint_every_n_tokens: long = 0;      // > 0 emits state_checkpoints
+    use_beta_sigmoid:          bool = false;  // beta holds logits
+    allow_neg_eigval:          bool = false;  // 2 * sigmoid(beta); needs use_beta_sigmoid
+    safe_gate:                 bool = false;  // g holds logits: gate_lower_bound * sigmoid(exp(a_log) * (g + dt_bias))
+    gate_domain:               GateDomain = LOG;
+    gate_lower_bound:          float = null;  // safe_gate lower bound in log space; absent: -5.0
+    batch_invariant:           bool = false;
+    overwrite_initial_state:   bool = false;  // in-place: final_state shares initial_state's buffer
+}

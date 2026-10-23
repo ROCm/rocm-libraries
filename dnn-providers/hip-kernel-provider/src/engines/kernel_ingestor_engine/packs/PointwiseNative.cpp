@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -22,7 +24,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -33,6 +35,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file PointwiseNative.cpp
@@ -71,6 +74,18 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view INPUT_A_TOKEN = "input_a";
 constexpr std::string_view INPUT_B_TOKEN = "input_b";
 constexpr std::string_view OUTPUT_TOKEN = "output";
+
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
+constexpr std::string_view INPUT_A_ROOT = "pointwise.input_a";
+constexpr std::string_view INPUT_B_ROOT = "pointwise.input_b";
+constexpr std::string_view OUTPUT_ROOT = "pointwise.output";
+
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
+constexpr std::string_view FLOPS_TOKEN = "pointwise.flops";
+constexpr std::string_view BYTES_TOKEN = "pointwise.bytes";
 
 /// Scratch reported by the larger-block kernel; keeps max-across-survivors non-zero.
 constexpr size_t LARGE_BLOCK_WORKSPACE_BYTES = 1024;
@@ -194,6 +209,10 @@ bool publishPointwiseNode(BoundTokens& bound,
            && publishFloat("pointwise.softplus_beta", attributes.softplus_beta());
 }
 
+using pack_features::bindTensorFields;
+using pack_features::elementCount;
+using pack_features::movedBytes;
+
 /// Returns the node's attributes for a single-node pointwise graph, or nullptr.
 const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
@@ -253,6 +272,25 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
        || !isServableBinding(bound))
     {
         return std::nullopt;
+    }
+
+    // The validated dims and dtypes are the features a UHD ranks this op on.
+    bindTensorFields(bound, INPUT_A_ROOT, *inputA);
+    bindTensorFields(bound, INPUT_B_ROOT, *inputB);
+    bindTensorFields(bound, OUTPUT_ROOT, *output);
+
+    // One operation per output element (ADD, MUL, SUB); no reduction or masking, so the
+    // effective and dense flop conventions agree.
+    const auto flops = elementCount(*output);
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+
+    const auto bytes = movedBytes({inputA, inputB, output});
+    if(bytes.has_value())
+    {
+        bound[std::string(BYTES_TOKEN)] = *bytes;
     }
     return bound;
 }

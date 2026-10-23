@@ -7,6 +7,7 @@ attribute "matcher_opcode";
 attribute "matcher_input_tensor";
 attribute "matcher_output_tensor";
 attribute "matcher_name";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -14,7 +15,9 @@ table MoeGroupedMatmulBwdAttributes (matcher_opcode: "moe_grouped_matmul_bwd") {
     // Required input tensor UIDs
     doutput_tensor_uid:            long (cache_uid, matcher_input_tensor, matcher_name: "doutput");
     token_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "token");
-    first_token_offset_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "first_token_offset");
+    // Per-expert row boundaries: only rows inside an expert's range are reduced into
+    // its weight gradient, so the values decide how many rows are computed.
+    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent, matcher_input_tensor, matcher_name: "first_token_offset");
 
     // Required output tensor UID
     dweight_tensor_uid:            long (cache_uid, matcher_output_tensor, matcher_name: "dweight");

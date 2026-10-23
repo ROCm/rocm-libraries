@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <set>
@@ -30,7 +31,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -300,13 +301,32 @@ inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
 /// Asserts @p declarative publishes exactly the tokens @p native does, with the same
 /// values, so criteria and dispatch written against the native binding work under either
 /// arm.
+///
+/// A native hook also publishes op-specific heuristic features (shape roots, flop and byte
+/// counts) that a pattern cannot derive. Tokens whose name starts with one of
+/// @p derivedPrefixes are such features and are left out of the comparison.
 inline void expectSameBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& native,
-                              const hipdnn_plugin_sdk::ingestor::BoundTokens& declarative)
+                              const hipdnn_plugin_sdk::ingestor::BoundTokens& declarative,
+                              std::initializer_list<std::string_view> derivedPrefixes = {})
 {
+    const auto isDerived = [&](const std::string& name) {
+        for(const auto prefix : derivedPrefixes)
+        {
+            if(name.rfind(prefix, 0) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
     std::set<std::string> nativeNames;
     for(const auto& token : native)
     {
-        nativeNames.insert(token.first);
+        if(!isDerived(token.first))
+        {
+            nativeNames.insert(token.first);
+        }
     }
     std::set<std::string> declarativeNames;
     for(const auto& token : declarative)
@@ -315,9 +335,9 @@ inline void expectSameBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& na
     }
 
     ASSERT_EQ(declarativeNames, nativeNames);
-    for(const auto& [name, value] : native)
+    for(const auto& name : nativeNames)
     {
-        EXPECT_TRUE(declarative.at(name) == value) << name;
+        EXPECT_TRUE(declarative.at(name) == native.at(name)) << name;
     }
 }
 

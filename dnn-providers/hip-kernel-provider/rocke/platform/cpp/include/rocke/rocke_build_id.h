@@ -1,14 +1,15 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/rocke_build_id.h -- engine freshness / provenance stamp.
+ * rocke/rocke_build_id.h -- portable-IR bundle freshness / provenance stamp.
  *
- * Exposes a stable content hash of the engine sources (computed at CMake
- * configure time) and a human-readable engine version. Consumers use these to
- * detect a stale or mixed-build artifact: a shared library, a static archive,
- * and a directory of prebuilt emitters that were NOT built from the same source
- * snapshot will report different build-ids, letting callers fail loud instead of
- * silently producing spurious mismatches.
+ * Exposes a stable content hash of the portable-IR native bundle inputs
+ * (regenerated whenever an engine/CLI source or native build recipe changes)
+ * and a human-readable engine version. Consumers use these to detect a
+ * stale or mixed-build artifact: a shared library, replay CLI, static archive,
+ * and directory of prebuilt emitters that were NOT built from the same source
+ * snapshot will report different build-ids, letting callers fail loud instead
+ * of silently producing spurious mismatches.
  *
  * NOTE ON THE FILE NAME: this pair is named with the ``rocke_`` prefix (mirroring
  * cmake/rocke_build_id.cmake) rather than ``build_id.*`` deliberately -- the
@@ -28,9 +29,9 @@
 extern "C" {
 #endif
 
-/* Stable content hash (lowercase hex) of the engine source tree, computed at
- * configure time. Changes if and only if a tracked source byte changes. Never
- * empty; returns "unknown" if the build did not define a build-id. */
+/* Stable content hash (lowercase hex) of the portable-IR native bundle inputs,
+ * generated as a build dependency. Changes if and only if a tracked source byte
+ * changes. Never empty; returns "unknown" if the build did not define an ID. */
 const char* rocke_build_id(void);
 
 /* Human-readable engine version (semantic version or date stamp). */

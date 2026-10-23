@@ -314,12 +314,19 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     else:
         total = block_lds_reduce(b, acc, lds, tid, block_size=BS, combine=combine)
 
+    # f64 divides the sum by N: one rounding, as a double result should have.
+    # f16/bf16 keep sum * (1/N) in f32: the second f32 rounding is far below
+    # the precision of their narrow output, and an f32 division would expand
+    # into the full division sequence.
     if spec.op == "mean":
-        total = b.fmul(total, b.rcp(const_c(float(N))))
+        if is_f64:
+            total = b.fdiv(total, const_c(float(N)))
+        else:
+            total = b.fmul(total, b.rcp(const_c(float(N))))
 
     with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
         if is_f64:
-            b.global_store(Y, row, total)
+            b.global_store(Y, row, total, align=8)
         else:
             store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype)
 

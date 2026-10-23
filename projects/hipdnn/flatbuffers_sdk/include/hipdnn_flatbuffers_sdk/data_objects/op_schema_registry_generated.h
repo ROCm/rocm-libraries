@@ -367,6 +367,73 @@ inline constexpr std::array<EdgeListSchema, 1> CUSTOM_OP_RESULT_LISTS = {{
     {"output_tensor_uids", &readEdgeList<&CustomOpAttributes::output_tensor_uids>},
 }};
 
+inline constexpr std::array<EdgeSchema, 10> GDN_OPERANDS = {{
+    {"q", false, &readEdge<&GdnAttributes::q_tensor_uid>},
+    {"k", false, &readEdge<&GdnAttributes::k_tensor_uid>},
+    {"v", false, &readEdge<&GdnAttributes::v_tensor_uid>},
+    {"g", false, &readEdge<&GdnAttributes::g_tensor_uid>},
+    {"beta", false, &readEdge<&GdnAttributes::beta_tensor_uid>},
+    {"cu_seqlens", false, &readEdge<&GdnAttributes::cu_seqlens_tensor_uid>},
+    {"initial_state", true, &readEdge<&GdnAttributes::initial_state_tensor_uid>},
+    {"a_log", true, &readEdge<&GdnAttributes::a_log_tensor_uid>},
+    {"dt_bias", true, &readEdge<&GdnAttributes::dt_bias_tensor_uid>},
+    {"state_indices", true, &readEdge<&GdnAttributes::state_indices_tensor_uid>},
+}};
+
+inline constexpr std::array<EdgeSchema, 3> GDN_RESULTS = {{
+    {"o", false, &readEdge<&GdnAttributes::o_tensor_uid>},
+    {"final_state", true, &readEdge<&GdnAttributes::final_state_tensor_uid>},
+    {"state_checkpoints", true, &readEdge<&GdnAttributes::state_checkpoints_tensor_uid>},
+}};
+
+inline constexpr std::array<AttributeSchema, 11> GDN_ATTRIBUTES = {{
+    {"scale", ValueKind::FLOAT, true, &readScalar<double, &GdnAttributes::scale>},
+    {"output_final_state", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::output_final_state>},
+    {"use_qk_l2norm", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::use_qk_l2norm>},
+    {"checkpoint_every_n_tokens", ValueKind::INT, false, &readScalar<int64_t, &GdnAttributes::checkpoint_every_n_tokens>},
+    {"use_beta_sigmoid", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::use_beta_sigmoid>},
+    {"allow_neg_eigval", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::allow_neg_eigval>},
+    {"safe_gate", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::safe_gate>},
+    {"gate_domain", ValueKind::ENUM_NAME, false, &readEnumName<&GdnAttributes::gate_domain, &EnumNameGateDomain>},
+    {"batch_invariant", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::batch_invariant>},
+    {"overwrite_initial_state", ValueKind::BOOL, false, &readScalar<bool, &GdnAttributes::overwrite_initial_state>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
+}};
+
+inline constexpr std::array<EdgeSchema, 10> KDA_OPERANDS = {{
+    {"q", false, &readEdge<&KdaAttributes::q_tensor_uid>},
+    {"k", false, &readEdge<&KdaAttributes::k_tensor_uid>},
+    {"v", false, &readEdge<&KdaAttributes::v_tensor_uid>},
+    {"g", false, &readEdge<&KdaAttributes::g_tensor_uid>},
+    {"beta", false, &readEdge<&KdaAttributes::beta_tensor_uid>},
+    {"cu_seqlens", false, &readEdge<&KdaAttributes::cu_seqlens_tensor_uid>},
+    {"initial_state", true, &readEdge<&KdaAttributes::initial_state_tensor_uid>},
+    {"a_log", true, &readEdge<&KdaAttributes::a_log_tensor_uid>},
+    {"dt_bias", true, &readEdge<&KdaAttributes::dt_bias_tensor_uid>},
+    {"state_indices", true, &readEdge<&KdaAttributes::state_indices_tensor_uid>},
+}};
+
+inline constexpr std::array<EdgeSchema, 3> KDA_RESULTS = {{
+    {"o", false, &readEdge<&KdaAttributes::o_tensor_uid>},
+    {"final_state", true, &readEdge<&KdaAttributes::final_state_tensor_uid>},
+    {"state_checkpoints", true, &readEdge<&KdaAttributes::state_checkpoints_tensor_uid>},
+}};
+
+inline constexpr std::array<AttributeSchema, 12> KDA_ATTRIBUTES = {{
+    {"scale", ValueKind::FLOAT, true, &readScalar<double, &KdaAttributes::scale>},
+    {"output_final_state", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::output_final_state>},
+    {"use_qk_l2norm", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::use_qk_l2norm>},
+    {"checkpoint_every_n_tokens", ValueKind::INT, false, &readScalar<int64_t, &KdaAttributes::checkpoint_every_n_tokens>},
+    {"use_beta_sigmoid", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::use_beta_sigmoid>},
+    {"allow_neg_eigval", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::allow_neg_eigval>},
+    {"safe_gate", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::safe_gate>},
+    {"gate_domain", ValueKind::ENUM_NAME, false, &readEnumName<&KdaAttributes::gate_domain, &EnumNameGateDomain>},
+    {"gate_lower_bound", ValueKind::FLOAT, true, &readScalar<double, &KdaAttributes::gate_lower_bound>},
+    {"batch_invariant", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::batch_invariant>},
+    {"overwrite_initial_state", ValueKind::BOOL, false, &readScalar<bool, &KdaAttributes::overwrite_initial_state>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
+}};
+
 inline constexpr std::array<EdgeSchema, 4> LAYERNORM_OPERANDS = {{
     {"x", false, &readEdge<&LayernormAttributes::x_tensor_uid>},
     {"scale", false, &readEdge<&LayernormAttributes::scale_tensor_uid>},
@@ -642,7 +709,7 @@ inline constexpr std::array<AttributeSchema, 10> SDPA_BWD_ATTRIBUTES = {{
 }};
 
 /// Sorted by opcode.
-inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
+inline constexpr std::array<OpSchema, 25> OP_SCHEMAS = {{
     {"batchnorm", NodeAttributes::BatchnormAttributes, spanOf(BATCHNORM_OPERANDS), spanOf(BATCHNORM_RESULTS), spanOf(BATCHNORM_ATTRIBUTES), spanOf(BATCHNORM_OPERAND_LISTS), {}},
     {"batchnorm_bwd", NodeAttributes::BatchnormBackwardAttributes, spanOf(BATCHNORM_BWD_OPERANDS), spanOf(BATCHNORM_BWD_RESULTS), spanOf(BATCHNORM_BWD_ATTRIBUTES), spanOf(BATCHNORM_BWD_OPERAND_LISTS), {}},
     {"batchnorm_inference", NodeAttributes::BatchnormInferenceAttributes, spanOf(BATCHNORM_INFERENCE_OPERANDS), spanOf(BATCHNORM_INFERENCE_RESULTS), spanOf(BATCHNORM_INFERENCE_ATTRIBUTES), {}, {}},
@@ -653,6 +720,8 @@ inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
     {"convolution_bwd_data", NodeAttributes::ConvolutionBwdAttributes, spanOf(CONVOLUTION_BWD_DATA_OPERANDS), spanOf(CONVOLUTION_BWD_DATA_RESULTS), spanOf(CONVOLUTION_BWD_DATA_ATTRIBUTES), {}, {}},
     {"convolution_bwd_filter", NodeAttributes::ConvolutionWrwAttributes, spanOf(CONVOLUTION_BWD_FILTER_OPERANDS), spanOf(CONVOLUTION_BWD_FILTER_RESULTS), spanOf(CONVOLUTION_BWD_FILTER_ATTRIBUTES), {}, {}},
     {"custom_op", NodeAttributes::CustomOpAttributes, {}, {}, spanOf(CUSTOM_OP_ATTRIBUTES), spanOf(CUSTOM_OP_OPERAND_LISTS), spanOf(CUSTOM_OP_RESULT_LISTS)},
+    {"gdn", NodeAttributes::GdnAttributes, spanOf(GDN_OPERANDS), spanOf(GDN_RESULTS), spanOf(GDN_ATTRIBUTES), {}, {}},
+    {"kda", NodeAttributes::KdaAttributes, spanOf(KDA_OPERANDS), spanOf(KDA_RESULTS), spanOf(KDA_ATTRIBUTES), {}, {}},
     {"layernorm", NodeAttributes::LayernormAttributes, spanOf(LAYERNORM_OPERANDS), spanOf(LAYERNORM_RESULTS), spanOf(LAYERNORM_ATTRIBUTES), {}, {}},
     {"layernorm_bwd", NodeAttributes::LayernormBackwardAttributes, spanOf(LAYERNORM_BWD_OPERANDS), spanOf(LAYERNORM_BWD_RESULTS), spanOf(LAYERNORM_BWD_ATTRIBUTES), {}, {}},
     {"matmul", NodeAttributes::MatmulAttributes, spanOf(MATMUL_OPERANDS), spanOf(MATMUL_RESULTS), spanOf(MATMUL_ATTRIBUTES), {}, {}},

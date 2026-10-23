@@ -261,6 +261,9 @@ struct tensor_vec_test : public testing::TestWithParam<TestCase>
         handle.EnableProfiling();
     }
 
+    // The handle is shared by every test in the process; don't leak profiling into later tests.
+    void TearDown() override { get_handle().EnableProfiling(false); }
+
     void Run()
     {
         auto dst_lens = src_lens;

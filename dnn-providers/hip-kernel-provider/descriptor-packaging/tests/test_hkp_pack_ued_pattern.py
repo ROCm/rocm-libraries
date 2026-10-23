@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pack_helpers import GENERIC_TARGETS
 
 from hkp_pack.descriptors import (
     GRAPH_MATCH_ARMS,
@@ -88,11 +89,11 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
 
     if case["valid"]:
         assert "error" not in case
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
     else:
         assert case["error"]
         with pytest.raises(HkpPackError, match=re.escape(case["error"])):
-            load_flat_input(root)
+            load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -154,7 +155,7 @@ def test_duplicate_json_key_names_the_key_and_the_file(tmp_path):
     root = _ued_root(tmp_path, duplicated, _NODES_UED["metadata"])
 
     with pytest.raises(HkpPackError, match="fixture.ued.json has duplicate key 'name'"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -168,7 +169,7 @@ def test_nan_literal_names_the_literal_and_the_file(tmp_path):
     with pytest.raises(
         HkpPackError, match="fixture.ued.json has non-standard literal 'NaN'"
     ):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 def _chain(*links):
@@ -210,7 +211,9 @@ def test_a_cyclic_pattern_is_rejected_naming_the_nodes_in_the_cycle(
     root = _ued_root(tmp_path, json.dumps(ued), ued["metadata"])
 
     with pytest.raises(HkpPackError, match="depend on each other in a cycle") as exc:
-        load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
+        load_flat_input(
+            root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json"
+        )
     assert f"pattern nodes {cycle} in UED fixture.ued.json" in str(exc.value)
 
 
@@ -228,7 +231,7 @@ def test_nodes_pattern_with_missing_registry_names_its_path(
         monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(missing))
 
     with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
-        load_flat_input(root, **kwargs)
+        load_flat_input(root, GENERIC_TARGETS, **kwargs)
     assert str(missing) in str(exc.value)
 
 
@@ -241,7 +244,7 @@ def test_an_unavailable_registry_fails_a_nodes_pattern_with_the_reason(
     root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
 
     with pytest.raises(OpSchemaRegistryError, match="hipDNN has no registry"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -250,7 +253,9 @@ def test_a_named_registry_wins_over_the_unavailable_reason(tmp_path, monkeypatch
     root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
 
     with pytest.raises(HkpPackError, match="cannot read op-schema registry"):
-        load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
+        load_flat_input(
+            root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json"
+        )
 
 
 @pytest.mark.quick
@@ -260,7 +265,7 @@ def test_native_ued_loads_though_the_registry_is_unavailable(tmp_path, monkeypat
     native = dict(_NODES_UED, graph_match={"native": "hipkernel.pointwise.graph_match"})
     root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
 
-    load_flat_input(root)
+    load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -268,7 +273,7 @@ def test_native_ued_loads_without_a_registry(tmp_path):
     native = dict(_NODES_UED, graph_match={"native": "hipkernel.pointwise.graph_match"})
     root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
 
-    load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
+    load_flat_input(root, GENERIC_TARGETS, op_schema_registry=tmp_path / "absent.json")
 
 
 @pytest.mark.quick
@@ -282,5 +287,5 @@ def test_a_registry_with_a_malformed_edge_names_the_registry_and_the_op(tmp_path
     root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
 
     with pytest.raises(HkpPackError, match="op 'pointwise' operands must be") as exc:
-        load_flat_input(root, op_schema_registry=registry)
+        load_flat_input(root, GENERIC_TARGETS, op_schema_registry=registry)
     assert str(registry) in str(exc.value)

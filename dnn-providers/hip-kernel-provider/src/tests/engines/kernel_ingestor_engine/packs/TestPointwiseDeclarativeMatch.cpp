@@ -105,7 +105,13 @@ void expectNativeParity(flatbuffers::FlatBufferBuilder builder)
     ASSERT_TRUE(native.has_value());
     ASSERT_TRUE(declarative.has_value());
 
-    expectSameBinding(*native, *declarative);
+    expectSameBinding(*native,
+                      *declarative,
+                      {"pointwise.input_a.",
+                       "pointwise.input_b.",
+                       "pointwise.output.",
+                       "pointwise.flops",
+                       "pointwise.bytes"});
 }
 
 /// A binary add with every optional pointwise attribute set. The node compute type differs

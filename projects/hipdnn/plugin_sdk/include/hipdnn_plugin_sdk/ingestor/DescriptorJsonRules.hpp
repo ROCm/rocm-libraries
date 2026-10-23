@@ -33,9 +33,15 @@ namespace hipdnn_plugin_sdk::ingestor::detail
     throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE, message);
 }
 
+/// The descriptor packager's one unprefixed tracking block.
+inline constexpr std::string_view PROVENANCE_KEY = "provenance";
+
 /// True for an extension key: one starting `x-` or `_`, or `provenance`, the one
-/// unprefixed block the descriptor packager emits. Extension keys log a warning and are
-/// ignored, so a descriptor can carry tracking fields the loader does not use.
+/// unprefixed block the descriptor packager emits. Extension keys are ignored, so a
+/// descriptor can carry tracking fields the loader does not use. Prefixed keys log a
+/// warning; `provenance` does not. The packager keeps it inline only on a KDP header (a
+/// packed UKD's lives in the provenance sidecar), but unpacked and authored trees carry it
+/// on any descriptor, so it is ignored silently rather than warning once per kernel.
 ///
 /// Any other key the struct does not define fails the file, because a typo would otherwise
 /// do silent damage. A UED spelling `heuristik` has no heuristic, which is legal, so the
@@ -45,7 +51,7 @@ namespace hipdnn_plugin_sdk::ingestor::detail
 /// gives it a prefix.
 inline bool isExtensionKey(std::string_view key)
 {
-    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";
+    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == PROVENANCE_KEY;
 }
 
 inline void requireKnownKeys(const nlohmann::json& object,
@@ -63,6 +69,10 @@ inline void requireKnownKeys(const nlohmann::json& object,
         {
             fail("unknown key '" + item.key() + "' in " + where
                  + "; extension keys must start with 'x-' or '_'");
+        }
+        if(item.key() == PROVENANCE_KEY)
+        {
+            continue;
         }
         HIPDNN_PLUGIN_LOG_WARN("descriptor loader: extension key '" << item.key() << "' in "
                                                                     << where << "; ignoring it");

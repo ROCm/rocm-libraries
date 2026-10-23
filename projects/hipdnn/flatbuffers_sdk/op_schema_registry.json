@@ -107,6 +107,44 @@
       "operands": [],
       "results": []
     },
+    "gdn": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "g", "optional": false},
+        {"name": "beta", "optional": false},
+        {"name": "cu_seqlens", "optional": false},
+        {"name": "initial_state", "optional": true},
+        {"name": "a_log", "optional": true},
+        {"name": "dt_bias", "optional": true},
+        {"name": "state_indices", "optional": true}
+      ],
+      "results": [
+        {"name": "o", "optional": false},
+        {"name": "final_state", "optional": true},
+        {"name": "state_checkpoints", "optional": true}
+      ]
+    },
+    "kda": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "g", "optional": false},
+        {"name": "beta", "optional": false},
+        {"name": "cu_seqlens", "optional": false},
+        {"name": "initial_state", "optional": true},
+        {"name": "a_log", "optional": true},
+        {"name": "dt_bias", "optional": true},
+        {"name": "state_indices", "optional": true}
+      ],
+      "results": [
+        {"name": "o", "optional": false},
+        {"name": "final_state", "optional": true},
+        {"name": "state_checkpoints", "optional": true}
+      ]
+    },
     "layernorm": {
       "operands": [
         {"name": "x", "optional": false},

@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from cmake_harness import PKG, SuppliedPython, consumer_preamble
+from pack_helpers import GENERIC_TARGETS_JSON
 
 pytestmark = pytest.mark.quick
 
@@ -708,6 +709,8 @@ _hkp_probe_derive_root(derived "${{CMAKE_CURRENT_SOURCE_DIR}}/authored" gfx942
         "gfx942",
         "--hipcc",
         "unused",
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
         "--inter-root",
         str(consumer.root / "inter"),
         "--source-label",
