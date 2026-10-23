@@ -109,12 +109,17 @@ if(ROCM_PATH)
 elseif(DEFINED ENV{ROCM_PATH})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
 endif()
-find_package(amd_comgr CONFIG)
-if(NOT amd_comgr_FOUND)
-    message(FATAL_ERROR
-        "amd_comgr not found. Set ROCM_PATH or CMAKE_PREFIX_PATH to your ROCm installation.")
+# Optional. Assembler capability probing uses it when a ROCm install is present.
+# A standalone build has no ROCm, and the library still builds: probing answers
+# "unsupported" and the architecture tables are used instead.
+find_package(amd_comgr CONFIG QUIET)
+if(amd_comgr_FOUND)
+    set(STINKYTOFU_HAS_COMGR 1)
+    message(STATUS "amd_comgr found; assembler capability probing is enabled")
+else()
+    set(STINKYTOFU_HAS_COMGR 0)
+    message(STATUS "amd_comgr not found; assembler capability probing is disabled")
 endif()
-set(STINKYTOFU_HAS_COMGR 1)
 
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
@@ -237,10 +242,12 @@ find_package(Threads REQUIRED)
 # All three need the same libraries for linking/include propagation.
 set(STINKYTOFU_PRIVATE_LINK_LIBS
     stinkytofu-warnings
-    amd_comgr
     ${CMAKE_DL_LIBS}
     Threads::Threads
 )
+if(amd_comgr_FOUND)
+    list(APPEND STINKYTOFU_PRIVATE_LINK_LIBS amd_comgr)
+endif()
 
 # Public include dirs shared by stinkytofu and stinkytofu_static.
 set(STINKYTOFU_PUBLIC_INCLUDE_DIRS
@@ -293,7 +300,7 @@ add_library(stinkytofu::stinkytofu ALIAS stinkytofu)
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
 # LoadLibraryExA to load the DLL from ROCM_PATH\bin.
-if(WIN32)
+if(WIN32 AND amd_comgr_FOUND)
     if(BUILD_SHARED_LIBS)
         target_link_options(stinkytofu PRIVATE "LINKER:/DELAYLOAD:amd_comgr.dll")
         target_link_libraries(stinkytofu PRIVATE delayimp)
@@ -314,7 +321,7 @@ if(BUILD_SHARED_LIBS AND STINKYTOFU_BUILD_TESTS)
     target_link_libraries(stinkytofu_static PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
     target_include_directories(stinkytofu_static PUBLIC ${STINKYTOFU_PUBLIC_INCLUDE_DIRS})
     target_compile_definitions(stinkytofu_static PUBLIC STINKYTOFU_STATIC)
-    if(WIN32)
+    if(WIN32 AND amd_comgr_FOUND)
         target_link_options(stinkytofu_static INTERFACE "LINKER:/DELAYLOAD:amd_comgr.dll")
         target_link_libraries(stinkytofu_static INTERFACE delayimp)
     endif()
