@@ -52,6 +52,9 @@ inline void unit_test_throw_hip_error(const char* call, hipError_t status)
         return;
     }
 
+    // Consume the error so that it is not reported again by the next test.
+    (void)hipGetLastError();
+
     std::ostringstream message;
     message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
             << ")";
@@ -314,6 +317,8 @@ namespace rocsparse_ut
     template <typename Kernel, typename... Args>
     hipError_t launch_single_block(Kernel kernel, unsigned int block_dim, Args... args)
     {
+        // Clear any error left pending by an earlier test, so it isn't blamed on this launch.
+        (void)hipGetLastError();
         hipLaunchKernelGGL(kernel, dim3(1), dim3(block_dim), 0, 0, args...);
         const hipError_t launch = hipGetLastError();
         if(launch != hipSuccess)
