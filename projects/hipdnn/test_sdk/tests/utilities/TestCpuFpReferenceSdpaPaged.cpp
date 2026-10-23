@@ -681,7 +681,8 @@ TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnSeqLenKvAboveMax)
 TEST(TestCpuFpReferenceSdpaPaged, ThrowsWhenPageTablesTooNarrow)
 {
     PagedProblem<float> problem(decodeCase(64));
-    // 70 keys need 5 blocks of 16; claim more keys than the tables can hold.
+    // Tables must be ceil(max_seq_len_kv / block_size) wide, so a max_seq_len_kv that lets a
+    // sequence need more blocks than the tables hold is rejected.
     problem.maxSeqLenKv = 1000;
     problem.seqLenKv->setHostValue(
         static_cast<int32_t>(problem.maxBlocks * problem.c.blockSize + 1),
@@ -738,6 +739,44 @@ TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnBadPageTableShape)
     PagedProblem<float> problem(decodeCase(64));
     problem.pageTableV = std::make_unique<Tensor<int32_t>>(
         std::vector<int64_t>{problem.batch, 1, problem.maxBlocks + 1, 1});
+    EXPECT_THROW(problem.run(), std::invalid_argument);
+}
+
+// The page tables must be exactly ceil(max_seq_len_kv / block_size) wide, as in the frontend and
+// the GPU reference, even when every used entry would fit.
+TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnPageTablesWiderThanMaxSeqLenKv)
+{
+    PagedProblem<float> problem(decodeCase(64));
+    ++problem.maxBlocks;
+    problem.pageTableK = problem.makePageTable(problem.c.seed + 4);
+    problem.pageTableV = problem.makePageTable(problem.c.seed + 5);
+    EXPECT_THROW(problem.run(), std::invalid_argument);
+    EXPECT_TRUE(problem.outputUntouched());
+}
+
+// max_seq_len_kv must be positive, even when every sequence is empty.
+TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnZeroMaxSeqLenKv)
+{
+    PagedCase c;
+    c.seqLenKv = {0, 0};
+    PagedProblem<float> problem(c);
+    problem.maxSeqLenKv = 0; // the tables stay one block wide
+    EXPECT_THROW(problem.run(), std::invalid_argument);
+    EXPECT_TRUE(problem.outputUntouched());
+}
+
+// Every dim of q is positive, as the frontend requires of every tensor: an empty sequence is
+// seq_len_q[b] == 0, not Sq == 0.
+TEST(TestCpuFpReferenceSdpaPaged, ThrowsOnZeroSq)
+{
+    PagedProblem<float> problem(decodeCase(64));
+    const int64_t tokenStride = problem.c.numHeads * problem.c.headDim;
+    const std::vector<int64_t> emptyDims
+        = {problem.batch, problem.c.numHeads, 0, problem.c.headDim};
+    const std::vector<int64_t> emptyStrides = {tokenStride, problem.c.headDim, tokenStride, 1};
+    std::vector<float> placeholder(1);
+    problem.q = std::make_unique<ShallowTensor<float>>(placeholder.data(), emptyDims, emptyStrides);
+    problem.o = std::make_unique<ShallowTensor<float>>(placeholder.data(), emptyDims, emptyStrides);
     EXPECT_THROW(problem.run(), std::invalid_argument);
 }
 

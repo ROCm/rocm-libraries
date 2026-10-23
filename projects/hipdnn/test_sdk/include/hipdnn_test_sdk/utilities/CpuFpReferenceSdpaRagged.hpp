@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
+#include <hipdnn_test_sdk/utilities/detail/SdpaPagedChecks.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -157,9 +158,10 @@ public:
     // Paged K/V forward. kContainer / vContainer are block pools [num_blocks, H_kv, block_size, D]
     // (num_blocks may differ between K and V) with any strides. Logical key row skv of batch b is
     // row skv % block_size of block pageTable[b, 0, skv / block_size, 0]. The page tables are INT32
-    // [B, 1, M, 1] with any strides and may be the same tensor. Only the first
-    // ceil(seqLenKv[b] / block_size) entries of a row are read, so unused entries may hold anything
-    // (e.g. -1); each used entry must be in [0, num_blocks).
+    // [B, 1, M, 1] with M == ceil(maxSeqLenKv / block_size), maxSeqLenKv >= 1, any strides, and
+    // may be the same tensor. Only the first ceil(seqLenKv[b] / block_size) entries of a row are
+    // read, so unused entries may hold anything (e.g. -1); each used entry must be in
+    // [0, num_blocks). Every dim of q, K/V and o is positive (Sq >= 1, as in the frontend).
     //
     // q is dense [B, H, Sq, D] or ragged (RFC-0014, detected by raggedIterationInfo()); o has q's
     // layout kind and token boundaries, with V's head dim. seqLenKv / seqLenQ are INT32
@@ -169,7 +171,8 @@ public:
     // including seqKv[b] == 0, gets zero output and LSE = -inf (LSE = sink with a sink).
     //
     // Mask alignment uses the per-batch lengths. GQA, descales and LSE ([B, H, Sq, 1], dense or
-    // ragged like q) are as in forward(). Every input is validated before any output is written.
+    // ragged like q) are as in forward(). Every input is validated before any output is written,
+    // by the checks fpropPaged shares (detail/SdpaPagedChecks.hpp).
     template <class QDataType,
               class KDataType = QDataType,
               class VDataType = QDataType,
@@ -194,35 +197,35 @@ public:
                              hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
                              const std::vector<float>* sinkPerHead = nullptr)
     {
-        validatePagedInput(q.dims(), kContainer.dims(), vContainer.dims(), o.dims());
+        const auto shape
+            = detail::checkPagedSdpaShapes(q.dims(),
+                                           kContainer.dims(),
+                                           vContainer.dims(),
+                                           o.dims(),
+                                           pageTableK.dims(),
+                                           pageTableV.dims(),
+                                           seqLenKv.dims(),
+                                           seqLenQ != nullptr ? &seqLenQ->dims() : nullptr,
+                                           maxSeqLenKv,
+                                           WHO);
 
-        const auto batch = q.dims()[0];
-        const auto numHeads = q.dims()[1];
-        const auto numHeadsK = kContainer.dims()[1];
-        const auto numHeadsV = vContainer.dims()[1];
-        const auto blockSize = kContainer.dims()[2];
-        const auto headsPerHeadK = numHeads / numHeadsK;
-        const auto headsPerHeadV = numHeads / numHeadsV;
+        const auto batch = shape.batch;
+        const auto numHeads = shape.numHeads;
+        const auto blockSize = shape.blockSize;
+        const auto headsPerHeadK = numHeads / shape.numHeadsK;
+        const auto headsPerHeadV = numHeads / shape.numHeadsV;
 
         // Q and O are both dense, or both ragged with the same token boundaries.
         const auto qInfo = q.raggedIterationInfo();
         const auto oInfo = o.raggedIterationInfo();
-        if(qInfo.has_value() != oInfo.has_value())
-        {
-            throw std::invalid_argument(std::string(WHO)
-                                        + ": o must be ragged exactly when q is ragged");
-        }
+        detail::checkPagedSdpaQLayout(
+            qInfo.has_value(), oInfo.has_value(), seqLenQ != nullptr, WHO);
         std::vector<int64_t> qTokens;
         if(qInfo.has_value())
         {
             qTokens = raggedTokens(*qInfo, q.dims(), q.strides(), "Q");
             detail::requireMatchingTokenBoundaries(
                 qTokens, "Q", raggedTokens(*oInfo, o.dims(), o.strides(), "O"), "O", WHO);
-            if(seqLenQ == nullptr)
-            {
-                throw std::invalid_argument(std::string(WHO)
-                                            + ": seq_len_q is required for a ragged q");
-            }
         }
 
         if(lse != nullptr)
@@ -244,25 +247,9 @@ public:
             }
         }
 
-        if(maxSeqLenKv < 0)
-        {
-            throw std::invalid_argument(std::string(WHO) + ": max_seq_len_kv must be >= 0");
-        }
-        const int64_t maxBlocks = pageTableWidth(pageTableK.dims(), batch, "page_table_k");
-        if(pageTableWidth(pageTableV.dims(), batch, "page_table_v") != maxBlocks)
-        {
-            throw std::invalid_argument(std::string(WHO)
-                                        + ": page_table_k and page_table_v widths must match");
-        }
-        validateSeqLen(seqLenKv.dims(), batch, "seq_len_kv");
-        if(seqLenQ != nullptr)
-        {
-            validateSeqLen(seqLenQ->dims(), batch, "seq_len_q");
-        }
-
-        const DescaleBinding dq = bindDescale(descaleQ, batch, numHeadsK, "Q");
-        const DescaleBinding dk = bindDescale(descaleK, batch, numHeadsK, "K");
-        const DescaleBinding dv = bindDescale(descaleV, batch, numHeadsV, "V");
+        const DescaleBinding dq = bindDescale(descaleQ, batch, shape.numHeadsK, "Q");
+        const DescaleBinding dk = bindDescale(descaleK, batch, shape.numHeadsK, "K");
+        const DescaleBinding dv = bindDescale(descaleV, batch, shape.numHeadsV, "V");
         validateSinks(sinkPerHead, numHeads);
 
         // Resolve and check every batch's lengths and used blocks before writing anything.
@@ -278,36 +265,21 @@ public:
 
             const int64_t extentQ
                 = qInfo.has_value() ? qTokens[bIdx + 1] - qTokens[bIdx] : q.dims()[2];
-            seqQ[bIdx] = seqLenQ != nullptr ? seqLenQ->getHostValue(lengthIndex) : extentQ;
-            if(seqQ[bIdx] < 0 || seqQ[bIdx] > extentQ)
+            std::optional<int64_t> givenSeqQ;
+            if(seqLenQ != nullptr)
             {
-                throw std::invalid_argument(std::string(WHO) + ": seq_len_q[" + std::to_string(b)
-                                            + "] = " + std::to_string(seqQ[bIdx])
-                                            + " is outside [0, " + std::to_string(extentQ)
-                                            + "], the rows q holds for that batch");
+                givenSeqQ = seqLenQ->getHostValue(lengthIndex);
             }
-
             seqKv[bIdx] = seqLenKv.getHostValue(lengthIndex);
-            if(seqKv[bIdx] < 0 || seqKv[bIdx] > maxSeqLenKv)
-            {
-                throw std::invalid_argument(std::string(WHO) + ": seq_len_kv[" + std::to_string(b)
-                                            + "] = " + std::to_string(seqKv[bIdx])
-                                            + " is outside [0, max_seq_len_kv = "
-                                            + std::to_string(maxSeqLenKv) + "]");
-            }
+            detail::checkPagedSdpaSeqLens(b, seqKv[bIdx], maxSeqLenKv, givenSeqQ, extentQ, WHO);
+            seqQ[bIdx] = givenSeqQ.value_or(extentQ);
 
+            // seq_kv <= max_seq_len_kv, so the used blocks fit the checked table width.
             const int64_t usedBlocks = (seqKv[bIdx] + blockSize - 1) / blockSize;
-            if(usedBlocks > maxBlocks)
-            {
-                throw std::invalid_argument(std::string(WHO) + ": seq_len_kv[" + std::to_string(b)
-                                            + "] needs " + std::to_string(usedBlocks)
-                                            + " blocks but the page tables hold "
-                                            + std::to_string(maxBlocks));
-            }
             blocksK[bIdx]
-                = usedBlockIds(pageTableK, b, usedBlocks, kContainer.dims()[0], "page_table_k");
+                = usedBlockIds(pageTableK, b, usedBlocks, shape.numBlocksK, "page_table_k");
             blocksV[bIdx]
-                = usedBlockIds(pageTableV, b, usedBlocks, vContainer.dims()[0], "page_table_v");
+                = usedBlockIds(pageTableV, b, usedBlocks, shape.numBlocksV, "page_table_v");
         }
 
         HeadParams params;
@@ -514,66 +486,6 @@ private:
                                              name);
     }
 
-    // Shapes for forwardPaged: q [B, H, Sq, D], K/V containers [num_blocks, H_kv, block_size, D]
-    // with one block size, o [B, H, Sq, Dv].
-    static void validatePagedInput(const std::vector<int64_t>& qDims,
-                                   const std::vector<int64_t>& kDims,
-                                   const std::vector<int64_t>& vDims,
-                                   const std::vector<int64_t>& oDims)
-    {
-        if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
-        {
-            throw std::invalid_argument(std::string(WHO)
-                                        + ": q, o and the K/V containers must all be rank-4");
-        }
-        // Sq (S_max for a ragged q) may be 0; the other dims may not.
-        if(qDims[0] <= 0 || qDims[1] <= 0 || qDims[2] < 0 || qDims[3] <= 0 || kDims[0] <= 0
-           || kDims[1] <= 0 || kDims[2] <= 0 || vDims[0] <= 0 || vDims[1] <= 0 || vDims[3] <= 0)
-        {
-            throw std::invalid_argument(std::string(WHO) + ": all dimensions must be positive");
-        }
-        if(kDims[3] != qDims[3])
-        {
-            throw std::invalid_argument(std::string(WHO) + ": Q head_dim != K head_dim");
-        }
-        if(vDims[2] != kDims[2])
-        {
-            throw std::invalid_argument(std::string(WHO)
-                                        + ": K and V containers must share one block size");
-        }
-        const auto numHeads = qDims[1];
-        if(numHeads % kDims[1] != 0 || numHeads % vDims[1] != 0)
-        {
-            throw std::invalid_argument(
-                std::string(WHO) + ": numHeads must be divisible by numHeadsK and numHeadsV");
-        }
-        if(oDims[0] != qDims[0] || oDims[1] != numHeads || oDims[2] != qDims[2]
-           || oDims[3] != vDims[3])
-        {
-            throw std::invalid_argument(std::string(WHO) + ": output shape must be [B, H, Sq, Dv]");
-        }
-    }
-
-    // A page table is [B, 1, M, 1]. Returns M, the blocks per sequence.
-    static int64_t pageTableWidth(const std::vector<int64_t>& dims, int64_t batch, const char* name)
-    {
-        if(dims.size() != 4 || dims[0] != batch || dims[1] != 1 || dims[3] != 1)
-        {
-            throw std::invalid_argument(std::string(WHO) + ": " + name
-                                        + " must be [B, 1, max_blocks_per_seq, 1]");
-        }
-        return dims[2];
-    }
-
-    // seq_len_q / seq_len_kv are [B, 1, 1, 1].
-    static void validateSeqLen(const std::vector<int64_t>& dims, int64_t batch, const char* name)
-    {
-        if(dims.size() != 4 || dims[0] != batch || dims[1] != 1 || dims[2] != 1 || dims[3] != 1)
-        {
-            throw std::invalid_argument(std::string(WHO) + ": " + name + " must be [B, 1, 1, 1]");
-        }
-    }
-
     // Block ids of entries [0, usedBlocks) of page-table row b. Each must be in [0, numBlocks).
     static std::vector<int64_t>
         usedBlockIds(const hipdnn_data_sdk::utilities::TensorBase<int32_t>& pageTable,
@@ -587,13 +499,7 @@ private:
         for(int64_t j = 0; j < usedBlocks; ++j)
         {
             const int64_t block = pageTable.getHostValue(std::vector<int64_t>{b, 0, j, 0});
-            if(block < 0 || block >= numBlocks)
-            {
-                throw std::invalid_argument(std::string(WHO) + ": " + name + "[" + std::to_string(b)
-                                            + ", " + std::to_string(j)
-                                            + "] = " + std::to_string(block) + " is outside [0, "
-                                            + std::to_string(numBlocks) + ")");
-            }
+            detail::checkPagedSdpaBlockId(b, j, block, numBlocks, name, WHO);
             blocks.push_back(block);
         }
         return blocks;

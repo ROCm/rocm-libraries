@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
+#include <hipdnn_test_sdk/utilities/detail/SdpaPagedChecks.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -294,11 +295,19 @@ public:
         const auto& kDims = kContainer.dims();
         const auto& vDims = vContainer.dims();
         const auto& oDims = o.dims();
-        if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
-        {
-            fail("q/o must be rank-4 [B, H, Sq, D] and K/V containers rank-4 [num_blocks, H, "
-                 "block_size, D]");
-        }
+        hipdnn_test_sdk::detail::checkPagedSdpaShapes(qDims,
+                                                      kDims,
+                                                      vDims,
+                                                      oDims,
+                                                      pageTableK.dims(),
+                                                      pageTableV.dims(),
+                                                      seqLenKv.dims(),
+                                                      seqLenQ != nullptr ? &seqLenQ->dims()
+                                                                         : nullptr,
+                                                      maxSeqLenKv,
+                                                      who);
+        hipdnn_test_sdk::detail::checkPagedSdpaQLayout(
+            raggedOffsetQ != nullptr, raggedOffsetO != nullptr, seqLenQ != nullptr, who);
 
         constexpr auto SEQ_AXIS = hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS;
         const auto batch = qDims[0];
@@ -311,55 +320,6 @@ public:
         const auto numBlocksV = vDims[0];
         const auto numHeadsV = vDims[1];
         const auto headDimV = vDims[3];
-
-        if(batch <= 0 || numHeads <= 0 || seqQMax <= 0 || headDim <= 0 || numBlocksK <= 0
-           || numHeadsK <= 0 || blockSize <= 0 || numBlocksV <= 0 || numHeadsV <= 0
-           || headDimV <= 0)
-        {
-            fail("all dimensions must be positive");
-        }
-        if(kDims[3] != headDim)
-        {
-            fail("Q head_dim != K head_dim");
-        }
-        if(vDims[SEQ_AXIS] != blockSize)
-        {
-            fail("K and V block sizes must match");
-        }
-        if(numHeads % numHeadsK != 0 || numHeads % numHeadsV != 0)
-        {
-            fail("numHeads must be divisible by numHeadsK and numHeadsV");
-        }
-        if(oDims[0] != batch || oDims[1] != numHeads || oDims[SEQ_AXIS] != seqQMax
-           || oDims[3] != headDimV)
-        {
-            fail("output shape must be [B, H, Sq, Dv]");
-        }
-        if((raggedOffsetQ == nullptr) != (raggedOffsetO == nullptr))
-        {
-            fail("Q and O must both be ragged or both dense");
-        }
-        if(raggedOffsetQ != nullptr && seqLenQ == nullptr)
-        {
-            fail("ragged Q needs seq_len_q");
-        }
-        if(maxSeqLenKv < 1)
-        {
-            fail("max_seq_len_kv must be >= 1 (got " + std::to_string(maxSeqLenKv) + ")");
-        }
-
-        const int64_t maxBlocks = (maxSeqLenKv + blockSize - 1) / blockSize;
-        const std::vector<int64_t> pageTableDims{batch, 1, maxBlocks, 1};
-        if(pageTableK.dims() != pageTableDims || pageTableV.dims() != pageTableDims)
-        {
-            fail("page tables must be [B, 1, ceil(max_seq_len_kv / block_size), 1] = [B, 1, "
-                 + std::to_string(maxBlocks) + ", 1]");
-        }
-        const std::vector<int64_t> seqLenDims{batch, 1, 1, 1};
-        if(seqLenKv.dims() != seqLenDims || (seqLenQ != nullptr && seqLenQ->dims() != seqLenDims))
-        {
-            fail("seq_len_kv and seq_len_q must be [B, 1, 1, 1]");
-        }
 
         // Q token boundaries: packed for ragged Q, Sq per batch for dense Q.
         const auto& mult = offsetMultipliers;
@@ -403,34 +363,30 @@ public:
         {
             const auto bIdx = static_cast<size_t>(b);
             const int64_t seqKv = seqLenKvHost[static_cast<size_t>(b * seqLenKv.strides()[0])];
-            if(seqKv < 0 || seqKv > maxSeqLenKv)
-            {
-                fail("seq_len_kv[" + std::to_string(b) + "] = " + std::to_string(seqKv)
-                     + " is outside [0, max_seq_len_kv = " + std::to_string(maxSeqLenKv) + "]");
-            }
-            const int64_t qExtent = qTokens[bIdx + 1] - qTokens[bIdx];
+            std::optional<int64_t> seqQ;
             if(seqLenQ != nullptr)
             {
-                const int64_t seqQ = seqLenQHost[static_cast<size_t>(b * seqLenQ->strides()[0])];
-                if(seqQ < 0 || seqQ > qExtent)
-                {
-                    fail("seq_len_q[" + std::to_string(b) + "] = " + std::to_string(seqQ)
-                         + " is outside [0, " + std::to_string(qExtent) + "]");
-                }
+                seqQ = seqLenQHost[static_cast<size_t>(b * seqLenQ->strides()[0])];
             }
+            hipdnn_test_sdk::detail::checkPagedSdpaSeqLens(
+                b, seqKv, maxSeqLenKv, seqQ, qTokens[bIdx + 1] - qTokens[bIdx], who);
             const int64_t usedBlocks = (seqKv + blockSize - 1) / blockSize;
             for(int64_t j = 0; j < usedBlocks; ++j)
             {
-                const int64_t blockK
-                    = pageTableKHost[static_cast<size_t>(b * ptKStr[0] + j * ptKStr[2])];
-                const int64_t blockV
-                    = pageTableVHost[static_cast<size_t>(b * ptVStr[0] + j * ptVStr[2])];
-                if(blockK < 0 || blockK >= numBlocksK || blockV < 0 || blockV >= numBlocksV)
-                {
-                    fail("page table entry [" + std::to_string(b) + ", " + std::to_string(j)
-                         + "] (k=" + std::to_string(blockK) + ", v=" + std::to_string(blockV)
-                         + ") is outside [0, num_blocks)");
-                }
+                hipdnn_test_sdk::detail::checkPagedSdpaBlockId(
+                    b,
+                    j,
+                    pageTableKHost[static_cast<size_t>(b * ptKStr[0] + j * ptKStr[2])],
+                    numBlocksK,
+                    "page_table_k",
+                    who);
+                hipdnn_test_sdk::detail::checkPagedSdpaBlockId(
+                    b,
+                    j,
+                    pageTableVHost[static_cast<size_t>(b * ptVStr[0] + j * ptVStr[2])],
+                    numBlocksV,
+                    "page_table_v",
+                    who);
             }
         }
 
