@@ -57,6 +57,15 @@ _LLVM_FLAVOR_LADDER: tuple = (
 )
 """
 
+# The packer's COMGR inputs: options per kernel, a fresh-process attribute, the ISA name.
+OPTIONS = """
+COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
+def _comgr_options_for_kernel(kernel):
+    return ["-O3"]
+def _resolve_compile_target(arch, isa):
+    return arch, "amdgcn-amd-amdhsa--" + arch
+"""
+
 
 def builder_src(params=(), body="v1"):
     ps = "".join(f'    p.append(("{n}", "{t}"))\n' for n, t in params)
@@ -194,6 +203,14 @@ def scenarios():
         ),
     )
     s["bare"] = {"README.md": "x"}
+    compile_py = f"{PROVIDER}/rocke/platform/python/rocke/helpers/compile.py"
+    for name, level in (("opts_o3", "-O3"), ("opts_o2", "-O2")):
+        s[name] = tree_files()
+        s[name][compile_py] = COMPILE + OPTIONS.replace("-O3", level)
+    s["cpp_pin"] = tree_files()
+    s["cpp_pin"][
+        f"{PROVIDER}/descriptor-packaging/python/hkp_pack/rocke_compile.py"
+    ] = (HELPERS + '_BACKEND = "cpp"\n')
     return s
 
 
@@ -307,7 +324,7 @@ def test_extra_param_lists_every_variant_and_shows_head_list(emit, repo, tmp_pat
 def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
     rc, doc = run(emit, repo, "base", "body", tmp_path)
     assert rc == 0
-    assert doc["schema"] == 2
+    assert doc["schema"] == 3
     # the recorded ids are the real tree ids, and differ when the sides differ
     assert doc["base_tree"] == git_out(repo, "rev-parse", "base^{tree}")
     assert doc["head_tree"] == git_out(repo, "rev-parse", "body^{tree}")
@@ -343,6 +360,26 @@ def test_raising_builder_is_a_recorded_failure_and_exit_zero(emit, repo, tmp_pat
         assert set(f["failures"][side]) == {"v_bad"}
         assert f["failures"][side]["v_bad"].startswith("ValueError")
     assert f["params_changed"] == f["ir_changed"] == []
+
+
+def test_comgr_option_change_with_equal_ir_is_comgr_changed(emit, repo, tmp_path):
+    # catches: a COMGR option change (the code object differs, the IR does not) reported
+    # as every variant equal
+    _, doc = run(emit, repo, "opts_o3", "opts_o2", tmp_path)
+    f = only_family(doc)
+    assert f["ir_changed"] == [] and f["params_changed"] == []
+    assert f["comgr_changed"] == ["v_a", "v_b"]
+    _, doc = run(emit, repo, "opts_o3", "opts_o3", tmp_path)
+    assert only_family(doc)["comgr_changed"] == []
+
+
+def test_packer_pinned_to_another_backend_fails_every_variant(emit, repo, tmp_path):
+    # catches: Python-lowered IR compared as if it were what a packer pinned to the C++
+    # backend ships
+    _, doc = run(emit, repo, "cpp_pin", "cpp_pin", tmp_path)
+    f = only_family(doc)
+    assert set(f["failures"]["head"]) == {"v_a", "v_b"}
+    assert "'cpp'" in f["failures"]["head"]["v_a"]
 
 
 def test_missing_helper_fails_every_variant_instead_of_skipping(emit, repo, tmp_path):

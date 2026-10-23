@@ -250,8 +250,11 @@ def test_pin_on_target_tip_only_is_mismatch_in_merged_view_only(mod, capsys, tmp
     assert json.loads(capsys.readouterr().out)["rollup"] == "Runtime impact: BREAKS"
 
 
-def test_merge_conflict_skips_merged_view_with_reason(mod, capsys, tmp_path):
-    # catches: a crash on conflict, or a clean NONE when the race cannot be excluded
+def test_merge_conflict_on_a_surface_file_marks_the_merged_view_changed(
+    mod, capsys, tmp_path
+):
+    # catches: a crash on conflict, a clean NONE when the race cannot be excluded, or rows
+    # read from a file full of conflict markers
     repo, base = make_repo(tmp_path, {BUILDER: BUILD})
     head = branch_commit(
         repo, base, {BUILDER: BUILD.replace("scale", "scale_a")}, "feature"
@@ -262,12 +265,32 @@ def test_merge_conflict_skips_merged_view_with_reason(mod, capsys, tmp_path):
     data = report(mod, capsys, repo, base, head, "--target-tip", tip)
     merged = next(v for v in data["views"] if v["label"] == "merged")
     assert (
-        merged["status"] == "skipped"
+        merged["status"] == "conflicted"
         and "conflict" in merged["reason"]
         and BUILDER in merged["reason"]
     )
     assert data["rollup"] != "Runtime impact: NONE (1 files inspected)"
-    assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
+    merged_rows = [r for r in data["rows"] if r["view"] == "merged"]
+    assert [(r["path"], r["status"]) for r in merged_rows] == [
+        ("(merged view)", "changed")
+    ]
+
+
+def test_conflict_elsewhere_still_finds_the_merged_view_race(mod, capsys, tmp_path):
+    # catches: one conflicted file, even one no runtime reads, discarding the whole merged
+    # view and with it a pin race on files that merged cleanly
+    doc = "AGENTS.md"
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, doc: "a\n"})
+    head = branch_commit(repo, base, {BUILDER: BUILD_REORDERED, doc: "b\n"}, "feature")
+    tip = branch_commit(repo, base, {PIN: PIN_TEST, doc: "c\n"}, "target")
+    data = report(mod, capsys, repo, base, head, "--target-tip", tip)
+    merged = next(v for v in data["views"] if v["label"] == "merged")
+    assert merged["status"] == "conflicted" and doc in merged["reason"]
+    (bad,) = rows_of(data, "kernargs", "mismatch")
+    assert bad["merged_only"] and bad["view"] == "merged"
+    (stand_in,) = [r for r in data["rows"] if r["path"] == "(merged view)"]
+    assert stand_in["status"] == "outside"
+    assert data["rollup"] == "Runtime impact: BREAKS"
 
 
 def test_static_cpp_list_disagreeing_with_builder_is_mismatch(mod, capsys, tmp_path):
@@ -493,8 +516,8 @@ def family(**fields) -> dict:
     `source` is relative to the rocKE library, as descriptors name it."""
     fam = dict(arch="gfx950", source="kernels/gfx950/attn.py", builder="build_attn", kdp=KDP,
                spec_origin="kdp-in-git", variants={"base": 1, "head": 1}, only_in_base=[],
-               only_in_head=[], params_changed=[], ir_changed=[], params={"base": None, "head": None},
-               failures={"base": {}, "head": {}})  # fmt: skip
+               only_in_head=[], params_changed=[], ir_changed=[], comgr_changed=[],
+               params={"base": None, "head": None}, failures={"base": {}, "head": {}})  # fmt: skip
     fam.update(fields)
     return fam
 
@@ -502,7 +525,7 @@ def family(**fields) -> dict:
 def write_emit(path, repo, base, head, families=None, **fields):
     """An impact_emit document made for base..head, holding `families` (default: one family
     built from `fields`)."""
-    doc = {"schema": 2, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
+    doc = {"schema": 3, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
            "base_tree": tree_of(repo, base), "head_tree": tree_of(repo, head),
            "families": [family(**fields)] if families is None else families,
            "not_inspected": [], "seconds": 1.0}  # fmt: skip
@@ -644,14 +667,14 @@ def test_emit_made_for_another_base_or_head_is_refused(mod, capsys, tmp_path):
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda d: d.update(schema=1),
+        lambda d: d.update(schema=2),
         lambda d: d.update(not_inspected={}),
         lambda d: d["families"][0].update(failures=[]),
         lambda d: d["families"][0].pop("variants"),
         lambda d: d["families"][0].update(params={"base": None, "head": "q_ptr"}),
     ],
     ids=[
-        "schema-1",
+        "schema-2-without-comgr-inputs",
         "not-inspected-dict",
         "failures-list",
         "no-variants",
@@ -852,16 +875,17 @@ def test_method_removed_from_a_base_read_only_through_a_subclass_is_changed(
     }
 
 
-def test_conflict_only_in_a_test_still_marks_the_skipped_merged_view(
+def test_conflict_only_in_a_test_still_marks_the_merged_view_changed(
     mod, capsys, tmp_path
 ):
-    # catches: a skipped merged view counted as outside when only a test file conflicts
+    # catches: a conflicted test counted as outside, though it is a searched copy
     repo, base = make_repo(tmp_path / "a", {BUILDER: BUILD, PIN: PIN_TEST})
     head = branch_commit(repo, base, {BUILDER: BODY_EDIT, PIN: PIN_TEST + "# head\n"}, "feature")  # fmt: skip
     tip = branch_commit(repo, base, {PIN: PIN_TEST + "# tip\n"}, "target")
     data = report(mod, capsys, repo, base, head, "--target-tip", tip)
     assert (
-        next(v for v in data["views"] if v["label"] == "merged")["status"] == "skipped"
+        next(v for v in data["views"] if v["label"] == "merged")["status"]
+        == "conflicted"
     )
     assert any(r["view"] == "merged" and r["status"] == "changed" for r in data["rows"])
     # a docs-only change conflicting in docs still has no surface file
@@ -895,3 +919,168 @@ def test_non_ascii_path_is_reported_under_its_real_name(mod, capsys, tmp_path):
     head = commit(repo, {odd: "def f():\n    return 2\n"})
     data = report(mod, capsys, repo, base, head)
     assert odd in {r["path"] for r in data["rows"]}
+
+
+ROCKE_PY = HKP + "rocke/platform/python/rocke/"
+PACKER_PY = HKP_PACK + "rocke_compile.py"
+
+
+def test_module_the_packer_reaches_ships_on_every_arch(mod, capsys, tmp_path):
+    # catches: a module the packer compiles every variant through, imported by name from its
+    # package (`from rocke.core import K`), reported only for the arch whose builder also
+    # imports it, so the device run named misses the others
+    shared = ROCKE_PY + "core/ir.py"
+    files = {
+        BUILDER: "from rocke.core.ir import K\n" + BUILD,
+        KDP: KDP_JSON,
+        shared: "K = 1\n",
+        ROCKE_PY + "core/__init__.py": "from .ir import K\n",
+        PACKER_PY: "def load():\n    from rocke.core import K\n    return K\n",
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {shared: "K = 2\n"})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = [r for r in rows_of(data, "file") if r["path"] == shared]
+    assert (row["status"], row["arch"]) == ("changed", "all-ingestor-archs")
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE all-ingestor-archs"
+
+
+def test_body_edit_of_a_helper_a_builder_imports_from_its_package_is_changed(
+    mod, capsys, tmp_path
+):
+    # catches: `from rocke.helpers import f` resolved to the package __init__ only, so a body
+    # edit of the module that defines f, which the shipped builder runs, reads inert
+    helper = ROCKE_PY + "helpers/x.py"
+    files = {
+        BUILDER: "from rocke.helpers import f\n" + BUILD,
+        KDP: KDP_JSON,
+        ROCKE_PY + "helpers/__init__.py": "from .x import f\n",
+        helper: "def f():\n    return 1\n",
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {helper: "def f():\n    return 2\n"})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = [r for r in rows_of(data, "file") if r["path"] == helper]
+    assert (row["status"], row["arch"]) == ("changed", "gfx950")
+
+
+def test_compile_step_edit_never_folds_on_equal_ir(mod, capsys, tmp_path):
+    # catches: a COMGR option change (-O3 to -O2) folded inert because the IR is equal
+    step = ROCKE_PY + "helpers/compile.py"
+    opts = 'def _comgr_options_for_kernel(k):\n    return ["-O3"]\n'
+    files = {
+        BUILDER: "from rocke.helpers.compile import _comgr_options_for_kernel\n"
+        + BUILD,
+        KDP: KDP_JSON,
+        step: opts,
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {step: opts.replace("-O3", "-O2")})
+    emit = write_emit(tmp_path / "eq.json", repo, base, head)
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    (row,) = [r for r in rows_of(data, "file") if r["path"] == step]
+    assert row["status"] == "changed" and "after lowering" in row["reason"]
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+
+
+def test_emit_comgr_inputs_changed_keep_shipped_rows_changed(mod, capsys, tmp_path):
+    # catches: a builder attribute that changes only the COMGR options or the fresh-process
+    # compile (the IR is equal) folded inert
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    emit = write_emit(tmp_path / "c.json", repo, base, head, comgr_changed=["v"])
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"
+    assert [r["name"] for r in rows_of(data, "kernargs")] == [
+        "emit-comgr:gfx950:build_attn"
+    ]
+    assert [r["status"] for r in rows_of(data, "file")] == ["changed"]
+
+
+def test_reexport_chain_past_three_packages_still_ships_the_defining_module(
+    mod, capsys, tmp_path
+):
+    # catches: a depth cap or a memoised dead end in the re-export walk, so `from rocke.a
+    # import f` stops short of the module defining f and a body edit of it reads inert
+    chain = "abcd"
+    files = {
+        ROCKE_PY + f"{p}/__init__.py": f"from rocke.{q} import f\n"
+        for p, q in zip(chain, chain[1:])
+    }
+    files[ROCKE_PY + "d/__init__.py"] = "from rocke.d.e import f\n"
+    defining = ROCKE_PY + "d/e.py"
+    files[defining] = "def f():\n    return 1\n"
+    files[HKP_PACK + "a1.py"] = "from rocke.a import f\n"
+    files[HKP_PACK + "a2.py"] = "from rocke.d import f\n"
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {defining: "def f():\n    return 2\n"})
+    data = report(mod, capsys, repo, base, head)
+    assert [(r["path"], r["status"]) for r in rows_of(data, "file")] == [
+        (defining, "changed")
+    ]
+
+
+ENGINE_SRC = HKP + "rocke/platform/cpp/core/a.cpp"
+PROVIDER_CMAKE = HKP + "src/CMakeLists.txt"
+
+
+@pytest.mark.parametrize(
+    "cmake, pin, status",
+    [
+        ("add_library(p x.cpp)\n# rocke_core is not linked\n", '_BACKEND = "python"\n', "inert"),
+        ("target_link_libraries(p PRIVATE rocke_core)\n", '_BACKEND = "python"\n', "changed"),
+        ("add_library(p SHARED $<TARGET_OBJECTS:rocke_core_objects>)\n", '_BACKEND = "python"\n', "changed"),
+        ("add_library(p x.cpp)\n", '_BACKEND = "cpp"\n', "changed"),
+    ],
+    ids=["unlinked-python-pin", "linked", "engine-objects", "cpp-pin"],
+)  # fmt: skip
+def test_rocke_cpp_engine_source_is_inert_only_while_nothing_ships_it(
+    mod, capsys, tmp_path, cmake, pin, status
+):
+    # catches: every rocKE C++ engine edit read as NEEDS-DEVICE on every arch though no shipped
+    # kernel is built by the engine; and the reverse, an engine the provider links or the
+    # packer lowers with read as inert
+    files = {
+        ENGINE_SRC: "int f() { return 1; }\n",
+        PROVIDER_CMAKE: cmake,
+        PACKER_PY: pin,
+    }
+    repo, base = make_repo(tmp_path, files)
+    head = commit(repo, {ENGINE_SRC: "int f() { return 2; }\n"})
+    data = report(mod, capsys, repo, base, head)
+    assert {r["path"]: r["status"] for r in rows_of(data, "file")} == {
+        ENGINE_SRC: status
+    }
+
+
+def test_ci_test_category_list_is_left_to_build(mod, capsys, tmp_path):
+    # catches: a CI test-category list read as provider code, so enrolling a test in a CI
+    # tier reads as NEEDS-DEVICE on every arch
+    cats = HKP + "ROCKE_ENGINE_test_categories_external.yaml"
+    repo, base = make_repo(tmp_path, {cats: "quick:\n  - a\n"})
+    head = commit(repo, {cats: "quick:\n  - a\n  - b\n"})
+    data = report(mod, capsys, repo, base, head)
+    (row,) = data["rows"]
+    assert row["status"] == "outside" and "BUILD" in row["reason"]
+    assert (
+        data["rollup"].startswith("Runtime impact: N/A") and "BUILD" in data["rollup"]
+    )
+
+
+def test_changed_dvc_pointer_is_not_folded_by_a_regenerated_catalog(
+    mod, capsys, tmp_path
+):
+    # catches: a new DVC-held catalog read as equal because the enumerator regenerates the
+    # same variant list from source, while the file's other fields went unread
+    ptr = KDP.rsplit("/", 1)[0] + "/artifacts.dvc"
+    pointer = "outs:\n- md5: {}.dir\n  path: artifacts\n"
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, ptr: pointer.format("a" * 32)})
+    head = commit(repo, {ptr: pointer.format("b" * 32)})
+    emit = write_emit(
+        tmp_path / "e.json", repo, base, head, spec_origin="registry_enumerator"
+    )
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    assert [(r["path"], r["status"]) for r in rows_of(data, "data")] == [
+        (ptr, "changed")
+    ]
+    assert data["rollup"] == "Runtime impact: NEEDS-DEVICE gfx950"

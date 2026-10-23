@@ -8,8 +8,11 @@
 REV is any commit or tree id. Each side is `git archive`d into a temp dir (the repo is
 only read) and a child interpreter with an allow-listed environment builds every shipped rocKE
 variant there, lowers it to LLVM IR with the Python backend (no GPU, comgr or network),
-and records the kernarg list parsed from the IR `define` line plus the SHA-256 of the IR
-text. This EXECUTES rocKE code from the reviewed revisions, like building the head does.
+and records the kernarg list parsed from the IR `define` line, the SHA-256 of the IR
+text, and the COMGR inputs the packer adds to that text (ISA name, codegen options,
+fresh-process compile): a code object can change while its IR does not. A packer that
+pins another lowering backend fails every variant. This EXECUTES rocKE code from the
+reviewed revisions, like building the head does.
 
 Variants come from every `*.kdp.json` under the shipped descriptor root whose
 `kernelDescriptors[].kernel_source` names a rocKE `source` + `builder`. A KDP held by
@@ -442,9 +445,39 @@ class _Helpers:
         self.resolve_spec_class = need["_resolve_spec_class"]
         self.build_spec = need["build_spec"]
         self.lower = need["_lower_llvm_via_backend"]
+        self.rcompile = rcompile
         self.compile_arch = getattr(rc, "rocke_compile_arch", None)
         self.require_arch_sig = getattr(rc, "_require_spec_arch_signature", None)
         self.check_predicate = getattr(rc, "_check_support_predicate", None)
+        # The packer's lowering backend; a tree without the pin is taken as Python.
+        backend = getattr(rc, "_BACKEND", "python")
+        if backend != "python":
+            self.error = (
+                f"the packer lowers with backend {backend!r}; "
+                "impact_emit lowers with the Python backend only"
+            )
+
+
+def _comgr_inputs(rcompile, kd, arch):
+    """What the packer's COMGR step takes besides the IR text: the ISA name and, per kernel,
+    the codegen options and whether it compiles in a fresh process. None when this revision
+    has no `_comgr_options_for_kernel`."""
+    options_for = getattr(rcompile, "_comgr_options_for_kernel", None)
+    if not callable(options_for):
+        return None
+    kernels = getattr(kd, "kernels", None)  # a KernelModule links several kernels
+    kernels = list(kernels) if isinstance(kernels, (list, tuple)) else [kd]
+    attr = getattr(rcompile, "COMGR_FRESH_PROCESS_ATTR", None)
+    resolve = getattr(rcompile, "_resolve_compile_target", None)
+    return {
+        "isa": (
+            resolve(arch, "amdgcn-amd-amdhsa--gfx950")[1] if callable(resolve) else None
+        ),
+        "options": [list(options_for(k)) for k in kernels],
+        "fresh_process": [
+            bool(attr and (getattr(k, "attrs", None) or {}).get(attr)) for k in kernels
+        ],
+    }
 
 
 def _compile_arch(h, shard, target):
@@ -473,6 +506,7 @@ def _build_one(h, v, arch):
     return {
         "params": parse_kernargs(text),
         "ir": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "comgr": _comgr_inputs(h.rcompile, kd, arch),
     }
 
 
@@ -668,6 +702,10 @@ def compare(base_side, head_side):
             n for n in common if built_b[n]["params"] != built_h[n]["params"]
         ]
         ir_changed = [n for n in common if built_b[n]["ir"] != built_h[n]["ir"]]
+        # A side that cannot tell its COMGR inputs (None) differs from one that can.
+        comgr_changed = [
+            n for n in common if built_b[n].get("comgr") != built_h[n].get("comgr")
+        ]
         shown = (params_changed or common or [None])[0]
         if shown is None:
             shown = next((n for n in names_h if n in built_h), None)
@@ -690,6 +728,7 @@ def compare(base_side, head_side):
                 "only_in_head": [n for n in names_h if n not in names_b],
                 "params_changed": params_changed,
                 "ir_changed": ir_changed,
+                "comgr_changed": comgr_changed,
                 "params": {
                     "base": built_b[shown]["params"] if shown in built_b else None,
                     "head": built_h[shown]["params"] if shown in built_h else None,
@@ -724,7 +763,7 @@ def cmd_run(a):
     ]
     seconds = round(time.time() - t0, 1)
     doc = {
-        "schema": 2,
+        "schema": 3,
         "tool": "impact_emit",
         "flavor": flavor,
         "base": a.base,
@@ -747,7 +786,8 @@ def cmd_run(a):
             f"{f['arch']} {f['source']}:{f['builder']} variants {f['variants']['base']}/"
             f"{f['variants']['head']} only_base {len(f['only_in_base'])} only_head "
             f"{len(f['only_in_head'])} params_changed {len(f['params_changed'])} "
-            f"ir_changed {len(f['ir_changed'])} failures {fails} ({f['spec_origin']})"
+            f"ir_changed {len(f['ir_changed'])} comgr_changed {len(f['comgr_changed'])} "
+            f"failures {fails} ({f['spec_origin']})"
         )
     for n in not_inspected:
         print(f"not inspected [{n['side']}] {n['kdp']}: {n['reason']}")
