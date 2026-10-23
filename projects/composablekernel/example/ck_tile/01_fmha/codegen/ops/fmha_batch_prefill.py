@@ -351,14 +351,19 @@ class FmhaFwdApiTrait:
 
     @property
     def page_check(self) -> str:
+        # The run-time page size kernels read a.page_block_size: check it, and that it is the
+        # page size the caller asked for.
         if self.page_size == RUNTIME_PAGE_SIZE:
             # each warp's K/V rows lie in one page
-            return f"t.page_size > 0 && t.page_size % {self.kv_warp_rows} == 0"
+            return (
+                "t.page_size == a.page_block_size && a.page_block_size > 0"
+                f" && a.page_block_size % {self.kv_warp_rows} == 0"
+            )
         if self.page_size == RUNTIME_PAGE_SIZE_GATHER:
             # a gather row index counts K/V rows from the start of the cache
             return (
-                "t.page_size > 0 && a.batch_stride_k % a.stride_k == 0"
-                " && a.batch_stride_v % a.stride_v == 0"
+                "t.page_size == a.page_block_size && a.page_block_size > 0"
+                " && a.batch_stride_k % a.stride_k == 0 && a.batch_stride_v % a.stride_v == 0"
             )
         return f"t.page_size == {self.page_size}"
 

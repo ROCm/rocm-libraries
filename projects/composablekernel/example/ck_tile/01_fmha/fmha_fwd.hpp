@@ -1882,13 +1882,31 @@ float fmha_fwd_appendkv(fmha_fwd_appendkv_traits,
                         fmha_fwd_appendkv_args,
                         const ck_tile::stream_config&);
 
-struct fmha_batch_prefill_traits : public fmha_fwd_traits
+// The fields of fmha_fwd_traits up to has_sink, then the paged KV ones. Callers initialize it
+// as a flat aggregate (aiter: {hdim_q, ..., has_sink, kv_memory_layout, kv_lookup_table,
+// page_size}), so new fields go at the end.
+struct fmha_batch_prefill_traits
 {
+    int hdim_q;
+    int hdim_v;
+    std::string data_type;
+    bool is_group_mode;
+    bool is_v_rowmajor;
+    bool has_logits_soft_cap;
+    mask_enum mask_type;
+    bias_enum bias_type;
+    bool has_lse;
+    bool has_dropout;
+    quant_scale_enum qscale_type;
+    bool skip_min_seqlen_q = false;
+    bool has_sink          = false;
     ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kv_memory_layout =
         ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
     ck_tile::BlockAttentionKVCacheLookupTableEnum kv_lookup_table =
         ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D;
     int page_size = 1;
+    // as fmha_fwd_traits::pipeline
+    std::string pipeline;
 };
 
 float fmha_batch_prefill(fmha_batch_prefill_traits,

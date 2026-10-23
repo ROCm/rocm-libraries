@@ -359,7 +359,6 @@ arguments match `tile_example_fmha_fwd`, with these differences:
 |---|---|
 | `-scale` | named `-scale_s` in the forward example |
 | `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
-| `-p_drop` | dropout probability; the forward example has no dropout argument |
 | `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
 | `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
 | `-pipeline` | run only this dq/dk/dv pipeline: `kr_ktr_vr`, `trload_kr_ktr_vr`, `trload_qr_qtr_dor` (decode, at most 32 query rows) or `tdm_kr_ktr`; skips the grid threshold that chooses the gfx1250 TDM decode pipeline (`fmha_bwd_traits::pipeline`) |

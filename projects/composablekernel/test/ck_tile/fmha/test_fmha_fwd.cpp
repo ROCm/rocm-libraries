@@ -1598,6 +1598,53 @@ TEST_P(BatchPrefill, DataTypeConfig)
     }
 }
 
+// aiter initializes the traits as flat aggregates, without the fields CK added last
+// (csrc/include/mha_fwd.h): new fields go at the end.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+TEST(TestCkTileFmhaFwd, TraitsFlatAggregateInit)
+{
+    const fmha_fwd_traits fwd{128,
+                              128,
+                              "bf16",
+                              true,
+                              true,
+                              false,
+                              mask_enum::no_mask,
+                              bias_enum::no_bias,
+                              false,
+                              false,
+                              quant_scale_enum::no_scale,
+                              false,
+                              true};
+    EXPECT_TRUE(fwd.has_sink);
+    EXPECT_TRUE(fwd.pipeline.empty());
+
+    const fmha_batch_prefill_traits bp{
+        128,
+        128,
+        "bf16",
+        true,
+        true,
+        false,
+        mask_enum::no_mask,
+        bias_enum::no_bias,
+        false,
+        false,
+        quant_scale_enum::no_scale,
+        false,
+        true,
+        ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
+        ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D,
+        16};
+    EXPECT_TRUE(bp.has_sink);
+    EXPECT_EQ(bp.kv_lookup_table,
+              ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
+    EXPECT_EQ(bp.page_size, 16);
+    EXPECT_TRUE(bp.pipeline.empty());
+}
+#pragma clang diagnostic pop
+
 // batch_prefill on qr_tdm_pingpong: its grids (at least 2 (batch, head) pairs per CU, below
 // 640 rows) take the 64-row tile, up to 16 rows the 16-row one. Pages of 1024, 16 (a warp's
 // 16 K/V rows) and 1 (TDM gather), with GQA.

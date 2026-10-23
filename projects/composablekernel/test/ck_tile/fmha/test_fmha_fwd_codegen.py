@@ -2209,12 +2209,12 @@ class TestGfx125BatchPrefillPageSizes(unittest.TestCase):
             bp.write_fwd_api(pool, Path(output_dir))
             api = (Path(output_dir) / "fmha_batch_prefill_api.cpp").read_text()
         # page views: each warp's 16 or 32 K/V rows in one page; gathers: page strides in rows
-        self.assertIn("t.page_size % 16 == 0", api)
-        self.assertIn("t.page_size % 32 == 0", api)
+        self.assertIn("a.page_block_size % 16 == 0", api)
+        self.assertIn("a.page_block_size % 32 == 0", api)
         self.assertIn("a.batch_stride_k % a.stride_k == 0", api)
         # the compiled page size is tried before the run-time ones of the same pipeline
         self.assertLess(
-            api.index("(t.page_size == 1024)"), api.index("t.page_size % 16 == 0")
+            api.index("(t.page_size == 1024)"), api.index("a.page_block_size % 16 == 0")
         )
 
     def test_other_archs_keep_compiled_page_sizes(self):
