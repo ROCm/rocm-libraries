@@ -129,12 +129,25 @@ def _check_kernel(base, src):
         assert "alpha-zero nonowner consumes cluster arrive" not in src
 
 
-def test_static_streamk_cluster_shapes_and_pgr_assemble():
-    results = emit_kernels_from_config(str(_CONFIG), limit=18, arch="gfx1250", canonical=False)
+@pytest.mark.parametrize("tree", [0, 1])
+def test_static_streamk_cluster_shapes_and_pgr_assemble(tmp_path, tree):
+    config = yaml.safe_load(_CONFIG.read_text())
+    for fork in config["BenchmarkProblems"][0][1]["ForkParameters"]:
+        if "StreamKFixupTreeReduction" in fork:
+            fork["StreamKFixupTreeReduction"] = [tree]
+    path = tmp_path / "cluster_reduction.yaml"
+    path.write_text(yaml.safe_dump(config))
+    results = emit_kernels_from_config(str(path), limit=18, arch="gfx1250", canonical=False)
     assert len(results) == 18
     assert_real_gfx1250_kernels(results)
     for base, src, _ in results:
         _check_kernel(base, src)
+        assert ("Tree reduction" in src) == bool(tree)
+        if not tree:
+            fixup = src[src.index("input partial tile index"):]
+            flag_read = re.search(r"^buffer_load_b32 .*acquire: get flag \(VMEM\)", fixup, re.M)
+            assert flag_read, "linear fixup must load a producer flag"
+            assert "physical partial slot = cluster * peers + peer" in fixup[:flag_read.start()]
 
 
 @pytest.mark.parametrize("cluster", [[2, 1], [2, 2]])

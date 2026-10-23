@@ -64,19 +64,20 @@ def test_existing_unclustered_kernel_identity_retains_its_payload_marker(strateg
     assert fragment in after if fragment else "_PLAV" not in after
 
 
+@pytest.mark.parametrize("tree", [0, 1])
 @pytest.mark.parametrize("shape", _SPATIAL_SHAPES)
-def test_supported_shapes_match_host_capability(shape):
+def test_supported_shapes_match_host_capability(shape, tree):
     from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
     from test_streamk_multicast import _mc_state, _isa_map
     state = _mc_state(TileProcessingStrategy="StreamK",
-                      StreamKFixupTreeReduction=1, ClusterDim=list(shape))
+                      StreamKFixupTreeReduction=tree, ClusterDim=list(shape))
     assert _validateStreamKMulticast(state, False, _isa_map())
 
 
 @pytest.mark.parametrize("overrides", [
     {"ClusterDim": [3, 1]}, {"ClusterDim": [4, 8]},
     {"PrefetchAcrossPersistent": 1}, {"PrefetchGlobalRead": 0},
-    {"StreamKFixupTreeReduction": 0}, {"StreamKAtomic": 1}, {"UseSubtileImpl": 1},
+    {"StreamKAtomic": 1}, {"UseSubtileImpl": 1},
     {"StoreRemapVectorWidth": 4}, {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
     {"TDMInst": 2}, {"ProblemType": {"Sparse": 1}}, {"DebugStreamK": 1},
     {"ProblemType": {"OutputAmaxD": True}},

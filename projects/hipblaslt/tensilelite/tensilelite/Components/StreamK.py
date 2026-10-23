@@ -1394,7 +1394,7 @@ class StreamK(TileProcessingStrategy):
                 module.add(skFixupLabel)
 
                 # Check flag
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
+                module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sCtaIdx)))
                 module.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
                 if kernel["DebugStreamK"] & 2 == 0:
                     module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))

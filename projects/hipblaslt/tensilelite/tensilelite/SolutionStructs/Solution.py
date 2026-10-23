@@ -322,7 +322,6 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
     constraints = (
         (not state.get("PrefetchAcrossPersistent", 0), "PrefetchAcrossPersistent=0"),
         (state.get("PrefetchGlobalRead", 1) in (1, 2), "PrefetchGlobalRead in (1,2)"),
-        (state.get("StreamKFixupTreeReduction", 0) == 1, "StreamKFixupTreeReduction=1"),
         (not state.get("UseSubtileImpl", 0), "UseSubtileImpl=0"),
         (not state.get("ProblemType", {}).get("Sparse", 0), "dense input"),
         (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),

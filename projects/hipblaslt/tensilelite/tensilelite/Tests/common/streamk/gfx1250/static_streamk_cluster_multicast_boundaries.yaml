@@ -119,6 +119,7 @@ BenchmarkProblems:
     - StoreRemapVectorWidth:
       - 0
     - StreamKFixupTreeReduction:
+      - 0
       - 1
     - PrefetchAcrossPersistent:
       - 0
