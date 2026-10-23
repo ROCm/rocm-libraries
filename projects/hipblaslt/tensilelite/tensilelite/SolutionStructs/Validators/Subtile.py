@@ -180,18 +180,36 @@ def subtileStackForTLU1(state, tc, mtTiles):
 # better here: a stack of 8 or 16 spans 256/512 B and buys no extra line
 # coverage while doubling or quadrupling the LDS footprint and the padding.
 #
-# So bf16 has exactly one stack, and there is no ladder to walk.  This is also
-# what the LDS swizzle supports: swizzleBitsForSubtile(4) is 2 bits, and
+# So 4 is the ceiling as well as the preference.  That is also what the LDS
+# swizzle supports: swizzleBitsForSubtile(4) is 2 bits, and
 # SubtileGeometry._SWZ_K_BITS_MSB_FIRST defines exactly the two k bits those
 # consume.  A stack of 8 would need a third, which is not derived anywhere, so
 # admitting 8 or 16 here would trade a clean rejection for an assertion during
 # emit.
 #
-# Being a constant rather than a chooser is why the bf16 call site does not look
-# like the fp4 one: there is nothing to fall back to, so it checks
-# subtileTLU1StackReason on this height and rejects the solution outright when
-# the geometry refuses it.
-SUBTILE_STACK_B16 = 4
+# Shorter, though, is reachable.  A 2-tile strip spans 64 B -- half a line, so it
+# is never preferred -- but it lays out M-tile counts a 4-stack refuses: 6, 10,
+# 14, ... tiles hit the partial-tail rule at 4 and are whole strips at 2, and an
+# odd number of strips per wave straddles at 4 and does not at 2.  Both swizzle
+# halves already handle the 1-bit width it implies: _SWZ_K_BITS_MSB_FIRST is
+# sliced [:swizzleBits], and _emitTLU1LRSwizzle documents the 32-row M-extent
+# case alongside the 64-row one.  So bf16 walks a two-rung ladder, 4 then 2,
+# the same shape as the fp4 chooser above.
+SUBTILE_STACK_SIZES_B16 = (4, 2)
+
+
+def subtileStackForB16TLU1(state, tc, mtTiles):
+  """Stack height for a TLU=1 bf16/fp16 operand, or None when neither fits.
+
+  Unlike subtileStackForTLU1 this returns None rather than the preferred height
+  on total failure: there is no geometry to fall back to, so the caller rejects
+  and the rejection reason should be the one from the *preferred* height, which
+  is what the caller re-derives.
+  """
+  for stack in SUBTILE_STACK_SIZES_B16:
+    if subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
+      return stack
+  return None
 
 
 def validateSubtileGRKPartition(state, printRejectionReason):

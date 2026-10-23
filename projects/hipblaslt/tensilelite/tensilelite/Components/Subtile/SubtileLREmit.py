@@ -114,6 +114,26 @@ def _emitLROffset_TLU0(tag, tile, ti, writer, kernel):
   return Module(f"LR Offset 1x2 ({ti.tc})")  # STUB
 
 
+_DS_IMM_LIMIT = 1 << 16   # ds_read offset field is 16-bit unsigned
+
+
+def _tlu1B16MaxLROffset(ti) -> int:
+  """Largest ds immediate _emitSingleDsReadTLU1B16 would ask for, in bytes.
+
+  The read address is one swizzled per-lane base register plus an immediate that
+  walks the un-swizzled strip / K-window / k_half terms, so the immediate has to
+  span the operand's whole LDS region.  Past 64 KB it no longer fits the ds
+  offset field and the top has to be staged through a VGPR -- see
+  sharedVgprLRBigOffset.
+  """
+  g = _tlu1LRGeom(ti, ti.waveSize)
+  stripStride = stripStrideBytes(ti)
+  kWindowStride = int(ti.globalSubtileGrid[0]) * stripStride
+  return ((int(ti.globalSubtileGrid[0]) - 1) * stripStride
+          + (int(ti.globalSubtileGrid[1]) - 1) * kWindowStride
+          + (int(g.readsPerTile) - 1) * g.kHalfStride)
+
+
 # --- LR alloc/dealloc (LRTag_1x2) -------------------------------------------
 
 @_allocLROffsetRegisters.register(LRTag_TLU1)
@@ -126,20 +146,36 @@ def _allocLROffsetRegs_tlu(tag, tile, ti, writer, kernel):
   and each one also costs a swap register and its double-buffer xor, in the main
   loop as well as at setup.
 
-  bf16 cannot use that trick and takes one register per read.  Its LDS
-  bank-conflict swizzle XORs the m-block field of the address, and the m-block
-  field is exactly what `tile_m * tileMStride` selects -- so the per-read term
-  has to be folded in BEFORE the XOR.  XOR does not distribute over addition, so
-  a single base plus a ds immediate would apply the permutation to the wrong
-  m-block.  See _lraTileAssignment_tlu_b16.
+  bf16 takes one register per M-TILE of the strip -- stackM of them, not the
+  stackM * readsPerTile that numLRPerSubtile counts.  Its LDS bank-conflict
+  swizzle XORs the m-block field of the address, and the m-block field is exactly
+  what `tile_m * tileMStride` selects, so that term has to be folded in BEFORE
+  the XOR: XOR does not distribute over an addition reaching into the field.
+
+  The other per-read term does not reach it.  The paired read steps by
+  kHalfStride = colsPerRead * colStride, and colStride == tileMStride * stackM is
+  the top of the m-block field, so the step is a multiple of 2^(field top) and
+  changes no bit at or below the mask -- carries included.  _emitTLU1LRSwizzle
+  additionally asserts no swizzle bit is sourced from the k_half range, so the
+  XOR term itself is identical across the paired reads.  Both halves together
+  make the XOR distribute over that term, and _emitSingleDsReadTLU1B16 carries it
+  in the ds immediate instead of a register.  See _lraTileAssignment_tlu_b16.
   """
-  count = ti.numLRPerSubtile if _isTLU1B16(ti) else 1
+  count = int(ti.lrSubtileShape[0]) if _isTLU1B16(ti) else 1
   tile.sharedVgprLROffset = [
       writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffset")
       for _ in range(count)]
   tile.sharedVgprLROffsetSwap = [
       writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffsetSwap")
       for _ in range(count)]
+  # One scratch address, and only for the operands that outgrow the ds immediate
+  # (>= 64 KB of LDS for this tensor).  It is a plain staging register, not an
+  # offset, so it needs no swap partner: the add that fills it is re-emitted at
+  # every read from whichever base register is live.
+  tile.sharedVgprLRBigOffset = None
+  if _isTLU1B16(ti) and _tlu1B16MaxLROffset(ti) >= _DS_IMM_LIMIT:
+    tile.sharedVgprLRBigOffset = writer.vgprPool.checkOut(
+        1, tag="_allocLROffsetRegs_tlu_sharedVgprLRBigOffset")
 
 
 @_allocLROffsetRegisters.register(LRTag_1x1)
@@ -177,6 +213,9 @@ def _deallocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
     for voff in tile.sharedVgprLROffsetSwap:
       writer.vgprPool.checkIn(voff)
     tile.sharedVgprLROffsetSwap = []
+  if getattr(tile, "sharedVgprLRBigOffset", None) is not None:
+    writer.vgprPool.checkIn(tile.sharedVgprLRBigOffset)
+    tile.sharedVgprLRBigOffset = None
 
 
 # --- LR load emit (LRTag_1x2) -----------------------------------------------
@@ -705,16 +744,19 @@ def _lraTileAssignment_tlu_b16(writer, kernel, module, tileInfo):
 
   DirectToLds writes a dense column-major pack, LDS[(k*mExtentRows + m)*bpe], so
 
-      base      = (lane16Group * kPerGroup + colInGroup) * colStride
-                  + mSub * mSubStride
-      offset[r] = base + tile_m * tileMStride + k_half * kHalfStride
+      base           = (lane16Group * kPerGroup + colInGroup) * colStride
+                       + mSub * mSubStride
+      offset[tile_m] = base + tile_m * tileMStride
 
   then XOR-swizzled by _emitTLU1LRSwizzle to de-conflict the LDS banks.
 
-  Unlike the fp4 arm this needs ONE VGPR PER READ, not a single base reached
-  through ds immediates: the swizzle XORs the m-block field, which is exactly
-  the field `tile_m * tileMStride` selects, and XOR does not distribute over the
-  addition of an immediate.  See _allocLROffsetRegs_tlu.
+  Unlike the fp4 arm this needs one VGPR per M-TILE of the strip rather than a
+  single base: the swizzle XORs the m-block field, which is exactly the field
+  `tile_m * tileMStride` selects, and XOR does not distribute over the addition
+  of an immediate that reaches into it.  It does NOT need one per read -- the
+  paired-read step k_half * kHalfStride lands entirely above the field, so
+  _emitSingleDsReadTLU1B16 carries it in the ds immediate.  See
+  _allocLROffsetRegs_tlu for the full argument.
   """
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]
@@ -763,25 +805,24 @@ def _lraTileAssignment_tlu_b16(writer, kernel, module, tileInfo):
 
   swzVgpr = _emitTLU1LRSwizzle(module, writer, tileInfo, g, lane16, lane16Group, tc)
 
-  # offset[r] = base + tile_m*tileMStride + k_half*kHalfStride.  read_const can
-  # exceed the VOP3 inline-constant limit (64), so stage those via an SGPR.
+  # offset[tile_m] = base + tile_m*tileMStride.  read_const can exceed the VOP3
+  # inline-constant limit (64), so stage those via an SGPR.  The k_half term is
+  # deliberately absent: it lives in the ds immediate (see the docstring).
   stmp = writer.sgprPool.checkOut(1, tag="_lraTileAssignment_tlu_b16_const")
-  for r in range(len(tileInfo.sharedVgprLROffset)):
-    tile_m = r // g.readsPerTile
-    k_half = r % g.readsPerTile
-    read_const = tile_m * g.tileMStride + k_half * g.kHalfStride
-    dst = tileInfo.sharedVgprLROffset[r]
+  for tile_m in range(len(tileInfo.sharedVgprLROffset)):
+    read_const = tile_m * g.tileMStride
+    dst = tileInfo.sharedVgprLROffset[tile_m]
     if read_const == 0:
       module.add(VMovB32(dst=vgpr(dst), src=vgpr(baseOffset),
-                 comment=f"{tc} TLU1: LR offset[{r}] (tile_m={tile_m}, k_half={k_half})"))
+                 comment=f"{tc} TLU1: LR offset[{tile_m}] (tile_m={tile_m})"))
     elif read_const <= 64:
       module.add(VAddU32(dst=vgpr(dst), src0=vgpr(baseOffset), src1=read_const,
-                 comment=f"{tc} TLU1: LR offset[{r}] = base + {read_const}"))
+                 comment=f"{tc} TLU1: LR offset[{tile_m}] = base + {read_const}"))
     else:
       module.add(SMovB32(dst=sgpr(stmp), src=hex(read_const),
-                 comment=f"{tc} TLU1: const {read_const} for offset[{r}]"))
+                 comment=f"{tc} TLU1: const {read_const} for offset[{tile_m}]"))
       module.add(VAddU32(dst=vgpr(dst), src0=vgpr(baseOffset), src1=sgpr(stmp),
-                 comment=f"{tc} TLU1: LR offset[{r}] = base + {read_const}"))
+                 comment=f"{tc} TLU1: LR offset[{tile_m}] = base + {read_const}"))
     if swzVgpr is not None:
       module.add(VXorB32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(swzVgpr),
                  comment=f"{tc} TLU1: XOR swizzle: permute m-block (LDS bank de-conflict)"))
@@ -1103,18 +1144,30 @@ def _emitSingleDsReadTLU1B16(tileInfo, sId0, sId1, subIterK, dstTile):
       subtileRow   = sId0 // stackM     -- which LDS strip
       mTileInStrip = sId0 %  stackM     -- which 16-row M-tile inside it
 
-  The M-tile selection and the paired-read K step are *swizzled* terms (they sit
-  in the m-block field the XOR permutes), so they were folded into the per-read
-  offset registers by _lraTileAssignment_tlu_b16 at index
+  The M-tile selection is a *swizzled* term -- it sits in the m-block field the
+  XOR permutes -- so it was folded into the offset register by
+  _lraTileAssignment_tlu_b16, one register per M-tile of the strip, indexed by
+  mTileInStrip.
 
-      r = mTileInStrip * readsPerTile + readIdx
+  The paired-read K step is NOT swizzled, despite sitting next to one that is.
+  kHalfStride = colsPerRead * colStride and colStride == tileMStride * stackM is
+  the top of the m-block field, so readIdx * kHalfStride is a multiple of
+  2^(field top) and cannot disturb the field or carry into it; _emitTLU1LRSwizzle
+  separately asserts no swizzle bit comes from the k_half range, so the XOR term
+  is the same for both reads.  The XOR therefore distributes over it and it rides
+  in the ds immediate alongside the un-swizzled strip and K-window terms, which
+  match the GR write base.  That is what lets one register serve readsPerTile
+  reads instead of one each.
 
-  and the ds immediate carries only the un-swizzled strip and K-window terms,
-  matching the GR write base.
+  The immediate is 16-bit, so an operand whose LDS region reaches 64 KB cannot be
+  addressed this way throughout -- MT320 at DepthU 128 wants 80 KB.  Those reads
+  stage the 64 KB-aligned top of the offset through sharedVgprLRBigOffset and
+  keep the remainder in the immediate; the address is unchanged, only its split.
   """
   module = Module()
   trLoad = _tlu1TrLoadInst(tileInfo)
   REGS_PER_TR = int(tileInfo.loadWidthLR) // 4
+  g = _tlu1LRGeom(tileInfo, tileInfo.waveSize)
   stackM = int(tileInfo.lrSubtileShape[0])
   subtileRow = sId0 // stackM
   mTileInStrip = sId0 % stackM
@@ -1122,20 +1175,53 @@ def _emitSingleDsReadTLU1B16(tileInfo, sId0, sId1, subIterK, dstTile):
   kWindowStride = int(tileInfo.globalSubtileGrid[0]) * stripStride
   offset = subtileRow * stripStride + sId1 * kWindowStride
 
+  # The property that licenses moving the k_half term out of the register.
+  mBlockFieldTop = g.tileMStride * stackM
+  assert g.kHalfStride % mBlockFieldTop == 0, (
+      "TLU=1 bf16 LR (%s): kHalfStride=%d is not a multiple of the m-block field "
+      "top (%d); the paired-read step would reach into the swizzled field and "
+      "could not be carried in the ds immediate"
+      % (tileInfo.tc, g.kHalfStride, mBlockFieldTop))
+
   numRegs = len(dstTile.regList.indices)
   numReads = numRegs // REGS_PER_TR
-  readsPerTile = tileInfo.numLRPerSubtile // stackM
-  assert numReads <= readsPerTile, (
-      "TLU=1 bf16 LR (%s): MMA tile needs %d transpose reads but only %d offset "
-      "registers per M-tile were allocated"
-      % (tileInfo.tc, numReads, readsPerTile))
+  assert len(tileInfo.sharedVgprLROffset) == stackM, (
+      "TLU=1 bf16 LR (%s): expected %d offset registers (one per M-tile of the "
+      "strip) but %d were allocated"
+      % (tileInfo.tc, stackM, len(tileInfo.sharedVgprLROffset)))
+  assert numReads <= g.readsPerTile, (
+      "TLU=1 bf16 LR (%s): MMA tile needs %d transpose reads but the geometry "
+      "gives only %d per M-tile"
+      % (tileInfo.tc, numReads, g.readsPerTile))
   dstVgpr = dstTile.regList.indices[0]
+  baseVgpr = tileInfo.sharedVgprLROffset[mTileInStrip]
+  bigVgpr = getattr(tileInfo, "sharedVgprLRBigOffset", None)
   for readIdx in range(numReads):
-    addrVgpr = tileInfo.sharedVgprLROffset[mTileInStrip * readsPerTile + readIdx]
+    readOffset = offset + readIdx * g.kHalfStride
+    assert readOffset >= 0, (
+        "TLU=1 bf16 LR (%s): negative ds offset %d (strip=%u, kWindow=%u, "
+        "k_half=%u)" % (tileInfo.tc, readOffset, subtileRow, sId1, readIdx))
+    addrVgpr = baseVgpr
+    if readOffset >= _DS_IMM_LIMIT:
+      # Past the ds offset field.  Stage the whole 64 KB-aligned top through the
+      # scratch register and leave the remainder in the immediate.  Splitting an
+      # un-swizzled constant across an add and the immediate is exact -- the sum
+      # is the same address either way, and the XOR already happened, on the base
+      # register, before any of this is added.
+      assert bigVgpr is not None, (
+          "TLU=1 bf16 LR (%s): ds offset %d needs the staging register but none "
+          "was allocated; _tlu1B16MaxLROffset said %d"
+          % (tileInfo.tc, readOffset, _tlu1B16MaxLROffset(tileInfo)))
+      bias = readOffset - (readOffset % _DS_IMM_LIMIT)
+      module.add(VAddU32(dst=vgpr(bigVgpr), src0=hex(bias), src1=vgpr(baseVgpr),
+                 comment="%s TLU1: stage LR offset top %d (ds imm is 16-bit)"
+                         % (tileInfo.tc, bias)))
+      readOffset -= bias
+      addrVgpr = bigVgpr
     module.add(trLoad(
         dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
         src=vgpr(addrVgpr),
-        ds=DSModifiers(offset=offset),
+        ds=DSModifiers(offset=readOffset),
         comment="TrSubtile%s[%u, %u] subIterK=%u k_half=%u (strip=%u, tile_m=%u)"
                 % (tileInfo.tc, sId0, sId1, subIterK, readIdx,
                    subtileRow, mTileInStrip)))
@@ -1333,6 +1419,11 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
 # Subroutine to generate DTL M0 LDS buffer swap
 #
 def localReadLDSBufferSwap(tc, writer, kernel):
+  if kernel.get("1LDSBuffer", 0):
+    # One buffer: there is no other half to flip to.  The swap mask is built
+    # from writer.ldsTotalSize, which under 1LDSBuffer is the WHOLE allocation,
+    # so XORing it would walk every LR base off the end of the kernel's LDS.
+    return Module("LR LDS buffer swap (1LDSBuffer: no-op)")
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
     return ti_.emitLRLDSBufferSwap(writer, kernel)

@@ -2,10 +2,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# End-to-end GPU roundtrip for the bf16 TLU=1 (4,1) sub-tile geometry.
+# End-to-end GPU roundtrip for the bf16 TLU=1 sub-tile geometries.
 #
 # test_gr_lr_roundtrip.py covers the TLU=0 geometries and compares GR->LDS->LR
-# against a model of that path.  This file covers AB_B16_TLU1_4x1 and compares
+# against a model of that path.  This file covers AB_B16_TLU1_4x1 and its
+# half-height fallback AB_B16_TLU1_2x1 (see SUBTILE_STACK_SIZES_B16), comparing
 # against an ABSOLUTE reference instead: the MFMA A-fragment layout is fixed by
 # the instruction, not by how the data got there, so a reference built from it
 # validates GR placement, LR placement and the LDS swizzle independently rather
@@ -73,6 +74,30 @@ SHAPES = [
     (128, 64, [4, 1]),    # 2 M-tiles per wave into a stack of 4
 ]
 
+# Same two regimes for the (2,1) fallback stack, whose strip is 32 M-rows and
+# whose swizzle is therefore 1 bit wide rather than 2 -- the narrower slice of
+# _SWZ_K_BITS_MSB_FIRST, which no shape above exercises.  The last two are the
+# reason the stack exists: 6 and 10 M-tiles are whole strips at 2 and a partial
+# tail at 4, so they have no 4x1 counterpart to list here.
+SHAPES_2X1 = [
+    # wave owns whole strips
+    (64, 64, [1, 4]),     # 4 M-tiles per wave = 2 strips
+    (128, 64, [1, 4]),    # 8 M-tiles per wave = 4 strips
+    (256, 64, [2, 2]),    # 8 M-tiles per wave = 4 strips
+    (128, 64, [4, 1]),    # 2 M-tiles per wave = 1 strip
+    # waves share a strip (perWaveMTiles < stack)
+    (64, 64, [4, 1]),     # 1 M-tile per wave into a stack of 2
+    # odd strip counts -- unreachable at a stack of 4
+    (96, 64, [1, 4]),     # 6 M-tiles per wave = 3 strips
+    (160, 64, [1, 4]),    # 10 M-tiles per wave = 5 strips
+    # MT320 wg[2,2] is also 5 strips per wave and is the shape that exposes the
+    # odd-localSubtileGrid[0] GR straddle, but it cannot go here: the scaffold
+    # double-buffers LDS and 2 x (80 KB A + 16 KB B) overruns the 160 KB cap.
+]
+
+ALL_SHAPES = ([("AB_B16_TLU1_4x1",) + s for s in SHAPES]
+              + [("AB_B16_TLU1_2x1",) + s for s in SHAPES_2X1])
+
 
 def tlu1_tile_map(tileInfo):
     """(mmaM, mmaK) -> vgprTile index for a TLU=1 sub-tile spanning stackM M-tiles.
@@ -99,7 +124,8 @@ def tlu1_tile_map(tileInfo):
     return tmap
 
 
-def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch):
+def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch,
+                 geometry="AB_B16_TLU1_4x1"):
     """Emit the roundtrip kernel for one shape/wave, with the swizzle on or off."""
     if swizzle:
         monkeypatch.delenv("SUBTILE_LDS_SWIZZLE", raising=False)
@@ -122,7 +148,7 @@ def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch):
         lraTileAssignment,
     )
 
-    geometryA = AB_GEOMETRY_MAP["AB_B16_TLU1_4x1"]
+    geometryA = AB_GEOMETRY_MAP[geometry]
     geometryB = AB_GEOMETRY_MAP["AB_B16"]
     cfg = TileConfig(mt_a=mt_a, mt_b=mt_b, depth_u=DEPTH_U,
                      stride_a=mt_a, stride_b=mt_b)
@@ -182,16 +208,18 @@ def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch):
     return asm, cfg, lds_size, num_tiles * WAVESIZE * 16, tileInfoA, kernel
 
 
-def run_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch, tmp_path):
+def run_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch, tmp_path,
+               geometry="AB_B16_TLU1_4x1"):
     """Assemble and run one shape/wave.  `tmp_path` is pytest's fixture, so the
     emitted .s and .co are retained under the pytest basetemp (last 3 runs) --
     a swizzle failure is only debuggable if you can still read the assembly."""
     asm, cfg, lds_size, out_size, tileInfoA, kernel = build_kernel(
-        mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch)
+        mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch, geometry)
     n = DEPTH_U * max(cfg.stride_a, cfg.stride_b)
     input_a = np.arange(1, n + 1, dtype=np.float16)
     input_b = -np.arange(1, n + 1, dtype=np.float16)
-    name = f"tlu1_{mt_a}x{mt_b}_{mi_wave_group[0]}{mi_wave_group[1]}_w{wave_id}_s{int(swizzle)}"
+    stack = geometry.rsplit("_", 1)[-1]
+    name = f"tlu1_{stack}_{mt_a}x{mt_b}_{mi_wave_group[0]}{mi_wave_group[1]}_w{wave_id}_s{int(swizzle)}"
     out = assemble_and_run(asm, tmp_path, name, out_size,
                            inputs=(input_a, input_b),
                            scalars=(cfg.stride_a, cfg.stride_b),
@@ -222,10 +250,11 @@ def expected_a_fragments(cfg, tileInfoA, kernel, wave_id):
 
 
 @requires_gpu
-@pytest.mark.parametrize("mt_a,mt_b,mi_wave_group", SHAPES,
+@pytest.mark.parametrize("geometry,mt_a,mt_b,mi_wave_group", ALL_SHAPES,
                          ids=lambda v: str(v).replace(" ", ""))
 @pytest.mark.parametrize("wave_id", range(NUM_WAVES))
-def test_b16_tlu1_4x1_roundtrip(mt_a, mt_b, mi_wave_group, wave_id, monkeypatch, tmp_path):
+def test_b16_tlu1_roundtrip(geometry, mt_a, mt_b, mi_wave_group, wave_id,
+                            monkeypatch, tmp_path):
     """GR -> LDS -> LR must reproduce the MFMA A-fragment, swizzle on and off.
 
     Regression guard for the shared-strip swizzle bug: the wave's window into a
@@ -235,9 +264,9 @@ def test_b16_tlu1_4x1_roundtrip(mt_a, mt_b, mi_wave_group, wave_id, monkeypatch,
     non-zero -- half or three-quarters of the waves, silently.
     """
     with_swz, tileInfoA, kernel, cfg = run_kernel(
-        mt_a, mt_b, wave_id, True, mi_wave_group, monkeypatch, tmp_path)
+        mt_a, mt_b, wave_id, True, mi_wave_group, monkeypatch, tmp_path, geometry)
     without_swz, _, _, _ = run_kernel(
-        mt_a, mt_b, wave_id, False, mi_wave_group, monkeypatch, tmp_path)
+        mt_a, mt_b, wave_id, False, mi_wave_group, monkeypatch, tmp_path, geometry)
 
     expected = expected_a_fragments(cfg, tileInfoA, kernel, wave_id)
     num_a = len(tileInfoA.vgprTiles)
