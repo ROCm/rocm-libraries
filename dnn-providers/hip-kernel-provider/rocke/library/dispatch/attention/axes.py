@@ -151,6 +151,7 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        "kv_storage_dtype",
     }
 )
 # Problem fields only some arches' dense specs declare (the band's right bound).
