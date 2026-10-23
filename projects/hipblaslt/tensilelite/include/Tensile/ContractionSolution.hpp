@@ -477,6 +477,8 @@ namespace TensileLite
         int temporalHintB = 0;
 
         bool hasTemporalHint = false;
+        bool BufferLoad = true;
+        bool BufferStore = true;
 
         int cacheHintA() const
         {
