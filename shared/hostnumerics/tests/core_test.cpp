@@ -6,10 +6,10 @@
 #include <array>
 #include <cmath>
 #include <complex>
-#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
@@ -152,6 +152,198 @@ TEST(Core, ScalarTypes) {
             << "ScalarType value: " << static_cast<int>(invalid);
     }
 }
+
+TEST(ShapeCpp, ConstructionAndOwnership) {
+    EXPECT_EQ(::testing::PrintToString(Shape{}), "Shape{}");
+    EXPECT_EQ(::testing::PrintToString(Shape{2, 3, 4}), "Shape{2, 3, 4}");
+    static_assert(!std::is_constructible_v<Shape, size_t>);
+    static_assert(!std::is_convertible_v<std::vector<size_t>, Shape>);
+    static_assert(!std::is_convertible_v<std::span<const size_t>, Shape>);
+    EXPECT_EQ(Shape{}, Shape({}));
+    EXPECT_EQ(Shape{7}.rank(), 1);
+    std::vector<size_t> source{2, 3, 4};
+    const Shape copied(source), spanCopy{std::span<const size_t>(source)};
+    source[0] = 9;
+    EXPECT_EQ(copied, (Shape{2, 3, 4}));
+    EXPECT_EQ(spanCopy, copied);
+    EXPECT_EQ(Shape(std::move(source)), (Shape{9, 3, 4}));
+    EXPECT_EQ(Shape(std::array<size_t, 3>{2, 3, 4}), copied);
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    const std::vector<size_t> oversized{maximum, 2};
+    EXPECT_THROW((Shape(oversized)), std::runtime_error);
+    EXPECT_THROW((Shape{maximum, 2}), std::runtime_error);
+    EXPECT_THROW(Shape(std::span<const size_t>(oversized)), std::runtime_error);
+    EXPECT_THROW((Shape(std::vector<size_t>{maximum, 2})), std::runtime_error);
+    for (const auto& extents :
+         {std::vector<size_t>{0, maximum, 2}, std::vector<size_t>{maximum, 0, 2},
+          std::vector<size_t>{maximum, 2, 0}}) {
+        EXPECT_EQ(Shape(extents).elementCount(), 0);
+        EXPECT_EQ(Shape(std::span<const size_t>(extents)).elementCount(), 0);
+    }
+    EXPECT_EQ(Shape{}.elementCount(), 1);
+}
+
+TEST(ShapeCpp, DimensionAccess) {
+    const Shape shape{2, 3, 5};
+    const std::array<size_t, 3> expected{2, 3, 5};
+    static_assert(noexcept(shape[0]));
+    for (size_t axis = 0; axis < expected.size(); ++axis) {
+        EXPECT_EQ(shape[axis], expected[axis]);
+        EXPECT_EQ(shape.extent(axis), expected[axis]);
+    }
+    EXPECT_THROW(shape.extent(shape.rank()), std::runtime_error);
+}
+
+TEST(ShapeCpp, ArrayArguments) {
+    const Shape shape{2, 3, 5};
+    // C++20 span parameters accept std::array, but not braced initializer lists.
+    const std::array<size_t, 3> axes{2, 0, 2};
+    EXPECT_EQ(shape.fromDimensions(axes), (Shape{5, 2, 5}));
+
+    const std::array<size_t, 3> indices{1, 2, 3};
+    const std::array<size_t, 3> order{1, 2, 0};
+    const std::vector<size_t> expected(indices.begin(), indices.end());
+    EXPECT_EQ(shape.linearIndex(indices), 28);
+    EXPECT_EQ(shape.coordinates(28), expected);
+    EXPECT_EQ(shape.linearIndex(indices, order), 27);
+    EXPECT_EQ(shape.coordinates(27, order), expected);
+}
+
+TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
+    for (const Shape original :
+         {Shape{}, Shape{2, 3, 5}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
+        Shape copied(original);
+        EXPECT_EQ(copied, original);
+        EXPECT_EQ(copied.elementCount(), original.elementCount());
+        Shape moved(std::move(copied));
+        EXPECT_EQ(moved, original);
+        EXPECT_EQ(moved.elementCount(), original.elementCount());
+        // The move contract defines a scalar source that can be queried.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(copied.rank(), 0);
+        EXPECT_EQ(copied.elementCount(), 1);
+        EXPECT_TRUE(copied.coordinates(0).empty());
+        EXPECT_THROW(copied.coordinates(1), std::runtime_error);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+
+        Shape assigned{7};
+        assigned = original;
+        EXPECT_EQ(assigned, original);
+        EXPECT_EQ(assigned.elementCount(), original.elementCount());
+        Shape moveAssigned{9};
+        moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(assigned.rank(), 0);
+        EXPECT_EQ(assigned.elementCount(), 1);
+        EXPECT_TRUE(assigned.coordinates(0).empty());
+        EXPECT_THROW(assigned.coordinates(1), std::runtime_error);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+
+        Shape& alias = moveAssigned;
+        moveAssigned = std::move(alias);
+        EXPECT_EQ(moveAssigned, original);
+        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
+    }
+}
+TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
+    std::vector<ptrdiff_t> strides{5, -1};
+    const Layout layout(Shape{2, 3}, strides, 2);
+    const Layout spanCopy(Shape{2, 3}, std::span<const ptrdiff_t>(strides), 2);
+    strides[0] = 9;
+    EXPECT_EQ(layout.stride(0), 5);
+    EXPECT_EQ(spanCopy, layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
+    EXPECT_EQ(Layout(Shape{}, {}, 0), Layout{});
+    const auto offset = layout.elementOffset(std::array<size_t, 2>{1, 2});
+    ASSERT_TRUE(offset);
+    EXPECT_EQ(*offset, 5);
+}
+
+TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
+    for (const Layout original :
+         {Layout{}, Layout(Shape{}, {}, -7), Layout(Shape{2, 3}, {5, -1}, 2),
+          Layout(Shape{2, 0}, {0, 1}, 4)}) {
+        Layout copied(original);
+        EXPECT_EQ(copied, original);
+        Layout moved(std::move(copied));
+        EXPECT_EQ(moved, original);
+        // Layout moves reset the source to a scalar with zero offset.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_TRUE(copied == Layout{});
+        EXPECT_EQ(copied.shape().elementCount(), 1);
+        EXPECT_TRUE(copied.strides().empty());
+        const auto copiedOffset = copied.elementOffset({});
+        ASSERT_TRUE(copiedOffset);
+        EXPECT_EQ(*copiedOffset, 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+
+        Layout assigned;
+        assigned = original;
+        EXPECT_EQ(assigned, original);
+        Layout moveAssigned(Shape{9}, {1}, 0);
+        moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_TRUE(assigned == Layout{});
+        EXPECT_EQ(assigned.shape().elementCount(), 1);
+        EXPECT_TRUE(assigned.strides().empty());
+        const auto assignedOffset = assigned.elementOffset({});
+        ASSERT_TRUE(assignedOffset);
+        EXPECT_EQ(*assignedOffset, 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        Layout& self = moveAssigned;
+        moveAssigned = std::move(self);
+        EXPECT_EQ(moveAssigned, original);
+    }
+}
+
+TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
+    using namespace roc::hostnumerics::detail;
+    const auto result = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), LayoutError::ExtentOutOfRange);
+    const auto valid = Layout::getContiguousLayout(Shape{2, 3});
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(valid->stride(0), 3);
+    EXPECT_EQ(valid->stride(1), 1);
+    const auto invalidOrder = Layout::getContiguousLayout(Shape{2, 3}, std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(invalidOrder);
+    EXPECT_EQ(invalidOrder.error(), LayoutError::InvalidOrder);
+    static_assert(noexcept(std::declval<const Layout&>() == std::declval<const Layout&>()));
+}
+
+TEST(LayoutCpp, OffsetFailuresCarryContextWithoutThrowing) {
+    using namespace roc::hostnumerics::detail;
+    static_assert(noexcept(std::declval<const Layout&>().elementOffset({})));
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>, ptrdiff_t>);
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>,
+                                                  Unexpected<LayoutFailure>>);
+    const Layout layout(Shape{3, 3}, {std::numeric_limits<ptrdiff_t>::max(), 1}, 0);
+    const auto rank = layout.elementOffset(std::array<size_t, 1>{0});
+    ASSERT_FALSE(rank);
+    EXPECT_EQ(rank.error().error, LayoutError::CoordinateRankMismatch);
+    EXPECT_EQ(rank.error().value, 1);
+    EXPECT_EQ(rank.error().limit, 2);
+    const auto bounds = layout.elementOffset(std::array<size_t, 2>{2, 3});
+    ASSERT_FALSE(bounds);
+    EXPECT_EQ(bounds.error().error, LayoutError::CoordinateOutOfRange);
+    EXPECT_EQ(bounds.error().dimension, 1);
+    EXPECT_EQ(bounds.error().value, 3);
+    EXPECT_EQ(bounds.error().limit, 3);
+    const auto multiply = layout.elementOffset(std::array<size_t, 2>{2, 0});
+    ASSERT_FALSE(multiply);
+    EXPECT_EQ(multiply.error().error, LayoutError::OffsetMultiplyOverflow);
+    const auto add = layout.elementOffset(std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(add);
+    EXPECT_EQ(add.error().error, LayoutError::OffsetAddOverflow);
+}
+}  // namespace
+
+namespace {
+using namespace roc::hostnumerics;
 
 template <typename Tag, typename T>
 void sqrtElements(std::vector<T>& elements) {
@@ -332,100 +524,4 @@ TEST(Core, ScalarDispatchExceptions) {
         EXPECT_EQ(error.marker, 37);
     }
 }
-
-TEST(ShapeCpp, ConstructionAndOwnership) {
-    EXPECT_EQ(::testing::PrintToString(Shape{}), "Shape{}");
-    EXPECT_EQ(::testing::PrintToString(Shape{2, 3, 4}), "Shape{2, 3, 4}");
-    static_assert(!std::is_constructible_v<Shape, size_t>);
-    static_assert(!std::is_convertible_v<std::vector<size_t>, Shape>);
-    static_assert(!std::is_convertible_v<std::span<const size_t>, Shape>);
-    EXPECT_EQ(Shape{}, Shape({}));
-    EXPECT_EQ(Shape{7}.rank(), 1);
-    std::vector<size_t> source{2, 3, 4};
-    const Shape copied(source), spanCopy{std::span<const size_t>(source)};
-    source[0] = 9;
-    EXPECT_EQ(copied, (Shape{2, 3, 4}));
-    EXPECT_EQ(spanCopy, copied);
-    EXPECT_EQ(Shape(std::move(source)), (Shape{9, 3, 4}));
-    EXPECT_EQ(Shape(std::array<size_t, 3>{2, 3, 4}), copied);
-    const size_t maximum = std::numeric_limits<size_t>::max();
-    const std::vector<size_t> oversized{maximum, 2};
-    EXPECT_THROW((Shape(oversized)), std::runtime_error);
-    EXPECT_THROW((Shape{maximum, 2}), std::runtime_error);
-    EXPECT_THROW(Shape(std::span<const size_t>(oversized)), std::runtime_error);
-    EXPECT_THROW((Shape(std::vector<size_t>{maximum, 2})), std::runtime_error);
-    for (const auto& extents :
-         {std::vector<size_t>{0, maximum, 2}, std::vector<size_t>{maximum, 0, 2},
-          std::vector<size_t>{maximum, 2, 0}}) {
-        EXPECT_EQ(Shape(extents).elementCount(), 0);
-        EXPECT_EQ(Shape(std::span<const size_t>(extents)).elementCount(), 0);
-    }
-    EXPECT_EQ(Shape{}.elementCount(), 1);
-}
-
-TEST(ShapeCpp, DimensionAccess) {
-    const Shape shape{2, 3, 5};
-    const std::array<size_t, 3> expected{2, 3, 5};
-    static_assert(noexcept(shape[0]));
-    for (size_t axis = 0; axis < expected.size(); ++axis) {
-        EXPECT_EQ(shape[axis], expected[axis]);
-        EXPECT_EQ(shape.extent(axis), expected[axis]);
-    }
-    EXPECT_THROW(shape.extent(shape.rank()), std::runtime_error);
-}
-
-TEST(ShapeCpp, ArrayArguments) {
-    const Shape shape{2, 3, 5};
-    // C++20 span parameters accept std::array, but not braced initializer lists.
-    const std::array<size_t, 3> axes{2, 0, 2};
-    EXPECT_EQ(shape.fromDimensions(axes), (Shape{5, 2, 5}));
-
-    const std::array<size_t, 3> indices{1, 2, 3};
-    const std::array<size_t, 3> order{1, 2, 0};
-    const std::vector<size_t> expected(indices.begin(), indices.end());
-    EXPECT_EQ(shape.linearIndex(indices), 28);
-    EXPECT_EQ(shape.coordinates(28), expected);
-    EXPECT_EQ(shape.linearIndex(indices, order), 27);
-    EXPECT_EQ(shape.coordinates(27, order), expected);
-}
-
-TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
-    for (const Shape original :
-         {Shape{}, Shape{2, 3, 5}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
-        Shape copied(original);
-        EXPECT_EQ(copied, original);
-        EXPECT_EQ(copied.elementCount(), original.elementCount());
-        Shape moved(std::move(copied));
-        EXPECT_EQ(moved, original);
-        EXPECT_EQ(moved.elementCount(), original.elementCount());
-        // The move contract defines a scalar source that can be queried.
-        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(copied.rank(), 0);
-        EXPECT_EQ(copied.elementCount(), 1);
-        EXPECT_TRUE(copied.coordinates(0).empty());
-        EXPECT_THROW(copied.coordinates(1), std::runtime_error);
-        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-
-        Shape assigned{7};
-        assigned = original;
-        EXPECT_EQ(assigned, original);
-        EXPECT_EQ(assigned.elementCount(), original.elementCount());
-        Shape moveAssigned{9};
-        moveAssigned = std::move(assigned);
-        EXPECT_EQ(moveAssigned, original);
-        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
-        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(assigned.rank(), 0);
-        EXPECT_EQ(assigned.elementCount(), 1);
-        EXPECT_TRUE(assigned.coordinates(0).empty());
-        EXPECT_THROW(assigned.coordinates(1), std::runtime_error);
-        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-
-        Shape& alias = moveAssigned;
-        moveAssigned = std::move(alias);
-        EXPECT_EQ(moveAssigned, original);
-        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
-    }
-}
-
 }  // namespace

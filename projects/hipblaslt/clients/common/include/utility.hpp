@@ -26,13 +26,16 @@
 
 #pragma once
 
-#include "hipblaslt_vector.hpp"
+#include "d_vector.hpp"
+#include "device_vector.hpp"
+#include "host_vector.hpp"
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 /*!\file
@@ -123,8 +126,8 @@ enum class hipblaslt_batch_type
 class hipblaslt_local_handle
 {
     hipblasLtHandle_t m_handle;
-    std::string    m_sol_selec_saved_status = "";
-    bool           m_sol_selec_env_set{false};
+    std::string       m_sol_selec_saved_status = "";
+    bool              m_sol_selec_env_set{false};
 
 public:
     hipblaslt_local_handle();
@@ -133,10 +136,10 @@ public:
 
     ~hipblaslt_local_handle();
 
-    hipblaslt_local_handle(const hipblaslt_local_handle&)            = delete;
-    hipblaslt_local_handle(hipblaslt_local_handle&&)                 = delete;
+    hipblaslt_local_handle(const hipblaslt_local_handle&) = delete;
+    hipblaslt_local_handle(hipblaslt_local_handle&&)      = delete;
     hipblaslt_local_handle& operator=(const hipblaslt_local_handle&) = delete;
-    hipblaslt_local_handle& operator=(hipblaslt_local_handle&&)      = delete;
+    hipblaslt_local_handle& operator=(hipblaslt_local_handle&&) = delete;
 
     // Allow hipblaslt_local_handle to be used anywhere hipblasLtHandle_t is expected
     operator hipblasLtHandle_t&()
@@ -161,9 +164,17 @@ public:
 /*! \brief  local matrix descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matrix_layout
 {
-    hipblasLtMatrixLayout_t m_descr;
+    hipblasLtMatrixLayout_t m_descr   = nullptr;
     hipblasStatus_t         m_status  = HIPBLAS_STATUS_NOT_INITIALIZED;
     static constexpr int    alignment = 16;
+
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatrixLayoutDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
 
 public:
     hipblaslt_local_matrix_layout(int64_t row, int64_t col, int64_t ld, hipDataType type)
@@ -173,14 +184,28 @@ public:
 
     ~hipblaslt_local_matrix_layout()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatrixLayoutDestroy(this->m_descr);
+        reset();
     }
 
-    hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&)            = delete;
-    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&&)                 = delete;
+    hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&) = delete;
     hipblaslt_local_matrix_layout& operator=(const hipblaslt_local_matrix_layout&) = delete;
-    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&&)      = delete;
+
+    hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matrix_layout& operator=(hipblaslt_local_matrix_layout&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
@@ -210,19 +235,31 @@ public:
 /*! \brief  local matrix multiplication descriptor which is automatically created and destroyed  */
 class hipblaslt_local_matmul_descr
 {
-    hipblasLtMatmulDesc_t m_descr;
+    hipblasLtMatmulDesc_t m_descr  = nullptr;
     hipblasStatus_t       m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
 
+    void reset() noexcept
+    {
+        if(m_status == HIPBLAS_STATUS_SUCCESS)
+            (void)hipblasLtMatmulDescDestroy(m_descr);
+        m_descr  = nullptr;
+        m_status = HIPBLAS_STATUS_NOT_INITIALIZED;
+    }
+
 public:
+    hipblaslt_local_matmul_descr(hipblasComputeType_t compute_type, hipDataType scale_type)
+    {
+        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
+    }
+
     hipblaslt_local_matmul_descr(hipblasOperation_t   opA,
                                  hipblasOperation_t   opB,
                                  hipblasComputeType_t compute_type,
                                  hipDataType          scale_type,
                                  hipDataType compute_input_typeA = HIPBLASLT_DATATYPE_INVALID,
                                  hipDataType compute_input_typeB = HIPBLASLT_DATATYPE_INVALID)
+        : hipblaslt_local_matmul_descr(compute_type, scale_type)
     {
-        this->m_status = hipblasLtMatmulDescCreate(&this->m_descr, compute_type, scale_type);
-
         hipblasLtMatmulDescSetAttribute(
             this->m_descr, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(int32_t));
         hipblasLtMatmulDescSetAttribute(
@@ -240,14 +277,28 @@ public:
 
     ~hipblaslt_local_matmul_descr()
     {
-        if(this->m_status == HIPBLAS_STATUS_SUCCESS)
-            hipblasLtMatmulDescDestroy(this->m_descr);
+        reset();
     }
 
-    hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&)            = delete;
-    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&&)                 = delete;
+    hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&) = delete;
     hipblaslt_local_matmul_descr& operator=(const hipblaslt_local_matmul_descr&) = delete;
-    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&&)      = delete;
+
+    hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&& other) noexcept
+        : m_descr(std::exchange(other.m_descr, nullptr))
+        , m_status(std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED))
+    {
+    }
+
+    hipblaslt_local_matmul_descr& operator=(hipblaslt_local_matmul_descr&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_descr  = std::exchange(other.m_descr, nullptr);
+            m_status = std::exchange(other.m_status, HIPBLAS_STATUS_NOT_INITIALIZED);
+        }
+        return *this;
+    }
 
     hipblasStatus_t status()
     {
@@ -293,10 +344,10 @@ public:
             hipblasLtMatmulPreferenceDestroy(this->m_pref);
     }
 
-    hipblaslt_local_preference(const hipblaslt_local_preference&)            = delete;
-    hipblaslt_local_preference(hipblaslt_local_preference&&)                 = delete;
+    hipblaslt_local_preference(const hipblaslt_local_preference&) = delete;
+    hipblaslt_local_preference(hipblaslt_local_preference&&)      = delete;
     hipblaslt_local_preference& operator=(const hipblaslt_local_preference&) = delete;
-    hipblaslt_local_preference& operator=(hipblaslt_local_preference&&)      = delete;
+    hipblaslt_local_preference& operator=(hipblaslt_local_preference&&) = delete;
 
     hipblasStatus_t status()
     {
@@ -323,7 +374,7 @@ public:
 
 /* ============================================================================================ */
 /*  device query and print out their ID and name */
-int64_t query_device_property(int device_id, hipDeviceProp_t &props);
+int64_t query_device_property(int device_id, hipDeviceProp_t& props);
 
 /*  set current device to device_id */
 void set_device(int64_t device_id);
@@ -357,49 +408,17 @@ const char* read_env_var(const char* env_var);
 /* Compute strided batched matrix allocation size allowing for strides smaller than full matrix */
 size_t strided_batched_matrix_size(int rows, int cols, int lda, int64_t stride, int batch_count);
 
-/* ===================================================================== */
-/*! \brief For special numerical types, to convert a value to such type. */
-template <typename T, typename Accumulator>
-typename std::enable_if<std::is_same<int8_t, T>::value, T>::type saturate_cast(Accumulator val)
-{
-    if constexpr(std::is_same<Accumulator, hipblasLtHalf>::value
-                 || std::is_same<Accumulator, hip_bfloat16>::value)
-    {
-        float tmp = std::nearbyint((float)val); //round to even
-        if(tmp > static_cast<float>(127))
-            tmp = static_cast<float>(127);
-        else if(tmp < static_cast<float>(-128))
-            tmp = static_cast<float>(-128);
-        return static_cast<T>(tmp);
-    }
-    else
-    {
-        if constexpr(std::is_same<Accumulator, float>::value
-                     || std::is_same<Accumulator, double>::value)
-            val = std::nearbyint(val); //round to even
-        if(val > static_cast<Accumulator>(127))
-            val = static_cast<Accumulator>(127);
-        else if(val < static_cast<Accumulator>(-128))
-            val = static_cast<Accumulator>(-128);
-        return static_cast<T>(val);
-    }
-}
-
-/* ==================================================================== */
-/*! \brief For common numerical types, to convert a value to such type. */
-template <typename T, typename Accumulator>
-typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(Accumulator val)
-{
-    return static_cast<T>(val);
-}
-
 std::vector<void*> benchmark_allocation();
 int32_t            hipblaslt_get_arch();
 int32_t            hipblaslt_get_arch_major();
-void hipblaslt_print_version();
+void               hipblaslt_print_version();
 
 /* ==================================================================== */
 /*! \brief write a matrix to file. */
-void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType TiA,
-                                   int row, int col, int lda, void *hA,
-                                   std::string ADataFile);
+void hipblasltDispatchValuesToFile(hipblasOperation_t transA,
+                                   hipDataType        TiA,
+                                   int                row,
+                                   int                col,
+                                   int                lda,
+                                   void*              hA,
+                                   std::string        ADataFile);

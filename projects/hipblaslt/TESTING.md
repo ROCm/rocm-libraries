@@ -178,7 +178,7 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 
 | You changed | Run this | Needs a GPU |
 | --- | --- | --- |
-| C++ library or client code | `hipblaslt-test --gtest_filter=*smoke*` for a fast check, then a wider tier | Yes |
+| C++ library or client code | `hipblaslt-test --gtest_filter=*smoke*` for a smoke check, then a wider tier | Yes |
 | TensileLite Python | `cd tensilelite && tox -e unit` | No |
 | `rocisa` | `cd tensilelite && tox -e rocisa` | No |
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
@@ -247,7 +247,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
 | `caching_library_gtest.cpp` | `CachingLibraryCollision` | Solution-cache keying under a forced hash collision |
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
-| `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
+| `device_validation_gtest.cpp` | `FreivaldsDevice_pre_checkin`, `DeviceBounds_pre_checkin` | Small HIP observer/guard tests: typed projections and failures, bounded fallback, auxiliary copies, padding and placement windows. Numerical verifier tests live in HostNumerics; GEMM cases use the ordinary clients. |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
@@ -329,7 +329,7 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
-| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. GEMM cases skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the freivalds cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
 
 All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases are built
 only with the fused GEMM plus all-to-all feature (`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, off by
@@ -349,23 +349,25 @@ address-arithmetic overflow and workspace behavior specifically, and are used sp
 reason. There is real redundancy in the datatype sweeps, where many numerical variants exercise the
 same code path, and pruning that is a standing opportunity rather than an active project.
 
-**Exact checks at large sizes (`fast_check`).** For large shapes, `fast_check: 1` replaces the CPU
-reference with an exact probe check of every element of D (see
-[`clients/common/include/fast_check.hpp`](clients/common/include/fast_check.hpp)). It needs
-`initialization: integer_exact`, which today covers only A, B and C:
+**Exact checks at large sizes (`freivalds`).** `freivalds: 1` selects modular projection checks
+of every element of D. Set `unit_check: 0` to omit the dense CPU reference (see
+[`clients/common/include/device_validation.hpp`](clients/common/include/device_validation.hpp)). HostNumerics
+certifies the actual values, ordered operand scales and compute-input conversions. Any
+initializer producing eligible integer-valued data can be used; `integer_exact` supplies
+patterns that keep large problems within the exact range:
 
 | Operand | integer_exact values |
 | --- | --- |
 | A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
 | B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
 | bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
-| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; freivalds refuses those) |
 | E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
 
-Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
+Before any kernel runs, freivalds bounds every partial sum and every result from the actual inputs
 and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
 f16, 2^31 for int32). At large K, D's type is the tighter limit: integers are exact up to 256 in
-bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. fast_check models
+bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. freivalds models
 the rounding into D, but each result outside D's exact range costs a K-length dot product on the
 host, so the large-K cases pick the pattern by output type:
 
@@ -376,6 +378,113 @@ host, so the large-K cases pick the pattern by output type:
 | bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
 | fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
 | int8 | saturates; each saturated result is recomputed | `sparse_k` |
+
+The reusable bounds, expected projections and exceptional-element checks are implemented by
+[HostNumerics Freivalds plans](../../shared/hostnumerics/docs/freivalds_verification.md).
+hipBLASLt retains device projection kernels, padding checks, launch orchestration and diagnostics.
+Plans own compact immutable input snapshots and can be reused across solutions and iterations.
+
+**Freivalds in ordinary clients.** Both `hipblaslt-test` and `hipblaslt-bench` accept
+`--freivalds`, including with `--yaml` and `--data`. It selects compact numerical validation and
+turns off dense validation from the input record; add `--verify` to run both on the same outputs.
+`--verify` uses the existing norm-based acceptance policy and returns failure when it exceeds
+that tolerance. The stricter unit-test comparison remains available as YAML `unit_check: 1`.
+Explicit CLI options override record values regardless of their order. Without an override,
+YAML `freivalds`, `unit_check`, `bounds_check` and `validation_iters` select their own checks.
+There is no alternate compatibility spelling.
+
+```bash
+hipblaslt-bench --precision f32_r --initialization rand_int \
+  -m 128 -n 128 -k 128 --alpha 1 --beta 0 --freivalds --iters 1 --cold_iters 0
+
+# From projects/hipblaslt, using the same workload in either executable:
+hipblaslt-test --yaml clients/tests/data/freivalds_cli.yaml --freivalds \
+  --gtest_filter='*freivalds_cli*' --validation-iters 3
+hipblaslt-bench --yaml clients/tests/data/freivalds_cli.yaml --freivalds \
+  --verify --bounds-check --validation-iters 3
+```
+
+The benchmark checks every selected solution in a separate untimed pass before measuring kernel
+performance. Both clients report checked launches/elements, projection readback bytes and whether
+the projection observer required a full host copy. Unsupported numerical contracts and verification failures
+return a failing exit status. Inputs are never silently changed to satisfy the verifier.
+
+The other controls select separate behavior:
+
+| CLI option | YAML field | Effect |
+| --- | --- | --- |
+| `--bounds-check` | `bounds_check` | Poison A/B/C and bias padding, check D/E padding and unwritten floating-point outputs. Works with ordinary floating-point reference validation or independently of numerical validation. |
+| `--validation-iters N` | `validation_iters` | Launch and check each selected solution N times; reset outputs/workspace between checked launches. Benchmark `--iters` still controls timing only. |
+| `--placement OPERAND` | `placement` | Use HIP virtual memory to place the selected buffer across a 4 GiB boundary and observe poison windows at ±4 GiB. Requires bounds checking and a single non-HMM buffer; rotating buffers are unsupported. |
+| `--placement-offset BYTES` | `placement_offset` | Place that many bytes below the boundary, or use 0 to select the middle. |
+| `--validation-inject I` | `validation_inject` | Deliberately change one logical output to a different finite value on checked iteration I (zero based). Requires a numerical verifier and produces a failing invocation. -1 disables injection. |
+
+Bounds checks cover the padding/poison regions the client owns; they are not a general memory
+sanitizer. Input-padding reads are detected only when they affect a numerical result. E, exact
+activation, amax and bias-gradient checks remain part of verifying the requested GEMM operation;
+those outputs do not need an additional testing mode. Activation and amax checks currently copy
+the relevant D/E matrices to the host. Amax still lacks a passing real-GEMM
+acceptance case in this suite; its numerical checks and device-copy adapter have unit coverage.
+
+Use ordinary GoogleTest repetition for on-demand SDC workloads, for example
+`hipblaslt-test --gtest_filter='*sdc_hunt*' --gtest_repeat=100`. Each YAML case already checks
+its solutions repeatedly. Environment/background-load experiments can surround that command;
+record their settings with the client log. The large stress and SDC categories require an explicit
+filter. There is no dedicated SDC process runner.
+
+`tensilelite-client` accepts `--freivalds`, or `freivalds=true` in an existing working client
+configuration. It checks every output even when `num-elements-to-validate=0`, prepares once per
+problem (again when solution-dependent inputs change), and reports `PASSED` or `FAILED` through
+the normal validator. For an integer-valued F32 control, set `init-a=1`, `init-b=1`, `init-c=0`,
+`init-alpha=1`, and `init-beta=0` with a matching library and solution. Its existing invocation
+adapter supplies owned Tensor inputs and numerical options without allocating an additional
+dense reference output or calling the CPU GEMM.
+
+Both clients share the HIP observation code in `clients/common/freivalds`; numerical eligibility,
+expected projections, exceptional-output recomputation and the verdict belong to HostNumerics.
+The initial TensileLite route supports strided batches, including grouped collections of those
+GEMMs, and linear epilogues. It explicitly refuses pointer-array batching, auxiliary/amax/gradient
+outputs and nonlinear epilogues. Requested NaN guard checking is preserved and requires a full
+output readback, reported as a fallback. Printing the reference tensor is unsupported because no
+dense reference is computed. General floating-point Freivalds is outside this exact-integer
+contract; the periodic acceptance below includes the non-integer floating-point control.
+
+**Freivalds acceptance through the clients.**
+[`freivalds_cli_test.py`](clients/tests/freivalds_cli_test.py) invokes ordinary command lines and
+checks their exit status and diagnostics. It covers direct benchmark use, YAML/binary overrides,
+independent bounds checking with non-integer data, dense cross-checks, unsupported inputs and
+finite corruptions. It is registered as the build-tree CTest `hipblaslt-validation-cli`.
+
+```bash
+python3 clients/tests/freivalds_cli_test.py \
+  --test /path/to/hipblaslt-test --bench /path/to/hipblaslt-bench \
+  --log-dir /path/to/results --large
+```
+
+`--large` adds a 4099-by-4093-by-4097 BF16/F32 workload with two batches, four solutions and four
+checked launches each. The clean run must use compact readback; the deliberately corrupted run
+must fail with the selected iteration and coordinates. GEMM shape/type/stride/epilogue coverage
+remains in `matmul_gtest.yaml`, including dense-reference cross-checks. The GPU unit tests only
+exercise observer, copy and guard behavior that requires synthetic buffers.
+
+**Periodic acceptance.**
+[`periodic_validation_gtest.cpp`](clients/tests/src/periodic_validation_gtest.cpp) still exercises
+repeated encoded seeds and small reference products under the
+[periodic numerical contract](../../shared/hostnumerics/docs/periodic_verification.md).
+The exact and non-integer floating-point controls cover all transposes, three batches, ordinary
+C and nonconstant bias, with an independent dense oracle:
+
+```bash
+hipblaslt-test --gtest_filter='HostNumericsPeriodicGemm_pre_checkin.*'
+hipblaslt-test --gtest_also_run_disabled_tests --gtest_filter='HostNumericsPeriodicGemm.DISABLED_Large*'
+```
+
+The large periodic controls use the same dimensions, two batches, four solutions and four
+iterations, then repeat with a finite error on iteration 2. They must detect exactly four
+corruptions and preserve output padding. A separately selected dense baseline prepares its
+reference once for the same launch sequence. These tests report timings and payload sizes;
+periodic checking currently compares bounded regions on the host and can cost more than a
+reused dense reference. A general periodic client selector remains separate work.
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has

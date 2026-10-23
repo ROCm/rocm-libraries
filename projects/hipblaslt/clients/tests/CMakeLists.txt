@@ -26,6 +26,13 @@ add_custom_command(
 add_custom_target(hipblaslt-test-data DEPENDS ${HIPBLASLT_TEST_DATA})
 add_dependencies(hipblaslt-test hipblaslt-test-data)
 
+# Interface acceptance uses the ordinary clients, including expected failing invocations.
+add_test(NAME hipblaslt-validation-cli
+    COMMAND ${HIPBLASLT_PYTHON_COMMAND} ${CMAKE_CURRENT_SOURCE_DIR}/freivalds_cli_test.py
+        --test $<TARGET_FILE:hipblaslt-test> --bench $<TARGET_FILE:hipblaslt-bench>
+        --log-dir ${CMAKE_CURRENT_BINARY_DIR}/validation-cli)
+set_tests_properties(hipblaslt-validation-cli PROPERTIES LABELS "pre_checkin" TIMEOUT 600)
+
 # Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
 # Skipped when shared/ is not present (e.g. standalone hipblaslt or sparse checkout in CI).
 set(HIPBLASLT_CTEST_INSTALL_FILE "")

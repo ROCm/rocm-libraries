@@ -16,6 +16,20 @@
 #include <vector>
 
 namespace roc::hostnumerics {
+namespace detail {
+struct ShapeAccess;
+
+inline bool canBroadcastTo(std::span<const size_t> source,
+                           std::span<const size_t> destination) noexcept {
+    if (source.size() > destination.size()) return false;
+    const size_t leading = destination.size() - source.size();
+    for (size_t axis = 0; axis < source.size(); ++axis)
+        if (source[axis] != 1 && source[axis] != destination[leading + axis]) return false;
+    return true;
+}
+
+}  // namespace detail
+
 // The logical shape of a tensor, independent of datatypes and storage strides.
 // The element count must fit size_t.
 class Shape {
@@ -23,7 +37,7 @@ class Shape {
     Shape() = default;
 
     explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {
-        const auto count = tryElementCount(m_dimensions);
+        const auto count = getElementCount(m_dimensions);
         if (!count) throw std::runtime_error("Tensor shape element count exceeds size_t.");
         m_elementCount = *count;
     }
@@ -137,6 +151,8 @@ class Shape {
     }
 
    private:
+    friend struct detail::ShapeAccess;
+
     void validateDimension(size_t dimension) const {
         if (dimension >= rank())
             throw std::runtime_error("Tensor shape dimension " + std::to_string(dimension) +
@@ -200,7 +216,7 @@ class Shape {
         }
     }
 
-    static std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
+    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
         if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
             return 0;
         size_t count = 1;
@@ -215,4 +231,37 @@ class Shape {
     size_t m_elementCount = 1;
 };
 
+// Returns the NumPy-style broadcast shape of two inputs. Dimensions are
+// aligned from the end and must be equal or have extent one. A zero extent
+// broadcasts with one to zero, but not with any other extent.
+inline Shape broadcastShapes(const Shape& left, const Shape& right) {
+    const size_t resultRank = std::max(left.rank(), right.rank());
+    std::vector<size_t> dimensions(resultRank, 1);
+    for (size_t reverseDimension = 0; reverseDimension < resultRank; ++reverseDimension) {
+        const size_t leftExtent =
+            reverseDimension < left.rank() ? left[left.rank() - reverseDimension - 1] : 1;
+        const size_t rightExtent =
+            reverseDimension < right.rank() ? right[right.rank() - reverseDimension - 1] : 1;
+        if (leftExtent != rightExtent && leftExtent != 1 && rightExtent != 1)
+            throw std::runtime_error("Tensor shapes are not broadcast-compatible.");
+        dimensions[resultRank - reverseDimension - 1] = leftExtent == 1 ? rightExtent : leftExtent;
+    }
+    return Shape(std::move(dimensions));
+}
+
+namespace detail {
+template <typename Function>
+void forEachIndex(const Shape& shape, Function&& function) {
+    const size_t count = shape.elementCount();
+    std::vector<size_t> indices(shape.rank(), 0);
+    for (size_t linearIndex = 0; linearIndex < count; ++linearIndex) {
+        function(std::span<const size_t>(indices), linearIndex);
+        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            if (++indices[index] < shape.dimensions()[index]) break;
+            indices[index] = 0;
+        }
+    }
+}
+}  // namespace detail
 }  // namespace roc::hostnumerics

@@ -8,6 +8,8 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
+#include <roc/hostnumerics/scalar_conversion_options.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -175,6 +177,11 @@ inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
 
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
+}
+
+inline constexpr size_t scalarElementGroupSize(ScalarType type) {
+    const size_t bits = scalarTypeInfo(type).storageBits;
+    return 8 / std::gcd(bits, size_t{8});
 }
 
 namespace detail {
