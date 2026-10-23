@@ -157,7 +157,10 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t M1 = warp_num / Problem::NumWaveGroups;
         constexpr index_t M0 = MNPerBlock / (M1 * M2);
 
-        static_assert(M0 * M1 * M2 == MNPerBlock, "Wrong!");
+        static_assert(M0 * M1 * M2 == MNPerBlock,
+                      "comp_async FP8/BF8 XOR swizzle: M/N per block must be a multiple of "
+                      "(waves per group) * warp_size * KPack / WarpTileK; this block tile is "
+                      "not supported");
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<1>,
@@ -179,6 +182,13 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
+#if defined(__gfx950__)
+            static_assert(IsSupportedAsyncVectorWidth<typename Problem::ADataType,
+                                                      Base::template GetVectorSizeA<Problem>()>,
+                          "comp_async on gfx950: the A tile's global vector load is not 4, 12 or "
+                          "16 bytes per lane, which the async buffer->LDS load requires; this "
+                          "block tile is not supported");
+#endif
             return Base::template MakeADramTileDistribution<Problem>();
         }
     }
@@ -194,6 +204,19 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
         else
         {
+#if defined(__gfx950__)
+            using BDataType =
+                std::conditional_t<Base::template IsBCastPolicyBeforeLDSWrite_v<Problem>,
+                                   typename Problem::ADataType,
+                                   typename Problem::BDataType>;
+            constexpr index_t VectorSizeB = Base::template IsBCastPolicyBeforeLDSWrite_v<Problem>
+                                                ? Base::template GetVectorSizeA<Problem>()
+                                                : Base::template GetVectorSizeB<Problem>();
+            static_assert(IsSupportedAsyncVectorWidth<BDataType, VectorSizeB>,
+                          "comp_async on gfx950: the B tile's global vector load is not 4, 12 or "
+                          "16 bytes per lane, which the async buffer->LDS load requires; this "
+                          "block tile is not supported");
+#endif
             return Base::template MakeBDramTileDistribution<Problem>();
         }
     }
@@ -230,7 +253,9 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t M1 = (warp_num / Problem::NumWaveGroups) / M2;
         constexpr index_t M0 = MNPerBlock / M1 / M2 / M3 / M4;
 
-        static_assert(M1 * M0 * M2 * M3 * M4 == MNPerBlock, "Wrong!");
+        static_assert(M1 * M0 * M2 * M3 * M4 == MNPerBlock,
+                      "comp_async FP8/BF8 XOR swizzle: the LDS layout cannot split M/N per block "
+                      "across the waves; this block tile is not supported");
 
         constexpr index_t PadSize = 16;
 
