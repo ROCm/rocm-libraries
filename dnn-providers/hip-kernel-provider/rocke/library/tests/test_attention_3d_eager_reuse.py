@@ -128,7 +128,7 @@ def test_capture_on_selected_stream_bypasses_eager_owner(eager, runtime, monkeyp
     au._run_3d_tiled(**args, stream=29)
     assert not bindings
     assert captured[0][1]["capturing"]
-    assert next(iter(au._3D_EAGER_WORKSPACES.values())).workspace is None
+    assert not au._3D_EAGER_WORKSPACES
 
 
 def test_same_stream_reentrant_call_gets_private_scratch(eager, monkeypatch):
@@ -386,3 +386,219 @@ def test_device_drain_keeps_other_device_explicit_streams(monkeypatch):
     rt.retain_until_drain(29, second)
     rt.sync()
     assert rt._pending_bound_args == {(0, 17): {id(first): first}}
+
+
+def test_maximum_length_within_same_selector_bucket_reuses_pair(eager, runtime):
+    from dataclasses import replace
+
+    args, bindings, launches, _retained = eager
+    start = len(runtime.allocations)
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+        args["problem"] = replace(args["problem"], max_seqlen_k=66)
+        au._run_3d_tiled(**args)
+    assert len(au._3D_EAGER_WORKSPACES) == 1
+    assert len(runtime.allocations) - start == 3
+    assert len(bindings) == 2 and len(launches) == 4
+
+
+@pytest.mark.parametrize(
+    "change", ["total_q", "num_seqs", "segments", "spec", "strided"]
+)
+def test_resolved_geometry_and_binary_identity_keep_separate_owners(
+    eager, monkeypatch, change
+):
+    from dataclasses import replace
+
+    args, bindings, _launches, _retained = eager
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+        if change in ("total_q", "num_seqs"):
+            args["problem"] = replace(args["problem"], **{change: 2})
+        elif change == "segments":
+            monkeypatch.setattr(au, "_num_segments", lambda *a: 256)
+        elif change == "spec":
+            key = au._tiled_3d_cache_key(args["problem"], "gfx942")
+            args["tuning_spec"] = SimpleNamespace(
+                kernel_spec=SimpleNamespace(num_segments=128),
+                cache_key=lambda: key + ("different_spec",),
+            )
+        else:
+            args["kv_cache_layout"] = SimpleNamespace(arguments=dict)
+        au._run_3d_tiled(**args)
+    assert len(au._3D_EAGER_WORKSPACES) == 2
+    assert bindings[0]["segm_output_ptr"] is not bindings[2]["segm_output_ptr"]
+
+
+def test_clear_drains_once_per_stream_before_dropping_owners(
+    eager, runtime, monkeypatch
+):
+    from dataclasses import replace
+
+    from kernels import clear_attention_3d_eager_cache
+
+    args, _bindings, _launches, retained = eager
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+        args["problem"] = replace(args["problem"], total_q=2)
+        au._run_3d_tiled(**args)
+        au._run_3d_tiled(**args, stream=29)
+    graphs, pipelines = au._3D_GRAPHS, au._3D_PIPELINES
+    drains = []
+
+    def drain(stream):
+        assert any(owner.stream == stream for owner in au._3D_EAGER_WORKSPACES.values())
+        drains.append((runtime.device, stream))
+        retained.pop(stream, None)
+
+    monkeypatch.setattr(au, "wait_stream_and_release", drain)
+    clear_attention_3d_eager_cache()
+    assert drains == [(0, 17), (0, 29)]
+    assert not au._3D_EAGER_WORKSPACES and not retained
+    assert au._3D_GRAPHS is graphs and au._3D_PIPELINES is pipelines
+    assert (runtime.device, runtime.stream) == (0, 17)
+
+
+def test_clear_failed_drain_keeps_affected_owners_for_retry(eager, monkeypatch):
+    args, _bindings, _launches, retained = eager
+    with au.no_fence():
+        au._run_3d_tiled(**args)
+    owner = next(iter(au._3D_EAGER_WORKSPACES.values()))
+
+    def fail(stream):
+        raise RuntimeError("drain failed")
+
+    monkeypatch.setattr(au, "wait_stream_and_release", fail)
+    with pytest.raises(RuntimeError, match="drain failed"):
+        au.clear_attention_3d_eager_cache()
+    assert next(iter(au._3D_EAGER_WORKSPACES.values())) is owner
+    assert retained
+    monkeypatch.setattr(
+        au, "wait_stream_and_release", lambda stream: retained.pop(stream, None)
+    )
+    au.clear_attention_3d_eager_cache()
+    assert not au._3D_EAGER_WORKSPACES and not retained
+
+
+def test_clear_rejects_selected_stream_capture_without_draining(eager, monkeypatch):
+    args, _bindings, _launches, retained = eager
+    with au.no_fence():
+        au._run_3d_tiled(**args, stream=29)
+    monkeypatch.setattr(
+        au,
+        "_torch_stream_capturing",
+        lambda: __import__("torch").cuda.current_stream().cuda_stream == 29,
+    )
+    with pytest.raises(RuntimeError, match="during capture"):
+        au.clear_attention_3d_eager_cache()
+    assert len(au._3D_EAGER_WORKSPACES) == 1 and retained
+
+
+def test_saved_executable_candidate_binding_uses_real_ordinary_runtime(eager, runtime):
+    from dataclasses import replace
+
+    from dispatch.attention import (
+        AttentionRequest,
+        attention_execution_candidates,
+        attention_tuning_spec,
+    )
+
+    class _Tensor(Tensor):
+        def __init__(self, shape, dtype, values=None):
+            super().__init__(id(self))
+            self.shape, self.dtype, self.values = shape, dtype, values
+
+        def is_contiguous(self):
+            return True
+
+        def stride(self, dim):
+            from math import prod
+
+            return prod(self.shape[dim + 1 :])
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def tolist(self):
+            return self.values
+
+    # Tensor transport and compilation are mocked; candidate binding, metadata
+    # validation and the public runtime connection remain real.
+    args, bindings, launches, retained = eager
+    problem = replace(args["problem"], target_ctas=0, num_cus=8)
+    req = AttentionRequest(
+        batch=1,
+        nhead_q=4,
+        nhead_k=1,
+        seqlen_q=1,
+        seqlen_k=65,
+        hdim_q=64,
+        hdim_v=64,
+        arch="gfx942",
+        dtype="fp16",
+        kv_block_size=16,
+        num_cus=8,
+    )
+    candidate = next(
+        c
+        for c in attention_execution_candidates()
+        if c.spec_id.startswith("gfx942_u3d")
+    )
+    spec = attention_tuning_spec(req, candidate.spec_id)
+    tensors = {
+        "problem": problem,
+        "q": _Tensor((1, 4, 64), "torch.float16"),
+        "out": _Tensor((1, 4, 64), "torch.float16"),
+        "k": _Tensor((5, 16, 1, 64), "torch.float16"),
+        "v": _Tensor((5, 16, 1, 64), "torch.float16"),
+        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1]),
+        "seqused_k": _Tensor((1,), "torch.int32", [65]),
+        "block_table": _Tensor((1, 5), "torch.int32", [list(range(5))]),
+    }
+    bound = candidate.bind_torch(req, spec, tensors, stream=17)
+    start = len(runtime.allocations)
+    with au.no_fence():
+        for _ in range(20):
+            bound.launch()
+    assert len(runtime.allocations) - start == 3
+    assert len(bindings) == 2 and len(launches) == 40
+    assert len(retained[17]) == 1
+
+
+def test_clear_restores_device_and_preserves_unrelated_caches(
+    eager, runtime, monkeypatch
+):
+    from collections import OrderedDict
+
+    args, _bindings, _launches, _retained = eager
+    with au.no_fence():
+        au._run_3d_tiled(**args, stream=29)
+        args["q"].device = "cuda:1"
+        au._run_3d_tiled(**args, stream=31)
+    graphs = OrderedDict(sentinel=object())
+    pipelines = {("sentinel",): object()}
+    monkeypatch.setattr(au, "_3D_GRAPHS", graphs)
+    monkeypatch.setattr(au, "_3D_PIPELINES", dict(pipelines))
+    drains = []
+    monkeypatch.setattr(
+        au,
+        "wait_stream_and_release",
+        lambda stream: drains.append((runtime.device, stream)),
+    )
+    au.clear_attention_3d_eager_cache()
+    assert drains == [(0, 29), (1, 31)]
+    assert (runtime.device, runtime.stream) == (0, 17)
+    assert len(au._3D_GRAPHS) == 1 and au._3D_PIPELINES == pipelines
+
+
+def test_clear_rejects_active_submission(eager):
+    args, *_ = eager
+    au._run_3d_tiled(**args)
+    owner = next(iter(au._3D_EAGER_WORKSPACES.values()))
+    with owner.lock:
+        with pytest.raises(RuntimeError, match="during submission"):
+            au.clear_attention_3d_eager_cache()
+    assert len(au._3D_EAGER_WORKSPACES) == 1

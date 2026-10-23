@@ -22,7 +22,11 @@ def runtime(monkeypatch):
     def device_context(device):
         previous = state.device
         state.contexts.append(("device", device))
-        state.device = getattr(device, "index", 0)
+        state.device = (
+            int(device.split(":")[-1])
+            if isinstance(device, str)
+            else getattr(device, "index", 0)
+        )
         try:
             yield
         finally:

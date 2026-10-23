@@ -947,3 +947,78 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
     ]
     torch.cuda.synchronize()
     assert churn
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_eager_cache_clear_drains_and_releases_scratch(gpu, dtype):
+    import gc
+    import weakref
+
+    from kernels.common import attention_unified as au
+    from rocke.runtime import no_fence
+
+    torch, arch = gpu
+    if arch not in ("gfx942", "gfx950"):
+        pytest.skip("eager-cache reuse targets gfx942/gfx950")
+    os.environ[f"HIPDNN_{arch.upper()}_3D_GRAPH"] = "0"
+    au.clear_attention_3d_eager_cache()
+    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    batch, heads, capacity, dim, block = 2, 8, 65, 64, 16
+    generator = torch.Generator().manual_seed(13700)
+    qh = torch.randn(batch, heads, dim, generator=generator).to(tdtype)
+    kh = torch.randn(batch, 1, capacity, dim, generator=generator).to(tdtype)
+    vh = torch.randn(batch, 1, capacity, dim, generator=generator).to(tdtype)
+    expected = _reference(torch, qh, kh, vh, [capacity] * batch, 0)
+    q, k, v = qh.cuda(), kh.cuda(), vh.cuda()
+    cu = torch.arange(batch + 1, dtype=torch.int32).cuda()
+    lengths = torch.full((batch,), capacity, dtype=torch.int32).cuda()
+    outs = [torch.empty_like(q), torch.empty_like(q)]
+    streams = [torch.cuda.Stream(), torch.cuda.Stream()]
+    torch.cuda.synchronize()
+    problem = au.UnifiedAttentionProblem(
+        total_q=batch,
+        num_seqs=batch,
+        num_query_heads=heads,
+        num_kv_heads=1,
+        head_size=dim,
+        block_size=block,
+        max_seqlen_q=1,
+        max_seqlen_k=capacity,
+        dtype=dtype,
+        target_ctas=8,
+    )
+    with no_fence():
+        for stream, out in zip(streams, outs):
+            au.run_unified_attention_torch(
+                problem=problem,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                cu_seqlens_q=cu,
+                seqused_k=lengths,
+                softmax_scale=1 / math.sqrt(dim),
+                block_table=None,
+                softcap=0.0,
+                backend="3d",
+                kv_layout="strided",
+                use_graph=False,
+                stream=stream.cuda_stream,
+            )
+    scratch = [
+        weakref.ref(tensor)
+        for owner in au._3D_EAGER_WORKSPACES.values()
+        for tensor in owner.workspace
+    ]
+    assert len(scratch) == 6 and all(ref() is not None for ref in scratch)
+    before = (torch.cuda.current_device(), torch.cuda.current_stream().cuda_stream)
+    au.clear_attention_3d_eager_cache()
+    gc.collect()
+    assert not au._3D_EAGER_WORKSPACES and all(ref() is None for ref in scratch)
+    assert (
+        torch.cuda.current_device(),
+        torch.cuda.current_stream().cuda_stream,
+    ) == before
+    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+    for out in outs:
+        torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
