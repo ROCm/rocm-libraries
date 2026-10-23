@@ -188,12 +188,13 @@ private:
             }
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
         }
+        case NodeAttrs::SdpaBackwardAttributes:
+            return detail::GpuSdpaBwdSignatureKey(node, tensorMap);
 
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormBackwardAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
-        case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:
         {

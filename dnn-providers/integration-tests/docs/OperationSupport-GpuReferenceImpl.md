@@ -63,6 +63,7 @@ The following table lists the operations currently executable through the GPU gr
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
+| SDPA Backward | FP16, BFP16, FP32 | Op-defined | GPU Reference | dQ/dK/dV and dBias; LSE (rank 3 or 4); bias, band, padding, GQA, Dqk != Dv. No dropout, ALiBi, ragged |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 | Pointwise Binary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
 
@@ -73,7 +74,6 @@ The following table lists the operations currently executable through the GPU gr
 | Convolution Backward Data | `ReferenceCapabilityError` ("GPU plan not yet implemented") | `GpuFpReferenceConvolution::dgrad` exists |
 | Convolution Backward Weights | `ReferenceCapabilityError` | `GpuFpReferenceConvolution::wgrad` exists |
 | BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
-| SDPA Backward | `ReferenceCapabilityError` | None |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
 | Resample Backward | "Unsupported node type" error | None |
@@ -198,7 +198,7 @@ host validator.
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
 | SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; no ragged) | Yes (dense incl. variable seq. len.; ragged incl. FP8 E4M3) |
-| SDPA Backward | Yes | No |
+| SDPA Backward | Yes | Yes (dense) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
 | Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
