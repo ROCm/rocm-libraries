@@ -465,8 +465,36 @@ define amdgpu_kernel void @k() {
             name="one_wave", spec={}, artifact=artifact, resources=res
         )
         row = compare_variant_reports([report])[0]
-        self.assertEqual(row["wg_launch"], 32)
+        self.assertEqual(row["wg_bound"], 32)
         self.assertEqual(row["wg_compiled"], 1024)
+        # The kernel records only a bound; without a launch size the row
+        # does not invent one.
+        self.assertIsNone(row["wg_launch"])
+
+    def test_report_compares_compiled_bound_with_actual_launch(self):
+        # A kernel left at the 256 default bound but launched with 64 threads:
+        # the compiler budgets for 256, four times the launch.
+        b = IRBuilder("default_bound")
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="default_bound",
+            spec={},
+            artifact=artifact,
+            resources=parse_resources("    .max_flat_workgroup_size: 256\n"),
+            launch_block_size=64,
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 256)
+        self.assertEqual(row["wg_launch"], 64)
+        self.assertEqual(row["wg_compiled"], 256)
+        self.assertEqual(report.as_dict()["launch_block_size"], 64)
+        # from_artifact forwards the launch size the caller supplies.
+        forwarded = VariantReport.from_artifact(
+            name="default_bound", spec={}, artifact=artifact, launch_block_size=64
+        )
+        self.assertEqual(forwarded.launch_block_size, 64)
 
 
 # ---------------------------------------------------------------------
