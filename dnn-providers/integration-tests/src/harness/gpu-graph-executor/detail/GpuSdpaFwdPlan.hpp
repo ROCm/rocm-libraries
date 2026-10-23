@@ -159,6 +159,9 @@ struct GpuSdpaFwdParams
     // Explicit-mask dropout (cuDNN custom dropout): mask and single-element scale.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
+    // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor and this is
+    // 1 / (1 - p).
+    std::optional<float> philoxDropoutScale;
 };
 
 template <typename QDataType,
@@ -240,7 +243,14 @@ public:
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> dropoutMask;
         std::optional<float> dropoutScale;
-        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        if(_params.dropoutMaskTensor.has_value() && _params.philoxDropoutScale.has_value())
+        {
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = _params.philoxDropoutScale;
+        }
+        else if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
         {
             dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
                                 _params.dropoutMaskTensor->dims,
@@ -355,9 +365,12 @@ public:
             return false;
         }
 
-        // Dropout: only cuDNN's explicit-mask form, as on the CPU; Philox and RNG_DUMP declined.
-        if(!isSupportedSdpaDropout(*nodeAttributes, tensorMap)
-           || nodeAttributes->rng_dump_tensor_uid().has_value())
+        // Dropout: cuDNN's explicit-mask form, or Philox dropout checked through the engine's
+        // RNG_DUMP keep mask, as on the CPU. Philox without RNG_DUMP is declined.
+        const bool philoxWithDump = isSdpaPhiloxDropoutWithDump(*nodeAttributes, tensorMap);
+        if(!philoxWithDump
+           && (!isSupportedSdpaDropout(*nodeAttributes, tensorMap)
+               || nodeAttributes->rng_dump_tensor_uid().has_value()))
         {
             return false;
         }
@@ -497,6 +510,14 @@ public:
                 *tensorMap.at(nodeAttributes->dropout_mask_tensor_uid().value()));
             params.dropoutScaleTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
                 *tensorMap.at(nodeAttributes->dropout_scale_tensor_uid().value()));
+        }
+        else if(isSdpaPhiloxDropoutWithDump(*nodeAttributes, tensorMap))
+        {
+            // The engine's dumped keep mask is the reference's explicit mask.
+            params.dropoutMaskTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->rng_dump_tensor_uid().value()));
+            params.philoxDropoutScale
+                = 1.0F / (1.0F - nodeAttributes->dropout_probability().value());
         }
         return std::make_unique<
             GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float, MaskDataType>>(
