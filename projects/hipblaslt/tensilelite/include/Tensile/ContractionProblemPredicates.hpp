@@ -3069,23 +3069,16 @@ namespace TensileLite
                 }
 
                 WorkgroupMappingXCCCheck()
+                    : value{}
+                    , cuCount(0)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
+                    captureCuCount();
                 }
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
+                    , cuCount(0)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
+                    captureCuCount();
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
@@ -3102,6 +3095,19 @@ namespace TensileLite
                 {
                     return "WorkgroupMappingXCCCheck";
                 }
+
+            private:
+                void captureCuCount()
+                {
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    Hardware const& hardware = *pHardware;
+                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
+                    cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
+                }
+
+            public:
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
