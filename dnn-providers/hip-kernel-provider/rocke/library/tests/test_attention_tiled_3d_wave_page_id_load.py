@@ -48,12 +48,15 @@ def test_kernel_name_token():
     assert "wpid" not in _spec(use_wave_page_id_load=False).kernel_name()
 
 
-@pytest.mark.parametrize("tile, swizzle", [(None, False), (32, False), (64, True)])
-def test_native_builder_matches_python(tile, swizzle):
+@pytest.mark.parametrize(
+    "page, tile, swizzle", [(16, None, False), (32, 32, False), (16, 64, True)]
+)
+def test_native_builder_matches_python(page, tile, swizzle):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     engine = pytest.importorskip("rocke_engine")
     spec = _spec(
+        block_size=page,
         num_query_heads=32,
         num_kv_heads=4,
         num_segments=8,
@@ -77,6 +80,26 @@ def test_native_builder_matches_python(tile, swizzle):
     )
     actual = engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950")
     assert actual == expected
+
+
+def test_gfx950_token_gather_rejects_wave_page_id_load():
+    with pytest.raises(
+        ValueError, match="paged gather does not support use_wave_page_id_load"
+    ):
+        _spec(block_size=16, tile_size_override=32)
+
+
+@pytest.mark.parametrize("entry", ["lower_llvm", "serialize_ir", "verify"])
+def test_gfx950_native_token_gather_rejects_wave_page_id_load(entry):
+    engine = pytest.importorskip("rocke_engine")
+    spec = asdict(
+        _spec(block_size=16, tile_size_override=32, use_wave_page_id_load=False)
+    )
+    spec["use_wave_page_id_load"] = True
+    with pytest.raises(
+        RuntimeError, match="paged gather does not support use_wave_page_id_load"
+    ):
+        getattr(engine, f"gfx950_attention_tiled_3d_{entry}")(spec, "gfx950")
 
 
 def _gfx942_spec(**kw):
