@@ -44,6 +44,8 @@ import logging
 from codegen_common import (
     CommonTypeMappings,
     gfx1250_fp32_tile_reject_reason,
+    gfx1250_lds_operand_bytes,
+    gfx1250_lds_operand_transposed,
     gfx1250_pipeline_reject_reason,
 )
 
@@ -265,6 +267,8 @@ except ImportError:
         "preshufflev2": 32768,
         # Mandatory double buffering (num_lds_buffers = 2), so half the budget.
         "comp_async": 32768,
+        # Ring of four LDS slots (producer/consumer TDM), so a quarter.
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "default": 65536,
     }
@@ -301,6 +305,9 @@ except ImportError:
         ("comp_tdm_v2", "tdm", "interwave"),
         ("comp_tdm_v2", "cshuffle", "interwave"),
         ("comp_tdm_v2", "default", "interwave"),
+        ("comp_tdm_pc", "tdm", "interwave"),
+        ("comp_tdm_pc", "cshuffle", "interwave"),
+        ("comp_tdm_pc", "default", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -318,7 +325,7 @@ except ImportError:
 
 # Tensor Data Mover pipelines. They exist only on gfx1250; elsewhere the TDM
 # instructions are no-ops and the kernel silently produces zeros.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
 TDM_ARCH = "gfx1250"
 
 
@@ -802,7 +809,7 @@ class ArchFilter:
     def _validate_gfx1250_pipeline(
         self, config: KernelConfig, result: ValidationResult
     ):
-        """Validate the gfx1250 pipelines (comp_async, comp_tdm, comp_tdm_v2)
+        """Validate the gfx1250 pipelines (comp_async, comp_tdm*)
         and the TDM epilogue.
 
         The rules come from codegen_common.gfx1250_pipeline_reject_reason, the
@@ -810,7 +817,8 @@ class ArchFilter:
         python/gemm_utils: TDM pipelines are gfx1250-only (off gfx1250 the TDM
         instructions compile to no-ops and the kernel silently writes zeros),
         need the TDM epilogue (and vice versa), intrawave, unpadded tiles and,
-        for comp_tdm_v2, exactly four waves; only the plain GEMM operator can
+        for comp_tdm_v2, exactly four waves, for comp_tdm_pc, at most 256 fp32
+        accumulators per lane; only the plain GEMM operator can
         use them. Non-MX comp_async GEMM on gfx1250 needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
         warp_tile_k >= 128.
@@ -843,6 +851,8 @@ class ArchFilter:
             variant_supported=is_gemm,
             variant_name=f"operator={config.operator.value}",
             pads=None if None in pads else tuple(bool(p) for p in pads),
+            tile_mn=(config.tile_m, config.tile_n),
+            warp_k=config.warp_k,
         )
         if reason:
             result.add_error(reason)
@@ -869,14 +879,21 @@ class ArchFilter:
             and config.operator == OperatorType.GEMM
         )
         if uses_gfx1250_base_lds:
-            # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
-            # descriptors: each group of rows spanning at least 256 bytes is
-            # followed by 16 padding bytes (same accounting as the Tile Engine
-            # validate_lds_capacity).
-            a_lds_layer = max(1, 256 // (config.tile_k * elem_size_a))
-            b_lds_layer = max(1, 256 // (config.tile_k * elem_size_b))
-            matrix_a_size += max(0, config.tile_m // a_lds_layer - 1) * 16
-            matrix_b_size += max(0, config.tile_n // b_lds_layer - 1) * 16
+            # TDM and non-MX comp_async use the gfx1250 base LDS descriptors,
+            # whose padding depends on whether the operand is transpose-loaded
+            # (same accounting as the Tile Engine validate_lds_capacity).
+            matrix_a_size = gfx1250_lds_operand_bytes(
+                config.tile_m,
+                config.tile_k,
+                elem_size_a,
+                gfx1250_lds_operand_transposed("a", config.datatype_a, config.layout),
+            )
+            matrix_b_size = gfx1250_lds_operand_bytes(
+                config.tile_n,
+                config.tile_k,
+                elem_size_b_staged,
+                gfx1250_lds_operand_transposed("b", config.datatype_b, config.layout),
+            )
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that

@@ -119,6 +119,9 @@ class TraitConfigBase:
             ("comp_tdm_v2", "tdm", "interwave"),
             ("comp_tdm_v2", "cshuffle", "interwave"),
             ("comp_tdm_v2", "default", "interwave"),
+            ("comp_tdm_pc", "tdm", "interwave"),
+            ("comp_tdm_pc", "cshuffle", "interwave"),
+            ("comp_tdm_pc", "default", "interwave"),
         }
     )
 
@@ -195,6 +198,7 @@ class CommonTypeMappings:
         # gfx1250 only (Tensor Data Mover); always paired with the tdm epilogue.
         "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
         "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+        "comp_tdm_pc": "GemmPipelineAgBgCrCompTDMProducerConsumer",
     }
 
     PIPELINE_TO_BASE = {
@@ -206,6 +210,7 @@ class CommonTypeMappings:
         "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
         "comp_tdm": "BaseGemmPipelineAgBgCrCompTDM",
         "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_pc": "BaseGemmPipelineAgBgCrCompTDM",
     }
 
     PIPELINE_TO_DISPATCHER = {
@@ -217,6 +222,7 @@ class CommonTypeMappings:
         "comp_async": "Pipeline::CompAsync",
         "comp_tdm": "Pipeline::CompTDMV1",
         "comp_tdm_v2": "Pipeline::CompTDMV2",
+        "comp_tdm_pc": "Pipeline::CompTDMPC",
     }
 
     SCHEDULER_TO_CK = {
@@ -1294,7 +1300,7 @@ def gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k) 
 # arch gate is exact) plus non-MX comp_async (MX comp_async on gfx950 is a
 # separate kernel family and is not gated here).
 GFX1250_ARCH = "gfx1250"
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
 
 
 def gemm_pipeline_skips_launch_checks(pipeline: str) -> bool:
@@ -1339,6 +1345,38 @@ GFX1250_FP32_ACC_REJECT_REASON = (
 )
 
 
+# comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
+# only (the two producer waves hold no accumulator), one fp32 VGPR per element.
+# Past 256 accumulators per lane occupancy collapses; same cap as the Tile
+# Engine MAX_ACC_VGPRS_PER_LANE. BatchedGemmKernel does not arm the pipeline's
+# named barriers, so the pipeline is plain-GEMM only.
+COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
+COMP_TDM_PC_BATCHED_REJECT_REASON = (
+    "comp_tdm_pc is not supported for batched GEMM: BatchedGemmKernel does not "
+    "arm the producer/consumer named barriers"
+)
+# BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
+# with no K-wave reduction, so a K wave would be a consumer whose work is lost.
+# Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
+COMP_TDM_PC_WARP_K_REJECT_REASON = (
+    "comp_tdm_pc requires warp_k=1: the consumer waves have no K-wave reduction"
+)
+
+
+def comp_tdm_pc_acc_reject_reason(tile_m: int, tile_n: int, num_waves: int) -> str:
+    """Why a comp_tdm_pc tile exceeds the accumulator budget ("" when accepted)."""
+    if num_waves <= 0:
+        return f"comp_tdm_pc needs a positive wave count, got {num_waves}"
+    acc = -(-(tile_m * tile_n) // (num_waves * 32))
+    if acc > COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE:
+        return (
+            f"comp_tdm_pc C accumulator needs {acc} VGPRs per lane "
+            f"({tile_m}x{tile_n} over {num_waves} wave(s)), exceeding "
+            f"{COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE}"
+        )
+    return ""
+
+
 def gfx1250_fp32_tile_reject_reason(
     gpu_target: str, dtype: str, tile_m: int, tile_n: int, num_waves: int
 ) -> str:
@@ -1348,6 +1386,59 @@ def gfx1250_fp32_tile_reject_reason(
     if tile_m * tile_n >= GFX1250_FP32_MAX_ACC_PER_LANE * num_waves * 32:
         return GFX1250_FP32_ACC_REJECT_REASON
     return ""
+
+
+# gfx1250 LDS geometry the C++ LDS descriptors are built from.
+GFX1250_LDS_BANKS = 64
+# supports_transpose_load in gemm_universal_pipeline_ag_bg_cr_policy.hpp (fp32 has
+# no transpose load).
+GFX1250_TR_LOAD_DTYPES = ("fp16", "bf16", "fp8", "bf8", "int8")
+
+
+def gfx1250_lds_operand_transposed(operand: str, dtype: str, layout: str) -> bool:
+    """is_a_load_tr / is_b_load_tr: column-major A or row-major B of a
+    transpose-load dtype is staged MN-contiguous in LDS."""
+    if dtype not in GFX1250_TR_LOAD_DTYPES or len(layout) < 2:
+        return False
+    return layout[0] == "c" if operand == "a" else layout[1] == "r"
+
+
+def gfx1250_lds_operand_bytes(
+    mn: int, tile_k: int, elem_bytes: int, transposed: bool
+) -> int:
+    """GetSmemSizeA/B of the gfx1250 TDM / comp_async LDS descriptors for one
+    operand of an mn x tile_k block.
+
+    Mirrors MakeA/BLdsBlockDescriptor (K-contiguous rows, 16 bytes of padding
+    after every group of rows spanning 256 bytes) and
+    MakeA/BLdsBlockDescriptorForTrLoad (MN-contiguous rows padded as
+    GetLdsPaddingConfig proposes), rounded up to 16 bytes. The TDM policy may
+    drop that padding but never adds any, so this never under-counts.
+    """
+    if not transposed:
+        layer = max(1, 256 // (tile_k * elem_bytes))
+        size = mn * tile_k * elem_bytes + max(0, mn // layer - 1) * 16
+        return -(-size // 16) * 16
+    banks_per_mn = mn * elem_bytes // 4
+    if banks_per_mn * 8 <= GFX1250_LDS_BANKS:
+        elems = tile_k * mn
+    else:
+        pad_elems = 16  # (pad_amount + 1) dwords of padding, in elements
+        interval = (
+            GFX1250_LDS_BANKS.bit_length() - 2
+            if banks_per_mn < GFX1250_LDS_BANKS
+            else banks_per_mn.bit_length() - 2
+        )
+        stride = (1 << (interval + 1)) * 4 // elem_bytes
+        if stride > mn:
+            k_layer = max(1, GFX1250_LDS_BANKS * 4 // mn // elem_bytes)
+            row = mn * k_layer
+            elems = (tile_k // k_layer - 1) * (row + pad_elems) + row
+        else:
+            m_layer = mn // stride
+            row = mn // m_layer
+            elems = (tile_k * m_layer - 1) * (row + pad_elems) + row
+    return -(-(elems * elem_bytes) // 16) * 16
 
 
 # The grouped quant GEMM kernels have no async (comp_async) or TDM (comp_tdm,
@@ -1386,6 +1477,9 @@ def gfx1250_pipeline_reject_reason(
     variant_name: str = "",
     persistent: bool = False,
     pads: Optional[Tuple[bool, bool, bool]] = None,
+    batched: bool = False,
+    tile_mn: Optional[Tuple[int, int]] = None,
+    warp_k: Optional[int] = None,
 ) -> str:
     """Why a comp_async / comp_tdm* / tdm-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
@@ -1395,9 +1489,12 @@ def gfx1250_pipeline_reject_reason(
     immediately, so existing kernel sets are unchanged.
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
-    support (only plain and batched GEMM are). ``pads`` is (pad_m, pad_n,
-    pad_k); None means unknown and skips the pad rules. An empty ``layout``
-    skips the comp_async layout rule and empty dtypes skip the 8-bit
+    support (only plain and batched GEMM are; comp_tdm_pc is plain only).
+    ``pads`` is (pad_m, pad_n, pad_k); None means unknown and skips the pad
+    rules. ``batched`` marks the batched GEMM variant and ``tile_mn``
+    (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
+    ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
+    An empty ``layout`` skips the comp_async layout rule and empty dtypes skip the 8-bit
     warp_tile_k rule.
     """
     is_tdm = pipeline in TDM_PIPELINES
@@ -1422,6 +1519,15 @@ def gfx1250_pipeline_reject_reason(
             return TDM_PAD_REJECT_REASON
         if pipeline == "comp_tdm_v2" and num_waves != 4:
             return "comp_tdm_v2 requires exactly 4 waves"
+        if pipeline == "comp_tdm_pc":
+            if batched:
+                return COMP_TDM_PC_BATCHED_REJECT_REASON
+            if warp_k is not None and warp_k != 1:
+                return COMP_TDM_PC_WARP_K_REJECT_REASON
+            if tile_mn is not None:
+                reason = comp_tdm_pc_acc_reject_reason(*tile_mn, num_waves)
+                if reason:
+                    return reason
         if "fp32" in (dtype_a, dtype_b) and layout and layout != "rcr":
             return GFX1250_TDM_FP32_LAYOUT_REJECT_REASON
         return ""
