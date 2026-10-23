@@ -216,7 +216,7 @@ class TestGenerateSdpaBwdGoldenRejectedConfigurations(unittest.TestCase):
             root = Path(tmp)
             return run_generator(root / "bwd/bwd", root / "fwd/fwd", *extra_args)
 
-    def test_gqa_is_rejected(self):
+    def test_heads_not_a_multiple_of_kv_heads_are_rejected(self):
         command = [
             sys.executable,
             str(SCRIPT_PATH),
@@ -231,13 +231,13 @@ class TestGenerateSdpaBwdGoldenRejectedConfigurations(unittest.TestCase):
             "16",
             "--v-dims",
             "1",
-            "2",
+            "3",
             "32",
             "16",
         ]
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("GQA is not supported", result.stdout + result.stderr)
+        self.assertIn("must be a multiple of H_kv", result.stdout + result.stderr)
 
     def test_fully_masked_query_row_is_rejected(self):
         # A fully masked row makes LSE -inf, so the softmax and every gradient
@@ -298,7 +298,7 @@ class TestGenerateSdpaBwdGoldenMath(unittest.TestCase):
         heads = shape[1]
         O = self.gen.compute_forward(Q, K, V, scale, heads, heads, keep_mask, attn_bias)
         lse = self.gen.compute_lse(Q, K, scale, heads, heads, keep_mask, attn_bias)
-        dQ, dK, dV = self.gen.compute_backward(
+        dQ, dK, dV, _ = self.gen.compute_backward(
             Q, K, V, O, lse, dO, scale, keep_mask, attn_bias
         )
         return Q, K, V, dO, scale, keep_mask, dQ, dK, dV, attn_bias
@@ -534,6 +534,112 @@ class TestSdpaBwdSweepMode(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be given together", result.stderr)
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdExtendedMath(unittest.TestCase):
+    """GQA, padding, dBias and dropout: the explicit backward equals FP64 autograd
+    of the forward definition on FP32 inputs (no IO rounding), so the bound is tight."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "generate_sdpa_bwd_golden", SCRIPT_PATH
+        )
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls.torch = cls.gen.torch
+
+    def _check(
+        self,
+        h_q=2,
+        h_kv=2,
+        s_q=8,
+        s_kv=12,
+        keep_mask=None,
+        bias_dims=None,
+        dropout_p=None,
+        dropout_scale_inv=None,
+    ):
+        torch, gen = self.torch, self.gen
+        rng = torch.Generator().manual_seed(5)
+        draw = lambda *shape: torch.empty(shape).uniform_(-1, 1, generator=rng)
+        Q, K, V = draw(2, h_q, s_q, 4), draw(2, h_kv, s_kv, 4), draw(2, h_kv, s_kv, 4)
+        dO = draw(2, h_q, s_q, 4)
+        bias = None if bias_dims is None else draw(*bias_dims)
+        mask, scale_d, scale_inv = None, 1.0, 1.0
+        if dropout_p is not None:
+            mask = (
+                torch.empty(2, h_q, s_q, s_kv).uniform_(0, 1, generator=rng)
+                >= dropout_p
+            ).float()
+            scale_d = 1.0 / (1.0 - dropout_p)
+            scale_inv = (
+                1.0 - dropout_p if dropout_scale_inv is None else dropout_scale_inv
+            )
+        O, lse = gen.compute_forward_explicit(
+            Q, K, V, 0.5, keep_mask, bias, mask, scale_d
+        )
+        dQ, dK, dV, dBias = gen.compute_backward(
+            Q,
+            K,
+            V,
+            O,
+            lse,
+            dO,
+            0.5,
+            keep_mask,
+            bias,
+            mask,
+            scale_d,
+            scale_inv,
+            bias_dims,
+        )
+        aQ, aK, aV, aBias = gen.autograd_fp64_gradients(
+            Q, K, V, dO, 0.5, keep_mask, bias, mask, scale_d
+        )
+        pairs = [("dQ", dQ, aQ), ("dK", dK, aK), ("dV", dV, aV)]
+        if bias_dims is not None:
+            pairs.append(("dBias", dBias, aBias))
+        return gen.worst_relative_deviation(pairs), dQ, dK, dV, O, lse
+
+    def test_gqa_sums_each_query_group(self):
+        self.assertLess(self._check(h_q=4, h_kv=2)[0], 1e-5)
+        self.assertLess(self._check(h_q=4, h_kv=1)[0], 1e-5)
+
+    def test_broadcast_dbias_is_the_reduced_unscaled_ds(self):
+        for dims in ([1, 1, 8, 12], [1, 2, 8, 12], [2, 1, 8, 12], [2, 2, 8, 12]):
+            self.assertLess(self._check(bias_dims=dims)[0], 1e-5, dims)
+
+    def test_dropout_matches_autograd_when_scale_inv_is_one_minus_p(self):
+        self.assertLess(self._check(dropout_p=0.3)[0], 1e-5)
+
+    def test_wrong_dropout_scale_inv_is_caught(self):
+        # cuDNN's composition is only the exact gradient when scale_inv = 1/scale;
+        # the generator's autograd gate must notice anything else.
+        self.assertGreater(self._check(dropout_p=0.3, dropout_scale_inv=1.0)[0], 1e-2)
+
+    def test_padding_with_dead_rows(self):
+        keep = self.gen.build_padded_keep_mask(8, 12, [3, 8], [12, 5], None, 0, False)
+        worst, dQ, dK, dV, O, lse = self._check(keep_mask=keep)
+        self.assertLess(worst, 1e-5)
+        # Batch 0: rows past seq_len_q are dead. Batch 1: bottom-right with
+        # Sq = 8 > Skv = 5 leaves the first 3 rows with no key.
+        for b, rows in ((0, range(3, 8)), (1, range(0, 3))):
+            for r in rows:
+                self.assertTrue(bool((O[b, :, r] == 0).all()))
+                self.assertTrue(bool(self.torch.isneginf(lse[b, :, r]).all()))
+                self.assertTrue(bool((dQ[b, :, r] == 0).all()))
+        # Keys past batch 1's seq_len_kv get no gradient.
+        self.assertTrue(bool((dK[1, :, 5:] == 0).all()))
+        self.assertTrue(bool((dV[1, :, 5:] == 0).all()))
+
+    def test_padded_keep_mask_uses_live_lengths_for_bottom_right(self):
+        keep = self.gen.build_padded_keep_mask(4, 6, [2], [5], None, 0, False)[0, 0]
+        # Live 2 x 5, offset 3: row 0 sees keys 0..3, row 1 keys 0..4; nothing else.
+        self.assertEqual([j for j in range(6) if keep[0, j]], [0, 1, 2, 3])
+        self.assertEqual([j for j in range(6) if keep[1, j]], [0, 1, 2, 3, 4])
+        self.assertFalse(bool(keep[2:].any()))
 
 
 if __name__ == "__main__":
