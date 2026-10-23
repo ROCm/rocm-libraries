@@ -66,10 +66,107 @@ def test_the_committed_bundle_passes_structurally(tmp_path, capsys):
     assert "descriptors=    2 distinct-binaries=    2" in output
 
 
+def _as_hip(by_name, entries=("decode_kernel", "merge_kernel"), build=None) -> None:
+    """Rewrite every descriptor's launches as hip sources of one translation unit,
+    each naming its own entry."""
+    for descriptor in by_name.values():
+        descriptor["sources"] = {
+            launch: {
+                "kind": "hip",
+                "source": "k.hip",
+                "entry": entry,
+                "build": build or {"defines": {"D": 1}},
+            }
+            for launch, entry in zip(descriptor["sources"], entries)
+        }
+
+
+class TestHipLaunches:
+    def test_hip_launches_differing_only_in_entry_are_distinct_binaries(self):
+        left = {
+            "sources": {
+                "decode": {"kind": "hip", "source": "k.hip", "entry": "a"},
+                "merge": {"kind": "hip", "source": "k.hip", "entry": "b"},
+            }
+        }
+        right = {
+            "sources": {
+                "decode": {"kind": "hip", "source": "k.hip", "entry": "a"},
+                "merge": {"kind": "hip", "source": "k.hip", "entry": "c"},
+            }
+        }
+        assert gate_module._binary_key(left) != gate_module._binary_key(right)
+
+    def test_hsaco_launches_differing_only_in_symbol_are_distinct_binaries(self):
+        left = {
+            "sources": {
+                "decode": {"kind": "hsaco", "file": "k.co", "symbol": "a"},
+                "merge": {"kind": "hsaco", "file": "k.co", "symbol": "b"},
+            }
+        }
+        right = {
+            "sources": {
+                "decode": {"kind": "hsaco", "file": "k.co", "symbol": "a"},
+                "merge": {"kind": "hsaco", "file": "k.co", "symbol": "c"},
+            }
+        }
+        assert gate_module._binary_key(left) != gate_module._binary_key(right)
+
+    def test_hip_launches_differing_only_in_build_are_distinct_binaries(self):
+        def one(defines):
+            return {
+                "sources": {
+                    "decode": {
+                        "kind": "hip",
+                        "source": "k.hip",
+                        "entry": "a",
+                        "build": {"defines": defines},
+                    }
+                }
+            }
+
+        assert gate_module._binary_key(one({"D": 1})) != gate_module._binary_key(
+            one({"D": 2})
+        )
+
+    def test_a_twin_pair_of_hip_launch_descriptors_nests(self, tmp_path, capsys):
+        small = _tree(tmp_path, "small", _as_hip, keep=(D64,))
+        big = _tree(tmp_path, "big", _as_hip)
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 0, output
+        assert "small binaries subset of big: True" in output
+
+    def test_hip_launches_with_another_entry_do_not_nest(self, tmp_path, capsys):
+        def other_entry(by_name):
+            _as_hip(by_name, entries=("decode_kernel", "other_kernel"))
+
+        small = _tree(tmp_path, "small", _as_hip, keep=(D64,))
+        big = _tree(tmp_path, "big", other_entry, keep=(D64,))
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 1
+        assert "small binaries subset of big: False  MISSING 1" in output
+
+
 class TestNesting:
     def test_equal_launch_tuples_nest(self, tmp_path, capsys):
         small = _tree(tmp_path, "small", keep=(D64,))
         big = _tree(tmp_path, "big")
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 0, output
+        assert "small binaries subset of big: True" in output
+
+    def test_the_order_of_a_descriptors_sources_keys_does_not_matter(
+        self, tmp_path, capsys
+    ):
+        """A launch tuple is a set of named launches: the same launches listed in
+        another order are the same binary."""
+
+        def reverse(by_name):
+            sources = by_name[D64]["sources"]
+            by_name[D64]["sources"] = dict(reversed(list(sources.items())))
+
+        small = _tree(tmp_path, "small", keep=(D64,))
+        big = _tree(tmp_path, "big", reverse, keep=(D64,))
         code, output = _gate(capsys, ("small", small), ("big", big))
         assert code == 0, output
         assert "small binaries subset of big: True" in output
@@ -83,6 +180,22 @@ class TestNesting:
 
         small = _tree(tmp_path, "small", keep=(D64,))
         big = _tree(tmp_path, "big", other_merge, keep=(D64,))
+        code, output = _gate(capsys, ("small", small), ("big", big))
+        assert code == 1
+        assert "small binaries subset of big: False  MISSING 1" in output
+
+    def test_a_renamed_launch_with_identical_content_does_not_nest(
+        self, tmp_path, capsys
+    ):
+        """The launch name is part of the identity: the same builder, spec and role
+        under another name is another binary."""
+
+        def rename(by_name):
+            sources = by_name[D64]["sources"]
+            sources["mrg"] = sources.pop("merge")
+
+        small = _tree(tmp_path, "small", keep=(D64,))
+        big = _tree(tmp_path, "big", rename, keep=(D64,))
         code, output = _gate(capsys, ("small", small), ("big", big))
         assert code == 1
         assert "small binaries subset of big: False  MISSING 1" in output

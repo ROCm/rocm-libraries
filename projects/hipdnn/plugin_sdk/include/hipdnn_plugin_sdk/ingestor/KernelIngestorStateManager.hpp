@@ -826,11 +826,7 @@ private:
                 // exactly the launches it declares, so a kernel carrying any other set --
                 // fewer, more, or the same number under other names -- is dropped here,
                 // before applicability, rather than failing at plan build.
-                std::set<std::string> kernelLaunches;
-                for(const auto& launch : kernel.sources)
-                {
-                    kernelLaunches.insert(launch.first);
-                }
+                const std::set<std::string> kernelLaunches = launchNamesOf(kernel.sources);
                 if(kernelLaunches != handlerLaunches)
                 {
                     const auto spell = [](const std::set<std::string>& names) {

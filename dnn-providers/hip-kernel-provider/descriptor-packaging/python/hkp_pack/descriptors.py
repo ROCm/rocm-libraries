@@ -369,13 +369,36 @@ def _validate_embedded_source_file(source_file, where):
         )
 
 
+def _validate_hip_source(ks, where):
+    """A hip kernel_source's `source`, `entry` and `build`; shared by a UKD's
+    `kernel_source` and each authored `sources` entry."""
+    _require(ks, ["source", "entry"], where)
+    if "build" not in ks:
+        raise HkpPackError(f"{where} has invalid build (absent)")
+    validate_hip_build(ks["build"], where)
+
+
+def _validate_hsaco_source(ks, where):
+    """A hsaco kernel_source's `file` and `symbol`; shared by a UKD's
+    `kernel_source` and each authored `sources` entry."""
+    _require(ks, ["file", "symbol"], where)
+    for field_name in ("file", "symbol"):
+        value = ks[field_name]
+        if not isinstance(value, str) or not value:
+            raise HkpPackError(
+                f"{where} hsaco '{field_name}' must be a non-empty string"
+            )
+    if not ks["symbol"].isascii():
+        raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
+
+
 def _validate_sources(ukd, where):
-    """A UKD's `sources` map: two or more launches, all rocke (authored) or all
-    kpack (packed). Returns the kind they share. Launches may name one kernel.
+    """A UKD's `sources` map: two or more launches, all rocke, all hip or all
+    hsaco (authored) or all kpack (packed). Returns the kind they share. Launches
+    may name one kernel.
 
     A single entry says what `kernel_source` says, so it is refused: two spellings
-    of one fact is how descriptors drift. Authored entries are rocke only; hip,
-    hsaco and embedded_source entries are refused for now.
+    of one fact is how descriptors drift. embedded_source entries are refused.
     """
     sources = ukd["sources"]
     if not isinstance(sources, dict) or len(sources) < 2:
@@ -393,13 +416,13 @@ def _validate_sources(ukd, where):
         if not isinstance(ks, dict) or "kind" not in ks:
             raise HkpPackError(f"{where} sources '{name}' missing 'kind'")
         kind = ks["kind"]
-        if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS:
+        if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS or kind not in (
+            "rocke",
+            "hip",
+            "hsaco",
+            "kpack",
+        ):
             raise sourcesmod.refuse_authored_kind(where, name, kind)
-        if kind not in ("rocke", "kpack"):
-            raise HkpPackError(
-                f"{where} sources '{name}' has unsupported kind '{kind}' "
-                "(expected 'rocke', or 'kpack' once packed)"
-            )
         kinds.add(kind)
         if kind == "rocke":
             _require(ks, ["source", "builder", "spec"], f"{where} sources '{name}'")
@@ -413,6 +436,16 @@ def _validate_sources(ukd, where):
                     f"{where} sources '{name}' has invalid role {ks['role']!r} "
                     "(expected a lowercase identifier)"
                 )
+        elif kind == "hip" or kind == "hsaco":
+            if "role" in ks:
+                raise HkpPackError(
+                    f"{where} sources '{name}' carries 'role', which only a rocke "
+                    "entry may have"
+                )
+            if kind == "hip":
+                _validate_hip_source(ks, f"{where} sources '{name}'")
+            else:
+                _validate_hsaco_source(ks, f"{where} sources '{name}'")
         else:
             _require(
                 ks,
@@ -469,6 +502,11 @@ def _validate_ukd_fields(ukd, where, log=print):
     if "sources" in ukd:
         kind = _validate_sources(ukd, where)
         _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
+        if kind == "hsaco" and not ukd.get("arch"):
+            raise HkpPackError(
+                f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
+                "the code objects run on"
+            )
         return
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
@@ -481,24 +519,13 @@ def _validate_ukd_fields(ukd, where, log=print):
         )
     _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
     if kind == "hip":
-        _require(ks, ["source", "entry"], where)
-        if "build" not in ks:
-            raise HkpPackError(f"{where} has invalid build (absent)")
-        validate_hip_build(ks["build"], where)
+        _validate_hip_source(ks, where)
     elif kind == "rocke":
         _require(ks, ["source", "builder", "spec"], where)
         validate_rocke_spec(ks["spec"], where)
         validate_rocke_target(ks, where)
     elif kind == "hsaco":
-        _require(ks, ["file", "symbol"], where)
-        for field_name in ("file", "symbol"):
-            value = ks[field_name]
-            if not isinstance(value, str) or not value:
-                raise HkpPackError(
-                    f"{where} hsaco '{field_name}' must be a non-empty string"
-                )
-        if not ks["symbol"].isascii():
-            raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
+        _validate_hsaco_source(ks, where)
         # An hsaco object is built for specific archs, so a wildcard would ship
         # its bytes into every shard.
         if not ukd.get("arch"):
