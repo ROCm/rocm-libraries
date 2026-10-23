@@ -862,25 +862,25 @@ def _wmma_gfx12_b_16x16(builder, lane, slot):
 # column-distributed layout as gfx12 (<8 x float>, slot i -> row (l//16)*8 + i,
 # col l%16), since the output tile is still 16x16. These maps are the
 # *hypothesis* verified empirically by examples/gfx1250/wmma_probe.py.
+# The gfx1250 WMMA 16x16x4 fp32 A and B maps are CK-sourced (wmma_gfx12.hpp
+# parameters); not validated on hardware. Lane l holds row l % 16 of A (column
+# l % 16 of B) and the two K values 2 * (l // 16) + slot, so lanes 0-15 carry K
+# 0..1 and lanes 16-31 carry K 2..3.
 def _wmma_gfx1250_a_16x16x4_f32(builder, lane, slot):
-    """gfx1250 WMMA 16x16x4 fp32 A operand (wave32): kABKLane=2, kAK1PerLane=2.
-    row = lane // 2 (M index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
-    Returns ``(row, k)``."""
-    c2 = builder.const_i32(2)
-    row = builder.div(lane, c2)
-    k_lane = builder.mod(lane, c2)
-    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    """gfx1250 WMMA 16x16x4 fp32 A operand (wave32): row = lane % 16;
+    K = 2 * (lane // 16) + slot (slot in {0, 1}). Returns ``(row, k)``."""
+    c2, c16 = builder.const_i32(2), builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k = builder.add(builder.mul(builder.div(lane, c16), c2), builder.const_i32(slot))
     return row, k
 
 
 def _wmma_gfx1250_b_16x16x4_f32(builder, lane, slot):
-    """gfx1250 WMMA 16x16x4 fp32 B operand (wave32): kABKLane=2, kAK1PerLane=2.
-    col = lane // 2 (N index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
-    Returns ``(k, col)``."""
-    c2 = builder.const_i32(2)
-    col = builder.div(lane, c2)
-    k_lane = builder.mod(lane, c2)
-    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    """gfx1250 WMMA 16x16x4 fp32 B operand (wave32): col = lane % 16;
+    K = 2 * (lane // 16) + slot (slot in {0, 1}). Returns ``(k, col)``."""
+    c2, c16 = builder.const_i32(2), builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k = builder.add(builder.mul(builder.div(lane, c16), c2), builder.const_i32(slot))
     return k, col
 
 
@@ -1180,11 +1180,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),
     # --- WMMA fp32 (wave32, gfx1250, CDNA) --------------------------------
-    # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2).
-    # kABKLane=2, kAK1PerLane=2: row=lane//2, K=(lane%2)*2+slot (slot ∈ {0,1}).
-    # Accumulator is the gfx12 column-distributed <8 x float> (c_frag_len=8).
-    # Intrinsic: __builtin_amdgcn_wmma_f32_16x16x4_f32 (verified in CK Tile
-    # wmma_gfx12.hpp lines 355-373; amdgcn_mma_base kABKPerLane=2, kCMPerLane=8).
+    # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2): row (or
+    # column) lane % 16, K = 2 * (lane // 16) + slot. CK-sourced
+    # (wmma_gfx12.hpp parameters); not validated on hardware. Accumulator is
+    # the gfx12 column-distributed <8 x float> (c_frag_len=8).
     "wmma_gfx1250_f32_16x16x4_f32": _FragInfo(
         2,
         2,
@@ -1261,6 +1260,22 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # values and eight results per lane. No lane maps until one is checked
     # against an independent source.
     "wmma_gfx1250_bf16f32_16x16x32_bf16": _FragInfo(16, 16, 8, 32),
+    # 16-bit results, fp8 / bf8 -> f16 and i8 -> i32, counted in logical
+    # elements per lane: sixteen f16 / bf16 values of A and of B (K 32), 32 or
+    # 64 fp8 / bf8 values (K 64 or K 128), 32 i8 values (K 64), and eight
+    # results. No lane maps until one is checked against an independent source.
+    "wmma_gfx1250_f16_16x16x32_f16": _FragInfo(16, 16, 8, 32),
+    "wmma_gfx1250_bf16_16x16x32_bf16": _FragInfo(16, 16, 8, 32),
+    **{
+        f"wmma_gfx1250_f16_16x16x{k}_{a}_{b}": _FragInfo(k // 2, k // 2, 8, 32)
+        for k in (64, 128)
+        for a in ("fp8", "bf8")
+        for b in ("fp8", "bf8")
+    },
+    **{
+        op_id: _FragInfo(32, 32, 8, 32)
+        for op_id in integer_mma_op_ids("wmma_gfx1250_i32_16x16x64_iu8", 8)
+    },
 }
 
 

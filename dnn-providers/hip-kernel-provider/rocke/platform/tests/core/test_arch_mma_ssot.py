@@ -45,13 +45,13 @@ from rocke.core.arch.target import (
 
 def test_filtered_catalog_preserves_supported_order_and_fields():
     # Independent snapshot of the supported rows at 72c28a69, filtered with
-    # the LLVM legality table, plus the bf16-result row. Preserve all
-    # remaining fields and relative order.
+    # the LLVM legality table, plus the bf16-result row and the 16-bit-output,
+    # fp8-to-f16 and i8 rows. Preserve all remaining fields and relative order.
     rows = _load_specs()["gfx1250"]["mma"]
-    assert len(rows) == 94
+    assert len(rows) == 108
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(encoded).hexdigest() == (
-        "65efeb2d45fe3f6b21007260fcf0bc16dfea3c9ddb964f71776edba1fdee52d0"
+        "228d5284751103f35bc6d8587356cacb89d0eb66d5db7276954c61d360871641"
     )
 
 
