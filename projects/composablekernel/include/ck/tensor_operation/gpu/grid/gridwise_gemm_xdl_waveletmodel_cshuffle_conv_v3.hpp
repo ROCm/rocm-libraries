@@ -220,14 +220,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static index_t GetThreadId() { return get_thread_local_1d_id(); }
 
-        __device__ static index_t GetWaveId()
-        {
-            return GetThreadId() / (BlockSize / MWaves / NWaves);
-        }
+        __device__ static index_t GetWaveId() { return GetThreadId() / get_warp_size(); }
 
         __device__ static constexpr index_t GetNumWaves()
         {
-            return TileMathThreadGroupSize / (BlockSize / MWaves / NWaves);
+            return TileMathThreadGroupSize / get_warp_size();
         }
     };
 
@@ -246,14 +243,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             return get_thread_local_1d_id() - TileMathThreadGroupSize;
         }
 
-        __device__ static index_t GetWaveId()
-        {
-            return GetThreadId() / (BlockSize / MWaves / NWaves);
-        }
+        __device__ static index_t GetWaveId() { return GetThreadId() / get_warp_size(); }
 
         __device__ static constexpr index_t GetNumWaves()
         {
-            return TileLoadThreadGroupSize / (BlockSize / MWaves / NWaves);
+            return TileLoadThreadGroupSize / get_warp_size();
         }
     };
 
@@ -671,6 +665,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     template <typename BlockDesc>
     __device__ static constexpr auto TransformLdsDescTdm(const BlockDesc&)
     {
+        // We transform LDS tensor descriptor from [BK0, N, BK1] to [N, K] where K = BK0 * BK1
+        // because vector size is handled by the instruction
         if constexpr(UseTdmB)
         {
             return transform_tensor_descriptor(
@@ -921,7 +917,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                 const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                 const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                     c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                const NamedBarrier& barrier = NamedBarrier{})
+                                const NamedBarrier& barrier)
     {
         barrier.Init();
 
@@ -1190,6 +1186,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
         else
         {
+            NamedBarrier barrier(nullptr);
             Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 p_a_grid,
                 p_b_grid,
@@ -1199,7 +1196,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 problem,
                 a_grid_desc_ak0_m_ak1,
                 b_grid_desc_bk0_n_bk1,
-                c_grid_desc_mblock_mperblock_nblock_nperblock);
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                barrier);
         }
     }
 };

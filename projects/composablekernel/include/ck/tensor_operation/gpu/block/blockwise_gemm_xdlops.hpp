@@ -666,7 +666,11 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
         // Split Math waves into "ping" and "pong"
         const int wave_id           = ThisThreadBlock::GetThreadId() / WaveSize;
         constexpr index_t num_waves = ThisThreadBlock::GetNumOfThread() / WaveSize;
-        bool wave_pong              = (wave_id / (num_waves / 2) == 1);
+
+        static_assert(num_waves >= 2 && num_waves % 2 == 0,
+                      "ping-pong requires an even wave count >= 2");
+
+        bool wave_pong = (wave_id / (num_waves / 2) == 1);
 
         // Delay execution of "pong" waves by 1 step
         if(wave_pong)
