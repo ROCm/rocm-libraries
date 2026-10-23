@@ -26,13 +26,16 @@
 
 #include "Rotating.hpp"
 
+#include <algorithm>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <math.h>
+#include <stdexcept>
+#include <string>
 
 namespace TensileLite
 {
-    void RotatingMemory::addRotatingSize(std::vector<size_t> sizes)
+    void RotatingMemory::addRotatingSize(std::vector<size_t> sizes, size_t problemSize)
     {
         if(m_rotatingBufferNum != sizes.size())
         {
@@ -43,17 +46,23 @@ namespace TensileLite
         {
             totalSize += size;
         }
-        m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, 0});
+        m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, problemSize, 0});
     }
 
     void RotatingMemory::createRotatingMemory(int32_t mode, size_t rotatingSize)
     {
-        // Check how many rotating units are needed
+        // Check how many rotating units are needed.
+        // Count rotations against each problem's own footprint, which is what
+        // prepareRotatingGPUOutput() measures and copies at run time. Using the shared
+        // totalSize here would under-count every problem smaller than the largest one,
+        // leaving the pool short of the copies those problems go on to request.
         m_rotatingSize = rotatingSize;
         size_t maxNumRotate = 0;
         for (auto& unit : m_rotatingInfo)
         {
-            size_t num = std::ceil((float)rotatingSize / unit.totalSize);
+            size_t perRotation = unit.problemSize ? unit.problemSize : unit.totalSize;
+            size_t num         = std::max<size_t>(
+                1, std::ceil((float)rotatingSize / std::max<size_t>(1, perRotation)));
             unit.rotatingNum = num;
             maxNumRotate = std::max(maxNumRotate, num);
         }
@@ -80,9 +89,15 @@ namespace TensileLite
         size_t largestUnitSize = 0;
         if(mode == 0)
         {
+            // The rotating area holds (rotatingNum - 1) extra copies of whichever problem
+            // needs the most room, measured with that problem's own footprint because that
+            // is what gets copied in. This stays below rotatingSize by construction, so
+            // rotatingSize caps the area and the allocation lands at or under
+            // rotatingSize + one shared unit.
             for(auto info : m_rotatingInfo)
             {
-                totalSize = std::max(totalSize, info.totalSize * (info.rotatingNum - 1));
+                size_t perRotation = info.problemSize ? info.problemSize : info.totalSize;
+                totalSize          = std::max(totalSize, perRotation * (info.rotatingNum - 1));
             }
             for(auto unit : m_rotatingMemory[0])
             {
@@ -111,10 +126,18 @@ namespace TensileLite
         m_size = totalSize;
         m_largestUnitSize = largestUnitSize;
 
-        void* ptr   = nullptr;
-        static_cast<void>(hipMalloc(&ptr, totalSize));
+        void* ptr = nullptr;
+        if(hipMalloc(&ptr, totalSize) != hipSuccess || ptr == nullptr)
+        {
+            throw std::runtime_error(
+                "Failed to allocate " + std::to_string(totalSize)
+                + " bytes of rotating memory (requested rotating size "
+                + std::to_string(rotatingSize) + "). Lower RotatingBufferSize.");
+        }
         m_data = std::shared_ptr<void>(ptr, hipFree);
-        std::cout << "Rotating memory size: " << totalSize << std::endl;
+        std::cout << "Rotating memory size: " << totalSize
+                  << " (rotating area: " << (totalSize - largestUnitSize)
+                  << ", base unit: " << largestUnitSize << ")" << std::endl;
 
         size_t limit = (mode == 1) ? m_rotatingMemory.size() : 1;
         size_t offset = 0;
