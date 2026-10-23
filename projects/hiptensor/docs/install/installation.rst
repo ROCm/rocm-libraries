@@ -341,11 +341,11 @@ Executable name                                  Description
 ``complex_scale_contraction_test_m4n4k4``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 8
 ``complex_scale_contraction_test_m5n5k5``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 10
 ``complex_scale_contraction_test_m6n6k6``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 12
-``rank2_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 2
-``rank3_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 3
-``rank4_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 4
-``rank5_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 5
-``rank6_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 6
+``rank2_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 2
+``rank3_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 3
+``rank4_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 4
+``rank5_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 5
+``rank6_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 6
 ``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 2
 ``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 3
 ``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 4
