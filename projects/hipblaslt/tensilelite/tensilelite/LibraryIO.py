@@ -35,6 +35,7 @@ from .Common.Architectures import gfxToIsa
 from .SolutionStructs import Solution, ProblemSizes
 from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Utilities import BinaryLibraryIO
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
 from .Common.GlobalParameters import defaultSolution
@@ -45,7 +46,6 @@ import os
 import sys
 import subprocess
 import re
-import zlib
 
 try:
     import orjson as json
@@ -110,12 +110,6 @@ StrictTypeLoader.add_implicit_resolver(
     re.compile(r'^(?:true|false|True|False)$', re.X),
     list('tTfF')
 )
-
-try:
-    import msgpack
-except ImportError:
-    print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 ###################
 # Writing functions
@@ -268,19 +262,10 @@ def writeJson(filename, data):
 
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
-    raw = msgpack.packb(data)
-    compressed = zlib.compress(raw, 9)
-    with open(filename + ".zlib", "wb") as f:
-        f.write(compressed)
-    try:
-        os.unlink(filename)
-    except FileNotFoundError:
-        pass
+    BinaryLibraryIO.writeMessagePack(filename, data)
 
-# Bumped only when the on-disk layout changes incompatibly. The C++ loader
-# accepts this exact value and rejects anything higher, so a reader that
-# predates a future format cannot silently misparse it.
-INDEXED_FORMAT_VERSION = 2
+# Shared with the native reader in Serialization/SolutionLibrary.hpp.
+INDEXED_FORMAT_VERSION = BinaryLibraryIO.INDEXED_FORMAT_VERSION
 
 def writeMsgPackIndexed(filename, data):
     """Writes a MasterSolutionLibrary state dict in indexed Message Pack format.
@@ -301,36 +286,7 @@ def writeMsgPackIndexed(filename, data):
         printExit("writeMsgPackIndexed requires a MasterSolutionLibrary state dict "
                   "with 'solutions' and 'library' keys")
 
-    # state() emits solutions as a list of dicts, so sorting needs an explicit
-    # key; a bare sorted() would try to order dicts and raise TypeError.
-    solutions = sorted(data["solutions"], key=lambda s: s["index"])
-
-    packer = msgpack.Packer(use_bin_type=True)
-    solutionsIndex = []
-    chunks = []
-    offset = 0
-    for solution in solutions:
-        packed = packer.pack(solution)
-        solutionsIndex.extend((solution["index"], offset, len(packed)))
-        chunks.append(packed)
-        offset += len(packed)
-
-    # Fixed key order keeps the artifact byte-reproducible across runs.
-    indexed = {"format_version": INDEXED_FORMAT_VERSION}
-    if "version" in data:
-        indexed["version"] = data["version"]
-    indexed["solutions_index"] = solutionsIndex
-    indexed["solutions_blob"] = b"".join(chunks)
-    indexed["library"] = data["library"]
-
-    raw = msgpack.packb(indexed, use_bin_type=True)
-    compressed = zlib.compress(raw, 9)
-    with open(filename + ".zlib", "wb") as f:
-        f.write(compressed)
-    try:
-        os.unlink(filename)
-    except FileNotFoundError:
-        pass
+    BinaryLibraryIO.writeMessagePack(filename, data, indexed=True)
 
 def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], gateTypeArgs: Optional[GateTypeArgs] = None) -> None:
     """Write the YAML header (version, problem sizes, bias/activation/gate args)."""
@@ -414,8 +370,17 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
 # Reading and parsing functions
 ###############################
 def read(filename, customizedLoader=False):
+    """Read YAML, JSON, or binary library data.
+
+    Binary files retain their serialized schema: legacy files have a
+    ``solutions`` list, while indexed files have ``solutions_index`` and
+    ``solutions_blob``. Use ``Utilities.BinaryLibraryIO.iterSolutionRecords`` to
+    iterate decoded solution records from either binary format.
+    """
     name, extension = os.path.splitext(filename)
-    if extension == ".yaml":
+    if str(filename).endswith((".dat", ".dat.zlib")):
+        return BinaryLibraryIO.readMessagePack(filename)
+    elif extension == ".yaml":
         return load_yaml_stream(filename, StrictTypeLoader) if customizedLoader else readYAML(filename)
     if extension == ".json":
         return readJson(filename)
@@ -794,6 +759,10 @@ def parseLibraryLogicData(
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
+        if len(problemType.get("ScaleBlockSizesA", [])) > 1:
+            args = solutionState.get("CustomKernel", {}).get("args", [])
+            if not any(a.get("semantic") == "ScaleBlockSizeA" for a in args):
+                raise ValueError("ScaleBlockSizesA requires a custom runtime group-size argument")
         # overwrite problemType if any
         solutionState["ProblemType"] = problemType
         if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input

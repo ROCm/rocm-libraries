@@ -110,7 +110,10 @@ class TestGfx1250LlvmBridge(unittest.TestCase):
         self.assertEqual(_lower(kernel), _lower(parsed))
 
     def test_unsupported_arch_rejected(self):
-        with self.assertRaisesRegex(ValueError, "requires gfx1250"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "s_wait_tensorcnt requires a target with memory.has_tdm, got gfx1201",
+        ):
             _lower(_build_all(), arch="gfx1201")
 
     def test_pre_llvm23_rejected(self):

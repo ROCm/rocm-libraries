@@ -49,6 +49,17 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
     target_compile_options(${COMPONENT_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${COMPONENT_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     set_target_properties(${COMPONENT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # Hidden-visibility baseline. The translation units are compiled in these OBJECT libraries,
+    # not in the final shared target, so the visibility flags must be set here to take effect.
+    # With this baseline the HIPTENSOR_EXPORT (visibility("default")) tags on the public C API
+    # act as the real allowlist; everything else stays local to libhiptensor.so. On Windows these
+    # presets are inert (export is __declspec-driven), so the behavior there is unchanged.
+    set_target_properties(${COMPONENT_NAME} PROPERTIES
+        CXX_VISIBILITY_PRESET     hidden
+        C_VISIBILITY_PRESET       hidden
+        VISIBILITY_INLINES_HIDDEN ON)
+
     target_link_libraries(${COMPONENT_NAME} PRIVATE hip::device)
 
     # Don't link to consume ck instances, however will customize and create our own.
@@ -106,6 +117,18 @@ function(create_hiptensor_shared_library)
     # Add driver mode to both cxx and link flags
     target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
     target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
+
+    # Linker version script: belt-and-suspenders ELF allowlist on top of the hidden-visibility
+    # baseline. ELF-only (GNU ld / lld); on Windows the DLL export set is driven entirely by
+    # __declspec, so this is skipped there. Keep the script's global set in lockstep with
+    # scripts/check_exported_symbols.py.
+    if(NOT WIN32)
+        target_link_options(hiptensor PRIVATE
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Relink when the script changes (not tracked as a link input otherwise).
+        set_target_properties(hiptensor PROPERTIES
+            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+    endif()
 
     # Add export definitions
     target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
@@ -169,6 +192,70 @@ add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
 
 # Create shared library for production use
 create_hiptensor_shared_library()
+
+# Host-side CPU reference + stateless data-type helpers, built as a static library for the
+# test suite only.
+# With the hidden-visibility baseline the symbols are local to the .so, so the tests get their
+# own copy here instead.
+# The shared singletons (HiptensorOptions, Logger) are NOT here: they are exported from the
+# .so so the harness and the library share one instance.
+#
+# These sources are deliberately compiled twice: into libhiptensor.so (hidden) and here (for
+# the tests). Keeping them in the .so would re-export the symbols and defeat the baseline.
+if(HIPTENSOR_BUILD_TESTS)
+    set(HIPTENSOR_HOST_REFERENCE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_cpu_reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank2_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank3_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank4_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank5_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/instances/elementwise_cpu_reference_rank6_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_solution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_solution_registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/elementwise_instance_selection.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elementwise/device/instance_params.cpp
+    )
+
+    add_library(hiptensor_host_reference STATIC ${HIPTENSOR_HOST_REFERENCE_SOURCES})
+    add_library(hiptensor::host_reference ALIAS hiptensor_host_reference)
+
+    target_compile_options(hiptensor_host_reference PRIVATE ${CLANG_DRIVER_MODE})
+    target_link_options(hiptensor_host_reference PRIVATE ${CLANG_DRIVER_MODE})
+    set_target_properties(hiptensor_host_reference PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(hiptensor_host_reference PRIVATE hip::device)
+
+    get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(hiptensor_host_reference PRIVATE
+        ${PROJECT_BINARY_DIR}/include/hiptensor
+        ${PROJECT_BINARY_DIR}/include
+        ${composable_kernel_INCLUDES}
+    )
+
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(hiptensor_host_reference PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
+    endif()
+
+    if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+        target_compile_options(hiptensor_host_reference PRIVATE "--offload-compress")
+    endif()
+
+    if(HIPTENSOR_BUILD_COMPRESSED_DBG)
+        target_compile_options(hiptensor_host_reference PRIVATE
+            "$<$<CONFIG:Debug>:-gz>"
+            "$<$<CONFIG:RelWithDebInfo>:-gz>"
+            )
+    endif()
+endif()
 
 # Set visibility for function names exported from shared library
 include(GenerateExportHeader)

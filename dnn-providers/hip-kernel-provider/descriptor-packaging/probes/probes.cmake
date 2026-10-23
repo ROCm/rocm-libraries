@@ -13,8 +13,12 @@
 # Wildcard descriptors (no `arch`, or an empty list) name no architecture and get no
 # automatic probe. That is safe: a wildcard ships for whatever the build targets, so
 # every lane's own production pack, and its GPU test lanes, exercise it on every PR.
-# A non-concrete arch name (gfx9-4-generic, a TheRock family) is skipped with a STATUS
-# line: no build packs for it.
+# A generic target in the generic target table (gfx11-generic) is probed through its
+# first member in table order (gfx1100): the packer compiles the generic once and merges
+# it into each requested member's folder, so the probe for the member covers it. A build
+# that targets any member of the generic (gfx1151) already compiles it and gets no probe
+# for it. A TheRock family name is skipped with a STATUS line: no build packs for it. A
+# `*-generic` absent from the table fails configure, as it fails the packer.
 #
 # Without UKDS a probe packs, per compile group of every KDP shipping for its ARCH, one
 # UKD, or for rocke enough UKDs that each value of each varying spec field is packed

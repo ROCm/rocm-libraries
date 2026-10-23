@@ -12,6 +12,10 @@ namespace nb = nanobind;
 using namespace nb::literals;
 using namespace roc::hostnumerics;
 
+namespace roc::hostnumerics::python_bindings {
+void registerShapeBindings(nb::module_& module);
+}
+
 NB_MODULE(_hostnumerics, module) {
     module.attr("__version__") = version().data();
     nb::enum_<ScalarCategory>(module, "ScalarCategory")
@@ -63,4 +67,5 @@ NB_MODULE(_hostnumerics, module) {
         .def("is_packed", &ScalarTypeInfo::isPacked);
 
     module.def("scalar_type_info", &scalarTypeInfo, "type"_a);
+    python_bindings::registerShapeBindings(module);
 }

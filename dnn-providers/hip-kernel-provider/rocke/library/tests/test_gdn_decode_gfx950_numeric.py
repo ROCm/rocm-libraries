@@ -373,11 +373,14 @@ def test_results_are_deterministic(harness):
 
 
 @requires_gfx950
-def test_state_dtype_variant_is_correct(harness):
-    """An f16 recurrent state is a distinct kernel; it must be checked too."""
+@pytest.mark.parametrize("state_dtype", ["f16", "f32"])
+@pytest.mark.parametrize("simple", [False, True])
+def test_state_dtype_variant_is_correct(harness, state_dtype, simple):
+    """Each non-default recurrent-state dtype is a distinct kernel on both
+    emitters; it must be checked too."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
-    spec = dc.replace(GdnDecodeSpec(), state_dtype="f16")
+    spec = dc.replace(GdnDecodeSpec(), state_dtype=state_dtype, simple=simple)
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
     out_err, state_err = harness["check"](spec, 8)
@@ -385,13 +388,18 @@ def test_state_dtype_variant_is_correct(harness):
 
 
 @requires_gfx950
-def test_f16_io_variant_is_correct(harness):
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["f16", "f32"])
+def test_f16_io_variant_is_correct(harness, state_dtype, gate):
     """f16 I/O is an advertised dtype -- ``is_valid_spec`` admits it -- so a
     config the validator says yes to must be numerically checked on device, not
-    just assumed. (The default path is bf16 I/O.)"""
+    just assumed. (The default path is bf16 I/O.) The f32 state is the one
+    state width whose element size differs from the I/O's."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
-    spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="f16")
+    spec = dc.replace(
+        GdnDecodeSpec(), dtype="f16", state_dtype=state_dtype, gate_kind=gate
+    )
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
     out_err, state_err = harness["check"](spec, 8)

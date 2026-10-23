@@ -40,6 +40,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "rocke/helper_rocke.helpers.rotary.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h"
@@ -237,8 +239,9 @@ rocke_kernel_def_t*
 
 std::string appendkv_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = appendkv_make(d, st, &b, a);
     if(!k || !rocke_ir_builder_ok(&b))
@@ -258,8 +261,9 @@ std::string appendkv_lower(const py::dict& d, const std::string& arch)
 }
 std::string appendkv_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = appendkv_make(d, st, &b, a);
     if(!k || !rocke_ir_builder_ok(&b))
@@ -274,8 +278,9 @@ std::string appendkv_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> appendkv_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = appendkv_make(d, st, &b, a);
     if(!k || !rocke_ir_builder_ok(&b))
@@ -305,8 +310,9 @@ rocke_fmha_fwd_paged_prefill_spec_t paged_build(const py::dict& d, Store& st)
 }
 std::string paged_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -327,8 +333,9 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
 }
 std::string paged_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -344,8 +351,9 @@ std::string paged_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> paged_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -388,8 +396,9 @@ rocke_kernel_def_t*
 }
 std::string varlen_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_kernel_builder_t kb;
     rocke_kernel_def_t* k = varlen_make(d, st, &kb, a);
     auto guard = rocke_bindings::own_builder(&kb, rocke_fmha_kernel_builder_free);
@@ -403,8 +412,9 @@ std::string varlen_lower(const py::dict& d, const std::string& arch)
 }
 std::string varlen_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_kernel_builder_t kb;
     rocke_kernel_def_t* k = varlen_make(d, st, &kb, a);
     std::string out;
@@ -422,8 +432,9 @@ std::string varlen_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> varlen_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_kernel_builder_t kb;
     rocke_kernel_def_t* k = varlen_make(d, st, &kb, a);
     std::vector<std::string> out;
@@ -468,8 +479,9 @@ std::string splitkv_lower_one(const rocke_fmha_splitkv_decode_spec_t* s, const c
 }
 std::string splitkv_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
     std::string phase = "seg";
     x_str(d, "phase", phase);
@@ -481,8 +493,9 @@ std::string splitkv_lower(const py::dict& d, const std::string& arch)
 }
 std::string splitkv_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
     std::string phase = "seg";
     x_str(d, "phase", phase);
@@ -502,8 +515,9 @@ std::string splitkv_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> splitkv_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
     std::string phase = "seg";
     x_str(d, "phase", phase);
@@ -526,29 +540,19 @@ void reg3(py::module_& m,
           const char* prefix,
           std::string (*lower)(const py::dict&, const std::string&),
           std::string (*ser)(const py::dict&, const std::string&),
-          std::vector<std::string> (*ver)(const py::dict&, const std::string&),
-          const char* dflt_arch)
+          std::vector<std::string> (*ver)(const py::dict&, const std::string&))
 {
-    m.def((std::string(prefix) + "_lower_llvm").c_str(),
-          lower,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
-    m.def((std::string(prefix) + "_serialize_ir").c_str(),
-          ser,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
-    m.def((std::string(prefix) + "_verify").c_str(),
-          ver,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
+    m.def((std::string(prefix) + "_lower_llvm").c_str(), lower, py::arg("spec"), py::arg("arch"));
+    m.def((std::string(prefix) + "_serialize_ir").c_str(), ser, py::arg("spec"), py::arg("arch"));
+    m.def((std::string(prefix) + "_verify").c_str(), ver, py::arg("spec"), py::arg("arch"));
 }
 
 } // namespace
 
 void register_fmha_extra(py::module_& m)
 {
-    reg3(m, "fmha_appendkv", &appendkv_lower, &appendkv_serialize, &appendkv_verify, "gfx950");
-    reg3(m, "fmha_paged_prefill", &paged_lower, &paged_serialize, &paged_verify, "gfx950");
-    reg3(m, "fmha_varlen", &varlen_lower, &varlen_serialize, &varlen_verify, "gfx950");
-    reg3(m, "fmha_splitkv_decode", &splitkv_lower, &splitkv_serialize, &splitkv_verify, "gfx950");
+    reg3(m, "fmha_appendkv", &appendkv_lower, &appendkv_serialize, &appendkv_verify);
+    reg3(m, "fmha_paged_prefill", &paged_lower, &paged_serialize, &paged_verify);
+    reg3(m, "fmha_varlen", &varlen_lower, &varlen_serialize, &varlen_verify);
+    reg3(m, "fmha_splitkv_decode", &splitkv_lower, &splitkv_serialize, &splitkv_verify);
 }

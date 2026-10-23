@@ -400,14 +400,13 @@ def build_attention_3d(
     num_segments,
     sliding_window=0,
     has_softcap=False,
+    **kw,
 ):
     def _build():
-        from kernels import (
-            UnifiedAttention3DTiledSpec,
-            build_unified_attention_3d_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttention3DTiledSpec(
+        SpecCls, _, build_fn, _, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             block_size=block_size,
             num_query_heads=num_query_heads,
@@ -417,8 +416,9 @@ def build_attention_3d(
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             num_segments=num_segments,
+            **kw,
         )
-        return build_unified_attention_3d_tiled(spec)
+        return build_fn(spec, arch=arch)
 
     return _build
 
@@ -427,19 +427,55 @@ def build_attention_reduce(
     name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
 ):
     def _build():
-        from kernels import (
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_reduce_tiled,
-        )
+        from kernels.common.attention_unified import _tiled_3d_impl
 
-        spec = UnifiedAttentionReduceTiledSpec(
+        _, SpecCls, _, build_fn, _ = _tiled_3d_impl(arch)
+        spec = SpecCls(
             head_size=head_size,
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
             num_segments=num_segments,
         )
-        return build_unified_attention_reduce_tiled(spec)
+        return build_fn(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_scalar(name, arch, *, three_d=False, **problem):
+    """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
+
+    ``problem`` patches a small ``UnifiedAttentionProblem``; the band fields
+    (``causal_top_left``, ``right_bound``, ``sliding_window``) select the mask.
+    """
+
+    def _build():
+        from kernels import (
+            UnifiedAttention2DSpec,
+            UnifiedAttention3DSpec,
+            UnifiedAttentionProblem,
+            build_unified_attention_2d,
+            build_unified_attention_3d,
+        )
+
+        fields = dict(
+            total_q=64,
+            num_seqs=1,
+            num_query_heads=4,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=64,
+            max_seqlen_k=64,
+            dtype="fp16",
+        )
+        fields.update(problem)
+        p = UnifiedAttentionProblem(**fields)
+        if three_d:
+            return build_unified_attention_3d(
+                UnifiedAttention3DSpec(p, num_segments=8), arch=arch
+            )
+        return build_unified_attention_2d(UnifiedAttention2DSpec(p), arch=arch)
 
     return _build
 
@@ -539,6 +575,33 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
+def build_lightning_indexer_case(arch, **over):
+    """Build one representative lightning-indexer kernel for ``arch``.
+
+    The kernel is arch-neutral (gfx942/gfx950); ``arch`` only selects the lowering
+    target. Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted
+    into the tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.common.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -634,12 +697,12 @@ def build_attention_d256_gfx950(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx950_fast(problem):
+            if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
                     "would pin the fallback (no pad/interleave)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
                 raise RuntimeError(
                     "expected pad+interleave in the D256 fast spec; got "
@@ -669,12 +732,12 @@ def build_attention_d256_gfx942(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx942_fast(problem):
+            if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 gfx942 fast route not selected under pinned arch "
                     f"{arch!r}; would pin the fallback (slow scalar path)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
@@ -720,7 +783,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
                     f"GQA head-fold not selected under pinned arch {arch!r}; "
                     "would pin the unfolded kernel"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             kernel = build_gfx942_4warp_gqa(spec, arch=arch)
             if not kernel.name.endswith("_4wgqa_fold"):
                 raise RuntimeError(
@@ -1144,6 +1207,48 @@ def build_direct_nongrouped(
     return _build
 
 
+def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
+    """A direct wgrad kernel: ``kind`` is tiled / dw_lds / dw_cols / gather /
+    fold; ``problem`` overrides the DirectConvProblem fields (unused by the
+    fold). Configs mirror parity/conv_direct_grouped_emit.* (indices 95+),
+    where the C++ engine is gated byte-identical by check_byte_identity.py."""
+
+    def _build():
+        from kernels.common import conv_direct_dw_wgrad as dw
+        from kernels.common import conv_direct_wgrad_gather as wg
+        from kernels.common import conv_direct_wgrad_tiled as wt
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        if kind == "fold":
+            return dw.build_dw_wgrad_fold(
+                dw.DwWgradFoldSpec(name=name, **spec_kw), arch=arch
+            )
+        kw = dict(
+            N=2,
+            H=16,
+            W=32,
+            groups=1,
+            cpg=64,
+            kpg=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        kw.update(problem)
+        p = DirectConvProblem(**kw)
+        spec_cls, build = {
+            "tiled": (wt.DirectWgradTiledSpec, wt.build_direct_wgrad_tiled),
+            "dw_lds": (dw.DwWgradLdsSpec, dw.build_dw_wgrad_lds),
+            "dw_cols": (dw.DwWgradColsSpec, dw.build_dw_wgrad_cols),
+            "gather": (wg.WgradGatherSpec, wg.build_wgrad_gather),
+        }[kind]
+        return build(spec_cls(problem=p, name=name, **spec_kw), arch=arch)
+
+    return _build
+
+
 def build_direct_depthwise_tiled(
     name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
 ):
@@ -1281,6 +1386,52 @@ def build_streaming_copy(arch):
         off = b.mul(b.thread_id_x(), b.const_i32(8))
         v = b.global_load_vN(src, off, BF16, 8, temporal_hint=TemporalHint.STREAMING)
         b.global_store_vN(dst, off, v, 8, temporal_hint=TemporalHint.STREAMING)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_reduce(arch, masks):
+    """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
+    pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
+    exist for, so a change that alters the op's IR in both engines at once
+    still trips the golden. gfx9 uses masks 1, 2, 7, 15 (quad_perm x2,
+    row_half_mirror, row_mirror); a row_xmask target uses 1, 2, 4, 8."""
+
+    def _build():
+        from rocke.core.ir import I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_reduce_{arch}")
+        src = b.param("S", PtrType(I32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(I32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        acc = b.global_load(src, tid, I32, align=4)
+        for m in masks:
+            acc = b.add(acc, b.warp_shuffle_xor_dpp(acc, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_masks_f32(arch):
+    """f32 shuffle by every register-only gfx9 mask (1, 2, 3, 7, 8, 15),
+    summed: pins each table entry and the f32 <-> i32 bitcast path."""
+
+    def _build():
+        from rocke.core.ir import F32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_masks_f32_{arch}")
+        src = b.param("S", PtrType(F32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(F32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        x = b.global_load(src, tid, F32, align=4)
+        acc = x
+        for m in (1, 2, 3, 7, 8, 15):
+            acc = b.fadd(acc, b.warp_shuffle_xor_dpp(x, m))
+        b.global_store(dst, tid, acc, align=4)
         b.ret()
         return b.kernel
 
@@ -2672,6 +2823,23 @@ def cases():
     )
     add(
         "deep_fused_conv",
+        "deep/gfx12_generic/h16w16_k32",
+        "gfx12-generic",
+        build_deep(
+            "gfx1201",
+            "gfx12-generic",
+            h=16,
+            w=16,
+            c=16,
+            k0=32,
+            k1=32,
+            pool_tile_h=4,
+            pool_tile_w=4,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "deep_fused_conv",
         "deep/gfx1151/native_h16w16",
         "gfx1151",
         build_deep(
@@ -3098,6 +3266,55 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
+        # band on the top-left diagonal. causal=False is the unbounded right side.
+        # Non-causal (left-only) window: default + persistent grids.
+        ("noncausal_window_sq512", {"causal": False, "sliding_window": 128}),
+        (
+            "persist_noncausal_window_sq512",
+            {
+                "causal": False,
+                "sliding_window": 128,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        # Two-sided window and plain lookahead (right_bound > 0 needs causal=True).
+        (
+            "two_sided_window_sq512",
+            {"sliding_window": 128, "right_bound": 64},
+        ),
+        ("lookahead_sq512", {"right_bound": 64}),
+        (
+            "persist_lookahead_sq512",
+            {"right_bound": 64, "persistent": True, "num_persistent": 256},
+        ),
+        # Cross-attention between different lengths: full attention, ragged both ways,
+        # and top-left causal with seqlen_q > seqlen_kv (key-pad mask on a causal body).
+        (
+            "full_ragged_cross_197x400",
+            {"seqlen_q": 197, "seqlen_kv": 400, "ragged": True, "causal": False},
+        ),
+        (
+            "top_left_ragged_cross_400x197",
+            {"seqlen_q": 400, "seqlen_kv": 197, "ragged": True},
+        ),
+        # Rows with no visible key (window past the keys): the zero-output guard and
+        # the start-tile clamp, on both grids.
+        (
+            "window_empty_rows_1024x512",
+            {"seqlen_q": 1024, "seqlen_kv": 512, "sliding_window": 128},
+        ),
+        (
+            "persist_window_empty_rows_1024x512",
+            {
+                "seqlen_q": 1024,
+                "seqlen_kv": 512,
+                "sliding_window": 128,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
         # --- Sinks ---
         # Full-sink (use_sinks=True, no sliding window): D64 and D128, default + persistent
         ("sinks_d64_sq512", {"use_sinks": True, "head_size": 64}),
@@ -3162,6 +3379,129 @@ def cases():
             f"attention_dense/gfx950/{_variant}",
             "gfx950",
             build_attention_dense("gfx950", **_over),
+        )
+
+    # Attention band on the unified kernels: top-left alignment, full attention
+    # (right_bound=-1), lookahead and non-causal / two-sided windows. These bodies have
+    # no C++ mirror yet, so this golden is the only pin of their lowered IR.
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+        (
+            "top_left_sw64",
+            dict(causal_top_left=True, sliding_window=64),
+        ),
+        (
+            "left_only_sw64",
+            dict(causal_top_left=True, right_bound=-1, sliding_window=64),
+        ),
+        (
+            "two_sided_sw64_rb16",
+            dict(causal_top_left=True, right_bound=16, sliding_window=64),
+        ),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_fp16_d128_b64_{_case}",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_fp16_{_case}",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="fp16",
+                **_kw,
+            ),
+        )
+    # The transposed-32x32 combo path (mask_once / mask_limit / peel sites).
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_fp16_d64_b32_gqa8_combo_{_case}",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_fp16_d64_combo_{_case}",
+                "gfx950",
+                head_size=64,
+                block_size=32,
+                num_query_heads=64,
+                num_kv_heads=8,
+                dtype="fp16",
+                **_sink_combo_kw,
+                **_kw,
+            ),
+        )
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("rb16", dict(right_bound=16)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/3d_bf16_d128_b64_{_case}",
+            "gfx950",
+            build_attention_3d(
+                f"irhash_attn_950_3d_bf16_{_case}",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                num_segments=4,
+                **_kw,
+            ),
+        )
+    # Scalar oracle kernels (arch-neutral, lowered for gfx950).
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("no_mask", dict(right_bound=-1)),
+        ("sw16_rb8", dict(sliding_window=16, right_bound=8)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/scalar2d_fp16_d128_{_case}",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar2d_{_case}", "gfx950", **_kw
+            ),
+        )
+    for _case, _kw in (
+        ("top_left", dict(causal_top_left=True)),
+        ("sw16_rb8", dict(sliding_window=16, right_bound=8)),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/scalar3d_fp16_d128_{_case}",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar3d_{_case}",
+                "gfx950",
+                three_d=True,
+                **_kw,
+            ),
+        )
+    # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
+    # magic sum carries a real multiply-high term (a power-of-two ratio has multiplier 1).
+    for _dim, _three_d in (("2d", False), ("3d", True)):
+        add(
+            "attention",
+            f"attention/gfx950/scalar{_dim}_fp16_d128_q40_kv8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar{_dim}_q40_kv8",
+                "gfx950",
+                three_d=_three_d,
+                num_query_heads=40,
+                num_kv_heads=8,
+            ),
         )
 
     # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
@@ -3776,6 +4116,62 @@ def cases():
             ),
         )
 
+    # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
+    # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
+    # depthwise partial-slot kernels and their fold, and the small-C gather.
+    # The full branch matrix (and the C++ twins) lives in
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 95+).
+    for _case_id, _kind, _prob, _over in (
+        ("tiled_bf16_c128", "tiled", dict(cpg=128, kpg=128, H=30), {}),
+        (
+            "tiled_qg2_pingpong",
+            "tiled",
+            {},
+            dict(
+                q_groups=2,
+                pingpong=True,
+                waves_k=2,
+                wave_k16=1,
+                rows_per_seg=12,
+                prefetch=3,
+            ),
+        ),
+        (
+            "tiled_fp16_unfold4",
+            "tiled",
+            dict(N=4, H=15, W=40, dtype="fp16"),
+            dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
+        ),
+        ("fold_t9", "fold", {}, dict(taps=9)),
+        (
+            "dw_cols_c3_7x7_s2",
+            "dw_cols",
+            dict(groups=3, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=2, H=20),
+            {},
+        ),
+        ("dw_lds_c64", "dw_lds", dict(groups=64, cpg=1, kpg=1), {}),
+        (
+            "gather_c3_s2",
+            "gather",
+            dict(cpg=3, kpg=24, stride=2, H=32, W=64),
+            {},
+        ),
+        (
+            "gather_c24_tr",
+            "gather",
+            dict(cpg=24, kpg=96, stride=2, H=30, W=40),
+            dict(wave_k16=1, waves_k=6, rows_per_seg=8, target_blocks=256),
+        ),
+    ):
+        add(
+            "conv_direct_wgrad",
+            f"conv_direct_wgrad/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_wgrad(
+                f"irhash_direct_wgrad_{_case_id}", "gfx950", _kind, _prob, **_over
+            ),
+        )
+
     # --- conv_direct_depthwise_tiled: output-stationary depthwise direct conv ---
     # Runtime filter-row loop, sliding input-row window, one weight row in
     # registers. Mirrors library/tests/parity/conv_direct_grouped_emit.*
@@ -3901,6 +4297,95 @@ def cases():
             _arch,
             build_streaming_copy(_arch),
         )
+
+    # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP
+    # encoding per mask; a row_xmask target (gfx1201) keeps 0x160 | mask.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_reduce_i32",
+            _arch,
+            build_warp_shuffle_xor_dpp_reduce(_arch, (1, 2, 7, 15)),
+        )
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_masks_f32",
+            _arch,
+            build_warp_shuffle_xor_dpp_masks_f32(_arch),
+        )
+    add(
+        "crosslane",
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32",
+        "gfx1201",
+        build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
+    )
+
+    # Lightning indexer (DSA scoring, bf16) on gfx942 and gfx950 -- the kernel is
+    # arch-neutral (no arch-specific atom, intrinsic, or LDS), so both lower the
+    # same specs (scalar-v1 model-shaped cases: DeepSeek H_I=64, GLM H_I=32, a
+    # small case; plus the MFMA body on 16-aligned shapes). The emitted IR is
+    # currently identical across arches, so the two per-arch goldens hold the same
+    # SHAs; the split is kept to catch future arch-specific divergence (fp8, wider
+    # atoms) the moment it appears.
+    for _arch in ("gfx942", "gfx950"):
+        for _case_id, _over in (
+            (
+                "deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 8,
+                    "seqlen_k": 64,
+                },
+            ),
+            (
+                "small",
+                {
+                    "n_index_heads": 4,
+                    "index_head_dim": 16,
+                    "seqlen_q": 8,
+                    "seqlen_k": 32,
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_deepseek_hi64",
+                {
+                    "n_index_heads": 64,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+            (
+                "mfma_glm_hi32",
+                {
+                    "n_index_heads": 32,
+                    "index_head_dim": 128,
+                    "seqlen_q": 16,
+                    "seqlen_k": 64,
+                    "body": "mfma",
+                    "block_size": 64,
+                },
+            ),
+        ):
+            add(
+                "lightning_indexer",
+                f"lightning_indexer/{_arch}/{_case_id}",
+                _arch,
+                build_lightning_indexer_case(_arch, **_over),
+            )
 
     return out
 

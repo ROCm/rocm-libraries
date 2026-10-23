@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 __all__ = [
     "OpcodeSpec",
     "UnsupportedLdsOpcodeError",
@@ -27,11 +26,15 @@ class OpcodeSpec:
 
     Profiles use this value to check opcode support and build a normalized request.
     ``access_width_bytes`` is the width of one logical LDS access in bytes.
+    ``alignment_bytes`` narrows prediction to an explicitly supported address
+    alignment; when absent, the full access width is used. It is not necessarily
+    the instruction's minimum hardware alignment.
     """
 
     opcode: str
     direction: str
     access_width_bytes: int
+    alignment_bytes: int | None = None
 
 
 _OPCODE_SPECS = {
@@ -43,6 +46,20 @@ _OPCODE_SPECS = {
         OpcodeSpec("ds_write_b32", "write", 4),
         OpcodeSpec("ds_write_b64", "write", 8),
         OpcodeSpec("ds_write_b128", "write", 16),
+        OpcodeSpec("ds_load_b32", "read", 4),
+        OpcodeSpec("ds_load_b64", "read", 8),
+        OpcodeSpec("ds_load_b96", "read", 12, 16),
+        OpcodeSpec("ds_load_b128", "read", 16),
+        OpcodeSpec("ds_store_b32", "write", 4),
+        OpcodeSpec("ds_store_b64", "write", 8),
+        OpcodeSpec("ds_store_b96", "write", 12, 16),
+        OpcodeSpec("ds_store_b128", "write", 16),
+        OpcodeSpec("ds_load_u8", "read", 1, 4),
+        OpcodeSpec("ds_load_i8", "read", 1, 4),
+        OpcodeSpec("ds_load_u16", "read", 2, 4),
+        OpcodeSpec("ds_load_i16", "read", 2, 4),
+        OpcodeSpec("ds_store_b8", "write", 1, 4),
+        OpcodeSpec("ds_store_b16", "write", 2, 4),
     )
 }
 

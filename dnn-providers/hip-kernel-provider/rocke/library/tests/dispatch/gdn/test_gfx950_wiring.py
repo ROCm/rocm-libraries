@@ -18,6 +18,7 @@ from dispatch.gdn import (
     GDN_REGISTRY,
     GdnDecodeRequest,
     dispatch_gdn_decode,
+    dispatch_gdn_decode_all,
     gdn_candidates,
     gdn_sweep_space,
     request_errors,
@@ -165,6 +166,100 @@ class TestRequestRejection(unittest.TestCase):
         result = dispatch_gdn_decode(_req(1, head_k_dim=64))
         self.assertEqual(result.spec.gate_kind, "gdn")
         self.assertEqual(result.spec.head_k_dim, 64)
+
+
+class TestMalformedRequestFields(unittest.TestCase):
+    """A wrong-typed request field is rejected, never coerced into a spec.
+
+    ``bool("false")`` is True and ``int(True)`` is 1, so a dispatcher that
+    converted these fields would hand back a DIFFERENT valid kernel (the
+    ``_l2`` one for ``use_qk_l2norm="false"``) instead of an error.
+    """
+
+    def _assert_rejected(self, field, message, **kw):
+        req = _req(8, **kw)
+        with self.assertRaises(ValueError) as ctx:
+            dispatch_gdn_decode(req)
+        self.assertIn(field, str(ctx.exception))
+        self.assertIn(message, str(ctx.exception))
+        self.assertEqual(dispatch_gdn_decode_all(req), ())
+
+    def test_non_bool_l2norm_is_rejected(self):
+        for value in ("false", "true", None, 0, 1):
+            for gate_kind in ("gdn", "kda"):
+                with self.subTest(value=value, gate_kind=gate_kind):
+                    self._assert_rejected(
+                        "use_qk_l2norm",
+                        "must be a bool",
+                        use_qk_l2norm=value,
+                        gate_kind=gate_kind,
+                        num_k_heads=32,
+                    )
+
+    def test_non_int_head_fields_are_rejected(self):
+        # num_v_heads 32 is a multiple of True / 4.0, so only the type rule
+        # can catch these.
+        for field in ("num_k_heads", "num_v_heads", "head_k_dim", "head_v_dim"):
+            for value in (True, 4.0):
+                with self.subTest(field=field, value=value):
+                    kw = {"num_k_heads": 4, "num_v_heads": 32, field: value}
+                    if field == "num_v_heads":
+                        kw["num_k_heads"] = 1
+                    self._assert_rejected(field, "must be an integer", **kw)
+
+    def test_non_str_gate_kind_is_rejected(self):
+        for value in (None, 1, b"gdn", ("gdn",)):
+            with self.subTest(value=value):
+                self._assert_rejected("gate_kind", "unsupported", gate_kind=value)
+
+
+class TestDeferredSpecFieldsAreUnreachable(unittest.TestCase):
+    """f32 state and the conv / output-norm fusions are spec-only today.
+
+    The kernel accepts them, but request routing for them lands in a follow-up
+    change. Until then a request must not reach them: f32 state is rejected
+    at the request, and no dispatched spec carries a fusion flag.
+    """
+
+    def test_f32_state_request_is_rejected(self):
+        for state_dtype in ("f32", "fp32", "float32"):
+            for gate_kind in ("gdn", "kda"):
+                with self.subTest(state_dtype=state_dtype, gate_kind=gate_kind):
+                    req = _req(
+                        8,
+                        state_dtype=state_dtype,
+                        gate_kind=gate_kind,
+                        num_k_heads=32,
+                    )
+                    with self.assertRaises(ValueError) as ctx:
+                        dispatch_gdn_decode(req)
+                    self.assertIn("unsupported state_dtype", str(ctx.exception))
+                    self.assertEqual(dispatch_gdn_decode_all(req), ())
+
+    def test_no_dispatched_spec_is_fused_or_f32(self):
+        checked = 0
+        for gate_kind, (num_k_heads, num_v_heads) in (
+            ("gdn", (16, 32)),
+            ("gdn", (32, 32)),
+            ("kda", (32, 32)),
+        ):
+            for dtype in ("bf16", "f16"):
+                for batch in (1, 64, 1024):
+                    req = _req(
+                        batch,
+                        gate_kind=gate_kind,
+                        num_k_heads=num_k_heads,
+                        num_v_heads=num_v_heads,
+                        dtype=dtype,
+                        state_dtype=dtype,
+                    )
+                    for result in dispatch_gdn_decode_all(req):
+                        spec = result.spec
+                        self.assertFalse(spec.fuse_conv, spec.kernel_name())
+                        self.assertFalse(spec.fuse_out_norm, spec.kernel_name())
+                        self.assertNotEqual(spec.state_dtype, "f32")
+                        checked += 1
+        self.assertGreater(checked, 0)
 
 
 class TestSpecIdPin(unittest.TestCase):

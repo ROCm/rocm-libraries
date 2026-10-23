@@ -83,7 +83,8 @@ constexpr auto config_name()
         return primbench::json{}
             .add("bs", config.kernel_config.block_size)
             .add("ipt", config.kernel_config.items_per_thread)
-            .add("method", get_block_scan_algorithm_name(config.block_scan_method));
+            .add("method", get_block_scan_algorithm_name(config.block_scan_method))
+            .add("lookback_scan_state_alignment", config.lookback_scan_state_alignment);
     }
 }
 

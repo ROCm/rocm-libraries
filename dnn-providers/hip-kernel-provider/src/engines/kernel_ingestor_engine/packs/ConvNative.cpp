@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,7 +22,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -31,6 +33,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
  * @file ConvNative.cpp
@@ -64,6 +67,18 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
+
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
+constexpr std::string_view X_ROOT = "conv_fwd.x";
+constexpr std::string_view W_ROOT = "conv_fwd.w";
+constexpr std::string_view Y_ROOT = "conv_fwd.y";
+
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
+constexpr std::string_view FLOPS_TOKEN = "conv_fwd.flops";
+constexpr std::string_view BYTES_TOKEN = "conv_fwd.bytes";
 
 /// x and y are 4-D NCHW/NKPQ; w is 4-D KCRS. All three are rank 4, which is the only
 /// fact this constant states -- the per-tensor role is fixed by which uid is read.
@@ -155,6 +170,10 @@ std::string dataTypeName(data_objects::DataType dataType)
 {
     return data_objects::EnumNameDataType(dataType);
 }
+
+using pack_features::bindTensorFields;
+using pack_features::checkedProduct;
+using pack_features::movedBytes;
 
 /// The node this engine's matchers read, or nullptr if the graph is not a single
 /// conv-forward node.
@@ -278,6 +297,27 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
     bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
     bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
+
+    // The validated dims and dtypes are the features a UHD ranks a conv on.
+    bindTensorFields(bound, X_ROOT, *x);
+    bindTensorFields(bound, W_ROOT, *w);
+    bindTensorFields(bound, Y_ROOT, *y);
+
+    // 2 x N x K x P x Q x C x R x S: two flops per MAC over every output element and filter
+    // tap. No masking, so the effective and dense flop conventions agree.
+    const auto flops
+        = checkedProduct({2, xDims->Get(0), wK, yDims->Get(2), yDims->Get(3), xC, wR, wS});
+    if(flops.has_value())
+    {
+        bound[std::string(FLOPS_TOKEN)] = *flops;
+    }
+
+    const auto bytes = movedBytes({x, w, y});
+    if(bytes.has_value())
+    {
+        bound[std::string(BYTES_TOKEN)] = *bytes;
+    }
+
     return bound;
 }
 

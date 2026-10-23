@@ -1,5 +1,9 @@
 # RFC 0003: Engine ID Design
 
+- **Status**: Implemented
+- **Status notes**: Engine names, `engineNameToId`, `engineNameOrIdToId`, and `HIPDNN_REGISTER_ENGINE` live in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` (#3791, #5826). Plugin-supplied names and load-time admission shipped in #10645 (`hipdnnEnginePluginGetEngineName`, `backend/src/plugin/EnginePluginManager.hpp`). The `HIPDNN_BENCHMARK_MODE` prefix in Future Improvements is not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
 2. [Problem Statement](#problem-statement)
@@ -255,10 +259,11 @@ inline int64_t engineNameToId(std::string_view engineName) {
 ```
 
 Callers that need to accept either spelling of an engine — a name or a decimal/hexadecimal
-ID — should use `engineNameOrIdToId` instead, which parses an ID spelling and otherwise
-falls through to `engineNameToId`. That is what the frontend, the fallback ordering
-environment variable and the heuristics config file all resolve through, so any spelling
-`hipdnn_list_engines` prints can be pasted back into any of them.
+ID — should use `engineNameOrIdToId` instead. It returns the ID of a registered name first,
+then parses an ID spelling, and otherwise falls through to `engineNameToId`. That is what the
+frontend, the fallback ordering environment variable and the heuristics config file all
+resolve through, so any spelling `hipdnn_list_engines` prints can be pasted back into any of
+them.
 
 ### Plugin Implementation
 
@@ -398,8 +403,8 @@ class MyCustomPlugin {
         //       hipdnn_data_sdk::utilities::engineNameToId("MY_CUSTOM_ENGINE");
 
         // Log for debugging
-        HIPDNN_LOG_INFO("Initializing engine '{}' with ID: 0x{:016X}",
-                       engineName, engineId);
+        HIPDNN_PLUGIN_LOG_INFO("Initializing engine '" << engineName << "' with ID: "
+                               << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
 
         // Register engine
         auto engine = std::make_unique<MyCustomEngine>(engineId);
