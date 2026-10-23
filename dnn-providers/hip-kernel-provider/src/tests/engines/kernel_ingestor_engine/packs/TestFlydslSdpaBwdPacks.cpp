@@ -26,15 +26,16 @@
  * @brief A census of what hipkernel:flydsl_sdpa_bwd_merged actually loads, read from the shard
  *        the census entry names rather than from anything built in-process.
  *
- * The merged table is 208 objects: 126 without a bias and 82 with one, each bias object
- * carrying the dBias reduce kernel as a second symbol of the same code object. Every case
+ * The merged table is 208 objects: 126 without a bias and 82 with one. The 28 bias objects
+ * that store dB carry the dBias reduce kernel as a second symbol of the same code object; a
+ * store_db=0 object never writes dB and carries no reduce kernel. Every case
  * opens by reading loadedSet(), none skips and none touches a device, so an empty shard fails
  * here instead of passing silently. The seam suite, over rows written in the test, is
  * TestFlydslSdpaBwdEngine.cpp.
  *
  * A descriptor carries the argument list of the merged symbol only. The reduce kernel's
  * 88-byte list (`_PARAMS["dbias_reduce"]`) is checked when the object is generated and, as the
- * engine launches it, by the seam suite; here every bias row names the reduce symbol.
+ * engine launches it, by the seam suite; here every dB-storing bias row names the reduce symbol.
  *
  * Registered with hkp_register_census_tests() in src/tests/CMakeLists.txt, over the
  * architectures the op ships for.
@@ -53,6 +54,7 @@ constexpr const char* REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 
 constexpr size_t MERGED_ROWS = 208;
 constexpr size_t BIAS_ROWS = 82;
+constexpr size_t REDUCE_ROWS = 28;
 
 /// A metadata field of type @p T, or nullptr when absent or of another type.
 template <typename T>
@@ -90,6 +92,7 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
     std::set<std::string> names;
     size_t kernels = 0;
     size_t biasRows = 0;
+    size_t reduceRows = 0;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
@@ -128,18 +131,22 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
                 EXPECT_GT(integer(geometry), 0) << kernel.name << " " << geometry;
             }
 
-            // A bias object carries the dBias reduce kernel; the class is exclusive of causal.
+            // A dB-storing bias object carries the dBias reduce kernel; the class is exclusive
+            // of causal.
             const bool hasBias = integer("has_bias") == 1;
+            const bool storesDb = hasBias && storeDb != 0;
             EXPECT_FALSE(hasBias && integer("causal") == 1) << kernel.name;
-            EXPECT_EQ(text("reduce_symbol"), hasBias ? std::string(REDUCE_SYMBOL) : std::string())
+            EXPECT_EQ(text("reduce_symbol"), storesDb ? std::string(REDUCE_SYMBOL) : std::string())
                 << kernel.name;
             biasRows += hasBias ? 1 : 0;
+            reduceRows += storesDb ? 1 : 0;
         }
     }
 
     EXPECT_EQ(kernels, MERGED_ROWS);
     EXPECT_EQ(names.size(), MERGED_ROWS) << "a name is shipped twice";
     EXPECT_EQ(biasRows, BIAS_ROWS);
+    EXPECT_EQ(reduceRows, REDUCE_ROWS);
 }
 
 TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)

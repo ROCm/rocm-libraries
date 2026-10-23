@@ -3609,7 +3609,10 @@ def _sdpa_bwd_instances(kind: str, arch: str) -> list[Instance]:
                     **(
                         {
                             "reduce_symbol": (
-                                SDPA_BWD_MERGED_REDUCE_SYMBOL if cls == "bias" else ""
+                                SDPA_BWD_MERGED_REDUCE_SYMBOL
+                                if cls == "bias"
+                                and dict(zip(names, perf, strict=True))["store_db"] != 0
+                                else ""
                             )
                         }
                         if kind == "merged"
