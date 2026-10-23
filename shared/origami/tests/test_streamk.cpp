@@ -305,11 +305,11 @@ TEST_CASE("Origami streamk: grid_k_split_aware partial-tile correction", "[strea
   // Force DP when sk_grid > 2*cu_count.  All three cases pass cu_count below
   // N_CU, which caps sk_grid at one WG per CU, so all three keep SK.
 
-  // [16, 884736, 32] and tile 16x512x32: tiles=1728, ipt=1.
+  // [16, 884736, 32] and tile 16x256x32: tiles=3456, ipt=1.
   // sk_grid=224 is one WG per CU, below the threshold → keep SK.  A CU budget
   // with nothing else running makes DP look faster here, but with a co-tenant
   // on the other CUs SK is the same or faster.
-  REQUIRE(run(1728, 1, 224) == 224);
+  REQUIRE(run(3456, 1, 224) == 224);
 
   // [12, 33554432, 32] and tile 16x448x32: tiles=74899, ipt=1.
   // sk_grid=224 is one WG per CU → keep SK; SK tile-streaming (sequential
