@@ -322,6 +322,22 @@ CACHE_FWD_SPLIT_K_TILE_N: Tuple[int, ...] = (16, 32, 64, 128)
 CACHE_FWD_SPLIT_K_TILE_K: Tuple[int, ...] = (32, 64)
 CACHE_FWD_SPLIT_K_PIPELINES: Tuple[str, ...] = ("mem", "wavelet")
 CACHE_FWD_SPLIT_K_VECS: Tuple[int, ...] = (4, 8)
+# Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
+# the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
+# their slabs after a cluster barrier, so there is no Stage 2 launch. The
+# degree is baked (the cluster shape), so one binary per S, on the tiles
+# (tile_m, tile_n, warp_m, warp_n) that win the small-output / deep-K layers
+# it is for; mem pipeline, cshuffle, tile_k 64, 16-byte vectors.
+CACHE_FWD_SPLIT_K_CLUSTER_DEGREES: Tuple[int, ...] = (4, 8, 12, 15)
+CACHE_FWD_SPLIT_K_CLUSTER_TILES: Tuple[Tuple[int, int, int, int], ...] = (
+    (16, 32, 1, 1),
+    (32, 32, 2, 1),
+    (64, 32, 2, 1),
+    (64, 64, 2, 2),
+    (128, 128, 2, 2),
+)
+CACHE_FWD_SPLIT_K_CLUSTER_TILE_K = 64
+CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -719,6 +735,18 @@ def _fwd_split_geometry(geometry: tuple) -> bool:
     )
 
 
+def _fwd_split_cluster_geometry(geometry: tuple) -> bool:
+    """Whether cluster split-K forward kernels are built for ``geometry``."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, _wt, pipeline, epilogue, atom = geometry
+    return (
+        atom.family == "wmma"
+        and epilogue == "cshuffle"
+        and pipeline == "mem"
+        and tile_k == CACHE_FWD_SPLIT_K_CLUSTER_TILE_K
+        and (tile_m, tile_n, warp_m, warp_n) in CACHE_FWD_SPLIT_K_CLUSTER_TILES
+    )
+
+
 def _fwd_split_jobs(
     arch: str,
     da: str,
@@ -730,6 +758,44 @@ def _fwd_split_jobs(
 ) -> Iterator[BuildJob]:
     """Split-K forward kernels for one geometry (see ``CACHE_FWD_SPLIT_K_*``)."""
     tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    if _fwd_split_cluster_geometry(geometry):
+        vec = CACHE_FWD_SPLIT_K_CLUSTER_VEC
+        for degree in CACHE_FWD_SPLIT_K_CLUSTER_DEGREES:
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=vec,
+                vector_size_b=vec,
+                vector_size_c=vec,
+                split_k=2,
+                split_k_cluster=degree,
+            )
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="fwd",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=True,
+                    two_stage=True,
+                    **cfg,
+                ),
+                direction="fwd",
+                spec_kwargs=cfg,
+                caps=dict(grouped=True),
+            )
     if not _fwd_split_geometry(geometry):
         return
     for vec_ab, vec_c in itertools.product(
@@ -1620,6 +1686,8 @@ def count_jobs(
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if _fwd_split_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
+                if _fwd_split_cluster_geometry(geo):
+                    total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
                 total += (
                     vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts

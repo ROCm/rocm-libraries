@@ -111,6 +111,10 @@ class KernelIdentity:
     waves_per_eu: int | None = None
     acc_epilogue: str = "none"
     split_k: int = 1
+    # Single-launch cluster split-K forward (ImplicitGemmConvSpec.
+    # split_k_cluster): the degree is baked as the (1, 1, S) cluster shape and
+    # there is no Stage 2. Left out of the hash while 0, like ws_replicas.
+    split_k_cluster: int = 0
     two_stage: bool = False
     # Two-stage scratch slabs per group (WgradConvSpec.ws_replicas). The host
     # sizes the scratch and builds Stage 2 from it, so it has to come from the
@@ -231,6 +235,8 @@ class KernelIdentity:
         for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
             if not fields[name]:
                 del fields[name]
+        if not fields["split_k_cluster"]:
+            del fields["split_k_cluster"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]

@@ -135,6 +135,74 @@ class TestClusterSplitKGate(unittest.TestCase):
         self.assertIsNone(kernel.cluster_dims)
 
 
+class TestClusterSplitKCache(unittest.TestCase):
+    """The AOT cache carries one cluster binary per degree, named apart."""
+
+    def test_identity_keeps_its_hash_at_zero(self):
+        from dataclasses import asdict
+
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(
+            "fwd-implicit_gemm-bf16-2d-t32x32x64-w2x1-a16x16x32-v8x8x8-mem-"
+            "cshuffle-grp-sk2-2stage-wave32-gfx1250-llvm23"
+        )
+        self.assertEqual(ident.split_k_cluster, 0)
+        # An identity written before the field existed hashes the same.
+        old = asdict(ident)
+        del old["split_k_cluster"]
+        self.assertEqual(
+            KernelIdentity.from_dict(old).stable_hash(), ident.stable_hash()
+        )
+
+    def test_grid_has_one_binary_per_degree(self):
+        from rocke.core.arch import ArchTarget
+
+        from benchmarks.common.kernel_sweep import enumerate_jobs
+        from kernels.conv.aot_jobs import (
+            CACHE_FWD_SPLIT_K_CLUSTER_DEGREES,
+            CACHE_FWD_SPLIT_K_CLUSTER_TILES,
+        )
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        jobs = [
+            j
+            for j in enumerate_jobs(
+                arch="gfx1250",
+                dtype="bf16",
+                target=ArchTarget.from_gfx("gfx1250"),
+                directions=["fwd"],
+            )
+            if j.identity.split_k_cluster
+        ]
+        self.assertEqual(
+            len(jobs),
+            len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
+            * len(CACHE_FWD_SPLIT_K_CLUSTER_TILES),
+        )
+        self.assertEqual(len({j.identity.stable_hash() for j in jobs}), len(jobs))
+        for j in jobs:
+            label = j.identity.label()
+            self.assertIn(f"skc{j.identity.split_k_cluster}", label)
+            self.assertEqual(KernelIdentity.from_label(label), j.identity)
+
+    def test_launch_gate(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(
+            "fwd-implicit_gemm-bf16-2d-t64x32x64-w2x1-a16x16x32-v8x8x8-mem-"
+            "cshuffle-grp-sk2-skc4-2stage-wave32-gfx1250-llvm23"
+        )
+        small = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=512, Y=3, X=3, pH=1, pW=1)
+        many_tiles = ConvProblem(
+            N=64, Hi=7, Wi=7, C=1024, K=1024, Y=3, X=3, pH=1, pW=1, groups=32
+        )
+        self.assertEqual(_runtime_split_ks(small, ident), (4,))
+        self.assertEqual(_runtime_split_ks(small, ident, 8), ())
+        self.assertEqual(_runtime_split_ks(many_tiles, ident), ())
+
+
 # ---------------------------------------------------------------------------
 # GPU numerics
 # ---------------------------------------------------------------------------
