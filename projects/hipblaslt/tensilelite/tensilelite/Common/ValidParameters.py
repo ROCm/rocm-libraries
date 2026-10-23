@@ -556,6 +556,8 @@ validParameters = { # we need to make sure this matches develop
     # Assembly only
     "DirectToVgprA": [False, True],
     "DirectToVgprB": [False, True],
+    # dot2 WaveSplitK only: v_dot2 reads A from its global-read registers; only B uses LDS.
+    "DirectToVgprDot2A": [False, True],
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
