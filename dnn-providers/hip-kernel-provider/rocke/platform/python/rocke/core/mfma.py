@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from .ir import BF8E5M2, BF16, F16, F32, FP8E4M3, I8, I32, Op, Type, VectorType
+from .ir import BF8E5M2, BF16, F16, F32, FP8E4M3, I8, I32, U8, Op, Type, VectorType
 from .tf32 import TF32_MMA, tf32_mma_error
 
 # These are the implemented instructions' fixed emission signatures, independent
@@ -38,6 +38,7 @@ _PACKED_BITS = {
 _CARRIER_BITS = {
     "i1": 1,
     "i8": 8,
+    "u8": 8,
     "i16": 16,
     "i32": 32,
     "i64": 64,
@@ -85,7 +86,7 @@ def validate_mfma(op: Op) -> None:
             valid = all(
                 isinstance(v.type, VectorType)
                 and v.type.count == 8
-                and v.type.elem in (I8, FP8E4M3, BF8E5M2)
+                and v.type.elem in (I8, U8, FP8E4M3, BF8E5M2)
                 for v in op.operands[:2]
             )
         else:

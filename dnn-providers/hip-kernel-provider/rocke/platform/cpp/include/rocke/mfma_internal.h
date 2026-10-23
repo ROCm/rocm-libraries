@@ -30,6 +30,7 @@ static inline int rocke_mfma_carrier_bits(const rocke_type_t* type)
         bits = 1;
         break;
     case ROCKE_SCALAR_I8:
+    case ROCKE_SCALAR_U8:
     case ROCKE_SCALAR_FP8E4M3:
     case ROCKE_SCALAR_BF8E5M2:
         bits = 8;
@@ -78,7 +79,7 @@ static inline int rocke_mfma_type_matches(const rocke_type_t* type, const char* 
     if(strcmp(expected, "vec<i8x8>") == 0)
         return type->kind == ROCKE_TYPE_VECTOR && type->count == 8 && type->elem
                && type->elem->kind == ROCKE_TYPE_SCALAR
-               && (type->elem->scalar == ROCKE_SCALAR_I8
+               && (type->elem->scalar == ROCKE_SCALAR_I8 || type->elem->scalar == ROCKE_SCALAR_U8
                    || type->elem->scalar == ROCKE_SCALAR_FP8E4M3
                    || type->elem->scalar == ROCKE_SCALAR_BF8E5M2);
     int count;

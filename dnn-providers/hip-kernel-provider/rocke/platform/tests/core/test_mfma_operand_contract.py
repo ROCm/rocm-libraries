@@ -20,6 +20,7 @@ from rocke.core.ir import (
     I32,
     I64,
     TF32,
+    U8,
     IRBuilder,
     PtrType,
     Value,
@@ -299,11 +300,17 @@ PACKED_CARRIERS = (
             VectorType(I16, 4),
             VectorType(F32, 2),
             VectorType(FP8E4M3, 8),
+            VectorType(U8, 8),
         )
     ]
     + [
         (CASES[-3], ty)
-        for ty in (VectorType(I32, 3), VectorType(I16, 6), VectorType(BF8E5M2, 12))
+        for ty in (
+            VectorType(I32, 3),
+            VectorType(I16, 6),
+            VectorType(BF8E5M2, 12),
+            VectorType(U8, 12),
+        )
     ]
     + [
         (case, ty)
@@ -313,6 +320,7 @@ PACKED_CARRIERS = (
             VectorType(F64, 4),
             VectorType(I32, 8),
             VectorType(I8, 32),
+            VectorType(U8, 32),
             VectorType(F16, 16),
         )
     ]
@@ -338,6 +346,44 @@ def test_mfma_preserves_equal_width_packed_carriers(case, carrier, flavor, engin
             )
             == expected
         )
+
+
+@pytest.mark.parametrize("case", [*CASES[13:17], *CASES[-4:]])
+@pytest.mark.parametrize("flavor", FLAVORS)
+@pytest.mark.parametrize(
+    "engine,concrete", [("python", False), ("python", True), ("native", False)]
+)
+def test_mfma_unsigned_byte_carriers_match_signed_bytes(case, flavor, concrete, engine):
+    count = case[4] // 8 if case[4] else 8
+    unsigned, _ = _kernel(case, source=VectorType(U8, count), concrete=concrete)
+    signed, _ = _kernel(case, source=VectorType(I8, count), concrete=concrete)
+    expected = _lower_kernel_to_llvm_python(signed, arch=case[0], llvm_flavor=flavor)
+    if engine == "native":
+        native = pytest.importorskip("rocke_engine")
+        actual = native.lower_serialized_ir(
+            serialize(unsigned), arch=case[0], flavor=flavor
+        )
+    else:
+        actual = _lower_kernel_to_llvm_python(
+            unsigned, arch=case[0], llvm_flavor=flavor
+        )
+        assert actual == _lower_kernel_to_llvm_python(
+            parse(serialize(unsigned)), arch=case[0], llvm_flavor=flavor
+        )
+    assert actual == expected
+
+
+@pytest.mark.parametrize("case", [*CASES[13:17], CASES[-4], CASES[-3], CASES[-1]])
+@pytest.mark.parametrize("concrete", [False, True])
+def test_mfma_unsigned_byte_carriers_preserve_unsupported_hip(case, concrete):
+    count = case[4] // 8 if case[4] else 8
+    kernel, _ = _kernel(case, source=VectorType(U8, count), concrete=concrete)
+    # U8 vectors already lower to i8 in LLVM, but have no HIP type mapping.
+    for candidate in (kernel, parse(serialize(kernel))):
+        with pytest.raises(
+            NotImplementedError, match="no HIP mapping for type vec<u8x"
+        ):
+            lower_kernel_to_hip(candidate, arch=case[0])
 
 
 @pytest.mark.parametrize("case", CASES[-1:])

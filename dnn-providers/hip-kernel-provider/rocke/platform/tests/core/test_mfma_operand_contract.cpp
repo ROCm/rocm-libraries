@@ -212,13 +212,13 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
 
 static int check_packed_carriers()
 {
-    const char* carriers[] = {"i8", "i16", "f16", "bf16", "i32", "f32", "i64", "f64"};
-    const int widths[] = {8, 16, 16, 16, 32, 32, 64, 64};
+    const char* carriers[] = {"i8", "u8", "i16", "f16", "bf16", "i32", "f32", "i64", "f64"};
+    const int widths[] = {8, 8, 16, 16, 16, 32, 32, 64, 64};
     for(const auto& base : cases)
     {
         if(!base.packed_bits)
             continue;
-        for(int i = 0; i < 7; ++i)
+        for(size_t i = 0; i < sizeof(carriers) / sizeof(carriers[0]); ++i)
         {
             if(base.packed_bits % widths[i])
                 continue;
@@ -228,12 +228,16 @@ static int check_packed_carriers()
             CHECK(check_case(&spec, 0, 1) == 0);
         }
     }
-    // Logical byte types and the i8 carrier share the existing fixed byte ABI.
+    // Logical byte types and integer byte carriers share the fixed byte ABI.
+    const char* byte_carriers[] = {"i8", "u8"};
     for(int index = 13; index <= 16; ++index)
     {
         auto spec = cases[index];
-        spec.source = "i8";
-        CHECK(check_case(&spec, 0, 1) == 0);
+        for(const char* source : byte_carriers)
+        {
+            spec.source = source;
+            CHECK(check_case(&spec, 0, 1) == 0);
+        }
     }
     return 0;
 }
