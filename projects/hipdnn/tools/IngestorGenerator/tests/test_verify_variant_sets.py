@@ -38,10 +38,12 @@ _KMD_ID = "11111111-1111-1111-1111-111111111111"
 _UED_ID = "22222222-2222-2222-2222-222222222222"
 _KDP_ID = "33333333-3333-3333-3333-333333333333"
 
-_PROFILE = """
-bundle: test_engine
-vocabulary:
-  dtype: [BF16, FP16]
+_MANIFEST = """
+engine:
+  name: test:TestEngine
+specialization:
+  vocabulary:
+    dtype: [BF16, FP16]
 """
 
 _KMD_FIELDS = [
@@ -122,11 +124,11 @@ def _kmd(fields=None, ident=_KMD_ID) -> dict:
     return {"version": "1.0", "id": ident, "fields": fields or _KMD_FIELDS}
 
 
-def _ued(metadata=_KMD_ID, ident=_UED_ID) -> dict:
+def _ued(metadata=_KMD_ID, ident=_UED_ID, name="test:TestEngine") -> dict:
     return {
         "version": "1.0",
         "id": ident,
-        "name": "test:Engine",
+        "name": name,
         "metadata": metadata,
     }
 
@@ -162,8 +164,8 @@ def _read_kdp(path: Path) -> dict:
 @pytest.fixture
 def gate(tmp_path):
     """A working gate environment: an id-wired bundle and a nesting pair."""
-    profile = tmp_path / "profile.yaml"
-    profile.write_text(_PROFILE)
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(_MANIFEST)
 
     def write(tag: str, descriptors: list[dict], fields=None, arch=None) -> Path:
         root = tmp_path / tag
@@ -173,10 +175,10 @@ def gate(tmp_path):
         (root / "test_engine.kmd.json").write_text(json.dumps(_kmd(fields)))
         return root
 
-    def run(*args, profiled: bool = True, mode: str = "structural"):
+    def run(*args, with_manifest: bool = True, mode: str = "structural"):
         argv = [sys.executable, str(_TOOL), *args, "--mode", mode]
-        if profiled:
-            argv += ["--profile", str(profile)]
+        if with_manifest:
+            argv += ["--manifest", str(manifest)]
         return subprocess.run(argv, cwd=tmp_path, capture_output=True, text=True)
 
     small = [_descriptor("k_sq512", 512), _descriptor("k_sq4096", 4096)]
@@ -193,7 +195,7 @@ def gate(tmp_path):
             "small": small,
             "big": big,
             "tmp": tmp_path,
-            "profile": profile,
+            "manifest": manifest,
         },
     )
 
@@ -268,7 +270,7 @@ class TestEachRootReadsItsOwnProvenanceRoot:
             flags = []
             for label, directory in zip(("small", "big"), pair):
                 flags += ["--provenance-root", f"{label}={gate.tmp / directory}"]
-            return self.run(gate, "--profile", str(gate.profile), *flags)
+            return self.run(gate, "--manifest", str(gate.manifest), *flags)
 
         paired = roots("provenance_small", "provenance_big")
         crossed = roots("provenance_big", "provenance_small")
@@ -286,8 +288,8 @@ class TestEachRootReadsItsOwnProvenanceRoot:
         (gate.tmp / "small" / provenance_sidecar.PACKED_MARKER).unlink()
         result = self.run(
             gate,
-            "--profile",
-            str(gate.profile),
+            "--manifest",
+            str(gate.manifest),
             "--provenance-root",
             f"small={gate.tmp / 'provenance_small'}",
         )
@@ -300,7 +302,7 @@ class TestEachRootReadsItsOwnProvenanceRoot:
         kdp.with_name(provenance_sidecar.sidecar_name(kdp.name)).unlink()
         kdp.with_name(provenance_sidecar.PACKED_MARKER).unlink()
         kdp.write_text(json.dumps(_kdp(gate.small)))
-        result = self.run(gate, "--profile", str(gate.profile))
+        result = self.run(gate, "--manifest", str(gate.manifest))
         assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -439,12 +441,12 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
 
     def test_equal_tuples_on_disjoint_arches_are_both_accepted(self, gate):
         self._two_packs(gate, "disjoint", ["gfx942"], ["gfx950"])
-        result = gate.run("d", "disjoint", profiled=False)
+        result = gate.run("d", "disjoint", with_manifest=False)
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_equal_tuples_overlapping_on_one_arch_collide(self, gate):
         self._two_packs(gate, "overlap", ["gfx942", "gfx950"], ["gfx950"])
-        result = gate.run("o", "overlap", profiled=False)
+        result = gate.run("o", "overlap", with_manifest=False)
         assert result.returncode == 1, result.stdout
         assert "loader-tuple collisions" in result.stdout
         assert "gfx950" in result.stdout
@@ -460,7 +462,7 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         self, gate, left_arch, right_arch
     ):
         self._two_packs(gate, "outranked", left_arch, right_arch)
-        result = gate.run("o", "outranked", profiled=False)
+        result = gate.run("o", "outranked", with_manifest=False)
         assert result.returncode == 0, result.stdout + result.stderr
 
     @pytest.mark.parametrize(
@@ -469,7 +471,7 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
     )
     def test_two_packs_tied_at_one_tier_collide(self, gate, left_arch, right_arch):
         self._two_packs(gate, "tied", left_arch, right_arch)
-        result = gate.run("t", "tied", profiled=False)
+        result = gate.run("t", "tied", with_manifest=False)
         assert result.returncode == 1, result.stdout
         assert "loader-tuple collisions" in result.stdout
 
@@ -492,7 +494,7 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         right["id"], right["name"] = "id-right", "k_float"
         right["metadata"]["scale"] = 1.0
         gate.write("floaty", [left, right], fields=fields)
-        result = gate.run("f", "floaty", profiled=False)
+        result = gate.run("f", "floaty", with_manifest=False)
         assert result.returncode == 1, result.stdout
         assert "loader-tuple collisions" in result.stdout
 
@@ -504,7 +506,7 @@ class TestStructuralModeDegradesLoudly:
         bad = copy.deepcopy(gate.small)
         bad[0]["metadata"]["use_exp2_fast"] = -1
         gate.write("bad", bad)
-        result = gate.run("bad", "bad", profiled=False)
+        result = gate.run("bad", "bad", with_manifest=False)
         assert result.returncode == 1, "a sentinel needs no evidence to spot"
         assert "unset sentinel" in result.stdout
 
@@ -524,7 +526,7 @@ class TestGateRefusesAmbiguity:
     def test_two_engines_without_a_pin_is_an_error(self, gate):
         root = gate.write("multi", gate.small)
         (root / "second_engine.ued.json").write_text(
-            json.dumps(_ued(metadata="kmd-second", ident="ued-second"))
+            json.dumps(_ued(metadata="kmd-second", ident="ued-second", name="t:Other"))
         )
         (root / "second_engine.kmd.json").write_text(
             json.dumps(_kmd(ident="kmd-second"))
@@ -537,12 +539,127 @@ class TestGateRefusesAmbiguity:
                 engine="ued-second",
             ),
         )
-        result = gate.run("multi", "multi", profiled=False)
+        result = gate.run("multi", "multi", with_manifest=False)
         assert result.returncode == 1
-        assert "Set 'bundle' in the profile" in (result.stdout + result.stderr), (
+        assert "Set engine.name in the manifest" in (result.stdout + result.stderr), (
             "guessing which engine to gate could pass while the one under test "
             "is broken"
         )
+
+    def test_the_manifest_gates_every_pack_of_its_engine(self, gate):
+        """A multi-pack engine ships `<slug>_<pack>.kdp.json`; selection is by the
+        engine's name, so every pack is gated and a sibling engine is not."""
+        root = gate.tmp / "packs"
+        root.mkdir()
+        (root / "test_engine.ued.json").write_text(json.dumps(_ued()))
+        (root / "test_engine.kmd.json").write_text(json.dumps(_kmd()))
+        (root / "other.ued.json").write_text(
+            json.dumps(_ued(metadata=_KMD_ID, ident="ued-other", name="t:Other"))
+        )
+        _write_kdp(root / "test_engine_a.kdp.json", _kdp(gate.small, ident="kdp-a"))
+        sentinel = [_descriptor("k_b", 1024)]
+        sentinel[0]["metadata"]["use_exp2_fast"] = -1
+        _write_kdp(root / "test_engine_b.kdp.json", _kdp(sentinel, ident="kdp-b"))
+        _write_kdp(
+            root / "other.kdp.json",
+            _kdp([_descriptor("k_o", 1024)], ident="kdp-o", engine="ued-other"),
+        )
+        result = gate.run("packs", "packs")
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "unset sentinel" in result.stdout, result.stdout + result.stderr
+        assert "k_b" in result.stdout
+
+    @pytest.mark.parametrize(
+        "raw, message",
+        [
+            ({"bundle": "x"}, "retired tool profile"),
+            ({"vocabulary": {"dtype": ["BF16"]}}, "retired tool profile"),
+            ({"engine": []}, "must be mappings"),
+            ({"specialization": ["x"]}, "must be mappings"),
+            ({"engine": {"name": "hipkernel:"}}, "is not '<namespace>:<Name>'"),
+            ({"engine": {"name": "NoNamespace"}}, "is not '<namespace>:<Name>'"),
+            ({"specialization": {"vocabulary": ["BF16"]}}, "must be a mapping"),
+            ({"specialization": {"vocabulary": None}}, "must be a mapping"),
+        ],
+        ids=[
+            "top-level-bundle",
+            "top-level-vocabulary",
+            "engine-list",
+            "specialization-list",
+            "empty-local-name",
+            "no-namespace",
+            "vocabulary-list",
+            "vocabulary-null",
+        ],
+    )
+    def test_a_malformed_manifest_is_refused(self, raw, message):
+        with pytest.raises(SystemExit, match=message):
+            gate_module.Manifest(raw, "m.yaml")
+
+    @pytest.mark.parametrize(
+        "suffix, text",
+        [
+            (".json", '{"engine": {}, "engine": {}}'),
+            (".yaml", "engine: {}\nengine: {}\n"),
+        ],
+    )
+    def test_a_key_declared_twice_is_a_fail(self, tmp_path, suffix, text):
+        path = tmp_path / f"m{suffix}"
+        path.write_text(text)
+        with pytest.raises(SystemExit, match="FAIL:.*engine"):
+            gate_module.Manifest.load(str(path))
+
+    def test_a_tab_indented_json_manifest_loads(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text('{\n\t"engine": {"name": "hipkernel:Dense"}\n}\n')
+        assert gate_module.Manifest.load(str(path)).engine_name == "hipkernel:Dense"
+
+
+class TestRunsWithoutPyYaml:
+    """The gate reads a JSON manifest with the standard library alone; PyYAML is needed
+    only to read a manifest that is not JSON."""
+
+    @staticmethod
+    def _run_without_yaml(gate, manifest: Path):
+        code = (
+            "import runpy, sys\n"
+            "sys.modules['yaml'] = None\n"
+            "sys.argv = sys.argv[1:]\n"
+            "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+        )
+        argv = [
+            sys.executable,
+            "-c",
+            code,
+            str(_TOOL),
+            "small",
+            "small",
+            "--mode",
+            "structural",
+            "--manifest",
+            str(manifest),
+        ]
+        return subprocess.run(argv, cwd=gate.tmp, capture_output=True, text=True)
+
+    def test_a_json_manifest_gates_without_pyyaml(self, gate):
+        manifest = gate.tmp / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "engine": {"name": "test:TestEngine"},
+                    "specialization": {"vocabulary": {"dtype": ["BF16", "FP16"]}},
+                }
+            )
+        )
+        result = self._run_without_yaml(gate, manifest)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_a_yaml_manifest_fails_cleanly_without_pyyaml(self, gate):
+        result = self._run_without_yaml(gate, gate.manifest)
+        assert result.returncode != 0
+        assert "FAIL:" in result.stdout + result.stderr
+        assert "Traceback" not in result.stderr
 
 
 class TestGateCatchesSpecializationTwins:
@@ -617,11 +734,11 @@ class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
         assert result.returncode == 1, result.stdout
         assert "varlen" in result.stdout
 
-    def test_runs_without_a_profile_at_all(self, gate):
+    def test_runs_without_a_manifest_at_all(self, gate):
         bad = copy.deepcopy(gate.small)
         bad[0]["metadata"]["head_size"] = 64
         gate.write("bad", bad)
-        result = gate.run("bad", "bad", profiled=False)
+        result = gate.run("bad", "bad", with_manifest=False)
         assert result.returncode == 1, result.stdout
         assert "metadata contradicts the spec" in result.stdout
 
@@ -650,15 +767,43 @@ class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
         # of a string are a translation or a defect, so the check declines to guess and
         # says so.
         gate.write("ok", copy.deepcopy(gate.small))
-        result = gate.run("ok", "ok", profiled=False)
+        result = gate.run("ok", "ok", with_manifest=False)
         assert result.returncode == 0, result.stdout
         assert "UNDECLARED STRING" in result.stdout
         assert "dtype" in result.stdout
 
+    @pytest.mark.parametrize(
+        "manifest, undeclared",
+        [
+            (None, True),
+            (
+                {
+                    "engine": {"name": "test:TestEngine"},
+                    "specialization": {"vocabulary": {"dtype": {"bf16": "BF16"}}},
+                },
+                False,
+            ),
+        ],
+        ids=["no-manifest", "specialization-vocabulary"],
+    )
+    def test_the_manifest_vocabulary_decides_an_undeclared_string_field(
+        self, gate, manifest, undeclared
+    ):
+        """Only the manifest's `specialization.vocabulary` declares dtype here."""
+        gate.write("declared", [_contract(d) for d in gate.small])
+        flags = []
+        if manifest is not None:
+            path = gate.tmp / "vocabulary-manifest.json"
+            path.write_text(json.dumps(manifest))
+            flags = ["--manifest", str(path)]
+        result = gate.run("declared", "declared", *flags, with_manifest=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert ("UNDECLARED STRING" in result.stdout) is undeclared, result.stdout
+
     def test_a_string_field_absent_from_a_declared_vocabulary_is_still_compared(
         self, gate
     ):
-        # The profile's vocabulary declares dtype and says nothing about persist_decode,
+        # The manifest's vocabulary declares dtype and says nothing about persist_decode,
         # a second string field both layers carry, so an unmentioned string field is
         # compared raw.
         bad = copy.deepcopy(gate.small)
@@ -687,7 +832,7 @@ class _Payloads:
     def __init__(self, payload: bytes = _PAYLOAD):
         self.payload = payload
 
-    def read(self, entry, arch):
+    def read(self, entry, arch, launch=None):
         return self.payload
 
 
@@ -800,7 +945,7 @@ def _run_full(root, payloads=None, arch=_ARCH):
         gate_module.check(
             "set",
             str(root),
-            gate_module.Profile.empty(),
+            gate_module.Manifest.empty(),
             "full",
             arch,
             payloads or _Payloads(),
@@ -914,7 +1059,7 @@ class TestFullModeChecksTheProducingBuildRecord:
         failures, _ = gate_module.check(
             "set",
             str(root),
-            gate_module.Profile.empty(),
+            gate_module.Manifest.empty(),
             "full",
             _ARCH,
             gate_module.Payloads(),
@@ -968,7 +1113,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
     def test_it_is_reported_rather_than_failed(self, tmp_path):
         root = self.tree(tmp_path, [], "unbound")
         _b, _d, failures, _unchecked, unverified, _k = gate_module.check(
-            "set", str(root), gate_module.Profile.empty(), "full", _ARCH, _Payloads()
+            "set", str(root), gate_module.Manifest.empty(), "full", _ARCH, _Payloads()
         )
         assert failures == []
         assert len(unverified) == 1
@@ -977,10 +1122,10 @@ class TestFullModeReportsAKernelWithNothingToBind:
         """On the exit code, which is what an integrator reads."""
         monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
         root = self.tree(tmp_path, [], "unbound_exit")
-        profile = tmp_path / "profile.yaml"
-        profile.write_text(_PROFILE)
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text(_MANIFEST)
         code = gate_module.main(
-            ["set", str(root), "--mode", "full", "--profile", str(profile)]
+            ["set", str(root), "--mode", "full", "--manifest", str(manifest)]
         )
         out = capsys.readouterr().out
         assert code == 0, out
@@ -999,7 +1144,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
         """`(failures, unverified)` from one full-mode run. Both lists are read, since a
         kernel landing in neither, or in both, is a different verdict."""
         _b, _d, failures, _unchecked, unverified, _k = gate_module.check(
-            "set", str(root), gate_module.Profile.empty(), "full", _ARCH, _Payloads()
+            "set", str(root), gate_module.Manifest.empty(), "full", _ARCH, _Payloads()
         )
         return failures, unverified
 
@@ -1035,10 +1180,10 @@ class TestFullModeReportsAKernelWithNothingToBind:
         )
 
         monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
-        profile = tmp_path / "rocke-profile.yaml"
-        profile.write_text(_PROFILE)
+        manifest = tmp_path / "rocke-manifest.yaml"
+        manifest.write_text(_MANIFEST)
         code = gate_module.main(
-            ["set", str(root), "--mode", "full", "--profile", str(profile)]
+            ["set", str(root), "--mode", "full", "--manifest", str(manifest)]
         )
         out = capsys.readouterr().out
         assert code == 1, out
@@ -1123,11 +1268,158 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
 
         root = packed(mutate, tag="tampered_structural")
         _b, _d, failures, unchecked, _u, _k = gate_module.check(
-            "set", str(root), gate_module.Profile.empty(), "structural"
+            "set", str(root), gate_module.Manifest.empty(), "structural"
         )
         assert failures == []
         assert any("COMPILED SPECIALIZATION AGREEMENT" in u for u in unchecked)
         assert "COMPILED SPECIALIZATION AGREEMENT" in capsys.readouterr().out
+
+
+class _FakeArchive:
+    def get_kernel(self, toc_key, arch):
+        return _PAYLOAD
+
+
+class _FakeKpack:
+    class PackedKernelArchive:
+        @staticmethod
+        def read(path):
+            return _FakeArchive()
+
+
+class TestMissingRocmKpackIsAnEnvironmentError:
+    """rocm_kpack not importable is a property of the machine, not of the catalog.
+    It must not surface as one gate failure per packed kernel (942:S4-1 saw 144), and
+    the image's /opt/rocm-kpack/python must be found without a flag, as
+    KpackPython.cmake finds it."""
+
+    @staticmethod
+    def _tree(packed, tag):
+        root = packed(tag=tag)
+        (root / "kpack").mkdir()
+        (root / "kpack" / "test.kpack").write_bytes(b"")
+        return root
+
+    @staticmethod
+    def _resolver(monkeypatch, importable_from):
+        """Replace load_kpack: only directories in `importable_from` import."""
+        calls = []
+
+        def fake_load_kpack(rocm_kpack_dir=None):
+            calls.append(rocm_kpack_dir)
+            if rocm_kpack_dir in importable_from:
+                return _FakeKpack, None
+            raise HkpPackError(f"unable to import rocm_kpack from {rocm_kpack_dir}")
+
+        import hkp_pack.kpack_resolver as resolver  # noqa: PLC0415
+
+        monkeypatch.setattr(resolver, "load_kpack", fake_load_kpack)
+        return calls
+
+    def test_unimportable_rocm_kpack_exits_with_the_environment_code(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from=set())
+        root = self._tree(packed, "no_kpack")
+
+        code = gate_module.main(["set", str(root), "--mode", "full", "--arch", _ARCH])
+
+        captured = capsys.readouterr()
+        assert code == gate_module.EXIT_ENVIRONMENT == 3, captured.out
+        assert "ENVIRONMENT ERROR" in captured.err
+        assert "GATE FAILED" not in captured.out
+        assert calls == [None, str(default)]
+
+    def test_the_default_directory_is_used_when_no_flag_is_given(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from={str(default)})
+        root = self._tree(packed, "default_kpack")
+
+        code = gate_module.main(["set", str(root), "--mode", "full", "--arch", _ARCH])
+
+        captured = capsys.readouterr()
+        assert code != gate_module.EXIT_ENVIRONMENT, captured.err
+        assert calls == [None, str(default)]
+        # The payload was read through the fallback and agreed with the evidence.
+        assert "distinct-binaries=    1 OK" in captured.out, captured.out
+
+    def test_a_named_directory_is_not_second_guessed(
+        self, packed, monkeypatch, tmp_path, capsys
+    ):
+        default = tmp_path / "opt-rocm-kpack-python"
+        default.mkdir()
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+        calls = self._resolver(monkeypatch, importable_from={str(default)})
+        root = self._tree(packed, "named_kpack")
+        named = str(tmp_path / "named")
+
+        code = gate_module.main(
+            [
+                "set",
+                str(root),
+                "--mode",
+                "full",
+                "--arch",
+                _ARCH,
+                "--kpack-python-dir",
+                named,
+            ]
+        )
+
+        assert code == gate_module.EXIT_ENVIRONMENT, capsys.readouterr().out
+        assert calls == [named]
+
+    @staticmethod
+    def _package(root: Path, *modules: str) -> Path:
+        """A rocm_kpack package under `root` holding only `modules`."""
+        package = root / "rocm_kpack"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        for module in modules:
+            (package / f"{module}.py").write_text(f"ORIGIN = {str(root)!r}\n")
+        return root
+
+    @pytest.fixture
+    def no_cached_rocm_kpack(self):
+        """Run with no rocm_kpack module cached, and put the cache back afterwards."""
+
+        def cached():
+            return {
+                n: m
+                for n, m in sys.modules.items()
+                if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+            }
+
+        saved = cached()
+        for name in saved:
+            del sys.modules[name]
+        yield
+        for name in cached():
+            del sys.modules[name]
+        sys.modules.update(saved)
+
+    def test_a_broken_installed_package_does_not_hide_the_default_directory(
+        self, monkeypatch, tmp_path, no_cached_rocm_kpack
+    ):
+        # The installed package imports, but has no kpack submodule. The first
+        # attempt caches its `rocm_kpack`; the directory attempt must not reuse it.
+        installed = self._package(tmp_path / "site-packages")
+        default = self._package(
+            tmp_path / "opt-rocm-kpack-python", "kpack", "compression"
+        )
+        monkeypatch.syspath_prepend(str(installed))
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+
+        module = gate_module.Payloads()._load_kpack()
+
+        assert module.ORIGIN == str(default)
 
 
 # TestRealArchiveSelectedConsumer is the one class that builds a real kpack archive,
@@ -1243,10 +1535,13 @@ class TestRealArchiveSelectedConsumer:
 
     @staticmethod
     def run(root, python_dir, tmp_path, mode="full", arch=None):
-        profile = tmp_path / "real-profile.json"
-        profile.write_text(
+        manifest = tmp_path / "real-manifest.json"
+        manifest.write_text(
             json.dumps(
-                {"bundle": "test_engine", "vocabulary": {"dtype": ["BF16", "FP16"]}}
+                {
+                    "engine": {"name": "test:TestEngine"},
+                    "specialization": {"vocabulary": {"dtype": ["BF16", "FP16"]}},
+                }
             )
         )
         args = [
@@ -1256,8 +1551,8 @@ class TestRealArchiveSelectedConsumer:
             str(root),
             "--mode",
             mode,
-            "--profile",
-            str(profile),
+            "--manifest",
+            str(manifest),
         ]
         if arch is not None:
             args += ["--arch", arch]
@@ -1293,7 +1588,7 @@ class TestRealArchiveSelectedConsumer:
         root = tmp_path / "shared"
         root.mkdir()
         schema, engine = _kmd(), _ued()
-        sibling_engine = _ued(ident="ued-sibling")
+        sibling_engine = _ued(ident="ued-sibling", name="test:Sibling")
         ukd = _packed_ukd()
         contract = ukd["provenance"].pop("specialization_contract")
         selected = _kdp([ukd], arch=[_ARCH])
