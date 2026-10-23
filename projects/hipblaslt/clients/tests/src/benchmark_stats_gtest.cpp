@@ -7,7 +7,7 @@
 
 // Host-only unit tests for benchmark_stats.hpp: no GPU/HIP calls, pure logic.
 
-#include "benchmark_stats.hpp"
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 
 #include <gtest/gtest.h>
 

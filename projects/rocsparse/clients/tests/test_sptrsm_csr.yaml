@@ -448,7 +448,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [amazon0312]
 
-# bmwcra_1: ill-conditioned matrix — strict tolerance on all hardware except gfx1103.
+# bmwcra_1: ill-conditioned matrix -- strict tolerance on all hardware except gfx1103.
 - name: sptrsm_csr_file
   category: nightly
   function: sptrsm_csr
@@ -600,3 +600,27 @@ Tests:
 - name: sptrsm_csr
   category: quick
   function: sptrsm_csr_extra
+
+
+# Tests:
+# nrhs = 1 AND conjugate_transpose
+#
+- name: sptrsm_csr
+  category: pre_checkin
+  function: sptrsm_csr
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: 4
+  N: 4
+  K: 1
+  ld_multiplier_B: [1, 2]
+  ld_multiplier_C: [1, 2]
+  alpha: 1
+  alphai: -1
+  transA: rocsparse_operation_none
+  transB: rocsparse_operation_conjugate_transpose
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row, rocsparse_order_column]
+  diag: rocsparse_diag_type_unit
+  uplo: rocsparse_fill_mode_lower
+  matrix: [rocsparse_matrix_random]

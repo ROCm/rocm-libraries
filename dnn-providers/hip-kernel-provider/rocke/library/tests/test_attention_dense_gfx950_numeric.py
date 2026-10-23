@@ -1792,5 +1792,417 @@ class TestDenseLseNumeric:
                     _DENSE_LAUNCHER_CACHE[key] = entry
 
 
+class TestDensePagedNumeric:
+    """Paged K/V (block_tables indirection) on the non-persistent dense body."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024)])
+    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window):
+        """A paged cache must give the same bits as the dense K/V it was scattered
+        from, and match the fp32 sliding-window reference.
+
+        The pages land at randomly permuted physical ids in a cache twice the
+        needed size, and every unused page is NaN. A wrong page index (the
+        per-wave ``tile_key // block_size`` lookup) or a wrong in-page row (the
+        per-row ``tile_key % block_size``) therefore reads either a NaN page or
+        the wrong keys, rather than a near miss the tolerance could absorb.
+        block_size 16/32/64 covers 4, 2 and 1 pages per 64-key tile.
+        """
+        import torch
+
+        hq, hkv, d, B = 16, 4, 128, 1
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+
+        q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+
+        npages = sq // block_size
+        num_kv_blocks = 2 * npages
+        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
+        k_cache = torch.full(
+            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        )
+        v_cache = torch.full_like(k_cache, float("nan"))
+        k_cache[phys] = k[0].view(npages, block_size, hkv, d)
+        v_cache[phys] = v[0].view(npages, block_size, hkv, d)
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+        kv_lens = torch.tensor([sq], device="cuda", dtype=torch.int32)
+
+        dense_spec = _spec(dtype, d, hq, hkv, False, sq=sq, sliding_window=window)
+        paged_spec = dataclasses.replace(
+            dense_spec, paged=True, block_size=block_size, num_kv_blocks=num_kv_blocks
+        )
+
+        dense_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=dense_spec, q=q, k=k, v=v, out=dense_out, scale=scale
+        )
+        paged_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=paged_spec,
+            q=q,
+            k=k_cache,
+            v=v_cache,
+            out=paged_out,
+            scale=scale,
+            block_tables=block_tables,
+            kv_lens=kv_lens,
+        )
+        torch.cuda.synchronize()
+
+        name = f"{dtype} pgd{block_size} sq{sq} swa{window}"
+        assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
+        assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        max_abs = (ref - paged_out.float()).abs().max().item()
+        assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+
+
+# Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and
+# aligned. For sq > sk the ragged padded keys sit below the diagonal of every
+# row with q >= Skv, so correctness depends on the key-pad mask in the causal loops.
+_TOP_LEFT_CASES = [
+    pytest.param(1000, 1050, 1, True, False, id="ragged-1000x1050"),
+    pytest.param(1050, 1000, 1, True, False, id="ragged-1050x1000"),
+    pytest.param(197, 400, 1, True, False, id="ragged-197x400"),
+    pytest.param(400, 197, 1, True, False, id="ragged-400x197"),
+    pytest.param(1234, 300, 1, True, False, id="ragged-1234x300"),
+    pytest.param(1050, 1000, 2, True, False, id="ragged-1050x1000-batch2"),
+    pytest.param(1050, 1000, 1, True, True, id="ragged-1050x1000-sinks"),
+    pytest.param(512, 1024, 1, False, False, id="aligned-512x1024"),
+    pytest.param(1024, 512, 1, False, False, id="aligned-1024x512"),
+]
+
+
+class TestDenseTopLeftCrossLengthNumeric:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["default", "persist"])
+    @pytest.mark.parametrize("sq,skv,batch,ragged,use_sinks", _TOP_LEFT_CASES)
+    def test_jit_matches_top_left(self, sq, skv, batch, ragged, use_sinks, persistent):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            ragged=ragged,
+            persistent=persistent,
+            use_sinks=use_sinks,
+        )
+
+        torch.manual_seed(0)
+        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        sinks = (
+            torch.randn(4, device="cuda", dtype=torch.bfloat16) if use_sinks else None
+        )
+        scale = 1.0 / math.sqrt(spec.head_size)
+
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+        )
+        torch.cuda.synchronize()
+
+        ref = _bottom_right_reference(q, k, v, sinks, scale, top_left=True)
+        err = (out.float() - ref).abs().max().item()
+        assert not torch.isnan(out).any(), "NaN in output"
+        assert err < _BOTTOM_RIGHT_TOL, (
+            f"B{batch} {sq}x{skv} {'ragged' if ragged else 'aligned'} "
+            f"{'persist' if persistent else 'default'}"
+            f"{'+sinks' if use_sinks else ''}: max_abs={err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        )
+
+
+# The cuDNN band ``(left = sliding_window, right = right_bound)`` on the top-left
+# diagonal: key ``k`` is visible to query ``q`` iff ``q - k < left`` (when set) and
+# ``k <= q + right`` (right = -1 is unbounded, 0 causal, R > 0 lookahead). A row whose
+# band holds no key must output zeros (the contract shared with the unified kernels and
+# PyTorch SDPA), never stale data. Before this matrix existed every dense window test
+# used ``seqlen_q == seqlen_kv`` and a causal mask, so neither non-causal bands nor the
+# empty-row case (``seqlen_q > seqlen_kv + window``) were exercised.
+#   (sq, skv, window, right, persistent, ragged)
+_BAND_CASES = [
+    # causal window x cross-length, with empty rows
+    pytest.param(1024, 512, 128, 0, False, False, id="causal-w128-1024x512-empty"),
+    pytest.param(1024, 256, 128, 0, False, False, id="causal-w128-1024x256-empty"),
+    pytest.param(
+        1024, 512, 128, 0, True, False, id="persist-causal-w128-1024x512-empty"
+    ),
+    pytest.param(512, 1024, 128, 0, False, False, id="causal-w128-512x1024"),
+    pytest.param(1024, 1024, 128, 0, False, False, id="causal-w128-1024x1024"),
+    # non-causal (left-only) windows
+    pytest.param(1024, 1024, 128, -1, False, False, id="left-only-w128-1024x1024"),
+    pytest.param(512, 1024, 128, -1, False, False, id="left-only-w128-512x1024"),
+    pytest.param(1024, 512, 128, -1, False, False, id="left-only-w128-1024x512-empty"),
+    pytest.param(1024, 512, 128, -1, True, False, id="persist-left-only-w128-1024x512"),
+    pytest.param(
+        1024, 1024, 256, -1, True, False, id="persist-left-only-w256-1024x1024"
+    ),
+    # two-sided windows and lookahead
+    pytest.param(1024, 1024, 128, 64, False, False, id="two-sided-w128-r64-1024x1024"),
+    pytest.param(512, 1024, 192, 128, False, False, id="two-sided-w192-r128-512x1024"),
+    pytest.param(
+        1024, 512, 128, 64, True, False, id="persist-two-sided-w128-r64-1024x512"
+    ),
+    pytest.param(1024, 1024, 0, 100, False, False, id="lookahead-r100-1024x1024"),
+    pytest.param(
+        1024, 1024, 0, 100, True, False, id="persist-lookahead-r100-1024x1024"
+    ),
+    pytest.param(512, 1024, 0, 7, False, False, id="lookahead-r7-512x1024"),
+    pytest.param(1024, 512, 0, 300, False, False, id="lookahead-r300-1024x512"),
+    # full attention, aligned and ragged cross-length (cross-attention)
+    pytest.param(512, 1024, 0, -1, False, False, id="full-512x1024"),
+    pytest.param(1000, 1050, 0, -1, False, True, id="full-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, -1, False, True, id="full-ragged-1050x1000"),
+    pytest.param(300, 1234, 0, -1, True, True, id="persist-full-ragged-300x1234"),
+    # lookahead on ragged cross-length (key padding can sit inside q + right)
+    pytest.param(1000, 1050, 0, 64, False, True, id="lookahead-ragged-1000x1050"),
+    pytest.param(1050, 1000, 0, 64, False, True, id="lookahead-ragged-1050x1000"),
+]
+
+
+# batch > 1 matters: a q-block that sits entirely past the keys must not read the next
+# batch's tokens, and with batch == 1 the over-read lands in zero-filled (out-of-range)
+# memory, which hides the bug.
+_BAND_BATCH = 2
+
+
+def _band_reference(q, k, v, scale, window, right):
+    import torch
+
+    sq, skv = q.shape[1], k.shape[1]
+    qi = torch.arange(sq, device=q.device)[:, None]
+    ki = torch.arange(skv, device=q.device)[None, :]
+    allowed = torch.ones(sq, skv, dtype=torch.bool, device=q.device)
+    if right >= 0:
+        allowed &= ki <= qi + right
+    if window:
+        allowed &= qi - ki < window
+    scores = torch.einsum("bqhd,bkd->bhqk", q.float(), k[:, :, 0].float()) * scale
+    scores = scores.masked_fill(~allowed[None, None], float("-inf"))
+    empty = ~allowed.any(dim=1)
+    probs = torch.softmax(scores, dim=-1)
+    probs[:, :, empty, :] = 0.0
+    ref = torch.einsum("bhqk,bkd->bqhd", probs, v[:, :, 0].float())
+    return ref, empty
+
+
+def _check_band(out, ref, empty):
+    import torch
+
+    assert not torch.isnan(out).any(), "NaN in output"
+    err = (out.float() - ref)[:, ~empty].abs().max().item()
+    assert err < _BOTTOM_RIGHT_TOL, f"max_abs={err:.3e}"
+    if empty.any():
+        worst = out.float()[:, empty].abs().max().item()
+        assert worst == 0.0, f"{int(empty.sum())} empty rows not zero: {worst}"
+
+
+class TestDenseBandNumeric:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
+    def test_jit_matches_band(self, sq, skv, window, right, persistent, ragged):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=_BAND_BATCH,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=right >= 0,
+            right_bound=max(right, 0),
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            sliding_window=window,
+            persistent=persistent,
+            ragged=ragged,
+        )
+        torch.manual_seed(0)
+        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(128)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        _check_band(out, *_band_reference(q, k, v, scale, window, right))
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
+    def test_dispatched_request_matches_band(
+        self, sq, skv, window, right, persistent, ragged
+    ):
+        """The same bands through ``AttentionRequest`` -> dispatch -> dense spec."""
+        import torch
+        from dispatch.attention import AttentionRequest, attention_tuning_spec
+
+        req = AttentionRequest(
+            batch=_BAND_BATCH,
+            nhead_q=4,
+            nhead_k=1,
+            seqlen_q=sq,
+            seqlen_k=skv,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx950",
+            dtype="bf16",
+            mask_type=0,  # NO_MASK: the band comes from (sliding_window, right_bound)
+            sliding_window=window,
+            right_bound=right,
+        )
+        spec = attention_tuning_spec(
+            req, "gfx950_dense_persist" if persistent else "gfx950_dense_grid"
+        ).kernel_spec
+        assert spec.causal == (right >= 0) and spec.right_bound == max(right, 0)
+        assert spec.ragged == ragged and spec.persistent == persistent
+        torch.manual_seed(1)
+        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(128)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        _check_band(out, *_band_reference(q, k, v, scale, window, right))
+
+
+_DENSE_SPEC_IDS = (
+    "gfx950_dense_grid",
+    "gfx950_dense_persist",
+    "gfx950_dense_persist_widedma",
+)
+# Windows that are not multiples of every tile a variant may pick, with both bounds.
+_VARIANT_BAND_CASES = [
+    pytest.param(1024, 1024, 192, -1, id="left-only-w192-1024x1024"),
+    pytest.param(1024, 512, 320, 64, id="two-sided-w320-r64-1024x512"),
+    pytest.param(512, 1024, 64, 0, id="causal-w64-512x1024"),
+    pytest.param(1024, 512, 128, 0, id="causal-w128-1024x512-empty"),
+]
+
+
+class TestDenseVariantsBand:
+    """Every dense tuning variant (grid, persistent, wide-DMA persistent) against the
+    band oracle, through the dispatcher so the variant's own tile geometry is used."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("spec_id", _DENSE_SPEC_IDS)
+    @pytest.mark.parametrize("sq,skv,window,right", _VARIANT_BAND_CASES)
+    def test_variant_matches_band(self, spec_id, sq, skv, window, right):
+        import torch
+        from dispatch.attention import AttentionRequest, attention_tuning_spec
+
+        req = AttentionRequest(
+            batch=_BAND_BATCH,
+            nhead_q=4,
+            nhead_k=1,
+            seqlen_q=sq,
+            seqlen_k=skv,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx950",
+            dtype="bf16",
+            mask_type=0,
+            sliding_window=window,
+            right_bound=right,
+        )
+        spec = attention_tuning_spec(req, spec_id).kernel_spec
+        torch.manual_seed(1)
+        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(128)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        _check_band(out, *_band_reference(q, k, v, scale, window, right))
+
+
+_ONE_HOT_DENSE = [
+    pytest.param(64, 0, id="causal_w64"),
+    pytest.param(64, -1, id="left_only_w64"),
+    pytest.param(64, 4, id="two_sided_w64_r4"),
+    pytest.param(0, 4, id="lookahead_r4"),
+    pytest.param(0, -1, id="full"),
+    pytest.param(0, 0, id="causal"),
+]
+
+
+class TestDenseBandIndexTruthTable:
+    """Index-level check of the dense band inequalities (top-left diagonal).
+
+    ``q = 0`` makes the visible scores equal (uniform softmax) and ``V[k] = e_k``
+    turns each output row into the indicator of its visible keys over ``1/n``, so
+    ``left = W`` seeing W keys counting the diagonal (``d - k < W``) and
+    ``k <= d + right`` are checked per key index. Rows with no visible key are zero.
+    """
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("window,right", _ONE_HOT_DENSE)
+    def test_visible_key_set_is_exact(self, window, right, persistent):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        sq, skv, batch, head = int(tile["block_m"]), 128, 2, 128
+        spec = Gfx950AttentionDenseSpec(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=2,
+            num_kv_heads=1,
+            head_size=head,
+            causal=right >= 0,
+            right_bound=max(right, 0),
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            sliding_window=window,
+            persistent=persistent,
+        )
+        q = torch.zeros(batch, sq, 2, head, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v = torch.zeros(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v[:, torch.arange(skv), 0, torch.arange(skv)] = 1.0
+        out = torch.empty_like(q)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1.0)
+        torch.cuda.synchronize()
+        expected = torch.zeros(sq, 2, head, dtype=torch.float32)
+        for p in range(sq):
+            visible = [
+                kk
+                for kk in range(skv)
+                if (window == 0 or p - kk < window) and (right < 0 or kk <= p + right)
+            ]
+            if visible:
+                expected[p, :, visible] = 1.0 / len(visible)
+        err = (out.float().cpu() - expected[None]).abs().max().item()
+        assert err < 1e-2, f"max_abs={err:.3e}"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

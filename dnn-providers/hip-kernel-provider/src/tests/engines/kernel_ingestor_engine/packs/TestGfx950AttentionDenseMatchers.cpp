@@ -28,7 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -2151,6 +2151,14 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsid
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeprecatedCausalWithRightBoundBelowMinusOne)
+{
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+    spec.rightBound = -5;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
 {
     // The control: bound-wins must not over-fire and decline ordinary deprecated-causal.
@@ -2229,6 +2237,32 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
     spec.causalMaskDeprecated = true;
     spec.leftBound = std::nullopt;
     spec.rightBound = 64;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, ServesDeprecatedCausalWithCausalBounds)
+{
+    // The bounds describe the same causal band the boolean does, so the merge agrees.
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+
+    KernelSpec causal;
+    causal.causal = 1;
+    EXPECT_TRUE(matchesKernel(spec, causal));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, ReadsDeprecatedCausalWithBottomRightAlignmentAsBottomRight)
+{
+    // causal_mask keeps the stored alignment, so this is bottom-right causal: served at
+    // Sq == Skv, declined where the corners differ.
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
+    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+
+    spec.seqLenKv = SEQ * 2;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 

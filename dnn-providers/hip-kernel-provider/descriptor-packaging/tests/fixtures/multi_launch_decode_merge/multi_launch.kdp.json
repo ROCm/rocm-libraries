@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "id": "f61cdae5-8072-4fb3-8b6d-ac5ec17d9fe6",
+  "name": "hipkernel:MultiLaunch",
+  "arch": [
+    "gfx1151"
+  ],
+  "matchers": [
+    "d4fab8c3-6e50-4d91-8f4b-8a3caf5b7dc4"
+  ],
+  "engine": "a1c7e5f0-3b2d-4a6e-9c18-5d0f7b2e4a91",
+  "dispatch": "e50bc9d4-7f61-4ea2-9a5c-9b4db06c8ed5",
+  "kernelDescriptors": [
+    {
+      "version": "1.1",
+      "id": "0a72ebf6-9183-40c4-9c7e-bd6fd28eaa07",
+      "name": "multi_launch.decode_merge",
+      "arch": [
+        "gfx1151"
+      ],
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          },
+          "compile_target": "gfx1151"
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          },
+          "compile_target": "gfx1151",
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "family": "decode_merge"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "a1c7e5f0-3b2d-4a6e-9c18-5d0f7b2e4a91",
+              "kmd_id": "b2d8f6a1-4c3e-4b7f-8d29-6e1a8c3f5ba2",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

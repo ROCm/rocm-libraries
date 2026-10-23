@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/instance_attention_unified.h"
@@ -228,6 +230,7 @@ rocke_kernel_def_t* au_make(const py::dict& d, Store& st, rocke_ir_builder_t* b)
 
 std::string au_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -242,18 +245,14 @@ std::string au_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
-                                                      resolve_python_llvm_flavor(),
-                                                      arch.empty() ? "gfx950" : arch.c_str(),
-                                                      &ll,
-                                                      err,
-                                                      sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.attention_unified_lower_llvm");
 }
 std::string au_serialize(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -270,7 +269,7 @@ std::string au_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> au_verify(const py::dict& d, const std::string& arch)
 {
-    (void)arch;
+    require_arch(arch); /* validated, not consumed: the kernel is arch-neutral */
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -307,10 +306,11 @@ rocke_fmha_mfma_spec_t mfma_build(const py::dict& d, Store& st)
 
 std::string fmma_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_mfma_spec_t s = mfma_build(d, st);
     const auto flavor = resolve_python_llvm_flavor();
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_kernel_def_t* k = rocke_build_fmha_fwd_mfma(nullptr, &s, a);
     if(!k)
         throw std::runtime_error("rocke_engine.fmha_mfma_lower_llvm build failed");
@@ -320,20 +320,20 @@ std::string fmma_lower(const py::dict& d, const std::string& arch)
 }
 std::string fmma_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_mfma_spec_t s = mfma_build(d, st);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_mfma(nullptr, &s, arch.c_str());
     if(!k)
         throw std::runtime_error("rocke_engine.fmha_mfma_serialize_ir build failed");
     return ser_kernel(k, "rocke_engine.fmha_mfma_serialize_ir");
 }
 std::vector<std::string> fmma_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_mfma_spec_t s = mfma_build(d, st);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_mfma(nullptr, &s, arch.c_str());
     if(!k)
         throw std::runtime_error("rocke_engine.fmha_mfma_verify build failed");
     return ver_kernel(k);
@@ -363,27 +363,24 @@ rocke_fmha_fwd_fp8_spec_t fp8_build(const py::dict& d, Store& st, bool* persiste
 
 std::string fp8_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_fmha_fwd_fp8_lower_to_llvm(&s,
-                                                         arch.empty() ? "gfx950" : arch.c_str(),
-                                                         resolve_python_llvm_flavor(),
-                                                         &ll,
-                                                         err,
-                                                         sizeof err);
+    rocke_status_t s2 = rocke_fmha_fwd_fp8_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.fmha_fwd_fp8_lower_llvm");
 }
 std::string fp8_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_fp8_new(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -395,12 +392,12 @@ std::string fp8_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> fp8_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_fp8_new(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -422,10 +419,11 @@ rocke_fmha_bwd_spec_t bwd_build(const py::dict& d, Store& st)
 }
 std::string bwd_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_bwd_spec_t s = bwd_build(d, st);
     rocke_fmha_kernel_builder_t kb;
-    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -435,21 +433,18 @@ std::string bwd_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
-                                                      resolve_python_llvm_flavor(),
-                                                      arch.empty() ? "gfx950" : arch.c_str(),
-                                                      &ll,
-                                                      err,
-                                                      sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.fmha_bwd_lower_llvm");
 }
 std::string bwd_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_bwd_spec_t s = bwd_build(d, st);
     rocke_fmha_kernel_builder_t kb;
-    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -461,10 +456,11 @@ std::string bwd_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> bwd_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_bwd_spec_t s = bwd_build(d, st);
     rocke_fmha_kernel_builder_t kb;
-    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_bwd(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -484,12 +480,12 @@ rocke_fmha_head_grouping_spec_t hg_build(const py::dict& d, Store& st)
 }
 std::string hg_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_head_grouping_spec_t s = hg_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -499,23 +495,19 @@ std::string hg_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
-                                                      resolve_python_llvm_flavor(),
-                                                      arch.empty() ? "gfx950" : arch.c_str(),
-                                                      &ll,
-                                                      err,
-                                                      sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
     return take_ll(s2, ll, err, "rocke_engine.fmha_head_grouping_lower_llvm");
 }
 std::string hg_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_head_grouping_spec_t s = hg_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -527,12 +519,12 @@ std::string hg_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> hg_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_fmha_head_grouping_spec_t s = hg_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_fmha_fwd_head_grouping(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -615,11 +607,12 @@ void sparse_free(rocke_jenga_sparse_ctx_t* jenga_ctx, rocke_vsa_sparse_ctx_t* vs
 }
 std::string sparse_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_jenga_sparse_ctx_t jctx;
     rocke_vsa_sparse_ctx_t vctx;
     bool is_vsa = false;
-    const char* arch_c = arch.empty() ? "gfx950" : arch.c_str();
+    const char* arch_c = arch.c_str();
     rocke_kernel_def_t* k = sparse_build(d, st, arch_c, &jctx, &vctx, &is_vsa);
     if(!k)
     {
@@ -637,12 +630,12 @@ std::string sparse_lower(const py::dict& d, const std::string& arch)
 }
 std::string sparse_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_jenga_sparse_ctx_t jctx;
     rocke_vsa_sparse_ctx_t vctx;
     bool is_vsa = false;
-    rocke_kernel_def_t* k
-        = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
+    rocke_kernel_def_t* k = sparse_build(d, st, arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
     {
         sparse_free(&jctx, &vctx, is_vsa);
@@ -663,12 +656,12 @@ std::string sparse_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> sparse_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_jenga_sparse_ctx_t jctx;
     rocke_vsa_sparse_ctx_t vctx;
     bool is_vsa = false;
-    rocke_kernel_def_t* k
-        = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
+    rocke_kernel_def_t* k = sparse_build(d, st, arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
     {
         sparse_free(&jctx, &vctx, is_vsa);
@@ -733,27 +726,24 @@ rocke_sage_attention_spec_t sage_build(const py::dict& d, Store& st)
 }
 std::string sage_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_sage_attention_spec_t s = sage_build(d, st);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_sage_attention_lower_to_llvm(&s,
-                                                           arch.empty() ? "gfx950" : arch.c_str(),
-                                                           resolve_python_llvm_flavor(),
-                                                           &ll,
-                                                           err,
-                                                           sizeof err);
+    rocke_status_t s2 = rocke_sage_attention_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.sage_attention_lower_llvm");
 }
 std::string sage_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_sage_attention_spec_t s = sage_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_sage_attention_new(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -765,12 +755,12 @@ std::string sage_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_sage_attention_spec_t s = sage_build(d, st);
     rocke_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    rocke_kernel_def_t* k
-        = rocke_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_sage_attention_new(&kb, &s, arch.c_str());
     if(!k)
     {
         rocke_fmha_kernel_builder_free(&kb);
@@ -833,10 +823,11 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 
 std::string t942_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    const char* a = arch.empty() ? "gfx942" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
@@ -853,11 +844,11 @@ std::string t942_lower(const py::dict& d, const std::string& arch)
 }
 std::string t942_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(
-        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -871,11 +862,11 @@ std::string t942_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(
-        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -890,10 +881,11 @@ std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
 
 std::string t950_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_kernel_def_t* k = rocke_gfx950_build_unified_attention_2d_tiled_new(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
@@ -910,11 +902,11 @@ std::string t950_lower(const py::dict& d, const std::string& arch)
 }
 std::string t950_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = rocke_gfx950_build_unified_attention_2d_tiled_new(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_gfx950_build_unified_attention_2d_tiled_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -928,11 +920,11 @@ std::string t950_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> t950_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = rocke_gfx950_build_unified_attention_2d_tiled_new(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k = rocke_gfx950_build_unified_attention_2d_tiled_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -985,10 +977,11 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
 }
 std::string fkv_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
     rocke_ir_builder_t b;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
     rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
@@ -1007,12 +1000,13 @@ std::string fkv_lower(const py::dict& d, const std::string& arch)
 }
 std::string fkv_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k
+        = rocke_build_unified_attention_2d_fastkv_register_p(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
@@ -1027,12 +1021,13 @@ std::string fkv_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
+    rocke_kernel_def_t* k
+        = rocke_build_unified_attention_2d_fastkv_register_p(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
@@ -1074,11 +1069,16 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
         s.has_tile_size_override = true;
         s.tile_size_override = a_int(d, "tile_size_override", 0);
     }
+    s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
+    s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
+    s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
     if(a_str(d, "kv_storage_dtype", v))
         s.kv_storage_dtype = st.keep(v);
+    if(a_str(d, "kv_cache_policy", v))
+        s.kv_cache_policy = st.keep(v);
     return s;
 }
 
@@ -1094,12 +1094,13 @@ bool t3d_strided(const py::dict& d)
 /* gfx942 3d: emitter lowers only the segment via the family convenience. */
 std::string t3d942_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    const char* target = arch.empty() ? "gfx942" : arch.c_str();
+    const char* target = arch.c_str();
     if(!t3d_strided(d))
     {
         rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
@@ -1123,6 +1124,7 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
     rocke_ir_builder_t b;
@@ -1130,9 +1132,9 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                                            : rocke_build_unified_attention_3d_tiled_gfx942)(
-        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    rocke_kernel_def_t* k
+        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
+                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1146,6 +1148,7 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
     rocke_ir_builder_t b;
@@ -1153,9 +1156,9 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                                            : rocke_build_unified_attention_3d_tiled_gfx942)(
-        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    rocke_kernel_def_t* k
+        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
+                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1171,9 +1174,10 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
 /* gfx950 3d: emitter lowers segment then reduce, concatenated. */
 std::string t3d950_lower(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     std::string out;
     /* segment */
     {
@@ -1226,9 +1230,10 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
 }
 std::string t3d950_serialize(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
     rocke_kernel_def_t* k
@@ -1247,9 +1252,10 @@ std::string t3d950_serialize(const py::dict& d, const std::string& arch)
 }
 std::vector<std::string> t3d950_verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
     rocke_kernel_def_t* k
@@ -1271,21 +1277,11 @@ void reg3(py::module_& m,
           const char* prefix,
           std::string (*lower)(const py::dict&, const std::string&),
           std::string (*ser)(const py::dict&, const std::string&),
-          std::vector<std::string> (*ver)(const py::dict&, const std::string&),
-          const char* dflt_arch)
+          std::vector<std::string> (*ver)(const py::dict&, const std::string&))
 {
-    m.def((std::string(prefix) + "_lower_llvm").c_str(),
-          lower,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
-    m.def((std::string(prefix) + "_serialize_ir").c_str(),
-          ser,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
-    m.def((std::string(prefix) + "_verify").c_str(),
-          ver,
-          py::arg("spec"),
-          py::arg("arch") = dflt_arch);
+    m.def((std::string(prefix) + "_lower_llvm").c_str(), lower, py::arg("spec"), py::arg("arch"));
+    m.def((std::string(prefix) + "_serialize_ir").c_str(), ser, py::arg("spec"), py::arg("arch"));
+    m.def((std::string(prefix) + "_verify").c_str(), ver, py::arg("spec"), py::arg("arch"));
 }
 
 } // namespace
@@ -1366,9 +1362,10 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
 
 py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     Store st;
     rocke_unified_attn_problem_t p = problem_dict_to_c(d, st);
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
     /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
      * that attention_unified._tiled_spec_from_problem makes after building the spec). */
@@ -1381,25 +1378,18 @@ py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch
 
 void register_attention(py::module_& m)
 {
-    reg3(m, "attention_unified", &au_lower, &au_serialize, &au_verify, "gfx950");
-    reg3(m, "fmha_mfma", &fmma_lower, &fmma_serialize, &fmma_verify, "gfx950");
-    reg3(m, "fmha_fwd_fp8", &fp8_lower, &fp8_serialize, &fp8_verify, "gfx950");
-    reg3(m, "fmha_bwd", &bwd_lower, &bwd_serialize, &bwd_verify, "gfx950");
-    reg3(m, "fmha_head_grouping", &hg_lower, &hg_serialize, &hg_verify, "gfx950");
-    reg3(m, "sparse_attention", &sparse_lower, &sparse_serialize, &sparse_verify, "gfx950");
-    reg3(m, "sage_attention", &sage_lower, &sage_serialize, &sage_verify, "gfx950");
-    reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify, "gfx942");
-    reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify, "gfx950");
-    reg3(m,
-         "gfx950_attention_tiled_2d_fastkv_regp",
-         &fkv_lower,
-         &fkv_serialize,
-         &fkv_verify,
-         "gfx950");
-    reg3(
-        m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify, "gfx942");
-    reg3(
-        m, "gfx950_attention_tiled_3d", &t3d950_lower, &t3d950_serialize, &t3d950_verify, "gfx950");
+    reg3(m, "attention_unified", &au_lower, &au_serialize, &au_verify);
+    reg3(m, "fmha_mfma", &fmma_lower, &fmma_serialize, &fmma_verify);
+    reg3(m, "fmha_fwd_fp8", &fp8_lower, &fp8_serialize, &fp8_verify);
+    reg3(m, "fmha_bwd", &bwd_lower, &bwd_serialize, &bwd_verify);
+    reg3(m, "fmha_head_grouping", &hg_lower, &hg_serialize, &hg_verify);
+    reg3(m, "sparse_attention", &sparse_lower, &sparse_serialize, &sparse_verify);
+    reg3(m, "sage_attention", &sage_lower, &sage_serialize, &sage_verify);
+    reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify);
+    reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify);
+    reg3(m, "gfx950_attention_tiled_2d_fastkv_regp", &fkv_lower, &fkv_serialize, &fkv_verify);
+    reg3(m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify);
+    reg3(m, "gfx950_attention_tiled_3d", &t3d950_lower, &t3d950_serialize, &t3d950_verify);
 
     m.def(
         "gfx950_attn_tiled_spec_from_problem",
@@ -1407,7 +1397,7 @@ void register_attention(py::module_& m)
             return attn_tiled_spec_from_problem(d, arch);
         },
         py::arg("problem"),
-        py::arg("arch") = std::string("gfx950"),
+        py::arg("arch"),
         "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
         "and return the assembled spec as a dict (mirrors "
         "attention_spec_builder._tiled_spec_from_problem).");

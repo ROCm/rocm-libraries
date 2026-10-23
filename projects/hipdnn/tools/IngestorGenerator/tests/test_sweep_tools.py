@@ -201,24 +201,29 @@ raise SystemExit(scenario.get("rc", 0))
 #: Marks a case that drives a sweep far enough to execute a staged fixture. Narrower
 #: than the file: staging a fixture and refusing a config work anywhere, so the
 #: refusal, device-probe and field-audit cases stay live on every platform.
-_needs_posix_exec = pytest.mark.skipif(
-    os.name != "posix",
-    reason=(
-        "driving a sweep to a result needs POSIX execution semantics: sweep.py "
-        "selects the benchmark interpreter from its shebang and runs the benchmark "
-        "directly. sweep.py targets an allocated device host."
-    ),
+def _skip_off_posix(reason: str):
+    """Skip off POSIX, and stay allowed to skip in a strict run: the platform cannot run
+    the case, which no build can fix."""
+
+    def mark(obj):
+        obj = pytest.mark.skipif(os.name != "posix", reason=reason)(obj)
+        return pytest.mark.allow_skip(reason=reason)(obj)
+
+    return mark
+
+
+_needs_posix_exec = _skip_off_posix(
+    "driving a sweep to a result needs POSIX execution semantics: sweep.py "
+    "selects the benchmark interpreter from its shebang and runs the benchmark "
+    "directly. sweep.py targets an allocated device host."
 )
 
 
 #: Marks a case that withdraws write access to drive an operational error. `chmod`
 #: does not deny directory writes on Windows, so the condition never holds there.
-_needs_posix_permissions = pytest.mark.skipif(
-    os.name != "posix",
-    reason=(
-        "making a directory unwritable needs POSIX permission semantics: chmod does "
-        "not withdraw directory write access on Windows"
-    ),
+_needs_posix_permissions = _skip_off_posix(
+    "making a directory unwritable needs POSIX permission semantics: chmod does "
+    "not withdraw directory write access on Windows"
 )
 
 
@@ -821,13 +826,15 @@ class TestTheDriverRefusesAnUnsafeConfig:
 
     def test_a_config_may_not_redirect_a_driver_owned_option(self, sweep):
         """`--engine` in the config would let the evidence come from a different engine
-        than the ledger attributes it to."""
-        config = json.loads(sweep.config_path.read_text())
-        config["benchmark"]["argv"] = [str(sweep.bin / "python3"), "--engine", "1"]
-        sweep.config_path.write_text(json.dumps(config))
-        result = sweep.run()
-        assert result.returncode == 2
-        assert "phase-owned options" in result.stderr
+        than the ledger attributes it to; `--autotune` or `--hipdnn-cache-dir` would move
+        the cache the rankings are read from."""
+        for extra in (["--engine", "1"], ["--autotune"], ["--hipdnn-cache-dir=/x"]):
+            config = json.loads(sweep.config_path.read_text())
+            config["benchmark"]["argv"] = [str(sweep.bin / "python3"), *extra]
+            sweep.config_path.write_text(json.dumps(config))
+            result = sweep.run()
+            assert result.returncode == 2, extra
+            assert "phase-owned options" in result.stderr
 
     def test_an_unknown_key_is_refused_rather_than_ignored(self, sweep):
         config = json.loads(sweep.config_path.read_text())
@@ -1005,7 +1012,7 @@ class TestCorpusGraphIdentity:
         return _sweep_module().corpus_inventory(corpus, "none")
 
     def test_two_sources_sharing_a_graph_name_are_two_graphs(self, tmp_path):
-        """942:S6-10: hipkittens and pytorch both ship
+        """hipkittens and pytorch both ship
         bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal."""
         shared = "bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal"
         self.stage(

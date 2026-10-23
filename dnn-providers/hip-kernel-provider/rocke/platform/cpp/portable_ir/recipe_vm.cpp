@@ -349,7 +349,7 @@ static long rv_int(rvm_t* vm, const jd_val_t* e)
            the multiplier depends on its odd part, so neither is expressible as
            arithmetic on the axis -- the recipe has to regenerate them.
            Mirrors recipe_expand.py::magic_division_constants, and upstream of
-           both, helpers/transforms.py::calculate_magic_numbers. */
+           both, helpers/magic_division.py::calculate_magic_numbers. */
         const jd_val_t* mm = rocke_jget(e, "magic_multiplier");
         const jd_val_t* ms = rocke_jget(e, "magic_shift");
         if(mm || ms)

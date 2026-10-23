@@ -299,7 +299,11 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     // Stream
     hipStream_t stream = handle->stream;
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    if(trans != rocsparse_operation_none)
+#else
     if(trans == rocsparse_operation_transpose || trans == rocsparse_operation_conjugate_transpose)
+#endif
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_trm_transpose(handle,
                                                           m,
