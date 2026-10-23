@@ -156,13 +156,10 @@ at runtime and does not select by batch. An explicit `spec_id`, such as
 
 Each registered tile is a tuned candidate (the shared `rocke.dispatch.tuning`
 template) whose knob space holds the performance knobs: every (tile x knob)
-configuration of the listed axes is listed by `dispatch_gdn_decode_all` and
-pinnable by `spec_id` plus `tuning_id` / `tuning_knobs`. The listed axes are the
-nine knob axes whole and `waves_per_eu` `{0, 4}` (the `production` sweep level)
-or every legal value `0`-`8` (`full`); any legal `waves_per_eu` is pinnable.
-`auto` runs the tile's base configuration, every knob at its default. The pin
-and scope rules are in
-[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md).
+configuration is listed by `dispatch_gdn_decode_all` and pinnable by
+`spec_id` plus `tuning_id` / `tuning_knobs`, and `auto` runs the tile's base
+configuration. The sweep levels and the pin and scope rules are in
+[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
 
 KDA `auto` keeps its separately measured table keyed by
 `work = batch * num_v_heads`, so tensor-parallel head sharding maps to the same

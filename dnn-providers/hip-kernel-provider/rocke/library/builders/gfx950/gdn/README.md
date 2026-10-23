@@ -175,20 +175,14 @@ computes (the two state hints and `waves_per_eu` also apply on the reference
 path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
 `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
 `waves_per_eu`. Every one defaults to the code the kernel emitted before it
-existed, so a default spec keeps its name and its IR. `auto` keeps every knob
-at its default (flags off, hints `default`, `waves_per_eu` `0`). Each
-registered tile's knob space holds them, so any (tile x knob) configuration is
-selectable by pinning its `spec_id` plus `tuning_knobs` (and the `tuning_id` a
-sweep recorded with them). `dispatch_gdn_decode_all` lists every configuration
-of the listed axes: all nine knob axes, and `waves_per_eu` `{0, 4}` at the
-default `production` sweep level or every legal value `0`-`8` at `full`; any
-legal `waves_per_eu` is pinnable. `dispatch_gdn_decode_bases` lists only each
-tile's base configuration. `tuning_knobs` alone carry a configuration to
-another shape (a knob that shape does not read is dropped); a stored
-`tuning_id` replays only where all of its knobs are still read, and is
-refused elsewhere. Their rules and the tiles where each changes code are in
-[`ALGORITHM.md` §4.10](ALGORITHM.md#410-performance-knobs); the registry and
-pin rules in [§4.6](ALGORITHM.md#46-registry-and-tile-selection).
+existed, so a default spec keeps its name and its IR, and `auto` keeps every
+knob at its default. Each registered tile's knob space holds them: every
+(tile x knob) configuration is listed by `dispatch_gdn_decode_all` (and each
+tile's base configuration by `dispatch_gdn_decode_bases`) and pinnable by its
+`spec_id` plus `tuning_knobs` and/or `tuning_id`. The sweep levels and pin
+rules are in [`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection);
+each knob's rules and the tiles where it changes code are in
+[§4.10](ALGORITHM.md#410-performance-knobs).
 
 ```python
 result = dispatch_gdn_decode(GdnDecodeRequest(
