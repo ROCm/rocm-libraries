@@ -36,3 +36,11 @@
 #ifndef ROCSOLVER_KERNEL
 #define ROCSOLVER_KERNEL static __global__
 #endif
+
+#ifndef ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER
+#define ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(_T, _sz) ([]() {\
+    __shared__ _T _w32[_sz / 32];\
+    __shared__ _T _w64[_sz / 64];\
+    return (warpSize == 32) ? _w32 : _w64;\
+}());
+#endif

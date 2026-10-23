@@ -69,7 +69,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     S* block_sums_block = load_ptr_batch<S>(block_sums, bid, 0, blocks);
 
     // shared variables
-    __shared__ S sval[LANGE_FROBENIUS_MAX_BDIM / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(
+        S, LANGE_FROBENIUS_MAX_BDIM);
 
     // loop over blocks with grid stride (handles grid overflow)
     for(I block_id = block_start; block_id < blocks; block_id += block_inc)
@@ -120,7 +121,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     S* block_sum = load_ptr_batch<S>(block_sums, bid, 0, blocks);
 
     // shared variables
-    __shared__ S sval[LANGE_FROBENIUS_MAX_BDIM / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(
+        S, LANGE_FROBENIUS_MAX_BDIM);
 
     // find maximum of row sums
     S norm_frobenius = 0;
@@ -162,7 +164,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     S* row_sums_block = load_ptr_batch<S>(row_sums, bid, 0, m);
 
     // shared variables
-    __shared__ S sval[LANGE_THDS / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(S, LANGE_THDS);
 
     // loop over rows with grid stride (handles grid overflow)
     for(I row = row_start; row < m; row += row_inc)
@@ -208,7 +210,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     S* row_sums_block = load_ptr_batch<S>(row_sums, bid, 0, m);
 
     // shared variables
-    __shared__ S sval[LANGE_THDS / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(S, LANGE_THDS);
 
     // find maximum of row sums
     S norm_one = 0;
@@ -250,7 +252,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     S* col_sums_block = load_ptr_batch<S>(col_sums, bid, 0, n);
 
     // shared variables
-    __shared__ S sval[LANGE_THDS / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(S, LANGE_THDS);
 
     // loop over columns with grid stride (handles grid overflow)
     for(I col = col_start; col < n; col += col_inc)
@@ -295,7 +297,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS)
     S* col_sums_block = load_ptr_batch<S>(col_sums, bid, 0, n);
 
     // shared variables
-    __shared__ S sval[LANGE_THDS / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(S, LANGE_THDS);
 
     // find maximum of column sums
     S norm_one = 0;
@@ -338,7 +340,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     S* block_maxs_block = load_ptr_batch<S>(block_maxs, bid, 0, blocks);
 
     // shared variables
-    __shared__ S sval[LANGE_FROBENIUS_MAX_BDIM / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(
+        S, LANGE_FROBENIUS_MAX_BDIM);
 
     // loop over blocks with grid stride (handles grid overflow)
     for(I block_id = block_start; block_id < blocks; block_id += block_inc)
@@ -389,7 +392,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FROBENIUS_MAX_BDIM)
     S* block_max = load_ptr_batch<S>(block_maxs, bid, 0, blocks);
 
     // shared variables
-    __shared__ S sval[LANGE_FROBENIUS_MAX_BDIM / WarpSize];
+    S* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(
+        S, LANGE_FROBENIUS_MAX_BDIM);
 
     // find maximum of block maximums
     S norm_max = 0;
