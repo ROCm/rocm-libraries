@@ -844,6 +844,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // that start can precede this split's range -- the head of the first
         // tile then belongs to the previous split and is erased from s_acc in
         // the main loop. Without paging there is nothing to align to.
+        //
+        // This only holds if page_block_size % kN0 == 0, otherwise a tile
+        // straddles two pages and the page turn below reads the wrong rows.
+        // Nothing enforces it: page_block_size is a runtime kargs field, so it
+        // is the caller's contract. Results are silently wrong if it is broken.
         const index_t aligned_physical_seqlen_k_start =
             kIsPagedKV ? kN0 * integer_divide_floor(physical_seqlen_k_start, kN0)
                        : physical_seqlen_k_start;
