@@ -11,6 +11,10 @@
 #include <hipdnn_frontend/detail/SdpaFwdUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
+#include <optional>
+#include <string>
+#include <utility>
+
 namespace hipdnn_frontend::graph
 {
 class SdpaFwdNode : public BaseNode<SdpaFwdNode, NodeType::SDPA_FWD>
@@ -67,16 +71,45 @@ public:
                             ErrorCode::INVALID_VALUE,
                             "SdpaFwdNode: Value tensor V must be rank-4, got rank="
                                 + std::to_string(vDims.size()));
-        HIPDNN_RETURN_IF_NE(qDims[0],
-                            kDims[0],
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFwdNode: batch size mismatch between Q and K: "
-                                + std::to_string(qDims[0]) + " vs " + std::to_string(kDims[0]));
-        HIPDNN_RETURN_IF_NE(qDims[0],
-                            vDims[0],
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFwdNode: batch size mismatch between Q and V: "
-                                + std::to_string(qDims[0]) + " vs " + std::to_string(vDims[0]));
+        // A paged K or V (cuDNN layout) is a container [num_blocks, H, block_size, D] addressed
+        // through a page table, so its leading dim is a block count, not the batch, and its
+        // dim 2 is a block size, not the key length. Whether an engine supports paging (and its
+        // other conditions, such as padding) is the engine's decision; the node only rejects
+        // shapes that cannot describe attention at all.
+        const auto pageTableK = attributes.get_page_table_k();
+        const auto pageTableV = attributes.get_page_table_v();
+        const bool pagedK = pageTableK != nullptr;
+        const bool pagedV = pageTableV != nullptr;
+        if(!pagedK)
+        {
+            HIPDNN_RETURN_IF_NE(qDims[0],
+                                kDims[0],
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: batch size mismatch between Q and K: "
+                                    + std::to_string(qDims[0]) + " vs " + std::to_string(kDims[0]));
+        }
+        if(!pagedV)
+        {
+            HIPDNN_RETURN_IF_NE(qDims[0],
+                                vDims[0],
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: batch size mismatch between Q and V: "
+                                    + std::to_string(qDims[0]) + " vs " + std::to_string(vDims[0]));
+        }
+        // Every batch needs a page-table row.
+        for(const auto& [table, name] : {std::pair{pageTableK, "K"}, std::pair{pageTableV, "V"}})
+        {
+            if(table == nullptr)
+            {
+                continue;
+            }
+            const auto& tableDims = table->get_dim();
+            HIPDNN_RETURN_IF_TRUE(tableDims.empty() || tableDims[0] != qDims[0],
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: page table for ") + name
+                                      + " must have the batch size of Q ("
+                                      + std::to_string(qDims[0]) + ") as its first dim");
+        }
         // Rule 2: head_dim: Q[-1] == K[-1]; V[-1] is independent (may differ)
         const auto headDimQ = qDims[3];
         const auto headDimK = kDims[3];
@@ -86,14 +119,18 @@ public:
                             "SdpaFwdNode: head_dim mismatch between Q and K: "
                                 + std::to_string(headDimQ) + " vs " + std::to_string(headDimK));
 
-        // Rule 3: seq_kv: K[-2] == V[-2]
+        // Rule 3: seq_kv: K[-2] == V[-2] when both are dense. A paged side's dim 2 is its block
+        // size, so the key lengths are not comparable from the dims.
         const auto seqKvK = kDims[2];
         const auto seqKvV = vDims[2];
-        HIPDNN_RETURN_IF_NE(seqKvK,
-                            seqKvV,
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFwdNode: seq_kv mismatch between K and V: "
-                                + std::to_string(seqKvK) + " vs " + std::to_string(seqKvV));
+        if(!pagedK && !pagedV)
+        {
+            HIPDNN_RETURN_IF_NE(seqKvK,
+                                seqKvV,
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: seq_kv mismatch between K and V: "
+                                    + std::to_string(seqKvK) + " vs " + std::to_string(seqKvV));
+        }
 
         // Rule 4: num_heads % K_heads == 0; num_heads % V_heads == 0 (GQA/MQA)
         const auto numHeads = qDims[1];
@@ -132,12 +169,20 @@ public:
                                       + std::to_string(maskRank));
 
             const auto seqQ = qDims[2];
-            const auto seqKv = kDims[2];
+            // Paged: the logical key length is max_seq_len_kv when given (cuDNN requires the bias
+            // to match it); without it the length is not known here, so the engine checks.
+            std::optional<int64_t> seqKv = kDims[2];
+            if(pagedK || pagedV)
+            {
+                seqKv = attributes.max_seq_len_kv.has_value()
+                            ? std::optional<int64_t>(attributes.max_seq_len_kv.value())
+                            : std::nullopt;
+            }
             const auto maskLast = maskDims[maskRank - 1];
-            HIPDNN_RETURN_IF_TRUE(maskLast != seqKv && maskLast != 1,
+            HIPDNN_RETURN_IF_TRUE(seqKv.has_value() && maskLast != seqKv.value() && maskLast != 1,
                                   ErrorCode::INVALID_VALUE,
                                   "SdpaFwdNode: ATTN_MASK last dim must equal seq_kv ("
-                                      + std::to_string(seqKv) + ") or 1, got "
+                                      + std::to_string(seqKv.value_or(0)) + ") or 1, got "
                                       + std::to_string(maskLast));
 
             if(maskRank >= 2)
