@@ -20,6 +20,10 @@
 
 # Build ROCmCMakeBuildTools from source as a fallback when no installed version is found.
 
+if(NOT ALLOW_FETCH_DEPS AND NOT DEFINED ROCM_CMAKE_SRC_URL)
+  message(FATAL_ERROR "ALLOW_FETCH_DEPS is set, but ROCM_CMAKE_SRC_URL was not provided")
+endif()
+
 include(FetchContent)
 
 set(ROCM_CMAKE_SRC_URL
