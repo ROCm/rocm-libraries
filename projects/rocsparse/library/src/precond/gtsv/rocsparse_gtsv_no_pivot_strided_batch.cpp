@@ -516,7 +516,8 @@ namespace rocsparse
     }
 
     // stride * columns + inner fits in limit.
-    static bool gtsv_strided_index_fits(int64_t stride, int64_t columns, int64_t inner, int64_t limit)
+    static bool
+        gtsv_strided_index_fits(int64_t stride, int64_t columns, int64_t inner, int64_t limit)
     {
         if(stride < 0 || columns < 0 || inner < 0 || inner > limit)
         {
@@ -571,9 +572,8 @@ namespace rocsparse
                                                     T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE,
-                                                                             T,
-                                                                             GRID_STRIDE>),
+            (rocsparse::
+                 gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE, T, GRID_STRIDE>),
             dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
             dim3(BLOCKSIZE),
             0,
@@ -656,9 +656,8 @@ namespace rocsparse
                                                    T*               B_spike)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE,
-                                                                            T,
-                                                                            GRID_STRIDE>),
+            (rocsparse::
+                 gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE, T, GRID_STRIDE>),
             dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
             dim3(BLOCKSIZE),
             0,

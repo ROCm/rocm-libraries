@@ -544,10 +544,10 @@ namespace rocsparse
     // the grid-stride kernel keeps the 64-bit indexing.
     template <uint32_t NUM_RHS>
     static bool gtsv_no_pivot_medium_straight(rocsparse_handle handle,
-                                               rocsparse_int    m,
-                                               rocsparse_int    n,
-                                               int64_t          num_spikes,
-                                               uint32_t&        grid_y)
+                                              rocsparse_int    m,
+                                              rocsparse_int    n,
+                                              int64_t          num_spikes,
+                                              uint32_t&        grid_y)
     {
         const int64_t tiles = (n > 0) ? ((static_cast<int64_t>(n) - 1) / NUM_RHS + 1) : 0;
         grid_y              = rocsparse::get_grid_size_y(handle, tiles);
@@ -556,11 +556,10 @@ namespace rocsparse
             return false;
         }
 
-        const int64_t last = static_cast<int64_t>(n) - 1;
-        const int64_t limit
-            = std::is_same<rocsparse_int, int32_t>::value
-                  ? static_cast<int64_t>(std::numeric_limits<uint32_t>::max())
-                  : std::numeric_limits<int64_t>::max();
+        const int64_t last  = static_cast<int64_t>(n) - 1;
+        const int64_t limit = std::is_same<rocsparse_int, int32_t>::value
+                                  ? static_cast<int64_t>(std::numeric_limits<uint32_t>::max())
+                                  : std::numeric_limits<int64_t>::max();
         return gtsv_index_fits(static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, limit)
                && gtsv_index_fits(num_spikes, last, num_spikes - 1, limit);
     }
@@ -580,7 +579,8 @@ namespace rocsparse
                                             T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS, T, GRID_STRIDE>),
+            (rocsparse::
+                 gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS, T, GRID_STRIDE>),
             dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
             dim3(BLOCKSIZE),
             0,

@@ -81,7 +81,7 @@ namespace rocsparse
                                                             T* __restrict__ d_spike,
                                                             T* __restrict__ du_spike,
                                                             T* __restrict__ B_spike,
-                                                            int64_t       bidy)
+                                                            int64_t bidy)
     {
         const rocsparse_int tidx = hipThreadIdx_x;
         const rocsparse_int bidx = hipBlockIdx_x;
@@ -90,16 +90,16 @@ namespace rocsparse
         T a = (gidx < m && gidx != 0)
                   ? dl[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
                   : static_cast<T>(0);
-        T b = (gidx < m) ? d[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy)
-                              + gidx]
-                         : static_cast<T>(1);
+        T b = (gidx < m)
+                  ? d[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
+                  : static_cast<T>(1);
         T c = (gidx < m && gidx != (m - 1))
                   ? du[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
                   : static_cast<T>(0);
 
-        T x = (gidx < m) ? B[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(ldb, bidy)
-                             + gidx]
-                         : static_cast<T>(0);
+        T x = (gidx < m)
+                  ? B[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(ldb, bidy) + gidx]
+                  : static_cast<T>(0);
 
         __shared__ T a_shared[BLOCKSIZE];
         __shared__ T b_shared[BLOCKSIZE];
@@ -406,7 +406,7 @@ namespace rocsparse
                                                              const T* __restrict__ B_modified,
                                                              const T* __restrict__ B_spike,
                                                              T* __restrict__ B,
-                                                             int64_t       bidy)
+                                                             int64_t bidy)
     {
         const rocsparse_int tidx = hipThreadIdx_x;
         const rocsparse_int bidx = hipBlockIdx_x;
@@ -475,7 +475,16 @@ namespace rocsparse
         else
         {
             rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE, T, false>(
-                m, ldb, num_spikes, dl_modified, d_modified, du_modified, B_modified, B_spike, B, 0);
+                m,
+                ldb,
+                num_spikes,
+                dl_modified,
+                d_modified,
+                du_modified,
+                B_modified,
+                B_spike,
+                B,
+                0);
         }
     }
 }

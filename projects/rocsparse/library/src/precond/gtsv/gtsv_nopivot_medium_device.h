@@ -68,7 +68,7 @@ namespace rocsparse
                                                                      T* __restrict__ d_spike,
                                                                      T* __restrict__ du_spike,
                                                                      T* __restrict__ B_spike,
-                                                                     int64_t       bidy)
+                                                                     int64_t bidy)
     {
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int bid = hipBlockIdx_x;
@@ -81,7 +81,8 @@ namespace rocsparse
         T x[NUM_RHS];
         for(int rhs = 0; rhs < NUM_RHS; ++rhs)
         {
-            const auto column = rocsparse::gtsv_no_pivot_rhs_column<NUM_RHS, GRID_STRIDE>(rhs, bidy);
+            const auto column
+                = rocsparse::gtsv_no_pivot_rhs_column<NUM_RHS, GRID_STRIDE>(rhs, bidy);
             x[rhs] = (gid < m && column < n) ? B[ldb * column + gid] : static_cast<T>(0);
         }
 
@@ -432,17 +433,18 @@ namespace rocsparse
     // n is the full right-hand side count. On the grid-stride path bidy is the
     // tile index; the straight-line path reads hipBlockIdx_y instead.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T, bool GRID_STRIDE>
-    ROCSPARSE_DEVICE_ILF void gtsv_no_pivot_pcr_tiled_backward_device(rocsparse_int m,
-                                                                     rocsparse_int n,
-                                                                     int64_t       ldb,
-                                                                     int           num_spikes,
-                                                                     const T* __restrict__ dl_modified,
-                                                                     const T* __restrict__ d_modified,
-                                                                     const T* __restrict__ du_modified,
-                                                                     const T* __restrict__ B_modified,
-                                                                     const T* __restrict__ B_spike,
-                                                                     T* __restrict__ B,
-                                                                     int64_t bidy)
+    ROCSPARSE_DEVICE_ILF void
+        gtsv_no_pivot_pcr_tiled_backward_device(rocsparse_int m,
+                                                rocsparse_int n,
+                                                int64_t       ldb,
+                                                int           num_spikes,
+                                                const T* __restrict__ dl_modified,
+                                                const T* __restrict__ d_modified,
+                                                const T* __restrict__ du_modified,
+                                                const T* __restrict__ B_modified,
+                                                const T* __restrict__ B_spike,
+                                                T* __restrict__ B,
+                                                int64_t bidy)
     {
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int gid = hipBlockIdx_x * BLOCKSIZE + tid;
@@ -461,7 +463,8 @@ namespace rocsparse
 
         for(int rhs = 0; rhs < NUM_RHS; rhs++)
         {
-            const auto column = rocsparse::gtsv_no_pivot_rhs_column<NUM_RHS, GRID_STRIDE>(rhs, bidy);
+            const auto column
+                = rocsparse::gtsv_no_pivot_rhs_column<NUM_RHS, GRID_STRIDE>(rhs, bidy);
             if(column < n)
             {
                 const T d_mod = B_modified[m * column + gid];
@@ -517,7 +520,17 @@ namespace rocsparse
         else
         {
             rocsparse::gtsv_no_pivot_pcr_tiled_backward_device<BLOCKSIZE, NUM_RHS, T, false>(
-                m, n, ldb, num_spikes, dl_modified, d_modified, du_modified, B_modified, B_spike, B, 0);
+                m,
+                n,
+                ldb,
+                num_spikes,
+                dl_modified,
+                d_modified,
+                du_modified,
+                B_modified,
+                B_spike,
+                B,
+                0);
         }
     }
 }
