@@ -81,8 +81,8 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     if(BATCHED)
     {
         // batched arrays hold pointers; require pointer-sized alignment
-        if(!isAligned(a, sizeof(Ti*)) || !isAligned(b, sizeof(Ti*)) || !isAligned(c, sizeof(To*))
-           || !isAligned(d, sizeof(To*)))
+        if(!isAligned(a, sizeof(void*)) || !isAligned(b, sizeof(void*))
+           || !isAligned(c, sizeof(void*)) || !isAligned(d, sizeof(void*)))
             return rocblas_status_invalid_size;
     }
     else

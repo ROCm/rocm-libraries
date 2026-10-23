@@ -223,42 +223,34 @@ dD, d_type, ldd, compute_type, algo, solution_index, flags));
 
         // clang-format on
 
-        // Source-kernel path: non-batched buffers need only element alignment, so a pointer
-        // that is element-aligned but not 8-byte aligned is accepted and a sub-element offset
-        // is rejected with rocblas_status_invalid_size.
+        // Source-kernel path alignment, reusing the buffers above with each dimension reduced by
+        // one so a pointer shifted by up to one element stays in bounds. Non-batched buffers need
+        // only element alignment: a half-element shift is rejected, while a full-element shift,
+        // which need not be 8-byte aligned, is accepted.
         {
             static constexpr int32_t c_source_solution_index = -2; // library-internal source GEMM
-            static constexpr int64_t tiny                    = 2;
-            static constexpr size_t  max_byte_offset         = 4;
 
-            const size_t A_bytes = tiny * tiny * sizeof(Ti) + max_byte_offset;
-            const size_t C_bytes = tiny * tiny * sizeof(To) + max_byte_offset;
+            Ti* A = dA;
+            Ti* B = dB;
+            To* C = dC;
+            To* D = dD;
 
-            DEVICE_MEMCHECK(device_vector<char>, dA_bytes, (A_bytes));
-            DEVICE_MEMCHECK(device_vector<char>, dB_bytes, (A_bytes));
-            DEVICE_MEMCHECK(device_vector<char>, dC_bytes, (C_bytes));
-            CHECK_HIP_ERROR(hipMemset(dA_bytes, 0, A_bytes));
-            CHECK_HIP_ERROR(hipMemset(dB_bytes, 0, A_bytes));
-            CHECK_HIP_ERROR(hipMemset(dC_bytes, 0, C_bytes));
+            const void* A_half = reinterpret_cast<char*>(A) + sizeof(Ti) / 2;
+            const void* B_half = reinterpret_cast<char*>(B) + sizeof(Ti) / 2;
+            const void* C_half = reinterpret_cast<char*>(C) + sizeof(To) / 2;
+            void*       D_half = reinterpret_cast<char*>(D) + sizeof(To) / 2;
 
-            for(size_t byte_offset : {size_t(2), max_byte_offset})
-            {
-                const bool element_aligned
-                    = byte_offset % sizeof(Ti) == 0 && byte_offset % sizeof(To) == 0;
-                const rocblas_status expected
-                    = element_aligned ? rocblas_status_success : rocblas_status_invalid_size;
+            // clang-format off
+            DAPI_EXPECT(rocblas_status_invalid_size, rocblas_gemm_ex_fn, (handle, transA, transB, M - 1, N - 1, K - 1,
+                        alpha, A_half, a_type, lda, B_half, b_type, ldb, beta, C_half, c_type, ldc,
+                        D_half, d_type, ldd, compute_type, rocblas_gemm_algo_solution_index,
+                        c_source_solution_index, flags));
 
-                const void* dA_off = static_cast<char*>(dA_bytes) + byte_offset;
-                const void* dB_off = static_cast<char*>(dB_bytes) + byte_offset;
-                void*       dC_off = static_cast<char*>(dC_bytes) + byte_offset;
-
-                // clang-format off
-                DAPI_EXPECT(expected, rocblas_gemm_ex_fn, (handle, transA, transB, tiny, tiny, tiny, alpha,
-                            dA_off, a_type, tiny, dB_off, b_type, tiny, beta, dC_off, c_type, tiny,
-                            dC_off, d_type, tiny, compute_type, rocblas_gemm_algo_solution_index,
-                            c_source_solution_index, flags));
-                // clang-format on
-            }
+            DAPI_CHECK(rocblas_gemm_ex_fn, (handle, transA, transB, M - 1, N - 1, K - 1,
+                       alpha, A + 1, a_type, lda, B + 1, b_type, ldb, beta, C + 1, c_type, ldc,
+                       D + 1, d_type, ldd, compute_type, rocblas_gemm_algo_solution_index,
+                       c_source_solution_index, flags));
+            // clang-format on
         }
     }
 }
