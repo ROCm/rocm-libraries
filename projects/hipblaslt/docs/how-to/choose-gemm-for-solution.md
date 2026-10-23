@@ -1,175 +1,255 @@
 # Choose one GEMM problem from a solution index
 
 A hipBLASLt solution describes a GPU function and the conditions under which it
-can multiply matrices. A solution index selects that description within one
-built device library. To exercise a particular function, start with its index
-and construct an input using `load_library_metadata()` and `get_problem()`.
-
-This guide is the entry point for that flow. The helper chooses one small,
-packed matrix multiplication for an ordinary fixed-split solution. It reads
-metadata without a GPU or the kernel generator. Native support checks and
-execution happen later; construction alone does not establish that the chosen
-function will accept the input.
+can multiply matrices. One solution can accept many matrix sizes. Given its
+index in a built device library, `choose_single_problem()` chooses one small
+matrix multiplication to try. It reads metadata without running the function;
+native support checks and execution happen afterward.
 
 ## Load once, then choose problems
 
-Use Python 3.10 or newer with the `tensilelite` package, MessagePack (`msgpack`)
-and PyYAML available. In a source checkout, the package root is
-`projects/hipblaslt/tensilelite`; put it on `PYTHONPATH` when running the example.
-Use a device library produced by a matching hipBLASLt build.
+Use the TensileLite environment and device library from your hipBLASLt build.
 
 ```python
 from tensilelite.Utilities.gemm_problem_for_solution import load_library_metadata
 
 library = load_library_metadata("/path/to/library", target="gfx950")
 solution_index = 17  # Replace with an index from this library build.
-problem = library.get_problem(solution_index)
+problem = library.choose_single_problem(solution_index)
 print(problem.m, problem.n, problem.k)
 ```
 
-Keep `library` and call `get_problem()` for each index you want to exercise.
-`library.indices` contains the loaded indices in sorted order, including entries
-whose features this generator does not yet implement. Repeating a call with the
-same index and arguments returns an equal descriptor. It does not read files,
-search sizes, allocate matrix buffers or execute a GPU function.
+Keep `library` and reuse it for subsequent indices. `library.indices` lists the
+loaded indices, including features not implemented yet, such as Stream-K
+scheduling and block-scaled MXFP4 inputs. Repeating a choice with the same
+arguments returns an equal problem description, without more file reads or GPU
+work. `reduction_blocks` is the number of complete K blocks per workgroup;
+changing it changes the chosen K size.
 
-If the indices are already known, pass them together when loading:
+If the indices are already known, load them together:
 
 ```python
 library = load_library_metadata(
     "/path/to/library", target="gfx950", solution_indices=[17, 23]
 )
-first = library.get_problem(17)
-second = library.get_problem(23, reduction_blocks=12)
+first = library.choose_single_problem(17)
+# Give each workgroup 12 complete blocks along K, instead of the default 8.
+second = library.choose_single_problem(23, reduction_blocks=12)
 ```
 
-Selective loading retains only those records. An index that was not loaded
-raises `KeyError` when requested later. Indices are local to a library build;
-reuse the same library directory and target when executing its problems.
+Only those indices are retained; choosing an unloaded index raises `KeyError`.
+Indices belong to a particular build, so execution must use the same library.
 
-## How the solution determines the problem
+## How the dimensions are chosen
 
-The generator reads the selected record's problem type and size mapping. It
-first checks that the scheduling mode and required features fit the supported
-baseline, then constructs the descriptor using the following rules.
+The helper first checks that it can handle the solution's scheduling and matrix
+options. It then chooses one full output tile, a rectangular chunk of the
+result matrix, with these dimensions:
 
-| Input from the solution | Result in the GEMM problem |
+| Where the value comes from | Value | Use |
+| --- | --- | --- |
+| Solution metadata | `sizeMapping.macroTile[0:2]` | M and N, the output tile's rows and columns |
+| Solution metadata | `sizeMapping.depthU` | Number of K elements in one reduction block |
+| Solution metadata | `sizeMapping.globalSplitU` | Fixed number of workgroups sharing the K reduction |
+| Caller argument, default 8 | `reduction_blocks` | Complete reduction blocks per workgroup |
+
+K is `reduction_blocks * depthU * globalSplitU`. For a 128-by-96 output tile,
+`depthU=32` and split factor 4, the default problem is **M=128, N=96, K=1024**.
+Four workgroups share the output tile, each processing eight blocks of 32
+reduction elements. These include prefetch and final stages; eight blocks does
+not necessarily mean eight steady-state loop backedges.
+
+Storage and compute types, transposes and conjugation come from the solution.
+The chosen problem uses one batch, alpha 1, beta 0 and no bias, activation or
+optional scales. Storage is packed column-major: element `(row, col)` has offset
+`row + col * leading_dimension`. Each leading dimension is the stored row
+count; transposing A or B changes that count. C and D are M-by-N and have no
+transpose operation in the hipBLASLt matmul descriptor.
+
+## What selective loading saves
+
+Loading reads every matching `.dat` or `.dat.zlib` file, even for one index.
+Those files contain solution descriptions and selection tables; `.zlib` means
+the file is compressed. Loading accepts the target directory or its parent,
+and a compressed file takes precedence over an uncompressed copy.
+
+The indexed format has a lookup table, so only selected solution records need
+decoding. The older format stores an array and requires decoding every record.
+Both still pay for reading and decompressing all matching files. Selecting
+fewer indices reduces retained data; with the older format it mainly
+saves the cost of keeping those decoded objects alive.
+
+For example, measurements on one 84,498-entry gfx950 library in the older
+format gave these median load times over three fresh processes:
+
+| Requested indices | Load time |
 | --- | --- |
-| `sizeMapping.macroTile[0:2]` | M and N, the rows and columns of one full output tile |
-| `sizeMapping.depthU` | Number of K elements in one reduction block |
-| `sizeMapping.globalSplitU` | Fixed number of workgroups sharing the K reduction |
-| `reduction_blocks`, a positive integer argument defaulting to 8 | K = `reduction_blocks * depthU * globalSplitU` |
-| `problemType` storage and compute types | A/B/C/D storage types and computation types |
-| A/B transpose flags and `operationIdentifier` | Transposes and complex conjugation |
-| Solution index, names, directory and GPU target | Information used to select and identify the function in this build |
+| 1 | About 1.8 seconds |
+| 1,000 | About 1.8 seconds |
+| All 84,498 | About 3.6 seconds |
 
-For an output tile of 128 by 96 elements, `depthU=32` and fixed split factor 4,
-the default problem is **M=128, N=96, K=1024**. Four workgroups share that output
-tile, each processing eight complete blocks of 32 reduction elements. The
-blocks include prefetch and final stages; eight blocks does not mean eight
-steady-state loop backedges.
+All three read the same 388 files. Thus, a two-index selection does not take
+twice as long as a one-index selection: for small selections, the file scan
+dominates. Indexed libraries can save more decoding work, and record sizes also
+affect the cost. Load once outside the loop over indices; subsequent choices
+take about 5 microseconds in this example. Load a new catalog if the library
+files change.
 
-The baseline uses one batch, alpha 1, beta 0, and no bias, activation or optional
-scales. These settings are fixed by this descriptor's contract and are written
-by the benchmark adapter. Storage is packed column-major: element `(row, col)`
-has offset `row + col * leading_dimension`. Leading dimensions equal the
-stored row counts; transposing A or B changes those counts. C and D are M-by-N
-and have no transpose operation in the hipBLASLt matmul descriptor.
+## What calls return or raise
 
-The generator uses the shared datatype definitions and binary metadata reader.
-It preserves datatype names independently of what a particular execution
-client can express. There is no architecture-specific size search or execution
-budget in this operation.
+Choosing a problem returns a `GemmProblem` object describing the input.
+Loading, choosing or formatting can instead raise an exception. This table explains
+what the caller receives before any GPU execution:
 
-## Execute the selected problem
+| Returned object or raised exception | What the caller does next |
+| --- | --- |
+| Returns `GemmProblem` | Format and execute the chosen input; native support is still unchecked |
+| Raises `UnsupportedSolution` | Record the index and `reasons` as features the generator has not implemented |
+| Raises `UnsupportedBenchProblem` | Record the index and `reason` as a limitation of the benchmark adapter |
+| Raises `KeyError` | Investigate a missing index or required metadata field |
+| Raises `ValueError` | Investigate an invalid argument, datatype, scheduling value, duplicate index or corrupt metadata |
 
-The separate `bench_yaml()` adapter writes `hipblaslt-bench` input:
+## Examples from selection to outcome
+
+### The selected function runs successfully
+
+This is the complete path from a built library to a benchmark input. Replace
+the path, target and index with your library and a supported solution:
 
 ```python
 from pathlib import Path
+from tensilelite.Utilities.gemm_problem_for_solution import load_library_metadata
 from tensilelite.Utilities.gemm_problem_bench import bench_yaml
 
+library = load_library_metadata("/path/to/library", target="gfx950")
+problem = library.choose_single_problem(17)
 Path("problem.yaml").write_text(bench_yaml([problem]))
-print(library.directory)
+print("Library:", library.directory)
+print("Expected index:", problem.solution_index)
+print("Expected kernel:", problem.kernel_name)
+print("Shape:", problem.m, problem.n, problem.k)
 ```
 
-Set the library path to the directory printed above and use the matching
-benchmark executable:
+Use the printed library directory and the matching benchmark:
 
 ```sh
-HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 hipblaslt-bench --yaml problem.yaml
+HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 \
+  hipblaslt-bench --yaml problem.yaml > bench.log 2>&1
+echo "Exit status: $?"
+cat bench.log
 ```
 
-The adapter selects the explicit solution index and requests numerical
-validation. With `cold_iters=0`, the benchmark still runs once to obtain the
-result being checked. `iters=0` disables additional fixed-count timed launches,
-and `adaptive=False` disables adaptive timing. Initialization and split-reduction
-helpers can launch separately.
+A successful run exits with status zero and prints one result row with numerical
+checks and the expected solution index and kernel name. A tested gfx950 BF16
+example chose 16-by-16-by-512 and reported `norm_error` of zero. Your dimensions
+and numerical error depend on the chosen solution.
 
-Use a benchmark containing this zero-iteration behavior. Successful numerical
-validation plus the reported solution index and kernel name establish which
-problem was executed. A dispatch log can additionally verify that the target
-function ran exactly once. A zero process exit code alone is insufficient: a
-native support rejection can produce no result and no target launch. Race
-reports, numerical failures, native rejections and emulator errors need their
-own outcomes in a test campaign.
+The generated YAML enables numerical validation, sets `cold_iters=0` and
+`iters=0`, and disables adaptive timing. Validation performs the one target
+execution; initialization and split-reduction helpers can launch separately.
+Use a benchmark containing this zero-timed-iteration behavior.
 
-## Unsupported features and errors
+### The function runs but fails numerical validation
 
-| Result | Meaning and caller action |
-| --- | --- |
-| `GemmProblem` | A constructed baseline input; native solution support still needs checking |
-| `UnsupportedSolution` | An explicitly unimplemented generator feature; record its index and `reasons` if continuing a sweep |
-| `UnsupportedBenchProblem` | A descriptor the benchmark adapter cannot express; its index and `reason` describe that adapter limitation |
-| `KeyError` | A requested index or required record field is missing; investigate the input |
-| `ValueError` | An invalid argument, datatype, scheduling value, duplicate index or corrupt metadata; investigate the input |
+Consider a hypothetical FP32 run of the same commands where the computed result
+has relative norm error 0.001. This exceeds the FP32 check's tolerance of
+0.00001, so the enabled `norm_check_assert` makes the benchmark exit with status
+1, possibly before printing a result row. Retain the input and log as a failed
+execution, not an unsupported solution.
 
-Automatic split-K and persistent scheduling, including Stream-K, are deferred.
-So are block-scaled MX inputs, grouped or sparse multiplication, required output
-operations, and other layouts outside the packed GEMM baseline. The exception
-names the excluded features. Catch the specific exclusion when scanning indices:
+To inspect the numerical error in that case, make a diagnostic copy:
 
 ```python
-from tensilelite.Utilities.gemm_problem_for_solution import UnsupportedSolution
+from pathlib import Path
+import yaml
 
-gaps = {}
-for index in library.indices:
-    try:
-        problem = library.get_problem(index)
-    except UnsupportedSolution as error:
-        gaps[index] = error.reasons
-        continue
-    # Pass this descriptor to the execution step in the campaign.
+rows = yaml.safe_load(Path("problem.yaml").read_text())
+rows[0]["norm_check_assert"] = False
+Path("diagnostic.yaml").write_text(yaml.safe_dump(rows))
 ```
 
-Unexpected errors should escape that handler. The formula does not solve
-arbitrary native predicates, such as a required size or hardware configuration.
-Matching the GPU target alone does not guarantee matching a required device ID
-or compute-unit count. This one problem also leaves output edges, reduction
-tails and varied scalar or output-operation settings untested.
+```sh
+HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 \
+  hipblaslt-bench --yaml diagnostic.yaml
+```
 
-## Loading cost and reuse
+The diagnostic row exposes `norm_error`; disabling the assertion does not make
+the original case a pass. A nonzero exit can also have other causes, so inspect
+the logs rather than classifying every failure as a numerical error.
 
-Loading accepts either the directory containing the metadata or its parent
-with a target subdirectory. It reads each matching `.dat` or `.dat.zlib` shard
-once; a compressed copy takes precedence over its uncompressed sibling. The
-binary files contain solution descriptions and selection tables. The older
-MessagePack format stores descriptions in an array; the indexed format adds a
-lookup table for individual records.
+### The function runs and a race is reported
 
-Both formats require reading and decompressing entire matching shards, even
-when selecting one index. Indexed metadata decodes only selected records;
-the older format decodes every record. Selection tables are skipped, and the
-catalog retains only the metadata used to construct problems.
+Run the same `problem.yaml` under rocJITsu, using a matching device configuration
+with the race and logging plugins enabled:
 
-Load once per library build and target, outside the loop over solution indices.
-Selecting known indices together reduces retained memory. Each subsequent
-`get_problem()` call uses a dictionary lookup and work proportional to the
-selected record, independent of the total library size. The catalog does not
-refresh itself if the files change; load a new catalog for a new build.
+```sh
+HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 \
+  rocjitsu --config /path/to/race-and-logging.json -- \
+  hipblaslt-bench --yaml problem.yaml > race-run.log 2>&1
+echo "Exit status: $?"
+cat race-run.log
+```
 
-The [integration test](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Tests/common/test_gemm_problem_for_solution_integration.py)
-builds eight small gfx942 libraries covering FP32, FP64, FP16 and BF16 with split
-factors 1 and 4. It checks geometry, numerical validation and function identity,
-and verifies one target dispatch when rocJITsu logging is active. The test also
-supports the common suite's build-only and cached-artifact flow.
+In a hypothetical failing run, the race report contains a `RACE` entry even
+though the numerical result might match and the process might exit zero.
+Record that case as a race failure and retain the report. With plugins writing
+to files, inspect their output files too. Use the logging plugin's
+`Kernel dispatch:` entries to check that the expected target ran exactly once;
+helper kernels have their own entries. A run with matching numerics, the
+expected dispatch and no race or emulator errors passes these checks.
+
+### An index cannot produce a problem yet
+
+This complete example finds and reports the first unimplemented entry in a
+library, without executing anything:
+
+```python
+from tensilelite.Utilities.gemm_problem_for_solution import (
+    UnsupportedSolution,
+    load_library_metadata,
+)
+
+library = load_library_metadata("/path/to/library", target="gfx950")
+for index in library.indices:
+    try:
+        library.choose_single_problem(index)
+    except UnsupportedSolution as error:
+        print(error.solution_index, error.reasons)
+        break
+else:
+    print("Every loaded index produced a problem")
+```
+
+A Stream-K entry reports `tileProcessingStrategy=StreamK`; block-scaled MXFP4
+inputs report `mxBlockA` and/or `mxBlockB`. Other current exclusions include
+automatic split-K, grouped or sparse GEMM, required output operations, unusual
+layouts and contractions, and different C/D storage types. Record the reason
+and continue a sweep if desired. Catch only `UnsupportedSolution`; malformed
+metadata and unexpected errors must remain visible.
+
+### Formatting or input validation fails
+
+The adapter can reject a constructed description. For example, this synthetic
+variation on the successfully chosen problem exercises its unsupported-compute
+path without depending on another library index:
+
+```python
+from dataclasses import replace
+from tensilelite.Utilities.gemm_problem_bench import bench_yaml
+
+bench_yaml([replace(problem, compute_type="Half")])
+# Raises UnsupportedBenchProblem: the adapter cannot express Half computation.
+```
+
+After loading a library, each of these separate calls exercises an input error:
+
+| Call | Exception |
+| --- | --- |
+| `library.choose_single_problem(-1)` | `ValueError`: indices must be nonnegative integers |
+| `library.choose_single_problem(17, reduction_blocks=0)` | `ValueError`: block count must be positive |
+| `library.choose_single_problem(max(library.indices) + 1)` | `KeyError`: that index was not loaded |
+
+Finally, successful construction and formatting can still end in native
+rejection, for example when the solution requires a different compute-unit
+count. The benchmark can then exit zero with no result and no target dispatch.
+Record that as a native rejection; it provides no execution coverage.

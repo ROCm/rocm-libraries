@@ -99,8 +99,9 @@ class GemmProblem:
 class LibraryMetadata:
     """Descriptions of the kernels in one built library.
 
-    ``indices`` lists the retained solutions. ``get_problem`` reuses their loaded
-    records to construct a workload, without reading more files or using a GPU.
+    ``indices`` lists the retained solutions. ``choose_single_problem`` reuses
+    their loaded records to construct a workload, without reading more files or
+    using a GPU.
     Records retain construction metadata; native predicates are checked by the
     runtime against the matching device library.
     """
@@ -110,9 +111,12 @@ class LibraryMetadata:
     indices: tuple[int, ...]
     _records: Mapping[int, dict] = field(repr=False)
 
-    def get_problem(self, solution_index: int, *, reduction_blocks: int = 8) -> GemmProblem:
-        """Choose one full output tile for this solution's matrix multiplication.
+    def choose_single_problem(
+        self, solution_index: int, *, reduction_blocks: int = 8
+    ) -> GemmProblem:
+        """Choose one of the matrix multiplications this solution may support.
 
+        This choice uses one full output tile; a solution can accept other sizes.
         M and N are the dimensions of the output tile computed by one workgroup.
         K is ``reduction_blocks * DepthU * fixed_split``: each split workgroup
         processes ``reduction_blocks`` full blocks of DepthU reduction elements.
