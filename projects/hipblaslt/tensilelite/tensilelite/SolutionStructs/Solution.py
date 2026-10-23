@@ -2333,7 +2333,7 @@ class Solution(collections.abc.Mapping):
          and (not isStreamKSpatialCluster(state)
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
-    # Sparse, subtile and gradient variants retain tree fixup.
+    # Sparse, subtile and gradient variants retain in-kernel fixup.
     state["InternalSupportParams"]["SupportStreamKClusterParallel"] = (
         isStreamKSpatialCluster(state)
         and not state["ProblemType"]["Sparse"]

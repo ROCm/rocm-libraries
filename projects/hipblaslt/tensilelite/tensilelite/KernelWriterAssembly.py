@@ -16156,7 +16156,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("GlobalWriteElements")
     deferredGSU0 = Module("DeferredGSU0")
     # Only kernels advertising the ABI2 parallel extension emit both output
-    # paths. Older/specialized clustered variants retain their tree epilogue.
+    # paths. Other clustered variants retain their in-kernel fixup epilogue.
     noGSUBranch = noGSUBranch or (
       isStreamKSpatialCluster(kernel)
       and not kernel["InternalSupportParams"].get("SupportStreamKClusterParallel", False)
