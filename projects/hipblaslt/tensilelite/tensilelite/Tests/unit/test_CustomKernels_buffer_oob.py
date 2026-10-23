@@ -34,9 +34,7 @@ REACHABLE_READABLE_KERNEL = (
     "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_"
     "MT256x256x32_MI16x16x1_shortname0_gfx950"
 )
-REACHABLE_ENCODED_KERNEL = (
-    "CustomGSUs_Cijk_Ailk_Bljk_HSS_BH_Bias_AS_SAV_MT64x16x64_MI16x16x1_Freesize_2stage_gfx942"
-)
+REACHABLE_ENCODED_KERNEL = "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_AS_SAB_SAV_shortname0_gfx942"
 
 # Kernels from other generators, which bound their stores without BufferOOB.
 # A kernel in which the scan recognizes no store bound must be listed here.
