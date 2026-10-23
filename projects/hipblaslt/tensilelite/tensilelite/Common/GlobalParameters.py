@@ -483,6 +483,9 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # ABI2 extension: split-major partials for a separate reduction.
+    # Absent/false preserves the tree-only contract of existing kernels.
+    "SupportStreamKClusterParallel": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

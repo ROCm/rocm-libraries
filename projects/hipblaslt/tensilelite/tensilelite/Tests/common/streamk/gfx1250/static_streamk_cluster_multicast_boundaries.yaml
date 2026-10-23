@@ -1,0 +1,98 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# TENSILE_DB=0x200000 reports the resolved schedule. A targeted rerun with
+# TENSILE_PERSISTENT_FIXED_GRID=256 exercises mid-tile K starts; check the
+# report for actual split work because residency/workspace caps still apply.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941,
+    skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters: {Architecture: gfx1250, SyncsPerBenchmark: 0, NumElementsToValidate: -1,
+  KernelTime: false, DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeD: 2,
+  DataInitTypeAlpha: 1, DataInitTypeBeta: 1, ForceGenerateKernel: true, CpuThreads: 8,
+  PrintLevel: 1, NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1, PrintSolutionRejectionReason: true}
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: b
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: true
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+    # Geometry breadth uses one prefetch/reduction pair.
+    - BenchmarkCommonParameters: &dense_defaults
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+        - DepthU: [64]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [false]
+        - ScheduleIterAlg: [4]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - StreamKFixupTreeReduction: [0]
+        - PrefetchAcrossPersistent: [0]
+      ForkParameters:
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2], [2, 8], [4, 4], [8, 2]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]  # Ragged peers, batches and a K tail.
+          - Exact: [96, 96, 1, 64]    # Whole-tile completion.
+          - Exact: [96, 96, 3, 0]     # Empty summation.
+          - Exact: [256, 256, 2, 8192]
+    # Double prefetch + tree, plus an ordinary dense StreamK control.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[1, 1], [2, 1], [2, 2]]
+        - PrefetchGlobalRead: [2]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters: &split_problems
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]
+          - Exact: [256, 256, 2, 8192]
+    # Long K on a small ragged output retains profitable separate reduction.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[2, 1], [2, 2]]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 8192]
+    # One-wave descriptors use independent A/B increments. Keep both shadow
+    # initialization paths without crossing every geometry with every mode.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[1, 1], [2, 2]]
+        - ForceDisableShadowInit: [true]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters: *split_problems
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[2, 2]]
+        - PrefetchGlobalRead: [2]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters: *split_problems
+    # Remapped final stores and split completion need different byte shifts.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[2, 2]]
+        - ForceDisableShadowInit: [true]
+        - StoreRemapVectorWidth: [4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]
+          - Exact: [96, 96, 1, 64]
+          - Exact: [256, 256, 2, 8192]

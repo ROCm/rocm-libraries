@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -119,6 +119,28 @@ def _enableLdsTr6Rearrange(kernel, tP, tail):
   hasTdm = kernel["enableTDMA"] or kernel["enableTDMB"]
   return (tP["bpe"] == 0.75 and kernel[f"enableLDSTr{tP['tensorChar']}"]
           and (not tail or hasTdm))
+
+def _tdmSparseMetadataKOffset(writer, kernel):
+  """Advance the TDM metadata descriptor to this work item's first K iteration.
+
+  Metadata has its own descriptor and compressed per-iteration increment, so
+  the A/B K-offset does not move it.
+  """
+  mod = Module("TDM StreamK metadata K-offset")
+  if not kernel.get("enableTDMMetadata"):
+    return mod
+  inc = sgpr("GlobalReadIncsMetadata")
+  with writer.allocTmpSgpr(2, tag="tdmSparseMetadataKOffset") as tmp:
+    lo = tmp.idx
+    mod.add(SMulHIU32(dst=sgpr(lo + 1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                      comment="StreamK metadata K-offset high word"))
+    mod.add(SMulI32(dst=sgpr(lo), src0=sgpr("StreamKLocalStart"), src1=inc,
+                    comment="StreamK metadata K-offset = localStart * metadata increment"))
+    mod.add(SAddU32(dst=sgpr("tdmMetadataGroup0+2"), src0=sgpr("tdmMetadataGroup0+2"),
+                    src1=sgpr(lo), comment="Apply StreamK K-offset to TDM metadata"))
+    mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"),
+                     src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
+  return mod
 
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
@@ -15217,6 +15239,9 @@ class KernelWriterAssembly(KernelWriter):
       coord0 = tmpV0+3
       waveCoord1 = tmpV0+4
 
+      # GSU and StreamK parallel reduction carry a runtime byte size.
+      # Whole-tile persistent DP and GSU=0 use the final output type and do
+      # not allocate GSULog2BpeD.
       gwvw = kernel["StoreRemapVectorWidth"]
       ldsPad = max(kernel["StoreRemapVectorWidth"],kernel["MIOutputVectorWidth"])
 
@@ -15246,7 +15271,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
@@ -15258,7 +15283,7 @@ class KernelWriterAssembly(KernelWriter):
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
           src1=vgpr(coord0), \
-          shiftHex=sgpr("GSULog2BpeD"), \
+          shiftHex=log2(self.states.bpeCexternalGSU1), \
           comment="local write C address"))
 
       module.addSpaceLine()
@@ -15288,7 +15313,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
                 comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
@@ -15300,7 +15325,7 @@ class KernelWriterAssembly(KernelWriter):
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
                   src1=vgpr(coord0), \
-                  shiftHex=sgpr("GSULog2BpeD"), \
+                  shiftHex=log2(self.states.bpeCexternalGSU1), \
                   comment="local read C address"))
       module.addSpaceLine()
 
@@ -16099,6 +16124,12 @@ class KernelWriterAssembly(KernelWriter):
     if not self.do["PostLoop"]: return Module("GlobalWriteElements (Empty)"), Module("DeferredGSU0 (Empty)")
     module = Module("GlobalWriteElements")
     deferredGSU0 = Module("DeferredGSU0")
+    # Only kernels advertising the ABI2 parallel extension emit both output
+    # paths. Other clustered variants retain their in-kernel fixup epilogue.
+    noGSUBranch = noGSUBranch or (
+      isStreamKSpatialCluster(kernel)
+      and not kernel["InternalSupportParams"].get("SupportStreamKClusterParallel", False)
+    )
 
     module.addComment2("Global Write Elements")
     if kernel["ProblemType"]["OutputAmaxD"]:
@@ -20983,6 +21014,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
           mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
                             comment="Apply K-offset high word and address carry"))
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
       return mod
 
     with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
@@ -20997,6 +21029,35 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
                         comment="Apply K-offset high word and address carry"))
 
+    if not (tcA.startswith("MX") or tcB.startswith("MX")):
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
+    return mod
+
+  def tdmApplyTileKOffset(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    """Advance single-wave TDM descriptors to this work item's first K iteration.
+
+    Each tensor owns its descriptor and advances by its own GlobalReadIncs,
+    which may be an assembler constant rather than an SGPR.
+    """
+    mod = Module("TDM StreamK K-offset")
+    # DP-only: StreamKLocalStart == 0 and is not allocated.
+    if isPersistentDataParallel(kernel):
+      return mod
+    with self.allocTmpSgpr(2, tag="tdmApplyTileKOffset_tmpSgprRes") as tmpSgprRes:
+      tmpSgpr = tmpSgprRes.idx
+      for tP in (tPA, tPB):
+        tc = tP["tensorChar"]
+        group0 = f"tdm{tc}Group0"
+        inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+        mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                          comment="StreamK K-offset high word"))
+        mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=inc,
+                        comment=f"StreamK K-offset for {group0} = localStart * increment"))
+        mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
+                        comment=f"Apply StreamK K-offset to TDM {group0}"))
+        mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
+                         comment="Apply K-offset high word and address carry"))
+    mod.add(_tdmSparseMetadataKOffset(self, kernel))
     return mod
 
   def tdmApplyTileTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
