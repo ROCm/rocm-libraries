@@ -57,10 +57,14 @@ def test_list_rows_carry_the_mx_format(tmp_path: Path, keys: dict, scale: int, f
     assert gc.name == name
 
 
-def test_list_yaml_forwards_epilogue_and_library_keys(tmp_path: Path) -> None:
+def test_list_yaml_forwards_epilogue_library_and_buildable_mis_keys(tmp_path: Path) -> None:
     path = _write(tmp_path, {**_TN, "DataType": "F8", "MX_BLOCK": 32, "EPILOGUES": False})
     _, overrides = _rows_from_gemm_config_yaml(path, "gfx1250-strict")
-    assert overrides == {"EPILOGUES": False, "LIBRARY_TYPE": "OOB"}
+    assert overrides == {"EPILOGUES": False, "LIBRARY_TYPE": "OOB", "BUILDABLE_MIS": False}
+
+    path = _write(tmp_path, {**_TN, "DataType": "F8", "MX_BLOCK": 32, "BUILDABLE_MIS": True})
+    _, overrides = _rows_from_gemm_config_yaml(path, "gfx1250-strict")
+    assert overrides["BUILDABLE_MIS"] is True
 
 
 def test_list_yaml_mx_keys_leave_other_log_types_alone(tmp_path: Path) -> None:
@@ -103,3 +107,28 @@ def test_environment_does_not_override_input_config_keys(key: str, value: str, d
     cfg = {"ARCH": "gfx1250-strict"}
     apply_input_config_defaults(cfg)
     assert cfg[key] == default
+
+
+@pytest.mark.parametrize("value,expected", [("1", True), ("true", True), ("0", False)])
+def test_environment_sets_buildable_mis(value: str, expected: bool, monkeypatch) -> None:
+    # The buildable-MI lists are opt-in; BUILDABLE_MIS=1 turns them on for any workload source.
+    monkeypatch.setenv("BUILDABLE_MIS", value)
+    cfg = {"ARCH": "gfx950"}
+    apply_input_config_defaults(cfg)
+    assert cfg["BUILDABLE_MIS"] is expected
+
+
+def test_buildable_mis_default_off_and_env_wins_over_list(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("BUILDABLE_MIS", raising=False)
+    cfg = {"ARCH": "gfx950"}
+    apply_input_config_defaults(cfg)
+    assert cfg["BUILDABLE_MIS"] is False
+
+    seen = {}
+    monkeypatch.setattr(optim.cg, "run", lambda config, *a, **k: seen.update(config))
+    gc = GemmConfig(GemmType.from_tensile("T", "N", "B", "B", "S"), [[512, 512, 1, 4096]])
+    optim.configure("/unused", gc, tmp_path, arch="gfx950", config_overrides={"BUILDABLE_MIS": True})
+    assert seen["BUILDABLE_MIS"] is True                       # from a --list file
+    monkeypatch.setenv("BUILDABLE_MIS", "0")
+    optim.configure("/unused", gc, tmp_path, arch="gfx950", config_overrides={"BUILDABLE_MIS": True})
+    assert seen["BUILDABLE_MIS"] is False                      # the environment wins
