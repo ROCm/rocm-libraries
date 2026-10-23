@@ -33,6 +33,15 @@ namespace hipblaslt_jit
         return index >= jitIndexBase && index < jitIndexEnd;
     }
 
+    // Whether a map keyed by solution index, such as a prebuilt library's
+    // solutions or libraryMapping, has a key in [jitIndexBase, jitIndexEnd).
+    template <class ByIndex>
+    bool holdsJitIndex(const ByIndex& byIndex)
+    {
+        const auto first = byIndex.lower_bound(jitIndexBase);
+        return first != byIndex.end() && isJitIndex(first->first);
+    }
+
     // Libraries live under "v<jitLibrarySchema>"; other versions are never read.
     constexpr int jitLibrarySchema = 1;
 

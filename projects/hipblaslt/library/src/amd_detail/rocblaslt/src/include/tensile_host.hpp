@@ -239,6 +239,14 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+// True when this GEMM query must stay on its existing lookup and not consult JIT.
+bool skipJitHeuristic(rocblaslt_handle handle, const RocblasltContractionProblem& problem);
+
+// The GEMM problem captured for gemmData, or null when this execution has none.
+const RocblasltContractionProblem* savedGemmProblem(const std::shared_ptr<void>& gemmData);
+#endif
+
 namespace TensileLite
 {
     class ProblemOverride;

@@ -31,6 +31,7 @@
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ProviderRows.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/AMDGPU_Detail.hpp>
@@ -161,9 +162,10 @@ namespace TensileLite
     public:
         using Library = SolutionLibrary<MyProblem, MySolution>;
         using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, AMDGPU, MyProblem>;
-        using Caches = CacheMap<SolutionVector<MySolution>, AMDGPU, MyProblem>;
+        // findTopSolutions results depend on the rows the walk was allowed to visit.
+        using Caches = CacheMap<SolutionVector<MySolution>, ProviderRows, AMDGPU, MyProblem>;
         using CachesAllSolsFlag
-            = CacheMap<bool, AMDGPU, MyProblem>;
+            = CacheMap<bool, ProviderRows, AMDGPU, MyProblem>;
         using CachesGroupedGemm
             = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
 
@@ -259,10 +261,11 @@ namespace TensileLite
             try
             {
                 auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+                const auto                 rows   = currentProviderRows();
                 SolutionVector<MySolution> solutions;
                 bool                       cacheAlreadyContainAll;
-                solutions = m_caches.find(problem, amdgpu);
-                cacheAlreadyContainAll = m_cachesAllSolutions.find(problem, amdgpu);
+                solutions = m_caches.find(problem, amdgpu, rows);
+                cacheAlreadyContainAll = m_cachesAllSolutions.find(problem, amdgpu, rows);
                 // set flag in case of early return
                 lastFindTopRetAll = cacheAlreadyContainAll;
 
@@ -273,8 +276,8 @@ namespace TensileLite
                 if(solutions.size() != 0)
                 {
                     bool alreadyRetAll = m_subLibrary->lastFindTopAlreadyRetAll();
-                    m_caches.add(solutions, problem, amdgpu);
-                    m_cachesAllSolutions.add(alreadyRetAll, problem, amdgpu);
+                    m_caches.add(solutions, problem, amdgpu, rows);
+                    m_cachesAllSolutions.add(alreadyRetAll, problem, amdgpu, rows);
                     // debug
                     // std::cout << "m_cachesAllSolutions.add() with solution.size() = " << solutions.size()
                     //           << " and alreadyRetAll: " << (alreadyRetAll? "True" : "False") << std::endl;
