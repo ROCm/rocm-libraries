@@ -47,7 +47,7 @@ The gate matrix is described by a dense matrix descriptor with the following pro
 Supported data types
 ====================
 
-The gate residual is supported on gfx942 and gfx950 for the following data types:
+The gate residual is supported on ``gfx942`` and ``gfx950`` for the following data types:
 
 .. list-table::
    :header-rows: 1
@@ -65,7 +65,7 @@ The gate residual is supported on gfx942 and gfx950 for the following data types
      - ``FP32``
      - ``FP32`` or ``FP8``
 
-``FP8`` refers to ``HIP_R_8F_E4M3`` on gfx950 and ``HIP_R_8F_E4M3_FNUZ`` on gfx942.
+``FP8`` refers to ``HIP_R_8F_E4M3`` on ``gfx950`` and ``HIP_R_8F_E4M3_FNUZ`` on ``gfx942``.
 
 Other combinations, including ``BF8`` and ``INT8`` inputs, are not supported.
 
