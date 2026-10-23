@@ -187,6 +187,27 @@ class TestCoreIR(unittest.TestCase):
             any(op.name == "memref.global_load" for op in b.kernel.body.ops)
         )
 
+    def test_optimize_kernel_cse_keeps_signed_zeros_apart(self):
+        # 0.0 == -0.0 in Python, but they are different constants: CSE keys a
+        # float by its bits (as the C++ engine does), and still merges two
+        # constants with the same bits.
+        b = IRBuilder("opt_signed_zero")
+        out = b.param("out", PtrType(F32, "global"))
+        for index, value in enumerate((0.0, -0.0, -0.0)):
+            b.global_store(out, b.const_i32(index), b.const_f32(value))
+        b.ret()
+        stats = optimize_kernel(b.kernel)
+        self.assertGreaterEqual(stats.common_subexpressions, 1)
+        stores = [
+            line
+            for line in lower_kernel_to_llvm(b.kernel, arch="gfx942").splitlines()
+            if "store float" in line
+        ]
+        self.assertEqual(len(stores), 3)
+        self.assertIn("store float 0x0000000000000000", stores[0])
+        self.assertIn("store float 0x8000000000000000", stores[1])
+        self.assertIn("store float 0x8000000000000000", stores[2])
+
     def test_param_metadata_lowers_to_llvm_arg_attrs(self):
         b = IRBuilder("metadata_smoke")
         b.param(
