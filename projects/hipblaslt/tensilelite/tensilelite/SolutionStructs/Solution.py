@@ -2321,6 +2321,26 @@ class Solution(collections.abc.Mapping):
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
         _supportStreamKPerTileExtraIters(state)
 
+    # LdsXorSwizzle is implemented for the gfx11 WMMA UnrollMajorLDS bf16/fp16 path only.
+    if state["LdsXorSwizzle"]:
+      isaInfo = isaInfoMap[tuple(state["ISA"])]
+      rowBytes = int(state["DepthU"] * state["ProblemType"]["DataType"].numBytes())
+      if not isaInfo.asmCaps["HasWMMA_V1"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: only gfx11 WMMA_V1 supported"); return
+      if state["ProblemType"]["DataType"].toChar() not in ('B', 'H'):
+        reject(state, printRejectionReason, "LdsXorSwizzle: bf16/fp16 only"); return
+      if state["ProblemType"]["TLUA"] or state["ProblemType"]["TLUB"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: requires UnrollMajorLDS (TLU=0 both)"); return
+      if state["LdsPadA"] != 0 or state["LdsPadB"] != 0:
+        reject(state, printRejectionReason, "LdsXorSwizzle: replaces padding, requires LdsPadA=LdsPadB=0"); return
+      # The read key is derived from Serial%16 (the lane's row in a 16-row WMMA tile).
+      if rowBytes not in (32, 64, 128, 256):
+        reject(state, printRejectionReason, "LdsXorSwizzle: needs an LDS row (DepthU*bpe) of 32..256 B"); return
+      if state["ProblemType"]["Sparse"] or state["DirectToVgprA"] or state["DirectToVgprB"] \
+          or state["DirectToLdsA"] or state["DirectToLdsB"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: Sparse/DTV/DTL not supported"); return
+      if state["MatrixInstK"] != 16:
+        reject(state, printRejectionReason, "LdsXorSwizzle: MatrixInstK must be 16"); return
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
@@ -2945,6 +2965,15 @@ class Solution(collections.abc.Mapping):
     # Save whether VW was auto-derived (-1) for TDM VW fallback in depthUIteration
     state.setdefault("_inputVWA_was_auto", state["VectorWidthA"] == -1)
     state.setdefault("_inputVWB_was_auto", state["VectorWidthB"] == -1)
+
+    # LdsXorSwizzle derives its read key from the lane's LDS row, which VectorWidth>1 interleaves.
+    if state["LdsXorSwizzle"]:
+      for tc in ("A", "B"):
+        if state["VectorWidth%s"%tc] == -1:
+          state["VectorWidth%s"%tc] = 1
+        elif state["VectorWidth%s"%tc] != 1:
+          reject(state, printRejectionReason, "LdsXorSwizzle requires VectorWidth%s=1"%tc)
+          return
 
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
@@ -6429,6 +6458,9 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
+    # The NumLdsBlk>=3 buffer switch (IncLdsBufSwitch) does not update the swizzled read bases.
+    if state["LdsXorSwizzle"] and numLdsBlk >= 3:
+      reject(state, printRejectionReason, "LdsXorSwizzle: NumLdsBlk>=3 (IncLdsBufSwitch) unsupported")
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
