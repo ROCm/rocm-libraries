@@ -5687,15 +5687,16 @@ def _cached_bind(
             d_bytes=sizes[2],
         )
 
-        def run(
-            values=values,
-            cfg=cfg,
-            s2_launcher=s2_launcher,
-            s2_values=s2_values,
-            s2_cfg=s2_cfg,
-        ):
-            launcher(values, config=cfg)
-            s2_launcher(s2_values, config=s2_cfg)
+        # Both stages pre-packed (bind), like the single-kernel path: a timed
+        # loop of launcher(values, ...) repacks the arguments on every call,
+        # which costs more host time than these small kernels run, so the
+        # loop timed the host instead of the GPU.
+        stage1 = run
+        stage2 = s2_launcher.bind(s2_values, config=s2_cfg)
+
+        def run(stage1=stage1, stage2=stage2):
+            stage1()
+            stage2()
 
     label = ident.label()
     if split_k is not None:
