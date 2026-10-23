@@ -292,6 +292,9 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
   baseline "$EMITTED_ROOT"
 ```
 
+The gate checks every launch of a multi-launch (`sources`) descriptor; a failure names
+its launch.
+
 Exactly one assignment must be live. Both commented passes an empty root, which the
 descriptor index expands as the recursive glob `/**/*.json` — a walk of the whole
 filesystem.
@@ -307,7 +310,7 @@ after packing.
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
 Extensions remap scratch references and copy only additions per [extend.md](extend.md),
 including consumer IDs in shared KDP or per-UKD specialization declarations. For
-descriptors, `tools/splice_additions.py` does this and refuses any change to a retained
+descriptors, `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` does this and refuses any change to a retained
 entry:
 
 ```bash
@@ -330,7 +333,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
 | `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
-| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `tools/splice_additions.py` |
+| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
@@ -598,6 +601,16 @@ authored, so a shard of only `embedded_source` UKDs then gets no provenance chec
 `--provenance-root` only relocates sidecars: given for a descriptor whose directory holds
 no marker, it is a usage error.
 
+The validator also loads every UHD a role map binds (`sort_kernel_catalog`,
+`predict_engine`, `predict_applicable_kernels`), for every architecture key and every
+metric, and fails the run when the loader refuses one. A trained model whose recorded
+`trained_against` does not match this set's UED, KMD or matchers fails here. So does a
+model whose features read an undeclared KMD field or whose `features_hash` disagrees. At
+runtime the same model is only disabled, with declared-order fallback. A signature that
+reads dynamic bindings is extracted only for engines a `--feature-samples` entry covers;
+without one the extraction check is skipped with a warning. See stage 6, **Trained
+heuristics survive regeneration only by intent**.
+
 **The embedded-source invariant.** A staged tree holds descriptor JSON, provenance
 sidecars and packed markers only, so an `embedded_source` descriptor resolves its
 `source_file` against a key table compiled into the binary.
@@ -633,6 +646,9 @@ drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
 the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
 `--provenance-root DIR` mirroring its `--tree`.
+
+A multi-launch descriptor is checked per launch (spec, symbol and code object); a failure
+names the launch.
 
 Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes
@@ -944,6 +960,51 @@ among variants sharing its other knobs, which divide every shape a larger tile d
 measure the cold heuristic against `dnn-benchmark --autotune` (fresh `--cache-dir` per
 phase, the cohort rules in [workloads.md](workloads.md)) and report the gap and the
 winning kernels as a finding; it is not a gate.
+
+### Trained heuristics survive regeneration only by intent
+
+Inventory the live engine's trained models before splicing a regenerated set. They are
+the per-architecture lists under the UED's `sort_kernel_catalog` and `predict_engine`,
+installed under `heuristics/<ued-id>/<role>/<arch>/<metric>/` beside the UED by
+`uhd_gen promote`, plus any `predict_applicable_kernels` binding. The generator does not
+produce or preserve them:
+
+- **Every scratch identity is new.** A scratch UED carries fresh UUIDs for itself, its
+  KMD, UMDs and UHD, no `revision`, and a single binding,
+  `sort_kernel_catalog: {default: <native UHD>}`. It has no per-arch lists and no
+  `predict_engine`.
+- **A trained model is bound to the set it was measured on.** Its
+  `trained_against` records the UED, KMD and matcher ids and revisions. The loader
+  accepts the same id at the same major revision with a minor revision no older than the
+  recorded one; anything else disables that `(role, arch, metric)` binding. The binding
+  never falls back to the `default` key's model for the same metric: the engine still
+  serves, and logs `… disabled: …; engine remains available with declared-order fallback`
+  at ERROR. Numerical and census gates stay green through this, so they are not evidence
+  that ranking survived.
+- **`uhd_gen promote --remove-knob` edits the UED, not the generator config.** It drops
+  the knob and bumps the UED's major revision. Regenerating from a config that still
+  lists the knob, or that drops the revision, invalidates every model promoted against
+  the revised UED.
+
+For a set with trained models, choose one of these and record the choice in the handoff:
+
+1. **Retain.** Splice per [extend.md](extend.md): keep the live UED, KMD, UMDs and every
+   role-map entry, and copy only KDP or UKD additions. Remove knobs from the config's
+   `engine.knobs` when `promote` removed them. Retained models remain valid only while
+   KMD fields, matcher identities and revisions are unchanged; the stage-4 validator is
+   the check.
+2. **Retrain.** When identities, KMD fields, matchers or knobs legitimately change,
+   regenerate the trained models against the final installed set with `uhd_gen
+   generate`, once for every bound architecture and with `--metric` for every bound
+   metric. See `projects/hipdnn/tools/uhd_gen/README.md`, **Reproducible generation**.
+   Promotion changes the descriptor tree, so return to stages 4–5 before stage 7.
+3. **Drop.** Remove the stale role-map entries and their `heuristics/<ued-id>/` subtree
+   explicitly, and state that the engine now ranks with its `default` model or declared
+   order.
+
+Never splice a scratch UED over a live one carrying role maps, and never edit
+`trained_against` to match: it records what the model was measured against, and
+rewriting it binds a model to a set it never saw.
 
 **Gate:** a user-accepted selection with its applied rules recorded in `$EVIDENCE`, no
 open correctness failure, and a revalidated installation of exactly that selection.

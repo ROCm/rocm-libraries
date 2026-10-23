@@ -314,7 +314,8 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
 // A finite negative sample is not a failure: it is a transient invalid reading that gets
 // replaced with a fresh measurement, up to two extra attempts per candidate. A negative
 // sample therefore never enters timings; the third such reading for this candidate
-// exhausts its retry budget even if valid readings occurred between negatives.
+// exhausts its retry budget even if valid readings occurred between negatives. Exhaustion
+// restarts a stalled pass unstalled and fails the candidate in an unstalled pass.
 // ============================================================================
 
 TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
@@ -335,14 +336,30 @@ TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
     EXPECT_EQ(timer.callCount, 4);
 }
 
-TEST(TestAutotune, RunFixedAverageFailsAfterThirdConsecutiveNegativeElapsed)
+TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
 {
-    // 2 retries are spent on the first two negatives; the 3rd negative exhausts the budget
-    // and fails immediately -- the 4th (valid) scripted value is never reached, proving the
-    // candidate cannot spin forever waiting for a clean reading.
+    // Stalled timing can read negative for every sample of short work (seen on Windows).
+    // The candidate is not at fault, so exhausting the budget must restart the comparison
+    // unstalled instead of dropping the candidate. The 4th (valid) scripted value is never
+    // reached, proving the candidate cannot spin forever waiting for a clean reading.
     ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f}, -1, 0};
     auto outcome = autotune::detail::runFixedAverage(
         /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
+
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_TRUE(outcome.timings.empty());
+    EXPECT_EQ(timer.callCount, 3);
+}
+
+TEST(TestAutotune, RunFixedAverageFailsUnstalledPassAfterThirdNegativeElapsed)
+{
+    // An unstalled pass cannot restart again, so the same exhaustion fails the candidate.
+    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f}, -1, 0};
+    timer.quality = TimingQuality::UNSTALLED;
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/false, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);

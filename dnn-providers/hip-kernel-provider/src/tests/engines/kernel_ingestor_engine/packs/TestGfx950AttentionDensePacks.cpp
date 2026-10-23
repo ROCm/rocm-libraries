@@ -18,7 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -1039,7 +1039,7 @@ TEST_F(TestGfx950AttentionDensePacks, ExposesTheConfiguredKnobs)
 TEST_F(TestGfx950AttentionDensePacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "hipkernel.gfx950_attention_dense.score");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx950_attention_dense.score");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_attention_dense.score"));
 }
 
