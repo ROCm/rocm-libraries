@@ -8,21 +8,33 @@
 
 #include "solution_selection.hpp"
 
+bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
+{
+    if(prob.bias != nullptr || prob.batch_count != 1)
+        return false;
+
+    // Asked in the types hipBLASLt already uses, not a generator's: this target
+    // builds without rocRoller's headers so that a checkout without
+    // shared/rocroller still compiles it. normalizeOperandType answers
+    // HIPBLASLT_DATATYPE_INVALID for a format no ranked kernel handles, which
+    // is the "unset" case and not a refusal. Comparing here also avoids
+    // hip2RocRollerType, which throws on a format it cannot name.
+    const auto scaleType = normalizeOperandType(prob.scale_type);
+    if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
+        return false;
+
+    return genKernelType(prob).typeAcc == HIP_R_32F;
+}
+
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
                                             std::vector<RocRollerSelectedTile>& tiles)
 {
     tiles.clear();
 
-    if(prob.bias != nullptr || prob.batch_count != 1)
+    if(!rocRollerSupportsProblem(prob))
         return rocblaslt_status_invalid_value;
 
     const KernelType kernelType = genKernelType(prob);
-    const auto       scaleType  = normalizeOperandType(prob.scale_type);
-    if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
-        return rocblaslt_status_invalid_value;
-    if(kernelType.typeAcc != HIP_R_32F)
-        return rocblaslt_status_invalid_value;
-
     const auto ranked = chooseSolutionIndexParameters(kernelType, prob, -1);
     tiles.reserve(ranked.size());
     for(const SolutionIndexParameters& params : ranked)
