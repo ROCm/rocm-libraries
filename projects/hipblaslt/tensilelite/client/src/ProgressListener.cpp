@@ -77,7 +77,7 @@ namespace TensileLite
             m_reporter->report(ResultKey::LDB, problem.b().strides()[1]);
             m_reporter->report(ResultKey::LDC, problem.c().strides()[1]);
             m_reporter->report(ResultKey::LDD, problem.d().strides()[1]);
-            if(problem.fusedGemmA2A())
+            if(problem.fusedA2A() != FusedA2A::Disabled)
             {
                 m_reporter->report(ResultKey::World, (int64_t)problem.world());
                 m_reporter->report(ResultKey::FusedA2AExtent, problem.fusedA2AExtent());

@@ -15,7 +15,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
   device-to-host copy, so this is single-threaded debugging use only, not for
   concurrent-stream workloads.
-* `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
+* `FusedA2A` TensileLite problem-type parameter (default `Disabled`); `GemmA2A` fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
 * gfx1250 v0 ASIC revision support, modeled as a separate `gfx1250v0` architecture identity (selectable via `--architecture=gfx1250v0`, `--gpu-targets gfx1250v0`, or `GlobalParameters.Architecture: gfx1250v0`) that shares ISA `{12,5,0}` and compiler target `gfx1250` but disables TDM multicast and the FP4 32x16 WMMA path, with a dedicated tuned GEMM library subtree selected at runtime by device `asicRevision`; use `install.sh --asic-revision <v0|v1>` or the `HIPBLASLT_ASIC_REVISION` CMake cache variable to build a specific revision, or leave it unset to build both.
@@ -27,6 +27,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
+* The TensileLite solution predicate `FusedGemmA2A` is now `FusedA2A` and holds the fused mode instead of a bool. Every solution records this predicate, so a device library built before this change -- including one selected with `HIPBLASLT_TENSILE_LIBPATH` -- loads as empty and reports no solution for any problem, with the load error itself printed only under `TENSILE_DB`. Rebuild the device library against this version.
 * Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
 * `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
 * `HIPBLASLT_TENSILE_LIBPATH` and `HIPBLASLT_EXT_OP_LIBRARY_PATH` are now ignored when the process runs in a secure execution context (set-uid/set-gid or other credential-changing exec), falling back to the default library location with a diagnostic; behavior is unchanged for non-privileged processes.

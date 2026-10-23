@@ -24,12 +24,16 @@ _FUSED_CONFIG = {
     "TransposeB": False,
     "UseBeta": True,
     "Batched": True,
-    "FusedGemmA2A": True,
+    "FusedA2A": "GemmA2A",
 }
 
 
 def _problemType(**overrides):
     return ProblemType({**_FUSED_CONFIG, **overrides}, False)
+
+
+def _unfused(**overrides):
+    return ProblemType({**{k: v for k, v in _FUSED_CONFIG.items() if k != "FusedA2A"}, **overrides}, False)
 
 
 def _sizes(problemType, *exacts):
@@ -64,8 +68,8 @@ class TestExactDictWorld:
             _sizes(_problemType(), {"sizes": [3072, 512, 2, 2048], "world": 2})
 
     def test_non_fused_rejects_world(self):
-        with pytest.raises(RuntimeError, match="only to FusedGemmA2A"):
-            _sizes(_problemType(FusedGemmA2A=False), {"sizes": [3072, 512, 1, 2048], "world": 2})
+        with pytest.raises(RuntimeError, match="apply only to"):
+            _sizes(_problemType(FusedA2A="Disabled"), {"sizes": [3072, 512, 1, 2048], "world": 2})
 
     def test_fused_rejects_exact_list(self):
         with pytest.raises(RuntimeError, match="Exact dict"):
@@ -76,6 +80,36 @@ class TestExactDictWorld:
             ProblemSizes(_problemType(), [{"Range": [[3072], [512], [1], [2048]]}])
 
 
+def _a2aGemmType(**overrides):
+    return ProblemType({**_FUSED_CONFIG, "FusedA2A": "A2AGemm", **overrides}, False)
+
+
+class TestA2AGemmExactDict:
+    def test_extent_defaults_to_k(self):
+        ps = _sizes(_a2aGemmType(), {"sizes": [3072, 2048, 1, 4096], "world": 4})
+        assert ps.exacts[0].a2aExtent == 4096
+
+    def test_extent_equal_to_k_is_accepted(self):
+        ps = _sizes(_a2aGemmType(), {"sizes": [3072, 2048, 1, 4096], "world": 4, "a2aExtent": 4096})
+        assert ps.exacts[0].a2aExtent == 4096
+
+    def test_partial_extent_is_rejected(self):
+        with pytest.raises(RuntimeError, match="a2aExtent=3072 must equal K=4096"):
+            _sizes(_a2aGemmType(), {"sizes": [3072, 2048, 1, 4096], "world": 4, "a2aExtent": 3072})
+
+    def test_k_must_divide_by_world(self):
+        with pytest.raises(RuntimeError, match="K=4100"):
+            _sizes(_a2aGemmType(), {"sizes": [3072, 2048, 1, 4100], "world": 8})
+
+
+class TestA2AGemmPipeline:
+    def test_client_writes_world_and_extent(self):
+        cpt = ContractionsProblemType.FromOriginalState(_a2aGemmType().state)
+        problem = Problem(sizes=[3072, 2048, 1, 4096, 3072, 3072, 4096, 4096], world=4, a2aExtent=4096)
+        params = CW.problemSizeParams(cpt, problem, [0])
+        assert ("world", 4) in params and ("fused-a2a-extent", 4096) in params
+
+
 class TestFusedProblemTypeRejects:
     @pytest.mark.parametrize("overrides, name", [
         ({"UseBias": 1}, "UseBias"),
@@ -83,8 +117,44 @@ class TestFusedProblemTypeRejects:
         ({"Activation": True, "ActivationType": "hipblaslt_all"}, "Activation"),
     ])
     def test_rejects(self, overrides, name):
-        with pytest.raises(Exception, match="FusedGemmA2A does not support .*%s" % name):
+        with pytest.raises(Exception, match="FusedA2A=GemmA2A does not support .*%s" % name):
             _problemType(**overrides)
+
+    @pytest.mark.parametrize("overrides, name", [
+        ({"UseBias": 1}, "UseBias"),
+        ({"TransposeB": True}, "TransposeB"),
+        ({"UseInitialStridesAB": True}, "UseInitialStridesAB"),
+        ({"Sparse": 1}, "Sparse"),
+    ])
+    def test_a2a_gemm_rejects(self, overrides, name):
+        with pytest.raises(Exception, match="FusedA2A=A2AGemm does not support .*%s" % name):
+            _a2aGemmType(**overrides)
+
+
+class TestModeKey:
+    def test_default_is_disabled(self):
+        assert _unfused(FusedGemmA2A=False)["FusedA2A"] == "Disabled"
+
+    def test_unknown_mode_is_rejected(self):
+        with pytest.raises(Exception, match="FusedA2A"):
+            _problemType(FusedA2A="Gemm")
+
+    def test_fused_gemm_a2a_true_is_rejected(self):
+        with pytest.raises(Exception, match="FusedA2A: GemmA2A"):
+            _unfused(FusedGemmA2A=True)
+
+    def test_name_tags(self):
+        assert "_GemmA2A" in str(_problemType())
+        assert "_A2AGemm" in str(_a2aGemmType())
+        assert "_A2AGemm" not in str(_unfused())
+
+    @pytest.mark.parametrize("mode", ["Disabled", "GemmA2A", "A2AGemm"])
+    def test_predicates(self, mode):
+        cpt = ContractionsProblemType.FromOriginalState(_problemType(FusedA2A=mode).state)
+        preds = {p.tag: p.value for p in cpt.predicates(True, True, True)}
+        assert preds["FusedA2A"] == mode
+        assert "FusedGemmA2A" not in preds
+        assert ("BatchSizeEqual" in preds) is (mode != "Disabled")
 
 
 class _FakeSol:
@@ -97,7 +167,7 @@ class TestFusedMatchingKey:
 
     def test_world_and_extent_join_the_key(self):
         d = {"indexOrder": [2, 3, 0, 1], "distance": "Equality", "table": [self._ROW]}
-        lib = SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], fusedGemmA2A=True)
+        lib = SL.MatchingLibrary.FromOriginalState(d, [_FakeSol(0)], fusedA2A="GemmA2A")
         assert [p.tag for p in lib.properties][-2:] == ["World", "FusedA2AExtent"]
         assert lib.table[0]["key"] == [3072, 512, 1, 2048, 4, 2048]
 
@@ -113,11 +183,11 @@ class TestMergeKeepsWorld:
     def test_strips_lds_only(self):
         rows, n = fixSizeInconsistencies(
             [[[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 2, 2048], [0, 1.0]],
-             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", True)
+             [[3072, 512, 1, 2048, 3072, 3072, 2048, 2048, 4, 2048], [0, 2.0]]], "base", _FUSED_CONFIG)
         assert n == 2
         assert sorted(r[0] for r in rows) == [[3072, 512, 1, 2048, 2, 2048],
                                               [3072, 512, 1, 2048, 4, 2048]]
-        assert fixSizeInconsistencies(rows, "base", True) == (rows, 2)
+        assert fixSizeInconsistencies(rows, "base", _FUSED_CONFIG) == (rows, 2)
 
 
 class TestClientWriterWorld:
@@ -139,7 +209,7 @@ class _FusedMockProblemType(dict):
             "Index0": 0, "Index1": 1, "IndexUnroll": 3, "TotalIndices": 4, "NumIndicesLD": 0,
             "NumIndicesC": 3, "IndexAssignmentsA": [3, 0, 2], "IndexAssignmentsB": [3, 1, 2],
             "IndexAssignmentsLD": [], "DataType": _MockDataType(), "OperationType": "GEMM",
-            "TileAwareSelection": False, "GroupedGemm": False, "FusedGemmA2A": True,
+            "TileAwareSelection": False, "GroupedGemm": False, "FusedA2A": "GemmA2A",
         })
 
     def __hash__(self):
@@ -240,3 +310,32 @@ class TestLibLogicToYamlWorld:
         data = formProblemSize(None, 0, {}, problemSizes=[{"Exact": exact}])
         p = self._reload(_problemType(), data)[0]
         assert (list(p.sizes[:4]), p.world, p.a2aExtent) == ([3072, 512, 1, 2048], 2, 2048)
+
+
+class TestProblemStrRoundTrip:
+    @staticmethod
+    def _roundTrip(problemType, exact):
+        import yaml
+        written = _sizes(problemType, exact).exacts[0]
+        parsed = yaml.safe_load(str(written))
+        return _sizes(problemType, parsed).exacts[0]
+
+    def test_a2a_gemm_keeps_world_and_extent(self):
+        p = self._roundTrip(_a2aGemmType(), {"sizes": [3072, 2048, 1, 4096], "world": 4})
+        assert (p.world, p.a2aExtent) == (4, 4096)
+
+    def test_gemm_a2a_keeps_world_and_extent(self):
+        p = self._roundTrip(_problemType(), {"sizes": [3072, 512, 1, 2048], "world": 4, "a2aExtent": 1024})
+        assert (p.world, p.a2aExtent) == (4, 1024)
+
+
+class TestLibLogicToYamlA2AGemm:
+    def test_logic_row_reloads_with_extent(self):
+        from tensilelite.TensileLibLogicToYaml import formProblemSize
+        config = {**_FUSED_CONFIG, "FusedA2A": "A2AGemm"}
+        logic = [([3072, 2048, 1, 4096, 3072, 3072, 4096, 4096, 4, 4096], [0, 1.0])]
+        data = formProblemSize(logic, 0, config)
+        exact = data["BenchmarkFinalParameters"][0]["ProblemSizes"][0]["Exact"]
+        assert exact["a2aExtent"] == 4096
+        p = TestLibLogicToYamlWorld._reload(_a2aGemmType(), data)[0]
+        assert (p.world, p.a2aExtent) == (4, 4096)

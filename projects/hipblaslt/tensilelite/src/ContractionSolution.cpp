@@ -725,6 +725,10 @@ namespace TensileLite
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args)
     {
+        for(auto const& problem : problems)
+            if(problem.fusedA2A() == FusedA2A::A2AGemm)
+                throw std::runtime_error("A2AGemm does not support device user arguments");
+
         for(int i = 0; i < problems.size(); i++)
         {
             const TensorDescriptor& e = problems[i].tensor(ContractionProblemGemm::TENSOR::E);
@@ -1285,10 +1289,13 @@ namespace TensileLite
             for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
 
+        const size_t bStrideDivisor
+            = problemType.fusedA2A == FusedA2A::A2AGemm ? problem.world() : 1;
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
-            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
+            args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i),
+                                           stride_b / bStrideDivisor);
         }
 
         if(problemType.mxBlockB)
@@ -2806,14 +2813,19 @@ namespace TensileLite
         }
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
-        if(problem.fusedGemmA2A())
+        if(problemType.fusedA2A != FusedA2A::Disabled)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
                                problem.world(),
                                inputs.fusedA2ADrain,
-                               static_cast<uint32_t>(problem.fusedA2AExtent()));
+                               static_cast<uint32_t>(problem.fusedA2AExtent()),
+                               static_cast<uint32_t>(pAMDGPU->computeUnitCount));
+        }
 
         if(problemType.stochasticRounding)
         {

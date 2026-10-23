@@ -464,7 +464,7 @@ TEST_P(SynchronizerValidatorFlagBlock, DirtyBlockFailsTheSolutionWithoutAWarmup)
     validator.setReporter(reporter);
     validator.setDevices(&devices);
     TensileLite::ContractionSolution solution;
-    solution.problemType.fusedGemmA2A = true;
+    solution.problemType.fusedA2A = TensileLite::FusedA2A::GemmA2A;
 
     validator.preSolution(&solution);
     validator.failure = GetParam();

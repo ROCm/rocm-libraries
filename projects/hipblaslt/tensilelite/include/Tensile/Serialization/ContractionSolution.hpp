@@ -237,6 +237,7 @@ namespace TensileLite
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "BufferLoad", s.BufferLoad);
                 iot::mapOptional(io, "BufferStore", s.BufferStore);
+                iot::mapOptional(io, "a2aSubRounds", s.a2aSubRounds);
             }
 
             const static bool flow = false;
@@ -311,7 +312,7 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
-                iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
+                iot::mapOptional(io, "fusedA2A", s.fusedA2A);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.

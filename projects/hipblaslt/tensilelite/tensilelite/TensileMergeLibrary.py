@@ -34,7 +34,7 @@ from . import __version__
 from . import LibraryIO
 from .SolutionStructs.Naming import getSolutionNameMin
 from .SolutionStructs.Naming import getKernelNameMin
-from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .SolutionStructs.Problem import ProblemType, isFusedA2A, problemTypeToEnum
 from .Common import ParallelMap2
 from .Common.GlobalParameters import defaultSolution
 from .Common import assignParameterWithDefault
@@ -93,11 +93,12 @@ def allFiles(startDir):
     return files
 
 
-def fixSizeInconsistencies(sizes, fileType, fusedGemmA2A=False):
+def fixSizeInconsistencies(sizes, fileType, problemType=None):
     origNumSizes = len(sizes)
+    fusedA2A = isFusedA2A(problemType)
     sizesDict = dict()
     for size, index in sizes:
-        if fusedGemmA2A and len(size) >= 10:
+        if fusedA2A and len(size) >= 10:
             size = size[:-6] + size[-2:]
         elif len(size) >= 8:
             size = size[:-4]
@@ -402,9 +403,9 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
     verbose(origNumSizes, "sizes and", origNumSolutions, "solutions in base logic file")
     verbose(incNumSizes, "sizes and", incNumSolutions, "solutions in incremental logic file")
 
-    fusedGemmA2A = oriData.get("ProblemType", {}).get("FusedGemmA2A", False)
-    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base", fusedGemmA2A)
-    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental", fusedGemmA2A)
+    problemType = oriData.get("ProblemType")
+    oriExactLogic, origNumSizes = fixSizeInconsistencies(oriExactLogic, "base", problemType)
+    incExactLogic, incNumSizes = fixSizeInconsistencies(incExactLogic, "incremental", problemType)
     oriData["ExactLogic"] = oriExactLogic
     incData["ExactLogic"] = incExactLogic
 

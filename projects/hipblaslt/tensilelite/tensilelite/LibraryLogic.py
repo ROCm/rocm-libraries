@@ -32,6 +32,7 @@ from .Common import print1, print2, HR, printExit, \
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
 from .Common.TimingInstrumentation import timing_context
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
+from .SolutionStructs.Problem import isFusedA2A
 
 from copy import deepcopy
 from sys import stdout
@@ -434,7 +435,6 @@ class LogicAnalyzer:
     # merge problem sizes from size groups
     #self.numIndices = len(problemSizesList[0].numProblemSizes)
     self.numIndices = self.problemType["TotalIndices"] + problemType["NumIndicesLD"]
-    self.fusedGemmA2A = self.problemType.get("FusedGemmA2A", False)
     unifiedProblemSizes = []
     for i in range(0, self.numIndices):
       unifiedProblemSizes.append(set())
@@ -443,7 +443,7 @@ class LogicAnalyzer:
     for problemSizes in problemSizesList:
       # add exacts
       for problem in problemSizes.exacts:
-        if self.fusedGemmA2A:
+        if isFusedA2A(self.problemType):
           self.exactProblemSizes.add(tuple(problem.sizes) + (problem.world, problem.a2aExtent))
         else:
           self.exactProblemSizes.add(tuple(problem.sizes))
@@ -580,11 +580,11 @@ class LogicAnalyzer:
       if rowIdx == 1:
         # get unit (gflops or gflops/cu) of benchmark data
         perfUnit = row[0]
-        if self.fusedGemmA2A:
+        if isFusedA2A(self.problemType):
           header = [col.strip() for col in row]
           missing = [name for name in ("World", "A2AExtent") if name not in header]
           if missing:
-            printExit("\"%s\" has no %s column(s) required for FusedGemmA2A" % (dataFileName, ", ".join(missing)))
+            printExit("\"%s\" has no %s column(s) required for fused A2A" % (dataFileName, ", ".join(missing)))
           worldIdx = header.index("World")
           extentIdx = header.index("A2AExtent")
         if perfUnit == "GFlops":
@@ -618,7 +618,7 @@ class LogicAnalyzer:
         problemSize = []
         for i in range(problemSizeStartIdx, totalSizeIdx):
           problemSize.append(int(row[i]))
-        if self.fusedGemmA2A:
+        if isFusedA2A(self.problemType):
           problemSize.append(int(row[worldIdx]))
           problemSize.append(int(row[extentIdx]))
         problemSize = tuple(problemSize)
