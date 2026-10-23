@@ -50,14 +50,14 @@
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
 #if THRUST_HAS_INCLUDE(<cuda/std/version>) && (USE_LIBCUDACXX || USE_LIBHIPCXX)
 #  include <cuda/std/version>
-// If version matches and '_CUDA_VSTD' is available.
+// If version matches.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <cuda/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>
 #    define _THRUST_LIBCXX                ::cuda
-#    define _THRUST_STD_NOVERSION         _CUDA_VSTD_NOVERSION
-#    define _THRUST_STD                   _CUDA_VSTD
+#    define _THRUST_STD_NOVERSION         ::cuda::std
+#    define _THRUST_STD                   ::cuda::std
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _THRUST_LIBCXX_BEGIN_NAMESPACE_CUDA_STD
 #    define _THRUST_STD_NAMESPACE_END     _THRUST_LIBCXX_END_NAMESPACE_CUDA_STD
@@ -69,16 +69,15 @@
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
 #elif THRUST_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
 #  include <hip/std/version>
-// If version matches and '_CUDA_VSTD' is available.
+// If version matches.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
-    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR && defined(_CUDA_VSTD)
+    && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
 // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
 #    define _THRUST_LIBCXX                ::hip
-// In 'libhipcxx' the macro '_CUDA_VSTD' is also defined.
 #    define _THRUST_STD_NOVERSION         ::hip::std
-#    define _THRUST_STD                   _CUDA_VSTD
+#    define _THRUST_STD                   ::hip::std
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _THRUST_LIBCXX_BEGIN_NAMESPACE_CUDA_STD
 #    define _THRUST_STD_NAMESPACE_END     _THRUST_LIBCXX_END_NAMESPACE_CUDA_STD
