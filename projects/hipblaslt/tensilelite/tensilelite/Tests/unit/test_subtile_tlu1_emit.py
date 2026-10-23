@@ -222,6 +222,38 @@ def test_gr_edge_mask_is_tile_relative(tc, wgSgpr):
     assert "s_sub_u32" in text, "the size is never reduced to the tile-relative bound"
 
 
+def _emitGRNamed(geoName, tc="A", miWaveGroup=(1, 1)):
+    """Emit TLU=1 GR for a geometry by name, not by fp4 stack height."""
+    from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+    kernel = _kernel(miWaveGroup=miWaveGroup)
+    writer = _Writer()
+    ti = TileInfo(AB_GEOMETRY_MAP[geoName], tc, writer, kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+    return writer, ti, GR._graTileAssignment_tlu(writer, kernel, ti), before
+
+
+@pytest.mark.parametrize("tc", ["A", "B"])
+def test_gr_edge_mask_covers_the_split_k_row_layout(tc):
+    """AB_B4_TLU1_4x1 splits the K row, so its lanes own maskable M/N blocks.
+
+    This shape bypasses column-scatter, so it would keep its edge lanes if only
+    the column-scatter path carried the mask.
+    """
+    _, ti, module, _ = _emitGRNamed("AB_B4_TLU1_4x1", tc=tc)
+    assert selectTLUColScatter(ti) is None, "fixture no longer bypasses column-scatter"
+    text = str(module)
+    assert "drop GR lanes past the real M/N" in text
+    assert "v_cmp_lt_u32" in text
+    assert "past-M/N lane" in text
+
+
+def test_gr_edge_mask_split_k_row_does_not_leak_registers():
+    writer, _, _, (vbefore, sbefore) = _emitGRNamed("AB_B4_TLU1_4x1")
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
+
+
 def test_gr_edge_mask_does_not_leak_registers():
     """The mask needs scratch on top of the pad path's; all of it must come back."""
     writer, _, _, (vbefore, sbefore) = _emitGR(_COL_SCATTER_STACK)
