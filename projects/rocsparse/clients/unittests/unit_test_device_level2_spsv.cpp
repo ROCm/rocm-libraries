@@ -324,13 +324,13 @@ namespace
 
     TEST_F(L2DeviceSpsv, csc_double_i64_and_complex)
     {
-        sweep<double, int64_t>(sp_format::csc, false);
+        sweep<double, int64_t>(sp_format::csc, true);
         sweep<rocsparse_float_complex, int32_t>(sp_format::csc, false);
     }
 
     TEST_F(L2DeviceSpsv, coo_double_i64_and_complex)
     {
-        sweep<double, int64_t>(sp_format::coo, false);
+        sweep<double, int64_t>(sp_format::coo, true);
         sweep<rocsparse_double_complex, int32_t>(sp_format::coo, false);
     }
 
