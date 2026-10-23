@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 include( utils.cmake )
 set( CORE_TARGET "rpp" )
 set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
@@ -101,6 +101,11 @@ option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
 ### CODE_COVERAGE - default = OFF, instruments librpp.so for LLVM coverage
 option(CODE_COVERAGE          "Build RPP with code coverage instrumentation (LLVM)"  OFF)
 
+### RPP_HIP_FATBIN_LAYOUT - default = ON, links librpp.so with .hip_fatbin placed after .bss
+# Keeps the link viable as the fat binary grows with GPU_TARGETS -- see cmake/hip-fatbin-layout.ld.
+# Turn OFF only for a linker with no INSERT-fragment support (ld.lld and GNU ld both have it).
+option(RPP_HIP_FATBIN_LAYOUT  "Link librpp.so with .hip_fatbin placed last"          ON)
+
 # Set message options
 if(NOT WIN32)
     string(ASCII 27 Esc)
@@ -150,6 +155,9 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     # -O0  -- Don't Optimize output file
     # -g -- generate debugging information
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
+    # -g reaches HIP *device* codegen too and inflates .hip_fatbin ~6.5x for every entry in
+    # GPU_TARGETS. Host and device both stay fully debuggable; the size is contained by
+    # --offload-compress (applied in src/modules) and by cmake/hip-fatbin-layout.ld.
 else()
     # -O3 -- Optimize output file
     # -DNDEBUG -- turn off asserts
@@ -204,6 +212,7 @@ message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/H
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
 message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
+message("-- ${Cyan}     -D RPP_HIP_FATBIN_LAYOUT=${RPP_HIP_FATBIN_LAYOUT} [Select RPP HIP fat binary section placement [options:ON/OFF](default:ON)]${ColourReset}")
 
 # OpenMP
 find_package(OpenMP COMPONENTS CXX REQUIRED)
@@ -350,6 +359,17 @@ endif()
 add_library(${PROJECT_NAME} SHARED api/rpp.h $<TARGET_OBJECTS:modules>)
 # Enable fast-math to replace Ofast
 target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
+
+# Place .hip_fatbin after .bss instead of between .gcc_except_table and .data. The fat binary
+# carries one copy of device code per --offload-arch and dominates the library, so the default
+# placement pushes .data out of range of the 4-byte PC-relative relocations in the exception
+# tables once the GPU_TARGETS list gets long enough. See cmake/hip-fatbin-layout.ld for detail.
+if("${BACKEND}" STREQUAL "HIP" AND RPP_HIP_FATBIN_LAYOUT AND NOT WIN32)
+    set(RPP_FATBIN_LAYOUT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-fatbin-layout.ld)
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-T,${RPP_FATBIN_LAYOUT_SCRIPT}")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${RPP_FATBIN_LAYOUT_SCRIPT})
+    message("-- ${Green}${PROJECT_NAME} set to link with .hip_fatbin placed last${ColourReset}")
+endif()
 
 # LLVM source-based coverage. Compile flags go on `modules` since ${PROJECT_NAME} builds
 # from its objects and has no sources of its own. -Xarch_host keeps instrumentation off the

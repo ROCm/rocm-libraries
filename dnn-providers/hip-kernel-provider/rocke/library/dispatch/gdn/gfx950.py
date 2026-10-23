@@ -38,6 +38,9 @@ ARCH = "gfx950"
 
 # KDA keeps its measured work-keyed table. GDN candidate registration below
 # owns the full configured tile space and has no GDN batch-winner table.
+# Both this table and DEFAULT_TILE below were measured on the interleaved
+# load order, before the warp-tiled emitter issued every load first
+# (ALGORITHM.md §4.3); re-run tune.py before relying on their ranking.
 #
 # (max_work, (num_warps, warp_threads_k, blocks_per_v_dim), spec_id)
 _TUNED_TILES_KDA = (
@@ -57,9 +60,10 @@ BLOCKS_PER_V_DIM = (1, 2, 4, 8, 16, 32)
 # and 16 read slower but were too noisy to call. The batch-64 cost was accepted
 # in exchange for one deterministic default. Across every legal tile at those
 # batches, (2,16,8) has the lowest geomean and worst-case slowdown against each
-# batch's fastest tile, though it is not the fastest at any single batch. To
-# revisit, run ``tune.py --gate-kind gdn``; it reports this default's rank and
-# its ratio to the fastest legal tile per batch.
+# batch's fastest tile, though it is not the fastest at any single batch (on
+# the interleaved load order; see above). To revisit, run
+# ``tune.py --gate-kind gdn``; it reports this default's rank and its ratio to
+# the fastest legal tile per batch.
 DEFAULT_TILE = (2, 16, 8)
 
 _LEXICOGRAPHIC_TILES = tuple(product(NUM_WARPS, WARP_THREADS_K, BLOCKS_PER_V_DIM))

@@ -29,16 +29,16 @@ The flag is `--cpu-only` and **requires `--gpu-targets`** (you must name the
 target arch to spoof). It is plumbed through an internal global, not the
 documented `--global-parameters` surface.
 
-- **CLI flag** — `Tensile/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It sets
+- **CLI flag** — `tensilelite/Tensile.py` (`--cpu-only`, `dest="cpuOnly"`). It sets
   `globalParameters["CpuOnly"]`. It does *not* set `CpuOnlyArch`; that keeps its
   default, and the primary path never reaches detection anyway because
   `--gpu-targets` supplies the architecture directly.
-- **Plumbing keys** — `Tensile/Common/GlobalParameters.py` defines
+- **Plumbing keys** — `tensilelite/Common/GlobalParameters.py` defines
   `globalParameters["CpuOnly"]` (default `False`) and
   `globalParameters["CpuOnlyArch"]` (default `"gfx942"`); both reset via
   `restoreDefaultGlobalParameters()`. The flag is intentionally **not** exposed
   on the `--global-parameters` surface.
-- **Arch spoof** — `Tensile/Common/Architectures.py::_detectGlobalCurrentArch`:
+- **Arch spoof** — `tensilelite/Common/Architectures.py::_detectGlobalCurrentArch`:
   when `CpuOnly` is set it returns `CpuOnlyArch` as a *name* before any probe
   runs, so neither `amdgpu-arch`/`rocminfo` nor the enumerator is shelled out
   to, and neither `detectGlobalCurrentArch` nor `detectGlobalCurrentISA` (which
@@ -76,7 +76,7 @@ Consequences:
   perf-meaningless.
 
 For this reason `--cpu-only` must never *silently* drive a real `LibraryLogic`
-generation step. The seam itself enforces this structurally: `Tensile.py`
+generation step. The seam itself enforces this structurally: `tensilelite.py`
 declines the efficiency-based (`UseEffLike`) frequency path — and therefore the
 real `LibraryLogic` winner-selection path — under `CpuOnly`, so synthetic perf
 is never consumed for tuning in the first place.

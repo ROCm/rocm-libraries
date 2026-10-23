@@ -381,3 +381,65 @@ def evaluate(state):
     seg_map = "TIGHT seg%d={A0,B0} seg%d={A1,B1}" % (a0, a1)
     return {"applicable": True, "aligned": False, "offsets": offsets,
             "blockSpan": 0, "reason": "tight", "segmentMap": seg_map}
+
+
+def b_rotate_reason(state, persistent=False):
+    """LDSSegmentBRotate gate. Returns None when B-rotate can be applied, else the reject reason.
+
+    B-rotate builds on the [2,2] split layout (A0/B0 component 0, A1/B1 component 1, component
+    stride S = writeStrideBytes, aligned S == 64K or tight 64K < S < 128K). LocalRead reaches B half
+    h through LocalReadAddrB+h; SIMD pair 1 (odd waves) gets +0 = root + S and +1 = +0 + 64K - 2S, so
+    it reads vIdx v from the other component, i.e. the data of rot(v) = (v + nV/2) mod nV. Both pairs
+    then always read addresses exactly S apart, which with 64K <= S < 128K are in different 64K LDS
+    segments. The accumulator halves are swapped back before the epilogue.
+    """
+    pt = state["ProblemType"]
+    if tuple(state.get("ISA", ()))[:2] != (12, 5):            return "not gfx1250"
+    if state.get("LDSSegmentInterleave") != 1:                return "needs LDSSegmentInterleave=1"
+    o = state.get("LDSSegInterleaveOffsets") or {}
+    for key in ("aBaseline", "bBaseline", "portSplitA", "portSplitB", "componentSplit"):
+        if o.get(key):                                        return "LSI layout '%s' not supported" % key
+    S = o.get("writeStrideBytes", 0)
+    if not (SEG <= S < 2 * SEG):                              return "component stride must be in [64K, 128K)"
+    fB = _footprint(state, "B")
+    baseB = o.get("ldsBaseB", 0)
+    # LocalRead picks LocalReadAddrB+h by offset // 64K: half 0 must stay below 64K, half 1 below 128K.
+    if fB > SEG or S + fB > 2 * SEG:                          return "B component reach exceeds the two 64K local-read registers"
+    # pair 1's +1 = root - (S - 64K) must stay non-negative.
+    if baseB < S - SEG:                                       return "ldsBaseB below S - 64K"
+    if state.get("NumLdsBlk") != 2 or state.get("1LDSBuffer") != 0:
+        return "needs 2 LDS buffers"
+    if not state.get("StoreSwapAddr"):
+        # XOR/AND buffer swap: the pair offset must stay below the buffer bit.
+        blk = state.get("LdsOffsetA_Blk", 0)
+        if blk <= 0 or (blk & (blk - 1)) or baseB + S + fB > blk:
+            return "LdsOffsetA_Blk must be a power of two above the B component span"
+    if state.get("PrefetchGlobalRead") != 2:                  return "needs PrefetchGlobalRead=2"
+    if state.get("ExpandPointerSwap"):                        return "needs ExpandPointerSwap=0"
+    if list(state["MIWaveGroup"]) != [2, 2] or state["NumWaves"] != 4 or state["WavefrontSize"] != 32:
+        return "needs MIWaveGroup [2,2], 4 waves, wave32"
+    vwb, wtb = state["VectorWidthB"], state["MIWaveTile"][1]
+    if vwb <= 0 or wtb % vwb != 0 or (wtb // vwb) % 2 != 0:
+        return "MIWaveTile[1]/VectorWidthB must be even"
+    if pt.get("MXBlockB"):
+        # MXSB must follow the rotation. Supported only for the TileSpan wave-split layout with
+        # one group (nV == 2): vIdx 0/1 scales sit in the lower/upper half-wave of one ds_load,
+        # so pair 1 flips the half-wave select in LRA. MXSA needs nothing (A is not rotated).
+        # TileSpan (LocalRead.getMxsTileSpanInfo) is gated on exactly gfx1250.
+        if tuple(state.get("ISA", ())) != (12, 5, 0):         return "MX: needs ISA (12, 5, 0)"
+        if state.get("DirectToVgprMXSB"):                     return "MX: DirectToVgprMXSB not supported"
+        if state.get("MXScaleFormat") != "InMemorySwizzle":   return "MX: needs MXScaleFormat InMemorySwizzle"
+        if state["MatrixInstN"] != state["WavefrontSize"] // 2:
+            return "MX: needs MatrixInstN == WavefrontSize/2"
+        if wtb // vwb != 2:                                   return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
+    if pt.get("Sparse"):                                      return "sparse not supported"
+    for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
+                "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
+                "PrefetchAcrossPersistent", "TDMFuse"):
+        v = state.get(key)
+        # -1 (auto) means unresolved/off for the tri-state knobs; only a positive value enables.
+        if v is True or (isinstance(v, int) and v > 0):      return "%s not supported" % key
+    if state.get("LocalSplitU", 1) > 1:                       return "LocalSplitU>1 not supported"
+    if state.get("NumWaveSplitK", 1) > 1:                     return "NumWaveSplitK>1 not supported"
+    if persistent:                                            return "persistent / StreamK not supported"
+    return None

@@ -20,6 +20,31 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
+- name: matmul_mx_scale_padding_smoke
+  category: smoke
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r }
+  # Preswizzled block-32 scales pad M/N to 32 and K/32 to 8. At K=256,
+  # one row therefore needs 256 scale bytes, not eight. Exercise padding
+  # in A alone, B alone, both operands, and neither, including batch strides.
+  matrix_size:
+    - { M: 1,  N: 32, K: 256 }
+    - { M: 32, N: 1,  K: 256 }
+    - { M: 1,  N: 1,  K: 256 }
+    - { M: 32, N: 32, K: 256 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  batch_count: [1, 2]
+  initialization: rand_int
+  unit_check: 1
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
 - name: matmul_pointer_array_distinct_c_d_layout_smoke
   category: smoke
   function:

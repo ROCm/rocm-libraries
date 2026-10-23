@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Transposed-QK WMMA FMHA-forward inner body for gfx1151 (CK gfx11 ``qr_ks_vs``
+"""Transposed-QK WMMA FMHA-forward inner body for gfx11 targets (CK gfx11 ``qr_ks_vs``
 design), FP16/BF16, dense, with runtime tensor strides.
 
 Computes the scores **transposed**: ``S^T = K @ Q^T`` instead of ``S = Q @
@@ -117,9 +117,13 @@ def wmma_swapqk_fwd_inner_body(
     ``mask_neg_inf`` may reuse the caller's true negative-infinity constant.
     ``block_n`` (32 or 64) and ``n_waves`` (1 or 2) are the only tunables.
     """
-    if arch != "gfx1151":
+    from rocke.core.arch import ArchTarget
+
+    # Any gfx11 row (concrete or gfx11-generic): the body depends on the gfx11
+    # WMMA operands being duplicated across the two lane halves.
+    if ArchTarget.from_gfx(arch).mma.by_op_id("wmma_f32_16x16x16_f16") is None:
         raise ValueError(
-            f"wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}"
+            f"wmma_swapqk needs the gfx11 WMMA operand layout; got arch={arch!r}"
         )
     if head_size not in (64, 128):
         raise ValueError(f"wmma_swapqk head_size must be 64 or 128 (got {head_size})")

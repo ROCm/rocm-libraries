@@ -39,6 +39,21 @@
       "name": "num_waves",
       "type": "int",
       "default_value": 1
+    },
+    {
+      "name": "runtime_head_dims",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_attn_bias",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "bias_dtype",
+      "type": "string",
+      "default_value": "f32"
     }
   ]
 }

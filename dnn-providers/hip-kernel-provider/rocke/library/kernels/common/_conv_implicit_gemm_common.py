@@ -39,11 +39,11 @@ from rocke.core.ir import (
     Type,
     Value,
 )
+from rocke.helpers.magic_division import do_magic_division_dynamic
 from rocke.helpers.spec import choose_load_vec
 from rocke.helpers.transforms import (
     TensorDescriptor,
     DynamicTensorDescriptor,
-    do_magic_division_dynamic,
     embed,
     embed_dynamic,
     pad,

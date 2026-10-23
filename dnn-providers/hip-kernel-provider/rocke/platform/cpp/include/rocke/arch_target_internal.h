@@ -56,6 +56,18 @@ extern const int rocke_ati_arch_registry_len;
  * in sync. */
 extern const char* const rocke_ati_known_arches[];
 
+/* One catalogued LLVM generic processor and its NULL-terminated concrete
+ * members (arch_specs.json "generic_targets"). */
+typedef struct rocke_ati_generic_row
+{
+    const char* generic;
+    const char* const* members;
+} rocke_ati_generic_row_t;
+
+/* Generic target rows, terminated by a row whose .generic == NULL. Defined in
+ * bucket 0. */
+extern const rocke_ati_generic_row_t rocke_ati_generic_targets[];
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

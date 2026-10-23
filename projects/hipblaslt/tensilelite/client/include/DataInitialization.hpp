@@ -1070,6 +1070,12 @@ namespace TensileLite
 
             void initializeMXData(ContractionProblemGemm const& problem);
 
+            void initNonMXSideWithMXGenerator(int                     dataTensorEnum,
+                                              int                     scaleTensorEnum,
+                                              TensorDescriptor const& dataDesc,
+                                              bool                    transposed,
+                                              bool                    isMatrixA);
+
             // True when swizzled MX scales depend on the solution.
             bool needsSolutionDependentMXPreswizzle(
                 ContractionProblemGemm const& problem,
@@ -1180,6 +1186,11 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
+            /// for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: initArray for A/B, MX or not, with
+            /// MX scales from init-mx-a/b (MX FP8/BF8/FP4 data). 1 and 0 give F8 and MXF8
+            /// runs identical A/B bytes.
+            int m_mxDataGenerator = -1;
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
@@ -3116,7 +3127,7 @@ namespace TensileLite
         inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
         {
             float val0 = getTrigValue<float>(idx, useCos, useAbs);
-            float val1 = getTrigValue<float>(idx, useCos, useAbs);
+            float val1 = getTrigValue<float>(idx + 1, useCos, useAbs);
             return Float4x2(val0, val1);
         }
 #endif // !_WIN32

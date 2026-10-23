@@ -5,6 +5,7 @@
     "refused": [
       "gfx1151_deep_fused_conv_pool",
       "gfx1151_wmma_fmha_fwd",
+      "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",
@@ -36,6 +37,7 @@
     "refused": [
       "gfx1151_deep_fused_conv_pool",
       "gfx1151_wmma_fmha_fwd",
+      "gfx1151_wmma_fmha_fwd_v2",
       "gfx1151_wmma_gemm",
       "gfx1151_wmma_gemm_int8",
       "gfx1151_wmma_gemm_iu8",

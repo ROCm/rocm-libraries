@@ -309,10 +309,15 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
     const char* arch = (p->arch != NULL) ? p->arch : "gfx1151";
-    if(strcmp(arch, "gfx1151") != 0)
+    /* Any gfx11 row (concrete or gfx11-generic): the body depends on the gfx11
+     * WMMA operands being duplicated across the two lane halves. */
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
+    if(target == NULL || rocke_mma_catalog_by_op_id(&target->mma, "wmma_f32_16x16x16_f16") == NULL)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "wmma_swapqk is a gfx1151 (RDNA3.5) kernel; got arch=%s", arch);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "wmma_swapqk needs the gfx11 WMMA operand layout; got arch=%s",
+                        arch);
         return ROCKE_ERR_VALUE;
     }
     int head_size = p->head_size;
@@ -350,12 +355,6 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
 
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-    if(target == NULL)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_swapqk: no target for arch %s", arch);
-        return ROCKE_ERR_VALUE;
-    }
     const char* op_id = bf16 ? "wmma_f32_16x16x16_bf16" : "wmma_f32_16x16x16_f16";
     const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     if(op == NULL || op->a_layout == NULL || op->b_layout == NULL || op->c_layout == NULL)

@@ -124,7 +124,11 @@ class TestGfx1250Prefetch(unittest.TestCase):
         self.assertEqual(_lower(kernel), _lower(parsed))
 
     def test_unsupported_arch_rejected(self):
-        with self.assertRaisesRegex(ValueError, "requires gfx1250"):
+        # enable_scalar_prefetch writes MODE through s_setreg, the first op.
+        with self.assertRaisesRegex(
+            ValueError,
+            "s_setreg requires a target with target_family gfx12_cdna, got gfx1201",
+        ):
             _lower(_build_all(), arch="gfx1201")
 
     def test_pre_llvm23_rejected(self):
@@ -140,19 +144,38 @@ class TestGfx1250Prefetch(unittest.TestCase):
             b.ret()
             return b.kernel
 
+        # Each op names the target fact that admits it.
         cases = {
-            "s_setreg": lambda b, s, f: b.s_setreg(1537, b.const_i32(1)),
-            "s_prefetch_data": lambda b, s, f: b.s_prefetch_data(s, b.const_i32(1)),
-            "s_buffer_prefetch_data": lambda b, s, f: b.s_buffer_prefetch_data(
-                b.buffer_rsrc(s, b.const_i32(64)), b.const_i32(1)
+            "s_setreg": (
+                "target_family gfx12_cdna",
+                lambda b, s, f: b.s_setreg(1537, b.const_i32(1)),
             ),
-            "global_prefetch": lambda b, s, f: b.global_prefetch(s),
-            "flat_prefetch": lambda b, s, f: b.flat_prefetch(f),
+            "s_prefetch_data": (
+                "memory.has_scalar_data_prefetch",
+                lambda b, s, f: b.s_prefetch_data(s, b.const_i32(1)),
+            ),
+            "s_buffer_prefetch_data": (
+                "memory.has_scalar_data_prefetch",
+                lambda b, s, f: b.s_buffer_prefetch_data(
+                    b.buffer_rsrc(s, b.const_i32(64)), b.const_i32(1)
+                ),
+            ),
+            "global_prefetch": (
+                "memory.has_global_prefetch",
+                lambda b, s, f: b.global_prefetch(s),
+            ),
+            "flat_prefetch": (
+                "memory.has_global_prefetch",
+                lambda b, s, f: b.flat_prefetch(f),
+            ),
         }
-        for name, emit in cases.items():
-            with self.subTest(op=name):
-                with self.assertRaisesRegex(ValueError, f"{name} requires gfx1250"):
-                    _lower(one(emit), arch="gfx950", flavor="llvm22")
+        for name, (fact, emit) in cases.items():
+            for arch, flavor in (("gfx950", "llvm22"), ("gfx1201", "llvm23")):
+                with self.subTest(op=name, arch=arch):
+                    with self.assertRaisesRegex(
+                        ValueError, f"{name} requires a target with {fact}, got {arch}"
+                    ):
+                        _lower(one(emit), arch=arch, flavor=flavor)
 
     def test_immediate_ranges(self):
         b = IRBuilder("bad")

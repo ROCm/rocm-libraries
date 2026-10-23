@@ -9,6 +9,8 @@ read. LDS is exempt (its allocation is the full tile by construction). Offline, 
 
 from __future__ import annotations
 
+import pytest
+
 from rocke.helpers.tiling.descriptors import make_tensor_desc, make_window
 from rocke.helpers.tiling.emit import _contiguous_run
 from rocke.helpers.tiling.memory import cooperative_load_desc
@@ -55,8 +57,21 @@ def test_runtime_clip_cannot_be_proven_aligned_scalarizes() -> None:
 
 
 def test_lds_access_is_exempt_from_the_gate() -> None:
-    # Even a "ragged" length is wide for LDS: the allocation is the full tile, so no overhang.
-    assert _vw((250, 16), is_lds=True) == 8
+    # Even a "ragged" length is wide for LDS: the allocation is the full tile, so no overhang. The K
+    # stride (256) keeps every run aligned.
+    tensor = make_tensor_desc((250, 16), (1, 256), _F16)
+    assert _contiguous_run(_COOP, make_window(tensor, (0, 0)), _F16, True) == 8
+
+
+@pytest.mark.parametrize("is_lds", [False, True])
+@pytest.mark.parametrize("k_stride,vw", [(256, 8), (260, 4), (258, 2), (257, 1)])
+def test_the_vector_run_divides_the_other_stride(
+    is_lds: bool, k_stride: int, vw: int
+) -> None:
+    # Column k starts at element k * k_stride; a wide access claims the alignment of its width, so
+    # the width must divide that stride in global memory and LDS alike.
+    tensor = make_tensor_desc((256, 16), (1, k_stride), _F16)
+    assert _contiguous_run(_COOP, make_window(tensor, (0, 0)), _F16, is_lds) == vw
 
 
 # ---- #32: origin-alignment on the wide-load gate (compile-time mid-tile origin caught; SSA trusted) ----
@@ -78,31 +93,23 @@ def test_ssa_origin_is_trusted_grid_aligned() -> None:
     assert _vw((256, 16), origin=(object(), 0)) == 8
 
 
-# ---- #30: the N-D operand gate fires only for a tensor that carries a CONTRACTION axis ----
+# ---- a rank-2 tile on a rank-3 tensor: the run axis is read on the tensor's last axes ----
 
 
-def test_loads_as_operand_predicate() -> None:
-    from rocke.helpers.tiling.emit import _loads_as_operand
+def test_vector_run_on_the_last_axis_of_a_rank_3_tensor_is_wide() -> None:
+    # (G, free, K) with the free axis stride 1 at tensor axis 1. The (free, K) tile covers the last
+    # two axes, so its run axis (tile axis 0) is tensor axis 1 -- stride 1 -> wide. Read without the
+    # leading-axis offset it would be the batch axis (stride free * K) and scalarize.
+    tensor = make_tensor_desc((3, 256, 16), (256 * 16, 1, 256), _F16)
+    assert _contiguous_run(_COOP, make_window(tensor, (2, 0, 0)), _F16, False) == 8
 
-    a_op = make_tensor_desc((16, 8), (8, 1), _F16, ("free", "contraction"))  # A (M,K)
-    b_op = make_tensor_desc((8, 16), (1, 8), _F16, ("contraction", "free"))  # B (K,N)
-    c_out = make_tensor_desc(
-        (16, 16), (16, 1), _F16, ("free", "free")
-    )  # C output (M,N)
-    plain = make_tensor_desc((16, 8), (8, 1), _F16)  # no roles
-    rank3 = make_tensor_desc(
-        (4, 16, 8), (128, 8, 1), _F16, ("batch", "free", "contraction")
-    )
 
-    assert _loads_as_operand(a_op) is True
-    assert _loads_as_operand(b_op) is True
-    assert (
-        _loads_as_operand(c_out) is False
-    )  # C reload: all free, not an operand -> gate skipped (was wrongly rejected)
-    assert _loads_as_operand(plain) is False  # positional, no roles
-    assert (
-        _loads_as_operand(rank3) is True
-    )  # has a contraction -> operand (assert_mma_operand then rejects rank!=2)
+def test_ragged_run_axis_of_a_rank_3_tensor_scalarizes_like_rank_2() -> None:
+    # The fully-in-bounds gate checks only the tile axes: a ragged free length scalarizes exactly as
+    # the rank-2 tensor of that length does, whatever the leading axis.
+    tensor = make_tensor_desc((3, 250, 16), (250 * 16, 1, 250), _F16)
+    assert _contiguous_run(_COOP, make_window(tensor, (1, 0, 0)), _F16, False) == 1
+    assert _vw((250, 16)) == 1
 
 
 # ---- #31: masking LDS is structurally unrepresentable -- the LDS verbs carry NO bounds parameter ----
