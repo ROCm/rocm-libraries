@@ -198,6 +198,7 @@ def test_override_does_not_falsify_guard_evidence(monkeypatch):
 
 
 def test_loader_skips_unloadable_candidate_before_querying(monkeypatch):
+    monkeypatch.setattr(comgr, "_mapped_comgr_files", lambda: [])
     lib = compiler_library((23, 0, 0), "second.so")
     monkeypatch.setattr(comgr, "_lib", None)
     monkeypatch.setattr(

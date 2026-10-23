@@ -828,3 +828,22 @@ Adding a
 published architecture creates a separate CTest automatically, which the
 provider category YAML selects by pattern. The new architecture also needs an
 adapter, a qualified bundle, and matching CI hardware.
+
+## Linux wheel compiler validation
+
+The Linux hipDNN superbuild runs the installed
+`rocke_installed_smoke.py --check-comgr` with compiler and emission overrides,
+ROCm roots, source `PYTHONPATH`, and injected loader paths unset. This lane queries
+the actual SDK compiler and compiles a minimal kernel to ELF HSACO without Torch
+or HIP launch. Ordinary installed smoke remains offline. Preserve complete SDK
+wheel dependencies for relocation and repeat from a different prefix without
+source directories available. Native CTests keep explicit wheel-path forwarding
+through `ROCKE_COMGR_LIB`; standalone native AUTO does not discover Python packages.
+
+For local ownership validation, run the SDK discovery, compiler detection,
+fresh-process, and binding selection pytest modules with a matching production
+archive (`ROCKE_TEST_ENGINE_ARCHIVE`) and importable matching pybind extension.
+Repeat from installed assets. Run strict C++ and differential routes and the
+byte-identity gate at every supported LLVM flavor. These are compiler/host gates;
+GPU launch and numerics are separate integration evidence. Native Windows
+query/compilation remains a separately executed lane.

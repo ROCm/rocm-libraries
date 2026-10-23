@@ -14,7 +14,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -22,6 +25,10 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#ifdef __linux__
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#endif
 #endif
 
 namespace
@@ -37,6 +44,72 @@ T symbol(void* library, const char* name)
     return reinterpret_cast<T>(dlsym(library, name));
 #endif
 }
+
+#ifdef __linux__
+/* Never open a second compiler beside any known mapped COMGR. An unreadable
+ * maps file is a detection limit, not evidence that the process is empty. */
+bool mapped_compiler_conflict(const std::string& path)
+{
+    std::ifstream maps("/proc/self/maps");
+    if(!maps)
+        return false;
+    std::string concrete = path;
+    const bool bare = !fs::path(path).has_parent_path();
+    bool resolved = !bare;
+    if(bare)
+    {
+        void* retained = dlopen(path.c_str(), RTLD_NOLOAD | RTLD_NOW | RTLD_LOCAL);
+        if(retained)
+        {
+            Dl_info info{};
+            void* address = dlsym(retained, "amd_comgr_get_version");
+            if(address && dladdr(address, &info) && info.dli_fname)
+            {
+                concrete = info.dli_fname;
+                resolved = true;
+            }
+            dlclose(retained);
+        }
+    }
+    struct stat candidate
+    {
+    };
+    bool known = resolved && stat(concrete.c_str(), &candidate) == 0;
+    if(!bare)
+    {
+        std::ifstream binary(path, std::ios::binary);
+        char magic[4]{};
+        if(!binary.read(magic, sizeof(magic))
+           || std::memcmp(magic,
+                          "\x7f"
+                          "ELF",
+                          4))
+            return false; // Missing/non-ELF candidates retain load-failure fallback.
+    }
+    const std::regex name(R"(libamd_comgr\.so(\.[0-9]+)*)");
+    std::string line;
+    while(std::getline(maps, line))
+    {
+        std::istringstream fields(line);
+        std::string address, permissions, offset, device, mapped;
+        unsigned long long inode = 0;
+        if(!(fields >> address >> permissions >> offset >> device >> inode))
+            continue;
+        std::getline(fields >> std::ws, mapped);
+        if(mapped.ends_with(" (deleted)"))
+            mapped.resize(mapped.size() - 10);
+        if(!std::regex_match(fs::path(mapped).filename().string(), name))
+            continue;
+        unsigned device_major = 0, device_minor = 0;
+        if(std::sscanf(device.c_str(), "%x:%x", &device_major, &device_minor) != 2)
+            continue;
+        if(!known || candidate.st_dev != makedev(device_major, device_minor)
+           || candidate.st_ino != inode)
+            return true;
+    }
+    return false;
+}
+#endif
 
 void* load(const std::string& path)
 {
@@ -148,11 +221,17 @@ void* load_comgr(std::string& requested)
     candidates.emplace_back("libamd_comgr.so");
 #endif
     for(const auto& candidate : candidates)
+    {
+#ifdef __linux__
+        if(mapped_compiler_conflict(candidate))
+            return nullptr;
+#endif
         if(void* library = load(candidate))
         {
             requested = candidate;
             return library;
         }
+    }
     return nullptr;
 }
 

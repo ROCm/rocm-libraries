@@ -34,6 +34,7 @@ def no_lib(monkeypatch: pytest.MonkeyPatch) -> None:
     """No comgr is loaded in this process: the parent's own checks pass."""
     lib = SimpleNamespace(_name="/opt/x/libamd_comgr.so.3")
     monkeypatch.setattr(comgr, "_resolve_lib", lambda: lib)
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: None)
     monkeypatch.setattr(comgr, "_assert_ir_flavor_matches_lib", lambda ir: None)
 
 
@@ -205,3 +206,18 @@ def test_fresh_process_builds_the_in_process_object() -> None:
     fresh = compile_module.compile_kernel(kernel, arch="gfx942", backend="python")
     assert fresh.llvm_text == here.llvm_text
     assert fresh.hsaco == here.hsaco and fresh.hsaco[:4] == b"\x7fELF"
+
+
+def test_fresh_process_forwards_actual_compiler_provenance(no_lib, monkeypatch):
+    info = comgr.CompilerInfo(
+        (23, 0, 0),
+        "LLVMGetVersion",
+        "libamd_comgr.so",
+        "selected-sdk/libamd_comgr.so.3",
+        "selected-sdk/libamd_comgr.so.3",
+    )
+    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    run, calls = _fake_child(0)
+    with mock.patch.object(subprocess, "run", run):
+        comgr.build_hsaco_from_llvm_ir("IR", fresh_process=True)
+    assert calls[0].env["ROCKE_COMGR_LIB"] == info.comgr_path

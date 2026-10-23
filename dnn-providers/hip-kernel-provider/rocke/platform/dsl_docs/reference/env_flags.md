@@ -118,7 +118,10 @@ by an external library or tool.
 
 Compiler version information comes from the loaded binary. Distribution layout
 and release metadata describe packaging; they are not compiler-version inputs.
-Existing discovery rules still locate candidate libraries.
+Linux COMGR candidates follow override, optional SDK wheel, explicit ROCm roots,
+system installs, and bare name. Imported torch is selected only by the explicit
+`comgr.prefer_bundled_lib()` opt-in; HIP retains its runtime ownership order.
+See [COMGR loading](../runtime/comgr_and_hipmodule.md) for fallback and mapped-library safety.
 
 ```mermaid
 flowchart TD
