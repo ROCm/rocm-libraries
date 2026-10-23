@@ -305,7 +305,7 @@ The easiest way to build MIOpen is via Docker. Building the MIOpen Docker image 
 docker buildx version
 ```
 
-The Dockerfile supports two build modes controlled by the `BUILD_TYPE` build argument:
+The Dockerfile supports three build modes controlled by the `BUILD_TYPE` build argument:
 
 ### Option 1: Using a prebuilt ROCm/TheRock image (default)
 
@@ -322,9 +322,52 @@ docker buildx build \
   ../../projects/.
 ```
 
-### Option 2: Building ROCm/TheRock from source (nightly)
+### Option 2: Installing ROCm/TheRock from the prebuilt nightly tarball
 
-This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit or when no prebuilt image is available:
+This path downloads TheRock's multi-arch nightly release tarball
+(`therock-dist-linux-multiarch-<version>.tar.gz`, which bundles every gfx family plus the
+lib/run/dev components) instead of building TheRock from source, then builds CK and MIOpen on
+top exactly as in the other modes. This is what nightly CI uses (`buildTheRockDockerImage()`):
+much faster and less prone to breaking on unrelated TheRock source-build changes than Option 3.
+The tarball is fetched over plain HTTPS from AMD's nightly repo (`THEROCK_NIGHTLY_REPO`, default
+`https://nightly.repo.amd.com/rocm/core/tarball`), so no GitHub token, AWS creds, or CI run ID is
+needed. (We fetch it directly rather than via TheRock's `install_rocm_from_artifacts.py`, which
+still points at the legacy `therock-nightly-tarball` S3 bucket that went stale after 2026-08-22;
+the installer's "install" was just a `tarfile.extractall`, so a plain `curl` + `tar` is
+equivalent.)
+
+In CI the version is resolved first and then pinned: `buildTheRockDockerImage()` lists the repo
+index and picks the newest `linux-multiarch` version (e.g. `10.1.0a20260904`), tags the base image
+`rocm/miopen:therock-<version>`, pins the real download to that exact tarball (via the
+`ROCM_NIGHTLY_VERSION` build arg), and stamps a `rocm.nightly.version` label. The tag and label
+therefore always reflect the ROCm that is actually installed, and the version — not the calendar
+date — is the layer cache key and the build/skip key. The label propagates to the CI image and the
+published dev image, so
+`docker inspect --format '{{ index .Config.Labels "rocm.nightly.version" }}' <image>` reports
+which nightly any of them was built on.
+
+`THEROCK_ASIC` still selects which archs CK and MIOpen build for; the ROCm base itself is
+arch-agnostic (the tarball already contains all families).
+
+A standalone build may omit `ROCM_NIGHTLY_VERSION` (the Dockerfile resolves the latest from the
+repo at build time) or pass it to pin an exact nightly:
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg BUILD_TYPE=artifact \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  --build-arg ROCM_NIGHTLY_VERSION=10.1.0a20260904 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
+```
+
+### Option 3: Building ROCm/TheRock from source
+
+This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit and no matching CI artifacts/prebuilt image are available, or when validating TheRock source changes directly:
 
 ```shell
 docker buildx build \

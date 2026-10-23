@@ -182,13 +182,30 @@ endif()
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
 
-if(NOT BUILD_WITH_ILDLT0)
-  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX ".*example_rocsparse_spildlt0\\.cpp$")
+# The rocsparse_spsort examples need rocsparse_spsort, which is only built with BUILD_WITH_SPSORT.
+if(NOT BUILD_WITH_SPSORT)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_spsort[^/]*\\.cpp$")
 endif()
+
+
+if(NOT BUILD_WITH_TRSM_REFACTORING)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_transpose.cpp$")
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_copy_data.cpp$")
+endif()
+
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})
 endforeach()
+
+# This documentation example intentionally demonstrates the deprecated
+# rocsparse_spmv API (see example_rocsparse_v2_spmv for the replacement),
+# so silence -Wdeprecated-declarations for it.
+set_source_files_properties(
+  documentation_examples/generic/example_rocsparse_spmv.cpp
+  PROPERTIES
+  COMPILE_FLAGS "-Wno-deprecated-declarations"
+)
 
 foreach(file ${DOCUMENTATION_EXAMPLES2})
     add_rocsparse_example(${file})

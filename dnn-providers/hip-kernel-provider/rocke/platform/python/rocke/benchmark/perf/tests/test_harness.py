@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from rocke.benchmark.perf import harness
 
@@ -331,6 +332,49 @@ class TestCounterSamples(unittest.TestCase):
         self.assertEqual(harness._counter_samples(rows, {"H": "l2_hit"}), [])
 
 
+class TestDurationMedian(unittest.TestCase):
+    def test_missing_warmup_timestamp_does_not_drop_measured_dispatch(self):
+        rows = [
+            {
+                "Dispatch_Id": str(dispatch_id),
+                "Counter_Name": "C1",
+                "Counter_Value": str(dispatch_id),
+                **timestamps,
+            }
+            for dispatch_id, timestamps in (
+                (3, {"Start_Timestamp": "0", "End_Timestamp": "3000000"}),
+                (1, {}),
+                (2, {"Start_Timestamp": "0", "End_Timestamp": "1000000"}),
+            )
+        ]
+        samples = harness._counter_samples(rows, {"C1": "busy_cycles"})
+        self.assertEqual(harness._duration_ms_median(samples, warmup=1), 2.0)
+        self.assertEqual(
+            harness._counter_medians(rows, {"C1": "busy_cycles"}, warmup=1),
+            {"busy_cycles": 2.5},
+        )
+
+    def test_warmup_boundary_is_ordered_independently_per_pass(self):
+        samples = [
+            {"counter_pass": counter_pass, "dispatch_id": did, "duration_ns": ns}
+            for counter_pass, values in (
+                ("pmc_2", ((3, 7000000), (1, 99000000), (2, 5000000))),
+                ("pmc_1", ((3, 3000000), (1, None), (2, 1000000))),
+            )
+            for did, ns in values
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, warmup=1), 4.0)
+
+    def test_no_usable_measured_timestamps_returns_none(self):
+        for samples in (
+            [],
+            [{"dispatch_id": 1}],
+            [{"dispatch_id": 1, "duration_ns": 1000000}, {"dispatch_id": 2}],
+        ):
+            with self.subTest(samples=samples):
+                self.assertIsNone(harness._duration_ms_median(samples, warmup=1))
+
+
 class TestPickTarget(unittest.TestCase):
     def _rows(self, *names):
         return [{"Kernel_Name": n} for n in names]
@@ -434,6 +478,239 @@ class TestProfileDegradation(unittest.TestCase):
         rec = harness.profile(["x"], "gfx950", op="op", shape={"M": 1})
         self.assertEqual(rec["counters"], {"l2_hit": 500})
         self.assertNotIn("l2_hit_rate", rec["derived"])
+
+
+class TestDurationMsMedian(unittest.TestCase):
+    def test_median_of_dispatch_durations_in_ms(self):
+        samples = [
+            {"dispatch_id": 1, "counter_pass": "pmc_0", "duration_ns": 1_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_0", "duration_ns": 3_000_000},
+            {"dispatch_id": 3, "counter_pass": "pmc_0", "duration_ns": 2_000_000},
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, 0), 2.0)
+
+    def test_warmup_dropped_per_pass_like_counters(self):
+        # Two passes, warmup=1: the leading dispatch of EACH pass is dropped, so the
+        # duration describes the same dispatches the counter medians do.
+        samples = [
+            {"dispatch_id": 1, "counter_pass": "pmc_0", "duration_ns": 9_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_0", "duration_ns": 1_000_000},
+            {"dispatch_id": 1, "counter_pass": "pmc_1", "duration_ns": 9_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_1", "duration_ns": 1_000_000},
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, 1), 1.0)
+
+    def test_none_without_timestamps(self):
+        self.assertIsNone(
+            harness._duration_ms_median([{"dispatch_id": 1, "busy_cycles": 5}], 0)
+        )
+
+
+class TestProfileTimingSource(unittest.TestCase):
+    """A launcher with no PerfJSON is measured from the profiler's own timestamps."""
+
+    _ROWS = [
+        {
+            "Kernel_Name": "gemm",
+            "Dispatch_Id": "1",
+            "Counter_Name": "GRBM_GUI_ACTIVE",
+            "Counter_Value": "1000",
+            "Start_Timestamp": "0",
+            "End_Timestamp": "2000000",
+        },
+        {
+            "Kernel_Name": "gemm",
+            "Dispatch_Id": "2",
+            "Counter_Name": "GRBM_GUI_ACTIVE",
+            "Counter_Value": "1000",
+            "Start_Timestamp": "0",
+            "End_Timestamp": "4000000",
+        },
+    ]
+
+    def setUp(self):
+        self._orig_disc = harness._counters.discover
+        self._orig_run = harness._run_rocprofv3
+        self._orig_wall = harness._wall
+        self._orig_read = harness._read_counter_csvs
+        self._orig_passes = harness._count_passes
+        self.wall_calls = []
+
+        def _wall(cmd, env, timeout):
+            self.wall_calls.append(cmd)
+            return {"ms_median": 1.0}, {}
+
+        harness._counters.discover = lambda arch: {"busy_cycles": "GRBM_GUI_ACTIVE"}
+        harness._count_passes = lambda outdir: 1
+        harness._read_counter_csvs = lambda outdir: list(self._ROWS)
+        harness._wall = _wall
+
+    def tearDown(self):
+        harness._counters.discover = self._orig_disc
+        harness._run_rocprofv3 = self._orig_run
+        harness._wall = self._orig_wall
+        harness._read_counter_csvs = self._orig_read
+        harness._count_passes = self._orig_passes
+
+    def test_no_perfjson_falls_back_to_dispatch_duration(self):
+        harness._run_rocprofv3 = lambda *a, **k: (True, "kernel ran, no PerfJSON\n")
+        warns = []
+        rec = harness.profile(
+            ["x"], "gfx950", op="gemm", shape={"M": 1}, warn=warns.append
+        )
+        self.assertEqual(rec["timing_source"], "rocprofv3_duration")
+        self.assertEqual(rec["profiled"]["ms_median"], 3.0)  # median(2ms, 4ms)
+        self.assertEqual(rec["wall"], {})  # un-profiled run skipped: unmeasurable
+        self.assertEqual(rec["counters"], {"busy_cycles": 1000})  # still the metric
+        self.assertEqual(self.wall_calls, [])
+        self.assertTrue(any("no PerfJSON line" in w for w in warns))
+
+    def test_perfjson_still_wins_and_keeps_the_wall_run(self):
+        harness._run_rocprofv3 = lambda *a, **k: (True, 'PerfJSON: {"ms": 2.5}\n')
+        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        self.assertEqual(rec["timing_source"], "perfjson")
+        self.assertEqual(rec["profiled"]["ms_median"], 2.5)  # not the 3.0 duration
+        self.assertEqual(rec["wall"]["ms_median"], 1.0)
+        self.assertEqual(self.wall_calls, [["x"]])
+
+    def test_no_perfjson_and_no_timestamps_still_requires_the_wall_run(self):
+        # Nothing measurable from the profiler -> the wall run is the only source,
+        # so it must run (and _wall raises on its own if it yields no timing).
+        harness._read_counter_csvs = lambda outdir: [
+            {
+                "Kernel_Name": "gemm",
+                "Dispatch_Id": "1",
+                "Counter_Name": "GRBM_GUI_ACTIVE",
+                "Counter_Value": "1000",
+            }
+        ]
+        harness._run_rocprofv3 = lambda *a, **k: (True, "no PerfJSON\n")
+        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        self.assertEqual(rec["timing_source"], "perfjson")
+        self.assertEqual(rec["wall"]["ms_median"], 1.0)
+        self.assertEqual(self.wall_calls, [["x"]])
+
+
+class TestProfileArtifacts(unittest.TestCase):
+    """Retained workspaces preserve profiler bytes, including partial captures."""
+
+    _CSV = (
+        b"Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value\r\n"
+        b"gemm,1,GRBM_GUI_ACTIVE,9000\r\n"
+        b"gemm,2,GRBM_GUI_ACTIVE,1000\r\n"
+        b"other,3,GRBM_GUI_ACTIVE,7000\r\n"
+    )
+    _RAW_FILES = {
+        "prof/pmc_1/host_counter_collection.csv": _CSV,
+        "prof/pmc_1/agent_info.csv": b'"Agent_Id","Name"\r\n"0","gfx950"\r\n',
+        "prof/diagnostics.bin": b"\x00\xffpartial\r\n",
+    }
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.artifacts = Path(temporary.name) / "capture"
+        self.profiler_ok = True
+        self.workspace = None
+        self.discover = self._patch(
+            harness._counters,
+            "discover",
+            return_value={"busy_cycles": "GRBM_GUI_ACTIVE"},
+        )
+        self.run = self._patch(
+            harness, "_run_rocprofv3", side_effect=self._produce_capture
+        )
+        self.wall = self._patch(harness, "_wall", return_value=({"ms_median": 1.0}, {}))
+
+    def _patch(self, target, name, **kwargs):
+        patcher = patch.object(target, name, **kwargs)
+        mocked = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mocked
+
+    def _produce_capture(self, cmd, pmc_input, outdir, env, timeout):
+        self.workspace = outdir.parent
+        for relative, contents in self._RAW_FILES.items():
+            path = self.workspace / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
+        return self.profiler_ok, 'PerfJSON: {"ms": 2.5}\n'
+
+    def _assert_raw_retained(self):
+        self.assertEqual(self.workspace, self.artifacts)
+        self.assertEqual(
+            (self.artifacts / "pmc.txt").read_bytes(), b"pmc: GRBM_GUI_ACTIVE\n"
+        )
+        for relative, contents in self._RAW_FILES.items():
+            with self.subTest(file=relative):
+                self.assertEqual((self.artifacts / relative).read_bytes(), contents)
+
+    def test_success_retains_unfiltered_original_bytes(self):
+        record = harness.profile(
+            ["x"], "gfx950", match="gemm", warmup=1, artifacts_dir=self.artifacts
+        )
+        self.assertEqual(record["counters"], {"busy_cycles": 1000})
+        self.assertEqual(
+            record["profile_capture"],
+            {
+                "status": "complete",
+                "counter_map": {"busy_cycles": "GRBM_GUI_ACTIVE"},
+                "counter_groups": [["GRBM_GUI_ACTIVE"]],
+                "match_kernel": "gemm",
+                "warmup_per_pass": 1,
+                "raw_includes_warmup": True,
+                "raw_includes_other_kernels": True,
+            },
+        )
+        self._assert_raw_retained()
+
+    def test_profiler_failure_retains_partial_output(self):
+        self.profiler_ok = False
+        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(record["profile_capture"]["status"], "failed")
+        self.assertEqual(record["counters"], {})
+        self.assertEqual(record["wall"], {"ms_median": 1.0})
+        self._assert_raw_retained()
+
+    def test_parsing_exception_retains_original_bytes(self):
+        self._patch(
+            harness, "_read_counter_csvs", side_effect=ValueError("malformed CSV")
+        )
+        with self.assertRaisesRegex(ValueError, "malformed CSV"):
+            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self._assert_raw_retained()
+        self.wall.assert_not_called()
+
+    def test_existing_directory_refused_before_discovery_or_launch(self):
+        self.artifacts.mkdir()
+        sentinel = self.artifacts / "previous.bin"
+        sentinel.write_bytes(b"previous capture\x00\xff")
+        with self.assertRaises(FileExistsError):
+            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(sentinel.read_bytes(), b"previous capture\x00\xff")
+        self.assertEqual(list(self.artifacts.iterdir()), [sentinel])
+        self.discover.assert_not_called()
+        self.run.assert_not_called()
+        self.wall.assert_not_called()
+
+    def test_default_omits_artifact_metadata_and_removes_workspace(self):
+        record = harness.profile(["x"], "gfx950", match="gemm", warmup=1)
+        self.assertNotIn("profile_capture", record)
+        self.assertEqual(record["counters"], {"busy_cycles": 1000})
+        self.assertIsNotNone(self.workspace)
+        self.assertFalse(self.workspace.exists())
+
+    def test_no_profiler_reports_unavailable_capture(self):
+        self.discover.return_value = {}
+        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(record["profile_capture"]["status"], "unavailable")
+        self.assertEqual(record["profile_capture"]["counter_map"], {})
+        self.assertEqual(record["profile_capture"]["counter_groups"], [])
+        self.assertEqual(record["counters"], {})
+        self.assertEqual(record["wall"], {"ms_median": 1.0})
+        self.assertTrue(self.artifacts.is_dir())
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+        self.run.assert_not_called()
 
 
 if __name__ == "__main__":

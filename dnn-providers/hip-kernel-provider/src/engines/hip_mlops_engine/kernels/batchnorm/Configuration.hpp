@@ -111,6 +111,11 @@ struct flt_max
     static constexpr double value = 3.402823466e+38;
 };
 
+struct bf16_max
+{
+    static constexpr double value = 0x1.fep+127;
+};
+
 template <int Grp0, int Grp1, int Grp2>
 struct launch_dimension
 {
@@ -146,6 +151,7 @@ struct architecture_switch
 template <typename HipKernelConfig,
           typename HalfMax,
           typename FltMax,
+          typename Bf16Max,
           typename LaunchDim,
           typename Architecture,
           int Variant,
@@ -178,18 +184,19 @@ struct proto_config
     using fp_type = typename std::conditional<
         input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
         _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
+        typename std::conditional<input_type_strategy == type_strategy::fp32, float, __bf16>::
             type>::type;
     using fp_prec_type = float;
     using fp_accum_type = float;
     static constexpr double epsilon
         = input_type_strategy == type_strategy::fp16 ? 0.0001 : 0.000001;
     static constexpr fp_type max_val
-        = input_type_strategy == type_strategy::fp16
+        = input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix
               ? HalfMax::value
               : (input_type_strategy == type_strategy::fp32
                      ? FltMax::value
-                     : 0); // TODO: not sure if 0 should be the default value of this.
+                     : Bf16Max::
+                           value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
     static constexpr auto launch_dim = LaunchDim{};
     static constexpr unsigned int nchw = static_cast<unsigned int>(NCHW);
 
@@ -262,6 +269,7 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
     hip_kernel_provider::config,
     hip_kernel_provider::batchnorm::detail::half_max,
     hip_kernel_provider::batchnorm::detail::flt_max,
+    hip_kernel_provider::batchnorm::detail::bf16_max,
     hip_kernel_provider::batchnorm::detail::
         launch_dimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
     hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_GFX103X,

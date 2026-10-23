@@ -4,13 +4,13 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <stdexcept>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
+#include "KernelIngestorTestFixtures.hpp"
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
-#include "KernelIngestorTestFixtures.hpp"
 
 /**
  * @file TestNativeRegistry.cpp
@@ -25,26 +25,42 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 TEST(TestIngestorNativeRegistry, ResolvesARegisteredSymbol)
 {
-    GraphMatcherRegistry::registerSymbol("registry.resolves", acceptGraph);
+    GraphMatchRegistry::registerSymbol("registry.resolves", acceptGraph);
 
-    EXPECT_EQ(GraphMatcherRegistry::resolve("registry.resolves"), acceptGraph);
+    EXPECT_EQ(GraphMatchRegistry::resolve("registry.resolves"), acceptGraph);
 
-    GraphMatcherRegistry::unregisterSymbol("registry.resolves");
+    GraphMatchRegistry::unregisterSymbol("registry.resolves");
+}
+
+// Code written against `ingestor::NativeRegistry` shares one registry with code using the
+// SDK-level template: a symbol registered through either spelling resolves through both.
+TEST(TestIngestorNativeRegistry, BothSpellingsNameOneRegistry)
+{
+    static_assert(std::is_same_v<NativeRegistry<GraphMatchFn>, GraphMatchRegistry>);
+    static_assert(
+        std::is_same_v<NativeRegistry<ScoreFn>, hipdnn_plugin_sdk::NativeRegistry<ScoreFn>>);
+
+    NativeRegistry<GraphMatchFn>::registerSymbol("registry.spellings", acceptGraph);
+
+    EXPECT_EQ(hipdnn_plugin_sdk::NativeRegistry<GraphMatchFn>::resolve("registry.spellings"),
+              acceptGraph);
+
+    GraphMatchRegistry::unregisterSymbol("registry.spellings");
 }
 
 TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 {
-    GraphMatcherRegistry::registerSymbol("registry.duplicate", acceptGraph);
+    GraphMatchRegistry::registerSymbol("registry.duplicate", acceptGraph);
 
-    EXPECT_THROW(GraphMatcherRegistry::registerSymbol("registry.duplicate", rejectGraph),
+    EXPECT_THROW(GraphMatchRegistry::registerSymbol("registry.duplicate", rejectGraph),
                  std::runtime_error);
 
-    GraphMatcherRegistry::unregisterSymbol("registry.duplicate");
+    GraphMatchRegistry::unregisterSymbol("registry.duplicate");
 }
 
 TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
 {
-    EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
+    EXPECT_THROW(GraphMatchRegistry::resolve("registry.never_registered"), std::runtime_error);
 }
 
 } // namespace

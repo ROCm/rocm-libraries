@@ -189,6 +189,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * the descriptor_type argument with which the descriptor was created using
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
 *
+* @note An engine descriptor validates its graph and engine applicability here, but loads
+* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
+* fetches and validates EngineDetails, including count-only queries. Successful finalization
+* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
+* validation should issue such a query after finalization.
+*
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
 * @retval  HIPDNN_STATUS_SUCCESS           The descriptor was finalized successfully
@@ -209,6 +215,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
+ * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
+ * Retrieval or validation errors are reported by this call, not engine finalization. A failed
+ * metadata load publishes no partial result and can be retried by a later attribute query.
+ *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve
  * @param  [in]   attributeName            The name of the attribute being get from the descriptor
@@ -226,6 +236,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
  *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
+ * @retval  HIPDNN_STATUS_PLUGIN_ERROR      An engine plugin failed to provide valid metadata.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
  *
  */
@@ -796,6 +807,56 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              size_t* typeLen);
 
 /**
+ * @brief Resolves an engine name to the ID of the engine that carries it.
+ *
+ * This is the inverse of the names reported by hipdnnGetEngineInfo_ext: any name obtained
+ * from that enumeration resolves here, and it resolves to exactly one engine.
+ *
+ * Names are unique across loaded engines. The backend enforces this at load time, dropping
+ * any engine whose reported name does not hash to its ID, or whose ID an earlier plugin
+ * already provides.
+ *
+ * @param[in]  handle       A valid hipDNN handle.
+ * @param[in]  engineName   Null-terminated engine name to resolve.
+ * @param[out] engineId     Pointer where the resolved engine ID will be stored.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle, name, or output pointer.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given name.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId);
+
+/**
+ * @brief Resolves an engine ID to the name that engine carries.
+ *
+ * This is the inverse of hipdnnGetEngineIdByName_ext, and reports the same name as
+ * hipdnnGetEngineInfo_ext without needing the engine's index. Only loaded engines
+ * resolve; any other ID reports HIPDNN_STATUS_NOT_SUPPORTED rather than a synthesized name.
+ *
+ * Uses the same two-call pattern as hipdnnGetEngineInfo_ext: pass `engineName` as `nullptr`
+ * to query the required size, then call again with an allocated buffer.
+ *
+ * @param[in]     handle         A valid hipDNN handle.
+ * @param[in]     engineId       Engine ID to resolve.
+ * @param[out]    engineName     Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen  On the size query, receives the required size. On the fill
+ *                               call, supplies the buffer size and is left unchanged.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle or null `engineNameLen`.
+ * @retval HIPDNN_STATUS_BAD_PARAM                Supplied buffer is too small.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given ID.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen);
+
+/**
  * @brief Gets the count of loaded heuristic policies.
  *
  * Returns the number of heuristic policy plugins that have been successfully loaded
@@ -860,6 +921,70 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                                                                       size_t* pluginVersionLen,
                                                                       char* apiVersion,
                                                                       size_t* apiVersionLen);
+
+/*!
+ * @brief Outcome of a hipdnnBackendWriteEngineRankingResults_ext() call.
+ *
+ * Reported through that call's optional @c outcome out-parameter, and meaningful only
+ * when the call returns HIPDNN_STATUS_SUCCESS. A decline is not an error.
+ */
+typedef enum
+{
+    HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN = 0, ///< The ranking was written to the cache.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED
+    = 1, ///< The exact-match cache is disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED
+    = 2, ///< graphDescriptor is unfinalized, or the graph/device could not be keyed.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES
+    = 3, ///< engineIdsInRankOrder was null or engineIdCount was 0.
+    HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED
+    = 4 ///< The cache already held this exact ranking, so nothing was written.
+} hipdnnAutotuneCacheWriteOutcome_ext_t;
+
+/*!
+ * @brief Writes an exhaustive-tuning engine ranking to the exact-match autotune cache.
+ *
+ * Keys on @p graphDescriptor's serialized buffer and the handle's current device.
+ * @p engineIdsInRankOrder is stored verbatim as both the sampled-engine set and the
+ * winning order. Fail-soft: never fails the caller's tuning run over a cache problem;
+ * an unfinalized descriptor, an empty ranking, an unkeyable graph, or a disabled cache
+ * (`HIPDNN_DISABLE_EXACT_ENGINE_CACHE`) is treated as success-with-no-write.
+ *
+ * Because one array serves as both sets, the caller owns two obligations this function
+ * cannot check. A record violating either is declined on every later lookup, and
+ * re-writing an identical record reports UNCHANGED without replacing it, so the record
+ * does not repair itself:
+ *
+ *  - **Each engine id at most once.** The read path filters the stored order to the live
+ *    candidates by set membership, which is non-consuming, so a repeated id survives and
+ *    makes the order longer than the candidate set. Callers holding several results per
+ *    engine (knob variants) must collapse them to one id first.
+ *  - **Every applicable engine present.** The read path's candidate list comes from the
+ *    pre-compile applicability probe, which knows nothing of compile failures, deselect
+ *    filters, or workspace budgets. Omitting an engine that probe reports rejects the
+ *    entry. Engines that were measured and failed, and engines that could not be
+ *    compiled, therefore belong in the array, ranked last. An engine held out by a
+ *    caller-side filter does not: a later run may admit it, so a ranking that never
+ *    measured it must not be written at all.
+ *
+ * @param [in]  handle                Supplies the device identity the ranking is scoped to.
+ * @param [in]  graphDescriptor       Backend graph descriptor; its buffer derives the cache key.
+ * @param [in]  engineIdsInRankOrder  Engine ids in winning rank order (fastest first), each
+ *                                    appearing at most once; see the obligations above.
+ * @param [in]  engineIdCount         Number of entries in @p engineIdsInRankOrder.
+ * @param [out] outcome               Optional; fail-soft outcome, valid on
+ *                                    HIPDNN_STATUS_SUCCESS. See
+ *                                    @ref hipdnnAutotuneCacheWriteOutcome_ext_t.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                 Written, or fail-soft declined (see above).
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  handle is null.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome);
 
 /**
  * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
