@@ -47,7 +47,7 @@ TEST(HostNumericsTypeBridge, ConvergesOnScalarType)
 
     EXPECT_EQ(scalarType<float>(), scalarType(HIP_R_32F));
     EXPECT_EQ(scalarType(static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)), ScalarType::E5M3);
-    EXPECT_FALSE(tryScalarType(static_cast<hipDataType>(-1)));
+    EXPECT_FALSE(getScalarType(static_cast<hipDataType>(-1)));
 }
 
 TEST(HostNumericsTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)

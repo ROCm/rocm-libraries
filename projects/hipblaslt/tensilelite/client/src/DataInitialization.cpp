@@ -1279,9 +1279,8 @@ namespace TensileLite
                                                       DataTypeInfo::Get(p.first).elementSize);
 
                     std::stringstream ss;
-                    ss << "[" << tensorIdx << "]"
-                       << "Failed to allocate gpu input " << it.name << " type("
-                       << DataTypeInfo::Get(p.first).abbrev
+                    ss << "[" << tensorIdx << "]" << "Failed to allocate gpu input " << it.name
+                       << " type(" << DataTypeInfo::Get(p.first).abbrev
                        << "), element size: " << DataTypeInfo::Get(p.first).elementSize
                        << ", element length: " << pUnit.maxElements;
 
@@ -1936,11 +1935,16 @@ namespace TensileLite
                         batchAddressShape[2] = completeDataLayout.shape()[2];
                         std::vector<ptrdiff_t> batchAddressStrides(batchCoordinates.size(), 0);
                         batchAddressStrides[2] = completeDataLayout.stride(2);
-                        batchOffset            = roc::hostnumerics::Layout(
-                                          roc::hostnumerics::Shape(std::move(batchAddressShape)),
-                                          std::move(batchAddressStrides),
-                                          completeDataLayout.offset())
-                                          .elementOffset(batchCoordinates);
+                        const auto offset
+                            = roc::hostnumerics::Layout(
+                                  roc::hostnumerics::Shape(std::move(batchAddressShape)),
+                                  std::move(batchAddressStrides),
+                                  completeDataLayout.offset())
+                                  .elementOffset(batchCoordinates);
+                        if(!offset)
+                            throw std::runtime_error(
+                                roc::hostnumerics::detail::message(offset.error()));
+                        batchOffset = *offset;
                     }
                     auto dataOutput = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
                         dataType,

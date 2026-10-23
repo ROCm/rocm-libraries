@@ -15,9 +15,9 @@ destination width and signedness. Diagnostics are obtained from the failure at
 reporting boundaries, without error-message output parameters. Checks needing
 dynamic diagnostic text can carry an owned string in the same result interface.
 
-The integer-conversion leaf is independent of throwing tensor/metadata headers
-and is tested with exception handling disabled and allocation attempts fatal.
-Its success and failure paths allocate no storage. Result payload construction
+The integer-conversion and offset leaves are independent of throwing tensor and
+metadata headers and are tested with exception handling disabled and allocation
+attempts fatal. Their success and failure paths allocate no storage. Result payload construction
 retains its ordinary exception behaviour; the wrapper does not make allocating
 operations or arbitrary user conversions nonthrowing.
 
@@ -56,3 +56,50 @@ result types. Copy and move assignment require both payloads to have nonthrowing
 constructors and support the corresponding assignment. This keeps an active
 payload present when copying a replacement throws. Add and test `Expected<void, E>`
 alongside the first check that needs to return only success or an error.
+
+## Layout boundaries
+
+`Layout::elementOffset` returns `detail::Expected<ptrdiff_t, detail::LayoutFailure>`
+and is `noexcept`. Rank, coordinate, and arithmetic errors retain an error code
+and numeric context. Checking an offset neither allocates nor formats diagnostics.
+The Python `element_offset` binding reports these errors as `RuntimeError` with
+the same rank, coordinate, and overflow messages.
+
+`Layout::getContiguousLayout` returns validation errors through `Expected`.
+It copies the Shape and allocates strides, so allocation errors can still throw.
+`Layout::contiguous` is a convenience boundary that reports validation errors as
+`std::runtime_error`. Both use orders listing axes from slowest to fastest, as in
+`Shape::linearIndex`.
+
+Assertions check established internal preconditions. Public checked operations
+return errors for invalid input in both debug and release builds. Returning an
+error does not require callers to choose a fallback: an outer boundary can
+report it as an exception when that operation cannot continue.
+
+## Prepared execution
+
+`detail::IndexIteration` validates and owns the shape and index order during
+setup. Its `noexcept` coordinate methods assert that spans have the correct rank,
+indices are in range, and the shape is nonempty. `preparedElementOffset` asserts
+coordinate rank and range and requires bounds already checked during Tensor
+construction. These assertions diagnose a broken internal loop in Debug builds;
+Release builds use the established preconditions without repeated validation.
+
+Numerical conversion remains fallible during prepared execution. A valid Float32
+Tensor can contain infinity, which cannot be converted to an integer under the
+reject policy. Checking storage and coordinates cannot prove that conversion
+will succeed. Conversion leaves return typed failures; the current Tensor and
+prepared codec conveniences report them as exceptions.
+
+The internal `detail/layout_offset.hpp` leaf checks borrowed extent, stride and
+coordinate spans without including Shape or Layout. It is tested alongside
+integer conversion with exceptions disabled and allocation attempts prohibited.
+Layout, Tensor and owning preparation still permit allocation exceptions.
+This split does not establish an exceptions-disabled build of the entire library.
+
+Fallible queries and factories use `get` names, including `getContiguousLayout`,
+`getElementBounds`, `getStorageBytesForLayout` and descriptor mappings. Their
+result type states whether failure is possible. The optional structured-sparsity
+executor uses `runTwoOfFourByteAlignedIfSupported`, since it executes a supported
+case rather than computing a query result. Throwing conveniences retain their
+existing names.

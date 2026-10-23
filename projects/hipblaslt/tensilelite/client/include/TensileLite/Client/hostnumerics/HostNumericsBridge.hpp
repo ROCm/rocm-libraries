@@ -108,14 +108,14 @@ namespace TensileLite::Client
 
     inline hostnumerics::detail::Expected<roc::hostnumerics::Layout,
                                           hostnumerics::detail::DescriptorFailure>
-        tryHostnumericsLayout(TensorDescriptor const& descriptor)
+        getHostnumericsLayout(TensorDescriptor const& descriptor)
     {
         if(descriptor.sizes().size() != descriptor.strides().size())
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::StrideRankMismatch));
         }
-        if(!roc::hostnumerics::detail::ShapeAccess::tryElementCount(descriptor.sizes()))
+        if(!roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes()))
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
@@ -138,14 +138,14 @@ namespace TensileLite::Client
 
     inline roc::hostnumerics::Layout hostnumericsLayout(TensorDescriptor const& descriptor)
     {
-        auto result = tryHostnumericsLayout(descriptor);
+        auto result = getHostnumericsLayout(descriptor);
         if(!result)
             throw std::runtime_error(std::string(hostnumerics::detail::message(result.error())));
         return std::move(*result);
     }
 
     inline std::optional<roc::hostnumerics::ScalarType>
-        tryToHostNumericsScalarType(rocisa::DataType type)
+        getHostNumericsScalarType(rocisa::DataType type)
     {
         using roc::hostnumerics::ScalarType;
         switch(type)
@@ -194,14 +194,14 @@ namespace TensileLite::Client
 
     inline roc::hostnumerics::ScalarType toHostNumericsScalarType(rocisa::DataType type)
     {
-        auto result = tryToHostNumericsScalarType(type);
+        auto result = getHostNumericsScalarType(type);
         if(!result)
             throw std::runtime_error("rocisa data type has no scalar HostNumerics mapping.");
         return std::move(*result);
     }
 
     inline std::optional<roc::hostnumerics::ScalarType>
-        tryToHostNumericsMxScaleType(rocisa::DataType type)
+        getHostNumericsMxScaleType(rocisa::DataType type)
     {
         using roc::hostnumerics::ScalarType;
         switch(type)
@@ -220,14 +220,14 @@ namespace TensileLite::Client
 
     inline roc::hostnumerics::ScalarType toHostNumericsMxScaleType(rocisa::DataType type)
     {
-        auto result = tryToHostNumericsMxScaleType(type);
+        auto result = getHostNumericsMxScaleType(type);
         if(!result)
             throw std::runtime_error("rocisa data type has no MX scale HostNumerics mapping.");
         return std::move(*result);
     }
 
     inline std::optional<roc::hostnumerics::ActivationFunction>
-        tryToHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
+        getHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
     {
         switch(activation)
         {
@@ -255,12 +255,12 @@ namespace TensileLite::Client
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::GeluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::GeluDerivativeActivation{});
+                             roc::hostnumerics::GeluDerivativeActivation{});
         case ActivationType::DRelu:
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::ReluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::ReluDerivativeActivation{});
+                             roc::hostnumerics::ReluDerivativeActivation{});
         case ActivationType::Silu:
             return roc::hostnumerics::ActivationFunction(roc::hostnumerics::SiluActivation{});
         case ActivationType::Swish:
@@ -275,7 +275,7 @@ namespace TensileLite::Client
     inline roc::hostnumerics::ActivationFunction
         toHostNumericsActivation(ActivationType activation, bool gradientApplication = false)
     {
-        auto result = tryToHostNumericsActivation(activation, gradientApplication);
+        auto result = getHostNumericsActivation(activation, gradientApplication);
         if(!result)
             throw std::runtime_error("Activation has no runtime HostNumerics mapping.");
         return std::move(*result);
@@ -345,11 +345,11 @@ namespace TensileLite::Client
 
     inline hostnumerics::detail::Expected<roc::hostnumerics::OutputSelection,
                                           hostnumerics::detail::DescriptorFailure>
-        tryReferenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
+        getReferenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
         using roc::hostnumerics::OutputSelection;
         const auto logicalCount
-            = roc::hostnumerics::detail::ShapeAccess::tryElementCount(descriptor.sizes());
+            = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
         if(!logicalCount)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
@@ -362,7 +362,7 @@ namespace TensileLite::Client
             return OutputSelection::all(order);
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
-        const auto stride = roc::hostnumerics::detail::tryNextPrimeStride(candidate);
+        const auto stride = roc::hostnumerics::detail::getNextPrimeStride(candidate);
         if(!stride)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
@@ -374,7 +374,7 @@ namespace TensileLite::Client
     inline roc::hostnumerics::OutputSelection
         referenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
-        auto selection = tryReferenceOutputSelection(descriptor, elementsToValidate);
+        auto selection = getReferenceOutputSelection(descriptor, elementsToValidate);
         if(!selection)
             throw std::runtime_error(std::string(hostnumerics::detail::message(selection.error())));
         return std::move(*selection);

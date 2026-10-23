@@ -31,6 +31,16 @@ compare and hash by their shape, strides, and offset.
         .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a = 0)
+        .def_static(
+            "contiguous", [](const Shape& shape) { return Layout::contiguous(shape); }, "shape"_a,
+            "Contiguous C order, with the last dimension fastest.")
+        .def_static(
+            "contiguous",
+            [](const Shape& shape, const std::vector<size_t>& order) {
+                return Layout::contiguous(shape, order);
+            },
+            "shape"_a, "order"_a,
+            "Order lists each axis once, from slowest to fastest, as in Shape.linear_index.")
         .def_static("contiguous_last_dimension_fastest", &Layout::contiguousLastDimensionFastest,
                     "shape"_a, "Contiguous C order, with the last dimension fastest.")
         .def_static("contiguous_first_dimension_fastest", &Layout::contiguousFirstDimensionFastest,
@@ -49,7 +59,9 @@ compare and hash by their shape, strides, and offset.
         .def(
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {
-                return layout.elementOffset(indices);
+                const auto result = layout.elementOffset(indices);
+                if (!result) throw std::runtime_error(message(result.error()));
+                return *result;
             },
             "indices"_a,
             "Return offset + sum(indices[d] * strides[d]), in elements. All coordinates "
