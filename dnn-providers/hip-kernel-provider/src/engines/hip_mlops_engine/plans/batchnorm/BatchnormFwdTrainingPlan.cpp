@@ -201,6 +201,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 {
     // Determine data type configuration
     auto xDataType = _trainingParams.x()->data_type();
+    auto yDataType = _trainingParams.y()->data_type();
     auto scaleDataType = _trainingParams.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
@@ -208,11 +209,21 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // applicability checks require the scale and bias tensors to be FP32.
     // So we are not using the USE_FP16 path in the kernel for now.
     const bool useFp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     const bool useBfp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useFp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useBfp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
@@ -292,6 +303,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
         isLayoutChannelLast,
         useFp16Mix,
         useBfp16Mix,
+        useFp16Upcast,
+        useBfp16Upcast,
         hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
         minWorkgroups);
     // Define default configuration based on heuristics and
@@ -384,8 +397,8 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                           _trainingParams.scale(),
                                           deviceProperties,
                                           activationMode);
-    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
-    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix || useFp16Upcast);
+    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix || useBfp16Upcast);
     options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
     options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
     options.update("HIP_PLUGIN_BN_VARIANT", variant);

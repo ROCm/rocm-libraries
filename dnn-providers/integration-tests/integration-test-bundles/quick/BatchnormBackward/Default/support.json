@@ -28,6 +28,8 @@
           "1_3_224_bfp16_upcast_nlc",
           "1_3_224_fp16_upcast_ncl",
           "1_3_224_fp16_upcast_nlc",
+          "4_3_1_fp16_upcast_ncl",
+          "4_3_1_fp16_upcast_nlc",
           "2_3_3_1_1_bfp16_upcast_ndhwc",
           "2_3_3_1_1_fp16_upcast_ncdhw",
           "2_3_3_1_1_fp16_upcast_ndhwc"

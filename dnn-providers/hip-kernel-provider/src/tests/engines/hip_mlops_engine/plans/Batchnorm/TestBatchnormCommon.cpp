@@ -17,6 +17,7 @@ ProblemDescription makeProblem(size_t batches,
                                size_t spatialSize,
                                bool isLayoutChannelLast,
                                bool isFp32,
+                               bool isUpcast,
                                size_t minWorkgroups = 1,
                                Direction direction = Direction::FORWARD_TRAINING)
 {
@@ -24,7 +25,9 @@ ProblemDescription makeProblem(size_t batches,
             channels,
             spatialSize,
             isLayoutChannelLast,
-            !isFp32,
+            !isFp32 && !isUpcast,
+            false,
+            !isFp32 && isUpcast,
             false,
             direction,
             minWorkgroups};
@@ -34,7 +37,8 @@ ProblemDescription makeProblem(size_t batches,
 
 TEST(TestProblemDescription, ExposesProblemProperties)
 {
-    const ProblemDescription problem(32, 64, 128, true, false, true, Direction::BACKWARD, 42);
+    const ProblemDescription problem(
+        32, 64, 128, true, false, true, false, false, Direction::BACKWARD, 42);
 
     EXPECT_EQ(problem.batches(), 32);
     EXPECT_EQ(problem.channels(), 64);
@@ -42,6 +46,8 @@ TEST(TestProblemDescription, ExposesProblemProperties)
     EXPECT_TRUE(problem.isLayoutChannelLast());
     EXPECT_FALSE(problem.useFp16Mix());
     EXPECT_TRUE(problem.useBfp16Mix());
+    EXPECT_FALSE(problem.useFp16Upcast());
+    EXPECT_FALSE(problem.useBfp16Upcast());
     EXPECT_FALSE(problem.useFp32());
     EXPECT_EQ(problem.direction(), Direction::BACKWARD);
     EXPECT_EQ(problem.minWorkgroups(), 42);
@@ -50,7 +56,7 @@ TEST(TestProblemDescription, ExposesProblemProperties)
 TEST(TestProblemDescription, ComputesDerivedDimensions)
 {
     const ProblemDescription problem(
-        32, 64, 128, false, false, false, Direction::FORWARD_TRAINING, 1);
+        32, 64, 128, false, false, false, false, false, Direction::FORWARD_TRAINING, 1);
 
     EXPECT_TRUE(problem.useFp32());
     EXPECT_EQ(problem.inCstride(), 128);
@@ -68,7 +74,7 @@ TEST(TestGetLocalConfigNlcFp32, ProducesSquareWorkgroup)
     size_t x = 0;
     size_t y = 0;
 
-    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, true), 4, x, y);
+    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, true, false), 4, x, y);
     EXPECT_EQ(x, 16);
     EXPECT_EQ(y, 16);
 }
@@ -78,7 +84,17 @@ TEST(TestGetLocalConfigNlc, MixedPrecisionUsesWiderX)
     size_t x = 0;
     size_t y = 0;
 
-    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, false), 4, x, y);
+    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, false, false), 4, x, y);
+    EXPECT_EQ(x, 32);
+    EXPECT_EQ(y, 8);
+}
+
+TEST(TestGetLocalConfigNlc, UpcastUsesWiderX)
+{
+    size_t x = 0;
+    size_t y = 0;
+
+    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, false, true), 4, x, y);
     EXPECT_EQ(x, 32);
     EXPECT_EQ(y, 8);
 }
@@ -89,7 +105,7 @@ TEST(TestGetLocalConfigNlc, HandlesVectorsizeScaling)
     size_t y = 0;
 
     // With vectorsize of 8, the maxlocalsize should be reduced
-    getLocalConfigChannelLast(makeProblem(1, 1024, 256, true, true), 8, x, y);
+    getLocalConfigChannelLast(makeProblem(1, 1024, 256, true, true, false), 8, x, y);
     EXPECT_EQ(x, 16);
     EXPECT_EQ(y, 8);
 }
@@ -98,12 +114,14 @@ TEST(TestGetLocalConfigNlc, HandlesIncreasedMinWorkgroups)
 {
     size_t xSmallWG = 0;
     size_t ySmallWG = 0;
-    getLocalConfigChannelLast(makeProblem(1, 64, 4096, true, true, 10), 1, xSmallWG, ySmallWG);
+    getLocalConfigChannelLast(
+        makeProblem(1, 64, 4096, true, true, false, 10), 1, xSmallWG, ySmallWG);
 
     // With high minWorkgroups requirement, the workgroup size should be reduced
     size_t xLargeWG = 0;
     size_t yLargeWG = 0;
-    getLocalConfigChannelLast(makeProblem(1, 64, 4096, true, true, 10000), 1, xLargeWG, yLargeWG);
+    getLocalConfigChannelLast(
+        makeProblem(1, 64, 4096, true, true, false, 10000), 1, xLargeWG, yLargeWG);
 
     EXPECT_EQ(xSmallWG, xLargeWG);
     EXPECT_LT(yLargeWG, ySmallWG);
@@ -114,7 +132,7 @@ TEST(TestGetLocalConfigNlc, HandlesSmallChannels)
     size_t x = 0;
     size_t y = 0;
 
-    getLocalConfigChannelLast(makeProblem(1, 2, 256, true, true), 4, x, y);
+    getLocalConfigChannelLast(makeProblem(1, 2, 256, true, true, false), 4, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 128);
 }
@@ -124,7 +142,7 @@ TEST(TestGetLocalConfigNlc, HandlesSmallInitialMaxLocalsize)
     size_t x = 0;
     size_t y = 0;
 
-    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, true), 4, x, y);
+    getLocalConfigChannelLast(makeProblem(1, 128, 256, true, true, false), 4, x, y);
     EXPECT_EQ(x, 16);
     EXPECT_EQ(y, 16);
 }
@@ -138,7 +156,7 @@ TEST(TestGetSpatialMultipleConfig, NlcReturnsDefaultOnMisalignment)
     size_t x = 0;
     size_t y = 0;
 
-    getSpatialMultipleConfig(makeProblem(1, 3, 256, true, true, 80), 4, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 3, 256, true, true, false, 80), 4, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 1);
 }
@@ -148,7 +166,7 @@ TEST(TestGetSpatialMultipleConfig, NclReturnsDefaultOnMisalignment)
     size_t x = 0;
     size_t y = 0;
 
-    getSpatialMultipleConfig(makeProblem(1, 64, 15, false, true, 80), 4, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 64, 15, false, true, false, 80), 4, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 1);
 }
@@ -158,7 +176,7 @@ TEST(TestGetSpatialMultipleConfig, NlcCalculatesWorkgroupSize)
     size_t x = 0;
     size_t y = 0;
 
-    getSpatialMultipleConfig(makeProblem(1, 64, 256, true, true, 80), 4, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 64, 256, true, true, false, 80), 4, x, y);
     EXPECT_EQ(x, 16);
     EXPECT_EQ(y, 8);
 }
@@ -168,7 +186,7 @@ TEST(TestGetSpatialMultipleConfig, NclHandlesLargeSpatial)
     size_t x = 0;
     size_t y = 0;
 
-    getSpatialMultipleConfig(makeProblem(1, 64, 4096, false, true, 80), 1, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 64, 4096, false, true, false, 80), 1, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 1024);
 }
@@ -178,11 +196,11 @@ TEST(TestGetSpatialMultipleConfig, NclScalesDownForSmallSpatial)
     size_t x = 0;
     size_t y = 0;
 
-    getSpatialMultipleConfig(makeProblem(1, 64, 128, false, true, 80), 1, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 64, 128, false, true, false, 80), 1, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 128);
 
-    getSpatialMultipleConfig(makeProblem(1, 64, 32, false, true, 80), 1, x, y);
+    getSpatialMultipleConfig(makeProblem(1, 64, 32, false, true, false, 80), 1, x, y);
     EXPECT_EQ(x, 1);
     EXPECT_EQ(y, 64);
 }
@@ -195,42 +213,49 @@ TEST(TestIsSpatialMultipleApplicable, NlcVectorAlignmentFail)
 {
     // If C is not divisible by vectorsize with channel last layout, it should fail immediately
     EXPECT_FALSE(
-        isSpatialMultipleApplicable(makeProblem(64, 63, 256, true, true), 4, 32, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(64, 63, 256, true, true, false), 4, 32, 64, 1, 64));
 }
 
 TEST(TestIsSpatialMultipleApplicable, NclSpatialAlignmentFail)
 {
     // If H*W is not divisible by vectorsize with NCHW layout, it should fail immediately
     EXPECT_FALSE(
-        isSpatialMultipleApplicable(makeProblem(64, 64, 15, false, true), 4, 32, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(64, 64, 15, false, true, false), 4, 32, 64, 1, 64));
 }
 
 TEST(TestIsSpatialMultipleApplicable, StashFitsInSpatialDimension)
 {
     // The last block of spatial dimension is large enough to hold stashed values
     EXPECT_TRUE(
-        isSpatialMultipleApplicable(makeProblem(64, 64, 256, true, true), 4, 32, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(64, 64, 256, true, true, false), 4, 32, 64, 1, 64));
 }
 
 TEST(TestIsSpatialMultipleApplicable, StashFitsInBatchDimension)
 {
     // Even if the spatial remainder is small, it works if the batch remainder is large enough
     EXPECT_TRUE(
-        isSpatialMultipleApplicable(makeProblem(128, 64, 10, true, true), 1, 32, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(128, 64, 10, true, true, false), 1, 32, 64, 1, 64));
 }
 
 TEST(TestIsSpatialMultipleApplicable, StashDoesNotFitInSpatialOrBatchDimension)
 {
     // Both spatial and batch remainders are smaller than the required stash values
     EXPECT_FALSE(
-        isSpatialMultipleApplicable(makeProblem(10, 64, 10, true, true), 1, 32, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(10, 64, 10, true, true, false), 1, 32, 64, 1, 64));
 }
 
 TEST(TestIsSpatialMultipleApplicable, MixedPrecisionOddCFailsOnSmallZ)
 {
     // For FP16/BF16, if C is odd, the intermediate results MUST fit in the batch dimension
+    EXPECT_FALSE(isSpatialMultipleApplicable(
+        makeProblem(10, 65, 256, true, false, false), 1, 16, 64, 1, 64));
+}
+
+TEST(TestIsSpatialMultipleApplicable, UpcastOddCFailsOnSmallZ)
+{
+    // For FP16/BF16, if C is odd, the intermediate results MUST fit in the batch dimension
     EXPECT_FALSE(
-        isSpatialMultipleApplicable(makeProblem(10, 65, 256, true, false), 1, 16, 64, 1, 64));
+        isSpatialMultipleApplicable(makeProblem(10, 65, 256, true, false, true), 1, 16, 64, 1, 64));
 }
 
 // ====================================================================================================
@@ -239,34 +264,42 @@ TEST(TestIsSpatialMultipleApplicable, MixedPrecisionOddCFailsOnSmallZ)
 
 TEST(TestUseMultiple, BackwardSmallSpatialReturnsFalse)
 {
-    EXPECT_FALSE(useMultiple(makeProblem(64, 1, 256, false, true, 1, Direction::BACKWARD)));
+    EXPECT_FALSE(useMultiple(makeProblem(64, 1, 256, false, true, false, 1, Direction::BACKWARD)));
 }
 
 TEST(TestUseMultiple, BackwardLargeProblemReturnsTrue)
 {
-    EXPECT_TRUE(useMultiple(makeProblem(64, 1, 1048576, false, true, 1, Direction::BACKWARD)));
+    EXPECT_TRUE(
+        useMultiple(makeProblem(64, 1, 1048576, false, true, false, 1, Direction::BACKWARD)));
 }
 
 TEST(TestUseMultiple, ForwardTrainingSmallProblemReturnsFalse)
 {
-    EXPECT_FALSE(useMultiple(makeProblem(2, 1, 64, false, true, 1, Direction::FORWARD_TRAINING)));
+    EXPECT_FALSE(
+        useMultiple(makeProblem(2, 1, 64, false, true, false, 1, Direction::FORWARD_TRAINING)));
 }
 
 TEST(TestUseMultiple, ForwardTrainingLargeBatchReturnsTrue)
 {
-    EXPECT_TRUE(
-        useMultiple(makeProblem(1024, 1, 1024, false, true, 1, Direction::FORWARD_TRAINING)));
+    EXPECT_TRUE(useMultiple(
+        makeProblem(1024, 1, 1024, false, true, false, 1, Direction::FORWARD_TRAINING)));
 }
 
 TEST(TestUseMultiple, ForwardTrainingMixedPrecisionHeuristic)
 {
+    EXPECT_FALSE(useMultiple(
+        makeProblem(128, 1, 1024, false, false, false, 1, Direction::FORWARD_TRAINING)));
+}
+
+TEST(TestUseMultiple, ForwardTrainingUpcastHeuristic)
+{
     EXPECT_FALSE(
-        useMultiple(makeProblem(128, 1, 1024, false, false, 1, Direction::FORWARD_TRAINING)));
+        useMultiple(makeProblem(128, 1, 1024, false, false, true, 1, Direction::FORWARD_TRAINING)));
 }
 
 TEST(TestUseMultiple, NhwcAlwaysReturnsTrue)
 {
-    EXPECT_TRUE(useMultiple(makeProblem(2, 1, 64, true, true)));
+    EXPECT_TRUE(useMultiple(makeProblem(2, 1, 64, true, true, false)));
 }
 
 // ====================================================================================================
@@ -275,22 +308,32 @@ TEST(TestUseMultiple, NhwcAlwaysReturnsTrue)
 
 TEST(TestGetStashMethod, ReturnsMethodZeroWhenSpatialFits)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 1024, false, true), 32, 1024, 1, 64), 0);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 1024, false, true, false), 32, 1024, 1, 64), 0);
 }
 
 TEST(TestGetStashMethod, ReturnsMethodOneWhenBatchStashRequired)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 10, false, true), 32, 64, 1, 64), 1);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 10, false, true, false), 32, 64, 1, 64), 1);
 }
 
 TEST(TestGetStashMethod, ReturnsMethodTwoForNhwcOddCMixedPrecision)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false), 16, 1024, 1, 64), 2);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, false), 16, 1024, 1, 64), 2);
+}
+
+TEST(TestGetStashMethod, ReturnsMethodZeroForNhwcOddCUpcast)
+{
+    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, true), 16, 1024, 1, 64), 0);
 }
 
 TEST(TestGetStashMethod, MixedPrecisionScalesStashValues)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false), 16, 64, 1, 64), 1);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, false), 16, 64, 1, 64), 1);
+}
+
+TEST(TestGetStashMethod, UpcastDoesntScaleStashValues)
+{
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, true), 16, 64, 1, 64), 0);
 }
 
 // ====================================================================================================
@@ -302,7 +345,8 @@ TEST(TestDefaultConfigSpatialSingle, NlcDefaultVariantOne)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(64, 1, 256, true, false, false, Direction::BACKWARD, 1), config);
+        ProblemDescription(64, 1, 256, true, false, false, false, false, Direction::BACKWARD, 1),
+        config);
     EXPECT_EQ(config.variant, 1);
     EXPECT_EQ(config.vectorsize, 1);
 }
@@ -312,7 +356,8 @@ TEST(TestDefaultConfigSpatialSingle, NclBackwardSmallSpatialSmallBatch)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(32, 1, 256, false, false, false, Direction::BACKWARD, 1), config);
+        ProblemDescription(32, 1, 256, false, false, false, false, false, Direction::BACKWARD, 1),
+        config);
     EXPECT_EQ(config.variant, 0);
     EXPECT_EQ(config.vectorsize, 1);
 }
@@ -322,7 +367,8 @@ TEST(TestDefaultConfigSpatialSingle, NclBackwardSmallSpatialLargeBatch)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(128, 1, 200, false, false, false, Direction::BACKWARD, 1), config);
+        ProblemDescription(128, 1, 200, false, false, false, false, false, Direction::BACKWARD, 1),
+        config);
     EXPECT_EQ(config.variant, 3);
     EXPECT_EQ(config.vectorsize, 1);
 }
@@ -332,7 +378,8 @@ TEST(TestDefaultConfigSpatialSingle, NclBackwardMidSpatialSmallBatch)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(16, 1, 600, false, false, false, Direction::BACKWARD, 1), config);
+        ProblemDescription(16, 1, 600, false, false, false, false, false, Direction::BACKWARD, 1),
+        config);
     EXPECT_EQ(config.variant, 3);
     EXPECT_EQ(config.vectorsize, 1);
 }
@@ -342,7 +389,8 @@ TEST(TestDefaultConfigSpatialSingle, NclForwardLargeSpatialOrMixed)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(64, 1, 1024, false, true, false, Direction::FORWARD_TRAINING, 1),
+        ProblemDescription(
+            64, 1, 1024, false, true, false, false, false, Direction::FORWARD_TRAINING, 1),
         config);
     EXPECT_EQ(config.variant, 1);
     EXPECT_EQ(config.vectorsize, 1);
@@ -353,7 +401,9 @@ TEST(TestDefaultConfigSpatialSingle, NclForwardSmallDefault)
     KernelConfig config;
 
     defaultConfigSpatialSingle(
-        ProblemDescription(10, 1, 64, false, false, false, Direction::FORWARD_TRAINING, 1), config);
+        ProblemDescription(
+            10, 1, 64, false, false, false, false, false, Direction::FORWARD_TRAINING, 1),
+        config);
     EXPECT_EQ(config.variant, 0);
     EXPECT_EQ(config.vectorsize, 1);
 }
@@ -366,7 +416,7 @@ TEST(TestDefaultConfigSpatialMultiple, NlcFullConfigCheck)
 {
     KernelConfig config;
 
-    defaultConfigSpatialMultiple(makeProblem(128, 64, 256, true, true, 80), 32, config);
+    defaultConfigSpatialMultiple(makeProblem(128, 64, 256, true, true, false, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 4);
     EXPECT_EQ(config.batchElements, 128);
@@ -379,7 +429,7 @@ TEST(TestDefaultConfigSpatialMultiple, NlcFallbackConfigCheck)
 {
     KernelConfig config;
 
-    defaultConfigSpatialMultiple(makeProblem(64, 25, 256, true, true, 80), 32, config);
+    defaultConfigSpatialMultiple(makeProblem(64, 25, 256, true, true, false, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
     EXPECT_EQ(config.batchElements, 64);
@@ -392,7 +442,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclFullConfigCheck)
 {
     KernelConfig config;
 
-    defaultConfigSpatialMultiple(makeProblem(128, 64, 256, false, true, 80), 32, config);
+    defaultConfigSpatialMultiple(makeProblem(128, 64, 256, false, true, false, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
     EXPECT_EQ(config.batchElements, 128);
@@ -405,7 +455,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclSingleVectorConfig)
 {
     KernelConfig config;
 
-    defaultConfigSpatialMultiple(makeProblem(16, 32, 2, false, true, 80), 1, config);
+    defaultConfigSpatialMultiple(makeProblem(16, 32, 2, false, true, false, 80), 1, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
     EXPECT_EQ(config.batchElements, 16);
@@ -418,7 +468,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclOddSpatialFallback)
 {
     KernelConfig config;
 
-    defaultConfigSpatialMultiple(makeProblem(64, 64, 15, false, true, 80), 32, config);
+    defaultConfigSpatialMultiple(makeProblem(64, 64, 15, false, true, false, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
     EXPECT_EQ(config.batchElements, 64);
@@ -432,7 +482,7 @@ TEST(TestDefaultConfigSpatialMultiple, NoConfigAssignedOnFailure)
     KernelConfig config;
 
     // StashValues requirement 12345 is impossible to satisfy
-    defaultConfigSpatialMultiple(makeProblem(1, 1, 1, false, true, 80), 12345, config);
+    defaultConfigSpatialMultiple(makeProblem(1, 1, 1, false, true, false, 80), 12345, config);
     EXPECT_EQ(config.variant, -1);
 }
 
@@ -452,7 +502,7 @@ TEST(TestBatchnormBwdStashFix, NotSavedValueRejectsAsanShapeFromVariant2)
 
     // dx at {2,3,1} holds 2 stash fields, not 4, so a 4-field request (what a
     // stats-computing backward pass needs) makes the gate reject the reduction path.
-    defaultConfigSpatialMultiple(makeProblem(2, 3, 1, true, true), 4, config);
+    defaultConfigSpatialMultiple(makeProblem(2, 3, 1, true, true, false), 4, config);
     EXPECT_NE(config.variant, 2);
 }
 
@@ -462,7 +512,7 @@ TEST(TestBatchnormBwdStashFix, OldValueAcceptedAsanShapeIntoVariant2)
 
     // A 2-field request fits dx at this shape, so the gate selects the reduction path.
     // This is the boundary the field count must clear: 2 fits where 4 does not.
-    defaultConfigSpatialMultiple(makeProblem(2, 3, 1, true, true), 2, config);
+    defaultConfigSpatialMultiple(makeProblem(2, 3, 1, true, true, false), 2, config);
     EXPECT_EQ(config.variant, 2);
 }
 
@@ -472,7 +522,7 @@ TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
     // resolves to ylocalsize=256, zlocalsize=1, batchElements=2, whose last block holds 2
     // stash fields but not 4, so the gate accepts a 2-field request and rejects a
     // 4-field one.
-    const auto problem = makeProblem(2, 3, 1, true, true);
+    const auto problem = makeProblem(2, 3, 1, true, true, false);
     EXPECT_TRUE(isSpatialMultipleApplicable(problem, 1, 2, 256, 1, 2));
     EXPECT_FALSE(isSpatialMultipleApplicable(problem, 1, 4, 256, 1, 2));
 }

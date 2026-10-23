@@ -27,6 +27,8 @@ public:
                        bool isLayoutChannelLast,
                        bool useFp16Mix,
                        bool useBfp16Mix,
+                       bool useFp16Upcast,
+                       bool useBfp16Upcast,
                        Direction direction,
                        size_t minWorkgroups)
         : _batches(batches)
@@ -35,6 +37,8 @@ public:
         , _isLayoutChannelLast(isLayoutChannelLast)
         , _useFp16Mix(useFp16Mix)
         , _useBfp16Mix(useBfp16Mix)
+        , _useFp16Upcast(useFp16Upcast)
+        , _useBfp16Upcast(useBfp16Upcast)
         , _direction(direction)
         , _minWorkgroups(minWorkgroups)
     {
@@ -64,13 +68,27 @@ public:
     {
         return _useBfp16Mix;
     }
+    bool useFp16Upcast() const
+    {
+        return _useFp16Upcast;
+    }
+    bool useBfp16Upcast() const
+    {
+        return _useBfp16Upcast;
+    }
     bool useFp32() const
     {
-        return !_useFp16Mix && !_useBfp16Mix;
+        return !_useFp16Mix && !_useBfp16Mix && !_useFp16Upcast && !_useBfp16Upcast;
     }
     Direction direction() const
     {
         return _direction;
+    }
+    bool useFp32Stash() const
+    {
+        return useFp32()
+               || (_direction == Direction::FORWARD_TRAINING
+                   && (_useFp16Upcast || _useBfp16Upcast));
     }
     size_t minWorkgroups() const
     {
@@ -101,6 +119,8 @@ private:
     bool _isLayoutChannelLast;
     bool _useFp16Mix;
     bool _useBfp16Mix;
+    bool _useFp16Upcast;
+    bool _useBfp16Upcast;
     Direction _direction;
     size_t _minWorkgroups;
 };
@@ -289,12 +309,14 @@ inline bool useMultiple(const ProblemDescription& problem)
 
     if(!problem.isLayoutChannelLast() && problem.direction() == Direction::FORWARD_TRAINING)
     {
-        const bool condition1
-            = (problem.batches() < 3) || (inCstride <= 512)
-              || (inChannelSliceSize < 33554432 && inCstride > 1024)
-              || (problem.batches() >= 256 && inCstride > 60
-                  && (problem.useFp16Mix() || problem.useBfp16Mix()))
-              || ((problem.useFp16Mix() || problem.useBfp16Mix()) && inCstride > 512);
+        const bool condition1 = (problem.batches() < 3) || (inCstride <= 512)
+                                || (inChannelSliceSize < 33554432 && inCstride > 1024)
+                                || (problem.batches() >= 256 && inCstride > 60
+                                    && (problem.useFp16Mix() || problem.useBfp16Mix()
+                                        || problem.useFp16Upcast() || problem.useBfp16Upcast()))
+                                || ((problem.useFp16Mix() || problem.useBfp16Mix()
+                                     || problem.useFp16Upcast() || problem.useBfp16Upcast())
+                                    && inCstride > 512);
 
         const bool condition2 = (problem.batches() <= 768) || (inCstride <= 150);
 
@@ -314,22 +336,22 @@ inline int getStashMethod(const ProblemDescription& problem,
                           size_t zlocalsize,
                           size_t batchElements)
 {
-    // See `batchnorm_functions.hpp` for stash implementation of different methods
+    // See `BatchnormFunctions.hpp` for stash implementation of different methods
     int stashMethod = 0;
-    stashValues *= (problem.useFp32() ? 1 : 2);
+    stashValues *= (problem.useFp32Stash() ? 1 : 2);
     const unsigned int lastYlocalsize = problem.inCstride() % ylocalsize == 0
                                             ? static_cast<unsigned int>(ylocalsize)
                                             : problem.inCstride() % ylocalsize;
-    const unsigned int lastZocalsize
+    const unsigned int lastZlocalsize
         = problem.batches() % (zlocalsize * batchElements) == 0
               ? static_cast<unsigned int>(zlocalsize * batchElements)
               : problem.batches() % static_cast<unsigned int>(zlocalsize * batchElements);
-    if(lastYlocalsize < stashValues && lastZocalsize >= stashValues)
+    if(lastYlocalsize < stashValues && lastZlocalsize >= stashValues)
     {
         stashMethod = 1;
     }
-    if(problem.isLayoutChannelLast() && !problem.useFp32() && (problem.channels() % 2 != 0)
-       && (lastZocalsize >= stashValues))
+    if(problem.isLayoutChannelLast() && !problem.useFp32Stash() && problem.channels() % 2 != 0
+       && lastZlocalsize >= stashValues)
     {
         stashMethod = 2;
     }

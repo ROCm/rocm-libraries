@@ -3616,6 +3616,240 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormBackwardCalcStats3dFp16.Correctness_2"
       }
+    },
+    {
+      "id": "4_3_1_fp16_upcast_ncl",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "notes": "Edge case for batchnorm stash method selection",
+        "operation": "BatchnormBackward",
+        "seed": 1
+      }
+    },
+    {
+      "id": "4_3_1_fp16_upcast_nlc",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              4,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "3": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "4": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          }
+        },
+        "notes": "Edge case for batchnorm stash method selection",
+        "operation": "BatchnormBackward",
+        "seed": 1
+      }
     }
   ]
 }

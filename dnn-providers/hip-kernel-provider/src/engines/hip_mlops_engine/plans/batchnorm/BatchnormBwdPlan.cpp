@@ -21,13 +21,24 @@ namespace hip_kernel_provider::batchnorm
 static ProblemDescription extractProblemDescription(const BatchnormBwdParams& params)
 {
     const auto xDataType = params.x()->data_type();
+    const auto yDataType = params.dy()->data_type();
     const auto scaleDataType = params.scale()->data_type();
     const bool useFp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     const bool useBfp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useFp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useBfp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     const auto* xDims = params.x()->dims();
     size_t batches = 0;
@@ -69,6 +80,8 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
             isChannelLastLayout(params.x()),
             useFp16Mix,
             useBfp16Mix,
+            useFp16Upcast,
+            useBfp16Upcast,
             Direction::BACKWARD,
             1};
 }
@@ -244,8 +257,8 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                           _params.scale(),
                                           deviceProperties,
                                           activationMode);
-    options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix());
-    options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix());
+    options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix() || problem.useFp16Upcast());
+    options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix() || problem.useBfp16Upcast());
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
     options.update("HIP_PLUGIN_BN_BATCHES", problem.batches());
     options.update("HIP_PLUGIN_BN_CHANNELS", problem.channels());
