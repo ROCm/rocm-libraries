@@ -46,8 +46,8 @@ namespace TensileLite::Client::hostnumerics
         {
             if(!std::in_range<ptrdiff_t>(right))
                 return std::nullopt;
-            return roc::hostnumerics::detail::getOffsetMultiply(left,
-                                                                static_cast<ptrdiff_t>(right));
+            return roc::hostnumerics::detail::LayoutOffset::getOffsetMultiply(
+                left, static_cast<ptrdiff_t>(right));
         }
 
         inline Expected<Layout, DescriptorFailure> matrixLayout(const TensorDescriptor& descriptor,
@@ -85,12 +85,13 @@ namespace TensileLite::Client::hostnumerics
                                bool       mirror) -> std::optional<DescriptorFailure> {
                 if(!mirror || extent == 0)
                     return std::nullopt;
-                const auto delta = roc::hostnumerics::detail::getOffsetMultiply(extent - 1, stride);
+                const auto delta = roc::hostnumerics::detail::LayoutOffset::getOffsetMultiply(
+                    extent - 1, stride);
                 if(!delta)
                 {
                     return DescriptorFailure(DescriptorError::OffsetMultiplyOverflow);
                 }
-                offset = roc::hostnumerics::detail::getOffsetAdd(*offset, *delta);
+                offset = roc::hostnumerics::detail::LayoutOffset::getOffsetAdd(*offset, *delta);
                 if(!offset)
                 {
                     return DescriptorFailure(DescriptorError::OffsetAddOverflow);
@@ -316,7 +317,7 @@ namespace TensileLite::Client::hostnumerics
             const size_t alignment     = 8 / std::gcd<size_t>(8, bits);
             const size_t alignedOffset = static_cast<size_t>(lowerOffset) / alignment * alignment;
             const auto   byteOffset = getMultiply(alignedOffset / alignment, alignment * bits / 8);
-            const auto   rebasedOffset = roc::hostnumerics::detail::getOffsetAdd(
+            const auto   rebasedOffset = roc::hostnumerics::detail::LayoutOffset::getOffsetAdd(
                 layout.offset(), -static_cast<ptrdiff_t>(alignedOffset));
             if(!byteOffset || !rebasedOffset)
             {
@@ -348,8 +349,8 @@ namespace TensileLite::Client::hostnumerics
             {
                 return Unexpected(DescriptorFailure(DescriptorError::NullStorage));
             }
-            const auto offset
-                = roc::hostnumerics::detail::getOffsetAdd(byteOffset, rebased->second);
+            const auto offset = roc::hostnumerics::detail::LayoutOffset::getOffsetAdd(
+                byteOffset, rebased->second);
             if(!offset)
             {
                 return Unexpected(DescriptorFailure(DescriptorError::OffsetAddOverflow));

@@ -68,28 +68,28 @@ int main() {
 
     const std::array<size_t, 2> dimensions{2, 3}, coordinates{1, 2};
     const std::array<ptrdiff_t, 2> strides{-3, 1};
-    const auto offset = getElementOffset(dimensions, strides, 3, coordinates);
+    const auto offset = LayoutOffset::getElementOffset(dimensions, strides, 3, coordinates);
     if (!offset || *offset != 2) return 11;
-    const auto rank = getElementOffset(dimensions, strides, 3, {});
+    const auto rank = LayoutOffset::getElementOffset(dimensions, strides, 3, {});
     if (rank || rank.error().error != LayoutError::CoordinateRankMismatch ||
         rank.error().value != 0 || rank.error().limit != 2)
         return 12;
     const std::array<size_t, 2> outside{0, 3};
-    const auto range = getElementOffset(dimensions, strides, 3, outside);
+    const auto range = LayoutOffset::getElementOffset(dimensions, strides, 3, outside);
     if (range || range.error().error != LayoutError::CoordinateOutOfRange ||
         range.error().dimension != 1 || range.error().value != 3 || range.error().limit != 3)
         return 13;
     const std::array<size_t, 1> extent{3}, index{2};
     const std::array<ptrdiff_t, 1> largeStride{std::numeric_limits<ptrdiff_t>::max()};
-    const auto multiply = getElementOffset(extent, largeStride, 0, index);
+    const auto multiply = LayoutOffset::getElementOffset(extent, largeStride, 0, index);
     if (multiply || multiply.error().error != LayoutError::OffsetMultiplyOverflow) return 14;
     const std::array<ptrdiff_t, 1> unitStride{1};
-    const auto addition =
-        getElementOffset(extent, unitStride, std::numeric_limits<ptrdiff_t>::max(), index);
+    const auto addition = LayoutOffset::getElementOffset(
+        extent, unitStride, std::numeric_limits<ptrdiff_t>::max(), index);
     if (addition || addition.error().error != LayoutError::OffsetAddOverflow) return 15;
     const std::array<size_t, 1> hugeExtent{SIZE_MAX}, hugeIndex{SIZE_MAX - 1};
     const std::array<ptrdiff_t, 1> zeroStride{0};
-    const auto repeated = getElementOffset(hugeExtent, zeroStride, 0, hugeIndex);
+    const auto repeated = LayoutOffset::getElementOffset(hugeExtent, zeroStride, 0, hugeIndex);
     if (!repeated || *repeated != 0) return 16;
     return 0;
 }
