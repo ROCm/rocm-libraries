@@ -864,7 +864,7 @@ void testing_spmat_descr(void)
     CHECK_HIP_ERROR(
         hipMemcpy(dcsr_valC, hcsr_valC.data(), nnzC * sizeof(float), hipMemcpyHostToDevice));
 
-    hipsparseSpMatDescr_t  matA, matB, matC, matD, matE, matF, matG, matH, matI, matJ, matK, matL,
+    hipsparseSpMatDescr_t matA, matB, matC, matD, matE, matF, matG, matH, matI, matJ, matK, matL,
         matM, matN, matO;
 
     CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&matA,
