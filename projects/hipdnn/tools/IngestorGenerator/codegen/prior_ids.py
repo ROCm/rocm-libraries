@@ -209,6 +209,48 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
     return EngineDocs(ued=ued, kmd=kmd, uhd=uhd, udd=udd, kernel_match_umd=kernel_match)
 
 
+def _is_arch_list(arch) -> bool:
+    return isinstance(arch, list) and all(isinstance(a, str) for a in arch)
+
+
+def _check_entry(path: Path, entry: dict) -> None:
+    """The fields of a previous kernel that matching reads must have the shape the
+    generator writes: ``metadata`` and ``arch`` make up the kernel's key, and the
+    source (``kernel_source``, or ``sources`` for a multi-launch kernel) is
+    compared launch by launch, each ``spec`` key by key."""
+    name = entry.get("name")
+    if not isinstance(entry.get("metadata") or {}, dict):
+        raise ValueError(f"{path}: kernel {name!r} has a non-object 'metadata'")
+    if entry.get("arch") is not None and not _is_arch_list(entry["arch"]):
+        raise ValueError(
+            f"{path}: kernel {name!r} has an 'arch' that is not a list of strings"
+        )
+    if "sources" in entry:
+        sources = entry["sources"]
+        if (
+            "kernel_source" in entry
+            or not isinstance(sources, dict)
+            or not sources
+            or not all(isinstance(launch, dict) for launch in sources.values())
+        ):
+            raise ValueError(
+                f"{path}: kernel {name!r} needs 'sources' to be a non-empty object "
+                f"of launch name to kernel_source object, with no 'kernel_source' "
+                f"beside it"
+            )
+        launches = list(sources.values())
+    elif isinstance(entry.get("kernel_source"), dict):
+        launches = [entry["kernel_source"]]
+    else:
+        raise ValueError(f"{path}: kernel {name!r} has no 'kernel_source' object")
+    for launch in launches:
+        spec = launch.get("spec")
+        if spec is not None and not isinstance(spec, dict):
+            raise ValueError(
+                f"{path}: kernel {name!r} has a 'spec' that is not an object"
+            )
+
+
 def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> PriorBundle:
     """The KDPs under ``root`` that name ``engine_id``, plus the engine-level
     documents when ``root`` holds the engine's UED.
@@ -249,6 +291,10 @@ def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> Prior
             )
         names[name] = path
         arch = kdp.get("arch")
+        if arch is not None and not _is_arch_list(arch):
+            raise ValueError(f"{path}: 'arch' is not a list of strings")
+        for entry in kdp.get("kernelDescriptors") or []:
+            _check_entry(path, entry)
         prior.append(
             PriorKdp(
                 path=path,
@@ -264,11 +310,6 @@ def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> Prior
     ueds = [d for _, d in tree.docs["ued"] if d.get("id") == engine_id]
     if ueds:
         engine = _engine_docs(tree, ueds[0]["name"])
-        if engine.kernel_match_umd["id"] != kernel_match_id:
-            raise ValueError(
-                f"kernel-scope matcher {kernel_match_id} is not the engine's "
-                f"({engine.kernel_match_umd['id']}) under {root}"
-            )
     return PriorBundle(root=root, engine=engine, kdps=prior, all_ids=tree.all_ids)
 
 
@@ -288,13 +329,20 @@ def holds_docs(root: Path, *kinds: str) -> bool:
 
 
 def _dvc_outs(pointer: Path) -> list[dict]:
-    """The ``outs`` entries of a ``*.dvc`` pointer; empty when it cannot be read."""
+    """The ``outs`` entries of a ``*.dvc`` pointer that name a ``path``; empty
+    when the pointer cannot be read or is not the mapping DVC writes."""
     try:
-        return (yaml.safe_load(pointer.read_text(encoding="utf-8")) or {}).get(
-            "outs"
-        ) or []
+        doc = yaml.safe_load(pointer.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return []
+    outs = doc.get("outs") if isinstance(doc, dict) else None
+    if not isinstance(outs, list):
+        return []
+    return [
+        out
+        for out in outs
+        if isinstance(out, dict) and isinstance(out.get("path"), str)
+    ]
 
 
 def _dvc_md5(path: Path) -> str:
@@ -347,14 +395,20 @@ def dvc_mismatches(root: Path) -> list[str]:
     return messages
 
 
-def _holds_kdp_of(directory: Path, engine_id: str) -> bool:
-    for kdp in sorted(directory.rglob("*.kdp.json")):
+def holds_kdp_of(directory: Path, engine_id: str) -> bool:
+    """Whether a KDP under ``directory`` names ``engine_id``: the only trace of
+    the engine in a satellite, which holds no UED. A KDP that cannot be read, or
+    is not a JSON object, names no engine."""
+    for kdp in list_docs(directory, "kdp"):
         try:
             text = kdp.read_text(encoding="utf-8")
-            if engine_id in text and json.loads(text).get("engine") == engine_id:
-                return True
+            if engine_id not in text:
+                continue
+            doc = json.loads(text)
         except (OSError, ValueError):
             continue
+        if isinstance(doc, dict) and doc.get("engine") == engine_id:
+            return True
     return False
 
 
@@ -382,7 +436,7 @@ def unnamed_siblings(parent: Path, engine_id: str, named: Sequence[Path]) -> lis
         for child in sorted(parent.iterdir())
         if child.is_dir()
         and child.resolve() not in skip
-        and _holds_kdp_of(child, engine_id)
+        and holds_kdp_of(child, engine_id)
     ]
 
 
@@ -410,7 +464,7 @@ def discover_siblings(parent: Path, engine_name: str, own: Path) -> list[Path]:
     return [
         child
         for child in children
-        if homes[child] or any(_holds_kdp_of(child, identity) for identity in ids)
+        if homes[child] or any(holds_kdp_of(child, identity) for identity in ids)
     ]
 
 

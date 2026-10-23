@@ -379,20 +379,22 @@ class TestInstalledBundle:
             all_ids(read_docs(descriptor_dir))
         )
 
-    def test_new_ids_contradicts_ids_from(
-        self, installed, tmp_path, monkeypatch, capsys
+    @pytest.mark.parametrize("flag", ["--ids-from", "--engine-ids-from"])
+    def test_new_ids_contradicts_the_reuse_flags(
+        self, installed, tmp_path, monkeypatch, capsys, flag
     ):
         _engine_dir, descriptor_dir = installed
-        code, _captured = self.run_main(
+        code, captured = self.run_main(
             monkeypatch,
             capsys,
             "--output-dir",
             str(tmp_path / "out"),
             "--new-ids",
-            "--ids-from",
+            flag,
             str(descriptor_dir),
         )
         assert code == 2
+        assert "--new-ids contradicts" in captured.err
 
     def test_an_installed_ued_without_its_kdp_refuses_and_names_new_ids(
         self, installed, tmp_path, monkeypatch, capsys

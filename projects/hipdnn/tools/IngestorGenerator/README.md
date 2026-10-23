@@ -120,11 +120,13 @@ error; `2` unusable input: a missing or invalid config, a non-existent `--emitte
 a config the renderer rejects, an `--ids-from` or `--engine-ids-from` that does not exist,
 is not a directory or does not yield usable ids (ambiguous, wrong bundle, missing KDP),
 `--new-ids` together with `--ids-from` or `--engine-ids-from`, or a bad flag (argparse).
-`--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. Every run
-(default, `--dry-run` and `--check-placeholders`) reads the previous version, so on a
-checkout where the previous version's KDP is a DVC output that has not been pulled, every
-run exits 2, for a home and a satellite bundle alike. The message names the `.dvc` pointer:
-run `dvc pull` first, or pass `--new-ids`.
+`--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. A default run
+and `--dry-run` read the previous version, so on a checkout where the previous version's KDP
+is a DVC output that has not been pulled they exit 2, for a home and a satellite bundle
+alike. The message names the `.dvc` pointer: run `dvc pull` first, or pass `--new-ids`.
+`--check-placeholders` resolves ids only when sibling bundles are found or
+`--engine-ids-from` is given, and then exits 2 the same way. Otherwise it reads no ids, and
+the unpulled KDP is reported as a missing file, so it exits 1 (the gfx950 config does).
 
 ## Descriptor ids
 
@@ -168,8 +170,8 @@ A kernel left over then takes a left-over prior id when each side has exactly on
 with that tuple, so widening or narrowing a kernel's arch keeps its id. A tuple shipped at
 several arch tiers is told apart by arch alone. Names and positions play no part, so
 inserting, reordering, renaming or moving a kernel between packs keeps its id, and so does
-a priority-only change (only `kernel_source` counts). A metadata (tuple) change or an
-ambiguous tuple gets a new id.
+a priority-only change (only the source counts: `kernel_source`, or a multi-launch kernel's
+`sources`). A metadata (tuple) change or an ambiguous tuple gets a new id.
 
 A reused id also requires the new source to still say everything the prior one said, at the
 same values (compared recursively, the spec included). A multi-launch kernel (one carrying
@@ -1033,7 +1035,10 @@ prerequisite on `IKernelDispatchHandler`.
 
 ## Tests
 
-This suite is **developer-run**, not registered with CTest or run by superbuild CI. Cases
+CTest registers this suite as `hipdnn_ingestor_generator_pytest` when hipDNN is configured
+with `HIPDNN_ENABLE_TOOLING_TESTS=ON` (which also needs `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`),
+and superbuild CI turns that option on. That run sets `HIPDNN_VALIDATE_DESCRIPTORS` and
+deselects `tests/test_coverage_gate.py::TestAgainstTheRealBuild`. Run by hand, cases
 needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) skip when it is unset; the
 real-archive class above skips only when `HIPKERNELPROVIDER_ROCM_KPACK_DIR` is unset and
 `rocm_kpack` is not importable.

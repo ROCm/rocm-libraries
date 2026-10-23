@@ -14,7 +14,6 @@ or rendering (and argparse's code for a bad flag).
 """
 
 import argparse
-import json
 import os
 import sys
 from collections import Counter
@@ -84,18 +83,6 @@ def installed_siblings(config) -> list[Path]:
     return prior_ids.discover_siblings(installed.parent, config.engine.name, installed)
 
 
-def _holds_kdp_of(bundle: Path, engine_id: str) -> bool:
-    """Whether a KDP under ``bundle`` names ``engine_id``: the only trace of the
-    engine in a satellite, which holds no UED."""
-    for path in prior_ids.list_docs(bundle, "kdp"):
-        try:
-            if json.loads(path.read_text(encoding="utf-8")).get("engine") == engine_id:
-                return True
-        except (OSError, ValueError, AttributeError):
-            continue
-    return False
-
-
 def holds_previous_version(root: Path) -> bool:
     """Whether ``root`` holds a previous version of a bundle: a UED or a KDP, or a
     ``*.dvc`` pointer for an artifact (an unfetched KDP), which reading ``root``
@@ -132,7 +119,7 @@ def earlier_passes(
             if not prior_ids.holds_docs(bundle, "ued", "kdp"):
                 continue
             if prior_ids.find_engine(bundle, config.engine.name) is None and not (
-                engine_id and _holds_kdp_of(bundle, engine_id)
+                engine_id and prior_ids.holds_kdp_of(bundle, engine_id)
             ):
                 continue
             found.append((bundle.stat().st_mtime, bundle))

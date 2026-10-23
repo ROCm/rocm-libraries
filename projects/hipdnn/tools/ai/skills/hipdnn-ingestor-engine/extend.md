@@ -38,30 +38,15 @@ retain existing engine-wide identities and hooks.
 
 ## Addition-only splicing
 
-Generating an existing engine reuses its descriptor UUIDs by default: with no flag,
-`generate.py` reads the bundle installed in the provider tree and prints `Reusing ids from
-the installed bundle <path>`. Every descriptor the config still produces keeps its UUID
-(a retuned kernel is the exception) and only added descriptors get new ones, so the
-scratch references to the retained UED/KMD/UDD/UHD/shared matcher, and the consumer IDs in
-the KDP's `provenance.specialization_contract`, already carry the real UUIDs. Check the
-result against the pre-splice KDP with `catalog_diff.py --expect-ids`.
-
-The full account (lookup order, how kernels are matched, the retune rule, the `Ids:`
-summary line, warnings, refusals, iterating in scratch) is the *Descriptor ids* section of
-`projects/hipdnn/tools/IngestorGenerator/README.md`. The steps:
-
-- Generate into scratch, never in place. Fetch a DVC-stored KDP first (`dvc pull`): a run
-  on an unfetched one exits 2, `--dry-run` included, as does an unusable previous bundle.
-  Use `--new-ids` only for an engine being replaced or renamed.
-- Read the `Ids:` line. For an extension, `minted` is the added kernels. Investigate any
-  retired name you did not remove, and any arch clause.
-- Read the stderr warnings and delete the stale descriptor files they name.
-- Iterate on an extension by regenerating into the **same** output directory with
-  `--force`, or into a new one with `--ids-from <previous scratch>/descriptors/<subpath>`.
-  A new engine that is not installed yet iterates the same way, in scratch. Either way a
-  same-directory run regenerates the C++ stubs and overwrites hand-filled bodies: hand-fill
-  and splice only once the descriptors settle, or keep hand-filled C++ outside the scratch
-  directory.
+Generating an existing engine reuses its descriptor UUIDs by default (the installed bundle
+is the previous version; a retuned kernel is the exception), and only added descriptors
+get new ones. The scratch references to the retained UED/KMD/UDD/UHD/shared matcher, and
+the consumer IDs in the KDP's `provenance.specialization_contract`, therefore already
+carry the real UUIDs. Check the result against the pre-splice KDP with
+`catalog_diff.py --expect-ids`. Use `--new-ids` only for an engine being replaced or
+renamed. RUNBOOK stage 3 has the commands, the `Ids:` line to read and how to iterate in
+scratch; the rules are the *Descriptor ids* section of
+`projects/hipdnn/tools/IngestorGenerator/README.md`.
 
 The generator has no in-place mode. Scratch generation emits engine-level files too, and
 `--force` against a live tree, or a copy of a scratch descriptor directory, replaces
@@ -105,13 +90,11 @@ engine-level UUIDs:
 - Sibling bundles are **packaged** and **single-pack** only. A satellite's descriptor
   directory sits under the same family folder of `descriptors/` as the home's, with its
   own `authored_subpath`; it must not write into the home's folder.
-- Installed siblings are found automatically for a packaged config (`Reusing the engine's
-  ids from the installed bundle(s) <dirs>`). Pass `--engine-ids-from <dir>` only for
-  bundles outside the provider tree, such as scratch: it turns discovery off, so name
-  **every** other bundle of the engine, the home included. A bundle left out is missing
-  from the engine-wide duplicate check, and a tuple that competes at the same arch tier
-  makes the loader drop the whole engine. `--new-ids` also turns discovery off. The
-  README's *More than one bundle for one engine* has the rest.
+- Installed siblings are found automatically. Name scratch siblings with
+  `--engine-ids-from <dir>`, which turns discovery off, so name **every** other bundle of
+  the engine, the home included: a bundle left out is missing from the engine-wide
+  duplicate check, and a tuple that competes at the same arch tier makes the loader drop
+  the whole engine. The README's *More than one bundle for one engine* has the rest.
 - The satellite's engine block (UED, KMD, UHD, UDD, kernel matcher) must generate exactly
   what the home holds. Change the engine block in the home, then regenerate every
   satellite.

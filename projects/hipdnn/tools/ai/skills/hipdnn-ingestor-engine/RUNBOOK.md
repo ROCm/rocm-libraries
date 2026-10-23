@@ -269,15 +269,10 @@ per the README's *Updating the captured catalog*.
 ## 3. Generate, implement and splice
 
 Generate from the selection `$CONFIG` into a scratch directory, never over the live
-engine; a run in place over a bundle whose KDP is a DVC artifact is refused. Descriptor
-ids are reused by default: with no flag the generator reads the bundle installed in the
-provider tree (`$PROVIDER/src/engines/kernel_ingestor_engine/<descriptor dir>`, announced
-as `Reusing ids from the installed bundle <path>`), so every descriptor the config still
-produces keeps its UUID and only added descriptors get new ones (a retuned kernel is the
-exception). A KDP stored with DVC must be fetched first (`dvc pull`). `--new-ids` reads
-nothing and gives every id anew: use it only for an engine being replaced or renamed. The
-full account (lookup order, matching and retune rules, warnings, refusals, siblings) is
-the *Descriptor ids* section of `$GEN/README.md`.
+engine. Descriptor ids are reused from the installed bundle by default; use `--new-ids`
+only for an engine being replaced or renamed. [extend.md](extend.md) states what an
+extension must keep, and the *Descriptor ids* section of `$GEN/README.md` has the rules
+(lookup order, matching, retunes, the `Ids:` line, warnings, refusals, siblings).
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
@@ -285,36 +280,26 @@ the *Descriptor ids* section of `$GEN/README.md`.
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
 
-`--dry-run` resolves ids too, so run it first as the preflight: it exits 2 on an unusable
-previous bundle. So does every run, `--dry-run` or not, when a bundle's previous KDP is a
-DVC output that has not been pulled (the message names the `.dvc` pointer: run `dvc pull`
-first, or pass `--new-ids`). A scripted invocation must do one or the other.
+`--dry-run` resolves ids too, so run it first as the preflight. It and a real run exit 2
+on an unusable previous bundle, including this bundle's DVC-stored KDP left unpulled (run
+`dvc pull`, or pass `--new-ids`); a scripted invocation must do one or the other.
+`--check-placeholders` resolves ids only when sibling bundles are in play, so on its own
+it reports an unpulled KDP as a missing file (exit 1).
 
-Read the `Ids:` line the real run prints:
-`Ids: reused T from <src> (engine E, packs P[, operation UMDs O], kernels K), minted M,
-retired R[: name, name (+N more)][; engine ids from <dir>][; X kept an id across an arch
-change: a, b (+N more)]`. A brand-new engine prints `Ids: none found to reuse; minted N
-(new bundle)`, and `--new-ids` prints `Ids: --new-ids; every id is new (minted N)`. For an
-extension `minted` is the added kernels; investigate a retired name you did not remove, a
-retune, and any arch clause. Read the stderr warnings too: none is fatal, but each names
-something to fix, and a descriptor file the run will not write must be deleted or the next
-run reads it as part of the previous bundle.
+Read the `Ids:` line the real run prints. For an extension `minted` is the added kernels;
+investigate a retired name you did not remove, a retune, and any arch clause. Read the
+stderr warnings too: none is fatal, but delete any descriptor file they name that the run
+will not write, or the next run reads it as part of the previous bundle.
 
-**Iterating within a ticket.** Regenerate an extension into the **same** output directory
-with `--force`, or into a **new** directory with `--ids-from <previous
-scratch>/descriptors/rocKE/<slug>` (an explicit `--ids-from` replaces the installed
-bundle as the previous version). A new directory without `--ids-from` remints every
-descriptor the installed bundle lacks. A **new engine** with nothing installed iterates
-the same way (`test_descriptors/<set>/<slug>` for a direct-load bundle). A same-directory
-run regenerates the C++ stubs and overwrites hand-filled bodies: hand-fill and splice only
-once the descriptors settle, or keep hand-filled C++ outside the scratch directory.
+**Iterating within a ticket.** Regenerate into the **same** output directory with
+`--force`, or into a **new** one with `--ids-from <previous scratch>/<descriptor dir>`;
+a new directory without it remints every added descriptor. A same-directory run
+overwrites hand-filled C++ stubs: hand-fill and splice only once the descriptors settle,
+or keep hand-filled C++ outside the scratch directory.
 
-**More than one bundle for one engine.** A satellite bundle (more kernels under an
-existing engine's UED name) finds the home's ids automatically when the bundles are
-installed beside each other; `--engine-ids-from <dir>`, repeatable, is the override for
-scratch bundles and must name **every other bundle of the engine, the home included**.
-Satellite rules are in [extend.md](extend.md). `--check-placeholders` on a satellite
-reports `Located 1 of this engine's 1 shippable files`: its KDP alone.
+**More than one bundle for one engine.** Follow [extend.md](extend.md)'s *Sibling
+bundles*. `--check-placeholders` on a satellite reports `Located 1 of this engine's 1
+shippable files`: its KDP alone.
 
 Run these against the revision you are about to splice; a render from an earlier revision
 is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
@@ -347,10 +332,8 @@ supplies the matcher vocabulary (`specialization.vocabulary`), never compiler ev
 after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
-Extensions copy only additions per [extend.md](extend.md). Generated with the installed
-ids, the scratch references and the consumer IDs in shared KDP or per-UKD specialization
-declarations already carry the retained UUIDs, which `catalog_diff.py --expect-ids` against
-the pre-splice KDP confirms. For descriptors,
+Extensions copy only additions per [extend.md](extend.md); confirm the reused ids with
+`catalog_diff.py --expect-ids` against the pre-splice KDP. For descriptors,
 `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` applies the additions
 and refuses any change to a retained entry:
 
@@ -384,11 +367,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
 A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste. A
-satellite bundle installs only its KDP: the engine-level files already exist, and the
-packer rejects a repeated descriptor ID even with identical content. Merge the satellite's
-kernel and pack names into the engine's existing census test by hand, since that test
-asserts its own emitted names. Its native stub, tests and other fragments name the
-engine's existing classes and are not spliced.
+satellite bundle installs only its KDP (see [extend.md](extend.md)'s *Sibling bundles*).
 
 **A new packaged engine shipped from `descriptors/`** with its own device tests needs
 further sites that no generator fragment emits. `hipkernel:Gfx950AttentionDense`
@@ -482,8 +461,8 @@ Three packaging-time constraints:
 
 **There is no shared stage tree.** Each root packs straight to its own `OUT_ROOT`, so
 "stage the descriptors" means "author them under the right root". Regenerate an existing
-engine (ids are reused from the installed bundle, and installed sibling bundles are found automatically; name scratch siblings with `--engine-ids-from`) after every
-change, then compare content and identities, not only counts. A fragment file is not
+engine after every change (ids are reused as in stage 3), then compare content and
+identities, not only counts. A fragment file is not
 evidence that its splice was applied.
 
 Set `SCHEMA` to the operation `.fbs` and `NATIVE_SOURCE` to its implementation; pass all

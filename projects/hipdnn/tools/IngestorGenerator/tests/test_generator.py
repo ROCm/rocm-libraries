@@ -2731,6 +2731,15 @@ class TestStableIds:
         with pytest.raises(ValueError, match="(?i)family"):
             resolve_ids(outside, tmp_path / "z", engine_ids_from=[bundles.home_dir])
 
+    def test_a_home_outside_any_descriptors_tree_is_refused(self, generator, tmp_path):
+        """The family folder is read from the path, so a home copied out of the
+        ``descriptors/`` tree gives the satellite nothing to compare against."""
+        bundles = home_and_satellite(generator, tmp_path)
+        plain = tmp_path / "plain"
+        shutil.copytree(bundles.home_dir, plain)
+        with pytest.raises(ValueError, match="no 'descriptors/<family>' component"):
+            resolve_ids(bundles.satellite, tmp_path / "z", engine_ids_from=[plain])
+
     def test_a_satellites_output_tree_without_its_siblings_is_refused(
         self, generator, tmp_path
     ):
@@ -3034,6 +3043,38 @@ class TestDiscoverSiblings:
             "rocKE/o", [7], engine=make_engine(name="hipkernel:Other")
         )
         render_resolved(generator, other, bundles.home_root)
+
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.home_dir
+        )
+
+        assert found == [bundles.satellite_dir]
+
+    @pytest.mark.parametrize(
+        ("file", "content"),
+        [
+            ("x.kdp.json", '[{{"engine": "{id}"}}]'),
+            ("x.kdp.json", '{{"engine": "{id}"'),
+            ("x.ued.json", '[{{"name": "hipkernel:Test", "id": "{id}"}}]'),
+            ("x.ued.json", '{{"name": "hipkernel:Test", "id": "{id}"'),
+        ],
+        ids=[
+            "kdp-not-an-object",
+            "kdp-unparseable",
+            "ued-not-an-object",
+            "ued-unparseable",
+        ],
+    )
+    def test_a_malformed_document_names_no_engine(
+        self, generator, tmp_path, file, content
+    ):
+        """A malformed descriptor beside the bundle, even one holding the engine's
+        name and id, is skipped rather than raised on."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        ued = json.loads((bundles.home_dir / "test.ued.json").read_text("utf-8"))
+        stray = bundles.home_dir.parent / "stray"
+        stray.mkdir()
+        (stray / file).write_text(content.format(id=ued["id"]), encoding="utf-8")
 
         found = discover_siblings(
             bundles.home_dir.parent, self.ENGINE, bundles.home_dir

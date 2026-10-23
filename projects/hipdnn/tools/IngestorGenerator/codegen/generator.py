@@ -109,8 +109,6 @@ def _launch_covers(prior: dict, new: dict) -> bool:
     the source gains outside ``spec`` (say a stated ``target``) changes what is
     compiled. A spec field ``prior`` had that ``new`` drops or changes is a
     difference."""
-    if not isinstance(prior, dict):
-        return False
     prior_spec, new_spec = prior.get("spec") or {}, new.get("spec") or {}
     return {k: v for k, v in prior.items() if k != "spec"} == {
         k: v for k, v in new.items() if k != "spec"
@@ -131,8 +129,6 @@ def _source_covers(prior: dict, new: dict) -> bool:
     if "kernel_source" in prior:
         return _launch_covers(prior["kernel_source"], new["kernel_source"])
     before, after = prior["sources"], new["sources"]
-    if not isinstance(before, dict):
-        return False
     return before.keys() == after.keys() and all(
         _launch_covers(before[name], after[name]) for name in before
     )
@@ -925,27 +921,10 @@ def _family_of(path: Path) -> str:
 
 
 def _check_seed_entry(path: Path, entry: dict) -> None:
-    """A sibling KDP's kernel entry must carry what the de-duplication reads."""
+    """A sibling KDP's kernel entry must carry what the de-duplication reads. The
+    reader has already checked its source, metadata and arch (`prior_ids`)."""
     if not isinstance(entry.get("name"), str):
         raise ValueError(f"{path}: kernel {entry.get('id')!r} has no string 'name'")
-    source = entry.get("sources") if "sources" in entry else entry.get("kernel_source")
-    if "sources" in entry:
-        valid = (
-            "kernel_source" not in entry
-            and isinstance(source, dict)
-            and bool(source)
-            and all(isinstance(launch, dict) for launch in source.values())
-        )
-        wanted = "a 'sources' object of launch name to kernel_source object"
-    else:
-        valid = isinstance(source, dict)
-        wanted = "a 'kernel_source' object"
-    if not valid:
-        raise ValueError(f"{path}: kernel {entry['name']!r} has no {wanted}")
-    if not isinstance(entry.get("metadata") or {}, dict):
-        raise ValueError(
-            f"{path}: kernel {entry['name']!r} has a non-object 'metadata'"
-        )
 
 
 def _check_sibling_mode(config: IngestorConfig) -> None:
