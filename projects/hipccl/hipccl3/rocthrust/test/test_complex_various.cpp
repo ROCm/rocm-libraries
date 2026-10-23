@@ -27,6 +27,14 @@
 #  define M_PI 3.1415926535897932
 #endif
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  define ROCTHRUST_TEST_LONG_DOUBLE 1
+#elif defined(_CCCL_HAS_LONG_DOUBLE)
+#  define ROCTHRUST_TEST_LONG_DOUBLE _CCCL_HAS_LONG_DOUBLE()
+#else
+#  define ROCTHRUST_TEST_LONG_DOUBLE 1
+#endif
+
 #define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps, real_val, imag_val)                   \
   do                                                                                                         \
   {                                                                                                          \
@@ -696,6 +704,7 @@ TYPED_TEST(VariousComplexTest, catan)
     1000);
 }
 
+#if ROCTHRUST_TEST_LONG_DOUBLE
 TEST(VariousComplexTest, acos_long_double)
 {
   run_trig_tests<long double>(
@@ -785,6 +794,7 @@ TEST(VariousComplexTest, atanh_long_double)
     0,
     1);
 }
+#endif
 
 // ===================================================================
 //
