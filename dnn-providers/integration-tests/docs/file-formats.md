@@ -240,7 +240,7 @@ parses it.
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
+| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, so an override for them has no effect. A node with an additive mask, ALiBi, padding, sequence lengths, dropout or ragged tensors keeps them as filled. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
