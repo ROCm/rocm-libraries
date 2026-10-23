@@ -61,6 +61,11 @@ struct SdpaFwdArgs
     // Optional attention sink (cuDNN): one fp32 logit per query head, read at h * sinkStride.
     const float* sink;
     long long sinkStride;
+    // Optional explicit-mask dropout (cuDNN custom dropout): FLOAT mask [B|1, H|1, Sq, Skv]
+    // (a size-1 dim has stride 0 here) and scale; O uses P * dropoutScale * mask.
+    const float* dropoutMask;
+    SdpaStrides dropoutMaskStr;
+    float dropoutScale;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,
@@ -100,6 +105,12 @@ struct SdpaBwdArgs
     const int* seqLenQ;
     const int* seqLenKv;
     long long seqLenQStride, seqLenKvStride;
+    // Optional explicit-mask dropout (see SdpaFwdArgs): D is scaled by dropoutScaleInv, dP is
+    // masked, dS is scaled by dropoutScale, and dV uses P * dropoutScale * mask.
+    const float* dropoutMask;
+    SdpaStrides dropoutMaskStr;
+    float dropoutScale;
+    float dropoutScaleInv;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

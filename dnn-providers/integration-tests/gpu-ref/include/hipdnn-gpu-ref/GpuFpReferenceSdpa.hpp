@@ -109,7 +109,9 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr,
         int64_t pagedMaxSeqKv = 0,
-        hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
+        hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
+        std::optional<float> dropoutScale = std::nullopt)
     {
         // Paged K / V (cuDNN): k / v are containers [blocks, H, blockSize, D] addressed through an
         // INT32 [B, 1, T, 1] page table; pagedMaxSeqKv is the logical key extent. Paging needs
@@ -256,7 +258,10 @@ public:
                       pagedKSide,
                       pagedVSide,
                       sinkPtr,
-                      sinkStride);
+                      sinkStride,
+                      dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv),
+                      dropoutMaskStrides(dropoutMask),
+                      dropoutScale.value_or(1.0F));
 
         o.memory().markDeviceModified();
         if(lse != nullptr)
@@ -303,7 +308,10 @@ public:
             dBias
         = nullptr,
         hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
-        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr,
+        std::optional<float> dropoutScale = std::nullopt,
+        std::optional<float> dropoutScaleInv = std::nullopt)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
         const auto batch = q.dims()[0];
@@ -411,6 +419,10 @@ public:
         launch.leftBound = leftBound;
         launch.rightBound = rightBound;
         launch.topLeftAlignment = topLeftAlignment;
+        launch.dropoutMask = dropoutMaskPointer(dropoutMask, batch, numHeads, seqQ, seqKv);
+        launch.dropoutMaskStrides = dropoutMaskStrides(dropoutMask);
+        launch.dropoutScale = dropoutScale.value_or(1.0F);
+        launch.dropoutScaleInv = dropoutScaleInv.value_or(1.0F);
         launchSdpaBwd(launch, defines);
 
         dQ.memory().markDeviceModified();
@@ -453,6 +465,11 @@ private:
         int64_t headDim = 0;
         int64_t headDimV = 0;
         float scale = 1.0F;
+        // Explicit-mask dropout; scales stay 1 without dropout (cuDNN's defaults).
+        const float* dropoutMask = nullptr;
+        std::vector<int64_t> dropoutMaskStrides;
+        float dropoutScale = 1.0F;
+        float dropoutScaleInv = 1.0F;
         int64_t leftBound = -1;
         int64_t rightBound = -1;
         bool topLeftAlignment = true;
@@ -569,7 +586,50 @@ private:
                               const SdpaPagedSide& pagedK = {},
                               const SdpaPagedSide& pagedV = {},
                               const float* sinkPtr = nullptr,
-                              int64_t sinkStride = 0);
+                              int64_t sinkStride = 0,
+                              const float* dropoutMaskPtr = nullptr,
+                              const std::vector<int64_t>& dropoutMaskStrides = {},
+                              float dropoutScale = 1.0F);
+
+    // Explicit dropout mask (cuDNN custom dropout): FLOAT [B|1, H|1, Sq, Skv] on the device.
+    static const float* dropoutMaskPointer(hipdnn_data_sdk::utilities::TensorBase<float>* mask,
+                                           int64_t batch,
+                                           int64_t heads,
+                                           int64_t seqQ,
+                                           int64_t seqKv)
+    {
+        if(mask == nullptr)
+        {
+            return nullptr;
+        }
+        const auto& d = mask->dims();
+        if(d.size() != 4 || (d[0] != batch && d[0] != 1) || (d[1] != heads && d[1] != 1)
+           || d[2] != seqQ || d[3] != seqKv)
+        {
+            throw std::invalid_argument(
+                "GpuFpReferenceSdpa: dropoutMask must be [B or 1, H or 1, Sq, Skv]");
+        }
+        return static_cast<const float*>(mask->memory().deviceData());
+    }
+
+    // Mask strides with broadcast (size-1) dims set to 0, so the kernels index it directly.
+    static std::vector<int64_t>
+        dropoutMaskStrides(const hipdnn_data_sdk::utilities::TensorBase<float>* mask)
+    {
+        if(mask == nullptr)
+        {
+            return {};
+        }
+        auto strides = mask->strides();
+        for(size_t i = 0; i < 2; ++i)
+        {
+            if(mask->dims()[i] == 1)
+            {
+                strides[i] = 0;
+            }
+        }
+        return strides;
+    }
 };
 
 } // namespace hipdnn_gpu_ref

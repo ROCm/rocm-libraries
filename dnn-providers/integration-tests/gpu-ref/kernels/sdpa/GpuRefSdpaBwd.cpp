@@ -119,13 +119,27 @@ __device__ COMPUTE_TYPE
     return acc;
 }
 
-// dS = P * (dP - D), before the attention scale, for an unmasked live (sq, skv).
+// Explicit dropout mask value for (b, h, sq, skv); 1 without dropout.
+__device__ inline COMPUTE_TYPE
+    dropoutMaskAt(const SdpaBwdArgs& a, long long b, long long h, long long sq, long long skv)
+{
+    if(a.dropoutMask == nullptr)
+    {
+        return static_cast<COMPUTE_TYPE>(1);
+    }
+    return a.dropoutMask[b * a.dropoutMaskStr.s[0] + h * a.dropoutMaskStr.s[1]
+                         + sq * a.dropoutMaskStr.s[2] + skv * a.dropoutMaskStr.s[3]];
+}
+
+// dS = dropoutScale * P * (mask * dP - D), before the attention scale, for an unmasked live
+// (sq, skv). Without dropout this is P * (dP - D).
 __device__ COMPUTE_TYPE
     dS(const SdpaBwdArgs& a, long long b, long long h, long long sq, long long skv)
 {
     const long long row = rowIndex(a, b, h, sq);
     const COMPUTE_TYPE p = prob(a, row, score(a, b, h, sq, skv));
-    return p * (dP(a, b, h, sq, skv) - a.rowD[row]);
+    return static_cast<COMPUTE_TYPE>(a.dropoutScale) * p
+           * (dropoutMaskAt(a, b, h, sq, skv) * dP(a, b, h, sq, skv) - a.rowD[row]);
 }
 
 } // namespace
@@ -160,7 +174,7 @@ extern "C" __global__ void sdpaBwdRowStatsRef(SdpaBwdArgs a)
                 * toAccum(
                     o[b * a.oStr.s[0] + h * a.oStr.s[1] + sq * a.oStr.s[2] + dv * a.oStr.s[3]]);
     }
-    a.rowD[idx] = dVal;
+    a.rowD[idx] = dVal * static_cast<COMPUTE_TYPE>(a.dropoutScaleInv);
     if(a.lse != nullptr)
     {
         a.rowM[idx] = a.lse[b * a.lseStr.s[0] + h * a.lseStr.s[1] + sq * a.lseStr.s[2]];
@@ -294,7 +308,9 @@ extern "C" __global__ void sdpaBwdDvRef(SdpaBwdArgs a)
                 {
                     continue;
                 }
-                const COMPUTE_TYPE p = prob(a, rowIndex(a, b, h, sq), score(a, b, h, sq, skv));
+                const COMPUTE_TYPE p = prob(a, rowIndex(a, b, h, sq), score(a, b, h, sq, skv))
+                                       * static_cast<COMPUTE_TYPE>(a.dropoutScale)
+                                       * dropoutMaskAt(a, b, h, sq, skv);
                 acc += p
                        * toAccum(dO[b * a.dOStr.s[0] + h * a.dOStr.s[1] + sq * a.dOStr.s[2]
                                     + dv * a.dOStr.s[3]]);
