@@ -149,6 +149,10 @@ The descriptor directory mirrors the authored root, so the emitted tree copies a
 verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` being the
 `authored_subpath` the config must name; `packaged` emits under
 `descriptors/<producer>/<bundle>/`, defaulting the subpath to `<kernel_source_kind>/<slug>`.
+`<slug>` is the engine slug, the snake_case of the engine's local name; it names the files.
+The folder is the `authored_subpath` and may differ from it:
+`hipkernel:Gfx942AttentionUnified3d` writes `gfx942_attention_unified3d.*` files into
+`rocKE/gfx942_attention_unified_3d/`.
 
 ```
 <output-dir>/
@@ -363,9 +367,9 @@ it needs a validator binary this repo does not build by default: point
 
 ## Updating the captured catalog
 
-The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<slug>/` are
-generated (never at build time) from the selection `configs/<slug>.yaml`, drawn from the
-registry space its manifest `configs/<slug>.engine.yaml` enumerates (RUNBOOK stages 2 and
+The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<bundle>/` are
+generated (never at build time) from the selection `configs/<bundle>.yaml`, drawn from the
+registry space its manifest `configs/<bundle>.engine.yaml` enumerates (RUNBOOK stages 2 and
 6). `tests/test_registry_regeneration.py` gates the three against each other. The gates
 compare specs, not code: `hkp_pack` builds unshipped spec fields at their current default
 with the builder's current code, so review rocKE default and builder changes as changes to
@@ -387,10 +391,12 @@ is `space: slice`):
 
 ```bash
 PY="$PWD/.venv/bin/python"
-SLUG=gfx950_attention_dense
+SLUG=gfx950_attention_dense   # bundle folder and config stem (configs/$SLUG.yaml)
+STEM=gfx950_attention_dense   # descriptor file stem: the engine slug. Not always $SLUG:
+                              # gfx942_attention_unified_3d's files are gfx942_attention_unified3d.*
 SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/$SLUG"
 SCRATCH=$(mktemp -d)
-D="descriptors/rocKE/$SLUG/$SLUG"
+D="descriptors/rocKE/$SLUG/$STEM"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
 "$PY" generate.py --config "configs/$SLUG.yaml" --output-dir "$SCRATCH/selection"
 # --strict-spec compares the FULL spec dict of every entry (not just the
@@ -398,14 +404,14 @@ D="descriptors/rocKE/$SLUG/$SLUG"
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
@@ -663,7 +669,8 @@ provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported f
 source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
 builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
-launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source
+# launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source.
+#   attention_dense has one launch; configs/gfx942_attention_unified_3d.engine.yaml sets this.
 
 enumerate:
   candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
@@ -682,8 +689,10 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
-  selector_fields: [batch, seqlen_k]  # optional: cell fields that only steer select_spec; see below
-  neutral_fields: [num_seqs]      # optional: spec fields proven not to change the kernel; see below
+  # The two keys below serve a rule-driven candidate (attention_dense is not one); see
+  # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
+  # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
+  # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -717,8 +726,9 @@ config's `launches` rules below, checked when the generated config loads.
 
 Two optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
 request and picks a knob from request fields (rocKE's strided split-KV decode picks
-`num_segments` from `batch` and `seqlen_k`). Without them each request combo is a cell,
-so many cells name the same kernel and `--out` fails on duplicate names.
+`num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
+field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
+is a cell, so many cells name the same kernel and `--out` fails on duplicate names.
 
 - `selector_fields` lists cell fields that only steer the candidate's choice. Combos
   equal in every other cell field merge into one cell, without the selector fields, at
@@ -729,7 +739,8 @@ so many cells name the same kernel and `--out` fails on duplicate names.
   name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
   naming the combo. A selector field must be a cell field and must not be a `feature` or
   `performance` field. `--shapes` keys a shape's cell without the selector fields too: a
-  graph need not set them (it never sets `kv_block_size`) nor take a listed value.
+  graph need not set them (a dense hipDNN graph has no `kv_block_size`) nor take a listed
+  value.
 - `neutral_fields` lists spec fields that do not change the compiled kernel. Before
   merging, each spec's neutral fields take the cell's default spec's value, so specs
   differing only there are one kernel. The manifest author owns that claim: a field is

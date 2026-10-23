@@ -12,13 +12,18 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 - Architecture: gfx942 only.
 - Variants: 2,192 in 138 cells (all `kind = rocke`, two launches each, compiled at pack
   time). A cell is (dtype, head_size, query heads, KV heads): 23 head pairs per head size.
+  2,192 exceeds the selection's 1000-kernel AOT budget (`aot_budget_per_arch`), so
+  `generate.py` and `registry_enumerator.py` print a warning (an error only under `--strict`).
 - dtype: bf16, fp16.
 - head_size: 64, 128, 256.
 - Query heads 1 to 128 and KV heads 1 to 64, varying per cell.
 - block_size: 16, 32, 64. tile_size_override follows from (head_size, block_size): 16, 32, 64.
 - num_segments: 2 to 128 (15 values), varying per cell.
 - Fixed in every variant: strided (dense) KV, decode grid, no sliding window, no sinks,
-  softcap, ALiBi or QQ bias, `num_seqs` 32, `kv_cache_policy` stream.
+  softcap, ALiBi or QQ bias, `kv_cache_policy` stream.
+- `num_seqs` is recorded as 32 in every spec but is IR-neutral: the decode grid's code
+  does not depend on it. The engine sets it at launch from the graph's batch, so 32 is
+  not a batch limit.
 
 ## Files
 
@@ -39,7 +44,7 @@ the selection's `authored_subpath`.
 - Selection: `projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_unified_3d.yaml`,
   expanded from the manifest `gfx942_attention_unified_3d.engine.yaml` (rocKE dispatcher
   registry, `attention_strided_decode` candidate).
-- Generated at rocm-libraries `4b59b88b9ea` with:
+- Generated with:
 
   ```bash
   python projects/hipdnn/tools/IngestorGenerator/generate.py \
@@ -51,8 +56,12 @@ the selection's `authored_subpath`.
 - The 16/16 head pair (100 variants) was added later with
   `tools/splice_additions.py`, which keeps the UUID of every retained kernel and appends
   the new entries at the end of the KDP.
-- `tests/test_registry_regeneration.py` (g1 to g4) gates this bundle against the selection
-  and the manifest.
+- `projects/hipdnn/tools/IngestorGenerator/tests/test_registry_regeneration.py` gates this
+  bundle against the selection and the manifest:
+  - g1 `test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults`;
+  - g2 `test_g2_the_shipped_catalog_is_generated_from_the_selection`;
+  - g3 `test_g3_the_enumerated_registry_reproduces_the_shipped_catalog`;
+  - g4 `test_g4_the_selection_header_equals_the_manifest`.
 
 ## Notes
 
