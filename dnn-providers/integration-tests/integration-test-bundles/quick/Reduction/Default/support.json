@@ -26,6 +26,9 @@
           "8_256_fp32_modenorm1"
         ],
         "support": {
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

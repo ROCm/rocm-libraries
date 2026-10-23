@@ -33,6 +33,9 @@
           "4_8_4_4_fp32_nhwc_modeadd_fd73be"
         ],
         "support": {
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

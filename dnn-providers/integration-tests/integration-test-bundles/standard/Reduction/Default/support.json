@@ -20,6 +20,9 @@
           "4_8_4_4_fp32_nchw_modeadd_e3c97c"
         ],
         "support": {
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

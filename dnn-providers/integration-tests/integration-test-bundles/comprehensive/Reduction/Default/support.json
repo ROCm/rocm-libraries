@@ -29,6 +29,9 @@
           "4_8_4_4_fp32_nhwc_modemax_499910"
         ],
         "support": {
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],
