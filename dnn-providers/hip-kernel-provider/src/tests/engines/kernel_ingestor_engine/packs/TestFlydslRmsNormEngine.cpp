@@ -1833,17 +1833,17 @@ WinnerKey winnerKeyFor(const MatchContext& context)
 ///
 /// The times are fabricated and that is sound: `RankedEntry::timeMs` is documented as
 /// diagnostic only, never compared across records. The ORDER is the payload.
-WinnerRecord recordOver(const std::vector<KernelDefinition>& definitions)
+WinnerRecord recordOver(const std::vector<const KernelDefinition*>& definitions)
 {
     WinnerRecord record;
     record.reserve(definitions.size());
     double timeMs = 1.0;
-    for(const auto& definition : definitions)
+    for(const auto* definition : definitions)
     {
         RankedEntry entry;
-        entry.kernelId = definition.kernelId;
-        entry.packId = definition.packId;
-        entry.dispatchId = definition.dispatchId;
+        entry.kernelId = definition->kernelId;
+        entry.packId = definition->packId;
+        entry.dispatchId = definition->dispatchId;
         entry.timeMs = timeMs;
         record.push_back(entry);
         timeMs += 1.0;
@@ -1852,9 +1852,9 @@ WinnerRecord recordOver(const std::vector<KernelDefinition>& definitions)
 }
 
 /// The baked `N` @p definition carries, or nullopt when it declares none.
-std::optional<int64_t> bakedWidthOf(const KernelDefinition& definition)
+std::optional<int64_t> bakedWidthOf(const KernelDefinition* definition)
 {
-    const auto* n = tryGetMetadataField<int64_t>(definition.metadata, FLYDSL_N_FIELD);
+    const auto* n = tryGetMetadataField<int64_t>(definition->metadata, FLYDSL_N_FIELD);
     return n == nullptr ? std::nullopt : std::optional<int64_t>(*n);
 }
 
@@ -1895,7 +1895,7 @@ TEST(TestGpuFlydslRmsNormWinnerShard, ARecordedOrderDisplacesTheScoreOrder)
            "nothing";
     ASSERT_EQ(bakedWidthOf(scored.back()), std::optional<int64_t>(FLYDSL_GENERIC_N));
 
-    const std::vector<KernelDefinition> inverted(scored.rbegin(), scored.rend());
+    const std::vector<const KernelDefinition*> inverted(scored.rbegin(), scored.rend());
     manager->recordWinner(
         winnerKeyFor(context), recordOver(inverted), WinnerWriteCause::FRESH_MISS);
 
@@ -1943,7 +1943,7 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
                                + " bf16 kernels at N=4096; the ordering cases need both tiers");
             return;
         }
-        const std::vector<KernelDefinition> inverted(scored.rbegin(), scored.rend());
+        const std::vector<const KernelDefinition*> inverted(scored.rbegin(), scored.rend());
         writer->recordWinner(
             winnerKeyFor(context), recordOver(inverted), WinnerWriteCause::FRESH_MISS);
     }
