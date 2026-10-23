@@ -54,9 +54,9 @@ namespace
         const std::array<float, 4> b{5, 7, 6, 8};
         const std::array<float, 4> c{1, 1, 1, 1};
         GeneratedGEMMInputs        inputs{
-            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}), a),
-            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}), b),
-            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}), c),
+            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}, 0), a),
+            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}, 0), b),
+            nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}, 0), c),
             std::nullopt,
             std::nullopt,
         };
@@ -74,9 +74,9 @@ namespace
         {
             const std::array<float, 6> b{1, 2, 3, 4, 5, 6};
             GeneratedGEMMInputs        inputs{
-                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}), empty),
-                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}), b),
-                nativeTensor(ScalarType::Float32, Layout(Shape{0, 3}, {1, 0}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}, 0), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}, 0), b),
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 3}, {1, 0}, 0), empty),
                 std::nullopt,
                 std::nullopt,
             };
@@ -91,9 +91,9 @@ namespace
         {
             const std::array<float, 6> a{1, 2, 3, 4, 5, 6};
             GeneratedGEMMInputs        inputs{
-                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}), a),
-                nativeTensor(ScalarType::Float32, Layout(Shape{3, 0}, {1, 3}), empty),
-                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}, 0), a),
+                nativeTensor(ScalarType::Float32, Layout(Shape{3, 0}, {1, 3}, 0), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}, 0), empty),
                 std::nullopt,
                 std::nullopt,
             };
@@ -108,9 +108,9 @@ namespace
         {
             const std::array<float, 4> c{1, 2, 3, 4};
             GeneratedGEMMInputs        inputs{
-                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}), empty),
-                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}), empty),
-                nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}), c),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}, 0), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}, 0), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}, 0), c),
                 std::nullopt,
                 std::nullopt,
             };
@@ -128,9 +128,9 @@ namespace
         const std::array<float, 4> b{1, 1, 1, 1};
         const std::array<float, 1> c{0};
         GeneratedGEMMInputs        inputs{
-            nativeTensor(ScalarType::Float32, Layout(Shape{1, 4}, {1, 1}), a),
-            nativeTensor(ScalarType::Float32, Layout(Shape{4, 1}, {1, 4}), b),
-            nativeTensor(ScalarType::Float32, Layout(Shape{1, 1}, {1, 1}), c),
+            nativeTensor(ScalarType::Float32, Layout(Shape{1, 4}, {1, 1}, 0), a),
+            nativeTensor(ScalarType::Float32, Layout(Shape{4, 1}, {1, 4}, 0), b),
+            nativeTensor(ScalarType::Float32, Layout(Shape{1, 1}, {1, 1}, 0), c),
             scaleTensor(Shape{1, 2}, {128, 129}),
             scaleTensor(Shape{1, 2}, {130, 131}),
         };
@@ -188,8 +188,8 @@ namespace
 
         require(inputs.scaleA && inputs.scaleB,
                 "Logical-K generation did not return both scale tensors.");
-        require(inputs.scaleA->layout() == Layout(Shape{2, 2}, {1, 2})
-                    && inputs.scaleB->layout() == Layout(Shape{3, 2}, {1, 3}),
+        require(inputs.scaleA->layout() == Layout(Shape{2, 2}, {1, 2}, 0)
+                    && inputs.scaleB->layout() == Layout(Shape{3, 2}, {1, 3}, 0),
                 "Logical-K generation returned the wrong canonical scale layouts.");
 
         const Tensor reference
@@ -202,7 +202,8 @@ namespace
     {
         constexpr float            bfloat16RoundingBoundary = 1.005859375f;
         const std::array<float, 3> values{1.25f, -2.5f, bfloat16RoundingBoundary};
-        const Tensor input = nativeTensor(ScalarType::Float32, Layout(Shape{3, 1}, {1, 3}), values);
+        const Tensor               input
+            = nativeTensor(ScalarType::Float32, Layout(Shape{3, 1}, {1, 3}, 0), values);
 
         require(convertHostReference<float>(input)
                     == std::vector<float>(values.begin(), values.end()),
@@ -222,7 +223,7 @@ namespace
 
         const Tensor bfloat16Tensor = convertHostReferenceTensor<BFloat16>(input);
         require(bfloat16Tensor.type() == ScalarType::BFloat16
-                    && bfloat16Tensor.layout() == Layout(Shape{3, 1}, {1, 3})
+                    && bfloat16Tensor.layout() == Layout(Shape{3, 1}, {1, 3}, 0)
                     && bfloat16Tensor.loadAs<float>({2, 0}) == 1.0f,
                 "Tensor host-reference output conversion mismatch.");
     }

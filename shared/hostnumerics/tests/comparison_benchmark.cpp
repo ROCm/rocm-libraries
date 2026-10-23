@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    const Layout layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(leadingDimension)});
+    const Layout layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(leadingDimension)}, 0);
     const Tensor expectedView =
         Tensor::copyNativeStorage<float>(layout, std::span<const float>(expected));
     const Tensor observedView =

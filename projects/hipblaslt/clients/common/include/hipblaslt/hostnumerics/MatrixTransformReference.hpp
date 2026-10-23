@@ -46,7 +46,8 @@ namespace hipblaslt::hostnumerics
         return Layout(Shape{rows, columns, batchCount},
                       {transpose ? physicalColumnStride : physicalRowStride,
                        transpose ? physicalRowStride : physicalColumnStride,
-                       batchStride});
+                       batchStride},
+                      0);
     }
 
     inline ComparisonReport referenceMatrixTransform(const Tensor&                observed,

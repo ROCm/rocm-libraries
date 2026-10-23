@@ -9,7 +9,7 @@ void testReferenceReduction() {
 
     std::array<float, 30> storage;
     storage.fill(-1);
-    Tensor input = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3, 4}, {15, 5, 1}),
+    Tensor input = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3, 4}, {15, 5, 1}, 0),
                                                     std::span<float>(storage));
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 3; ++row) {
@@ -18,7 +18,7 @@ void testReferenceReduction() {
         }
     }
 
-    Tensor output(ScalarType::Float32, Layout(Shape{3}, {2}));
+    Tensor output(ScalarType::Float32, Layout(Shape{3}, {2}, 0));
     referenceSumInto(input, output, {0, 2}, ScalarType::Float32);
     require(compare(output,
                     Tensor::copyNativeValues<float>(Shape{3}, std::array<float, 3>{412, 492, 572}))

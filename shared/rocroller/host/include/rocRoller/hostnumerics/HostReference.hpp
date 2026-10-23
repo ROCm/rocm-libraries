@@ -103,8 +103,8 @@ namespace rocRoller::hostnumerics
             throw std::runtime_error("rocRoller output matrix element count overflow.");
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::runtime_error("rocRoller output matrix stride exceeds ptrdiff_t.");
-        return roc::hostnumerics::Layout(roc::hostnumerics::Shape{rows, columns},
-                                         {1, static_cast<ptrdiff_t>(rows)});
+        return roc::hostnumerics::Layout(
+            roc::hostnumerics::Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}, 0);
     }
 
     template <typename T>

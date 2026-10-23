@@ -193,7 +193,7 @@ void testIndexedGeneration() {
     const int originalThreadCount = omp_get_max_threads();
     omp_set_dynamic(0);
 
-    const Layout paddedLayout(Shape{128, 96}, {1, 137});
+    const Layout paddedLayout(Shape{128, 96}, {1, 137}, 0);
     Tensor oneThread(ScalarType::Float32, paddedLayout);
     Tensor fourThreads(ScalarType::Float32, paddedLayout);
     const GenerationRecipe parallelRecipe =
@@ -225,7 +225,7 @@ void testIndexedGeneration() {
                        packedFourThreads.rawEncodedBackingStorage().end()),
             "Packed generation changed with OpenMP thread count.");
 
-    Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}));
+    Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}, 0));
     generate(aliased, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));
     require(aliased.loadAs<float>({0}) == 8191.0f,
             "Aliased generation did not preserve deterministic traversal order.");

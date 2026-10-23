@@ -28,7 +28,7 @@ TEST(ResultIntegration, GeometryFailuresPropagateWithoutFormatting) {
     const auto contiguous = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
     ASSERT_FALSE(contiguous.has_value());
     EXPECT_EQ(contiguous.error(), LayoutError::ExtentOutOfRange);
-    const Layout overflowing(Shape{3}, {std::numeric_limits<ptrdiff_t>::max()});
+    const Layout overflowing(Shape{3}, {std::numeric_limits<ptrdiff_t>::max()}, 0);
     const auto bounds = getElementBounds(overflowing);
     ASSERT_FALSE(bounds.has_value());
     EXPECT_EQ(bounds.error(), LayoutError::OffsetMultiplyOverflow);

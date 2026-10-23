@@ -20,11 +20,11 @@ void testStridedAndOffsetViews() {
 
     const Layout outputLayout(Shape{2, 2}, {1, 5}, 1);
     const Tensor operandA =
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {4, 1}), std::span<const float>(a));
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {4, 1}, 0), std::span<const float>(a));
     const Tensor operandB =
-        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {3, 1}), std::span<const float>(b));
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {3, 1}, 0), std::span<const float>(b));
     const Tensor inputC =
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 4}), std::span<const float>(c));
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 4}, 0), std::span<const float>(c));
     Tensor d = Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::Float32, outputLayout,
                                                             std::move(dStorage));
     const Tensor product = matmul(operandA, operandB, ScalarType::Float32,

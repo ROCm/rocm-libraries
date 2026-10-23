@@ -12,7 +12,7 @@ TEST(Package, Blas) {
 
     const std::array<float, 4> a{1, 3, 2, 4};
     const std::array<float, 4> b{5, 7, 6, 8};
-    const Layout layout(Shape{2, 2}, {1, 2});
+    const Layout layout(Shape{2, 2}, {1, 2}, 0);
     Tensor output(ScalarType::Float32, layout);
     matmulIntoWithBlasBackend(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
                               Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)),

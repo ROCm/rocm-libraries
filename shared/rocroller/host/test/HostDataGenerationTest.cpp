@@ -123,11 +123,11 @@ namespace
         auto seedPlusTwo = generate(
             descriptor, descriptor, descriptor, bounded, DataType::None, DataType::None, 1, 31417u);
 
-        require(first.a.layout() == Layout(Shape{4, 3}, {1, 4}),
+        require(first.a.layout() == Layout(Shape{4, 3}, {1, 4}, 0),
                 "A descriptor layout was not preserved.");
-        require(first.b.layout() == Layout(Shape{4, 3}, {1, 4}),
+        require(first.b.layout() == Layout(Shape{4, 3}, {1, 4}, 0),
                 "B descriptor layout was not preserved.");
-        require(first.c.layout() == Layout(Shape{4, 3}, {1, 4}),
+        require(first.c.layout() == Layout(Shape{4, 3}, {1, 4}, 0),
                 "C descriptor layout was not preserved.");
         require(sameStorage(first.a, repeated.a) && sameStorage(first.b, repeated.b)
                     && sameStorage(first.c, repeated.c),
@@ -315,17 +315,17 @@ namespace
         auto             generated = generate(
             descriptorA, descriptorB, descriptorC, unbounded, DataType::E4M3, DataType::E5M3, 4);
 
-        require(generated.a.layout() == Layout(Shape{3, 8}, {8, 1}),
+        require(generated.a.layout() == Layout(Shape{3, 8}, {8, 1}, 0),
                 "Scaled A descriptor layout was not preserved.");
-        require(generated.b.layout() == Layout(Shape{8, 5}, {1, 8}),
+        require(generated.b.layout() == Layout(Shape{8, 5}, {1, 8}, 0),
                 "Scaled B descriptor layout was not preserved.");
         require(generated.scaleA && generated.scaleB,
                 "Scaled generation did not return scale tensors.");
         require(generated.scaleA->type() == ScalarType::E4M3
                     && generated.scaleB->type() == ScalarType::E5M3,
                 "Scale type translation mismatch.");
-        require(generated.scaleA->layout() == Layout(Shape{3, 2}, {2, 1})
-                    && generated.scaleB->layout() == Layout(Shape{5, 2}, {2, 1}),
+        require(generated.scaleA->layout() == Layout(Shape{3, 2}, {2, 1}, 0)
+                    && generated.scaleB->layout() == Layout(Shape{5, 2}, {2, 1}, 0),
                 "K-contiguous canonical scale layout mismatch.");
 
         auto expectedA
@@ -350,8 +350,8 @@ namespace
                                       4);
         require(noncontiguous.scaleA && noncontiguous.scaleB,
                 "K-strided scaled generation did not return scale tensors.");
-        require(noncontiguous.scaleA->layout() == Layout(Shape{3, 2}, {1, 3})
-                    && noncontiguous.scaleB->layout() == Layout(Shape{5, 2}, {1, 5}),
+        require(noncontiguous.scaleA->layout() == Layout(Shape{3, 2}, {1, 3}, 0)
+                    && noncontiguous.scaleB->layout() == Layout(Shape{5, 2}, {1, 5}, 0),
                 "K-strided canonical scale layout mismatch.");
 
         auto expectedNoncontiguousA

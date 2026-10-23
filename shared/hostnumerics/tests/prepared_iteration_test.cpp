@@ -36,7 +36,7 @@ TEST(PreparedIteration, ScalarCodecsAgreeWithCheckedAccessForEveryType) {
 }
 
 TEST(PreparedIteration, ZeroStrideHugeCoordinatesDoNotOverflowSignedOffsets) {
-    Tensor tensor(ScalarType::Float32, Layout(Shape{SIZE_MAX}, {0}));
+    Tensor tensor(ScalarType::Float32, Layout(Shape{SIZE_MAX}, {0}, 0));
     tensor.storeFrom({0}, 7.0f);
     const detail::RuntimeTensorReader<float> reader(tensor);
     EXPECT_EQ(reader({SIZE_MAX - 1}), 7.0f);
@@ -58,7 +58,7 @@ TEST(PreparedIteration, PreconditionsAreDiagnosedInDebug) {
     EXPECT_DEATH((void)plan.linearIndex(outside), "validCoordinates");
     point = {0, 3};
     EXPECT_DEATH((void)plan.advance(point), "validCoordinates");
-    const Layout layout(Shape{2, 3}, {3, 1});
+    const Layout layout(Shape{2, 3}, {3, 1}, 0);
     EXPECT_DEATH((void)detail::preparedElementOffset(layout, {}), "indices.size()");
     EXPECT_DEATH((void)detail::preparedElementOffset(layout, outside), "indices\\[axis\\]");
 #endif
@@ -118,7 +118,7 @@ TEST(PreparedIteration, CheckedPublicAccessAndNumericalChecksRemain) {
 }
 
 TEST(PreparedIteration, HugeZeroStrideRunAndInvalidEmptyOrders) {
-    const Layout layout(Shape{SIZE_MAX}, {0});
+    const Layout layout(Shape{SIZE_MAX}, {0}, 0);
     size_t calls = 0;
     detail::forEachLayoutOffsetPairRange(layout, layout, {}, SIZE_MAX - 2, SIZE_MAX,
                                          [&](size_t, ptrdiff_t first, ptrdiff_t second) {
@@ -228,7 +228,7 @@ TEST(PreparedIteration, EncodedExponentDecodersMatchTensorAccessForEveryFloating
             const auto storage =
                 std::as_bytes(std::span(&raw, 1)).first((info.storageBits + 7) / 8);
             const auto tensor =
-                Tensor::copyEncodedBackingStorage(type, Layout(Shape{}, {}), storage);
+                Tensor::copyEncodedBackingStorage(type, Layout(Shape{}, {}, 0), storage);
             const double expected = tensor.loadAs<double>({});
             const double decoded = plan.decode(raw);
             if (std::isnan(expected))

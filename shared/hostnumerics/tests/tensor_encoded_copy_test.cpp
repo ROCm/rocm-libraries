@@ -90,7 +90,7 @@ void testTensorEncodedCopies() {
     Tensor overlappingCopyOut =
         Tensor::copyNativeStorage(std::span<const int32_t>(overlappingCopyOutValues));
     const Tensor overlappingCopyOutSource =
-        overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}));
+        overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
     overlappingCopyOutSource.copyLogicalElementsToEncodedStorage(
         overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)));
     require(overlappingCopyOut.loadAs<int32_t>({0}) == 1 &&
@@ -102,7 +102,7 @@ void testTensorEncodedCopies() {
     overlappingCopyOut =
         Tensor::copyNativeStorage(std::span<const int32_t>(overlappingCopyOutValues));
     const Tensor overlappingSelectedCopyOutSource =
-        overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}));
+        overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
     const std::array<size_t, 2> overlappingSelectedIndices{0, 1};
     overlappingSelectedCopyOutSource.copySelectedElementsToEncodedStorage(
         overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)),

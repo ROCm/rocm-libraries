@@ -29,7 +29,7 @@ namespace
     {
         return Tensor::copyEncodedBackingStorage(
             ScalarType::Float32,
-            Layout(Shape{rows, columns, batches}, {1, leadingDimension, batchStride}),
+            Layout(Shape{rows, columns, batches}, {1, leadingDimension, batchStride}, 0),
             std::as_bytes(std::span(values)));
     }
 
@@ -70,9 +70,9 @@ namespace
         const float value = 1.0f;
         const auto  bytes = std::as_bytes(std::span(&value, 1));
         const auto  expected
-            = Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{}, {}), bytes);
-        const auto observed
-            = Tensor::copyEncodedBackingStorage(ScalarType::BFloat16, Layout(Shape{}, {}), bytes);
+            = Tensor::copyEncodedBackingStorage(ScalarType::Float32, Layout(Shape{}, {}, 0), bytes);
+        const auto observed = Tensor::copyEncodedBackingStorage(
+            ScalarType::BFloat16, Layout(Shape{}, {}, 0), bytes);
         EXPECT_FALSE(unitCheck(expected, observed));
     }
 

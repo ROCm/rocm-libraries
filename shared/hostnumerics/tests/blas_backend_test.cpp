@@ -28,9 +28,9 @@ void testTransformingBlockScaleFallsBack(roc::hostnumerics::ScalarType accumulat
     const std::array<T, 8> b{1, 1, 1, 1, 1, 1, 1, 1};
     const std::array<uint8_t, 4> scaleA{128, 129, 130, 131};
     const std::array<uint8_t, 4> scaleB{127, 128, 129, 130};
-    const Layout layoutA(Shape{2, 4}, {1, 2});
-    const Layout layoutB(Shape{4, 2}, {1, 4});
-    const Layout layoutD(Shape{2, 2}, {1, 2});
+    const Layout layoutA(Shape{2, 4}, {1, 2}, 0);
+    const Layout layoutB(Shape{4, 2}, {1, 4}, 0);
+    const Layout layoutD(Shape{2, 2}, {1, 2}, 0);
     const Layout scaleLayout = Layout::contiguousLastDimensionFastest(Shape{2, 2});
     Tensor blockedD(nativeScalarType<T>, layoutD);
     Tensor transformingD(nativeScalarType<T>, layoutD);
@@ -76,12 +76,12 @@ void testPartialOutputSelection() {
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     constexpr std::array<float, 4> untouched{-99, -99, -99, -99};
-    Tensor d = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}),
+    Tensor d = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}, 0),
                                                 std::span<const float>(untouched));
     GemmTestCase problem(
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
-        ScalarType::Float32);
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
+        d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
@@ -172,7 +172,7 @@ void testModeratelyLargeExactGemm() {
     using namespace roc::hostnumerics;
 
     constexpr size_t dimension = 256;
-    const Layout layout(Shape{dimension, dimension}, {1, static_cast<ptrdiff_t>(dimension)});
+    const Layout layout(Shape{dimension, dimension}, {1, static_cast<ptrdiff_t>(dimension)}, 0);
     const std::vector<float> ones(dimension * dimension, 1.0f);
     Tensor output(ScalarType::Float32, layout);
 
@@ -251,11 +251,11 @@ TEST(BlasBackend, Behavior) {
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     Tensor d = Tensor::copyNativeStorage<float>(
-        Layout(Shape{2, 2}, {1, 2}), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
+        Layout(Shape{2, 2}, {1, 2}, 0), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
     GemmTestCase problem(
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
-        ScalarType::Float32);
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
+        d, ScalarType::Float32);
     require(queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas).supported,
             "BLAS backend unexpectedly rejected F32 GEMM.");
     const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
@@ -288,9 +288,9 @@ TEST(BlasBackend, Behavior) {
     testTransformingAutomaticCostPolicy();
     testZeroExtentsDoNotInvokeBlas();
     const size_t huge = std::numeric_limits<size_t>::max();
-    const Tensor emptyA(ScalarType::Float32, Layout(Shape{0, 1}, {0, 0}));
-    const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}));
-    const Layout emptyOutputLayout(Shape{0, huge}, {0, 0});
+    const Tensor emptyA(ScalarType::Float32, Layout(Shape{0, 1}, {0, 0}, 0));
+    const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}, 0));
+    const Layout emptyOutputLayout(Shape{0, huge}, {0, 0}, 0);
     const Tensor emptyProduct = matmulWithBlasBackend(emptyA, broadcastB, ScalarType::Float32,
                                                       MatmulOptions{}, emptyOutputLayout);
     require(emptyProduct.layout() == emptyOutputLayout &&
@@ -303,7 +303,7 @@ TEST(BlasBackend, Behavior) {
     const std::array<std::complex<float>, 1> complexB{std::complex<float>(3, 4)};
     Tensor complexD(ScalarType::ComplexFloat32, Shape{1, 1});
     Tensor operandA = Tensor::copyNativeStorage<std::complex<float>>(
-        Layout(Shape{1, 1}, {2, 1}), std::span<const std::complex<float>>(complexA));
+        Layout(Shape{1, 1}, {2, 1}, 0), std::span<const std::complex<float>>(complexA));
     GemmTestCase complexProblem(std::move(operandA),
                                 Tensor::copyNativeStorage<std::complex<float>>(
                                     Layout::contiguousLastDimensionFastest(Shape{1, 1}),

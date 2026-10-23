@@ -458,7 +458,7 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
     std::vector<std::byte> dataStorage = detail::packRawValues(
         dataRawValues, scalarTypeInfo(problem.dataType).storageBits, threadCount);
     Tensor data = Tensor::takeOwnershipOfEncodedBackingStorage(
-        problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}),
+        problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}, 0),
         std::move(dataStorage));
     std::vector<std::byte> scaleStorage(scaleRawValues.size());
     if (!scaleRawValues.empty())
@@ -467,10 +467,10 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
         problem.scaleType, Layout::contiguousLastDimensionFastest(blocking.naturalScaleShape()),
         std::move(scaleStorage));
     Tensor scaleIndices =
-        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}, 0),
                                   std::span<const uint32_t>(scaleIndexValues));
     Tensor reference =
-        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}, 0),
                                   std::span<const float>(referenceValues));
     return {std::move(data), std::move(scales), std::move(scaleIndices), std::move(reference)};
 }

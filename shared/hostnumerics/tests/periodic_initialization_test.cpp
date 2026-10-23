@@ -101,7 +101,7 @@ TEST(PeriodicInitialization, RejectsInvalidRegionsBeforeWriting) {
     EXPECT_THROW(init.fillInto(output, std::array<size_t, 2>{0, SIZE_MAX}), std::runtime_error);
     EXPECT_THROW(init.fillInto(output, std::array<size_t, 1>{0}), std::runtime_error);
     EXPECT_THROW(init.fillInto(Tensor(ScalarType::Float32, Shape{3, 3})), std::runtime_error);
-    EXPECT_THROW(init.fillInto(Tensor(ScalarType::Int32, Layout(Shape{3, 3}, {1, 1}))),
+    EXPECT_THROW(init.fillInto(Tensor(ScalarType::Int32, Layout(Shape{3, 3}, {1, 1}, 0))),
                  std::runtime_error);
 }
 }  // namespace

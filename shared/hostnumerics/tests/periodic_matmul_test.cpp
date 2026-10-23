@@ -34,8 +34,8 @@ TEST(PeriodicMatmul, ExactDenseOracleChunksAndEpilogue) {
                                   segment(m, n, k / 2, k - k / 2, 5, 3, 91)};
         auto plan = requirePlan(preparePeriodicMatmul(Shape{m, n}, k, segments, MatmulOptions{},
                                                       PeriodicMatmulMode::ExactInteger));
-        Tensor a(ScalarType::BFloat16, Layout(Shape{m, k}, {1, m + 3}));
-        Tensor b(ScalarType::BFloat16, Layout(Shape{k, n}, {1, static_cast<ptrdiff_t>(k + 2)}));
+        Tensor a(ScalarType::BFloat16, Layout(Shape{m, k}, {1, m + 3}, 0));
+        Tensor b(ScalarType::BFloat16, Layout(Shape{k, n}, {1, static_cast<ptrdiff_t>(k + 2)}, 0));
         for (const auto& s : segments) {
             s.a.fillInto(a.shareStorageWithLayout(Layout(
                 s.a.shape(), {1, m + 3}, static_cast<ptrdiff_t>(s.reductionBegin * (m + 3)))));

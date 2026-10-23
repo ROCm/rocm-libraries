@@ -447,7 +447,7 @@ class PermutationGenerationTests(unittest.TestCase):
     def test_contiguous_axis_order_conversion_and_selections(self):
         dimensions = (2, 3, 4)
         order = [1, 0, 2]
-        layout = hv.Layout(hv.Shape(dimensions), [4, 8, 1])
+        layout = hv.Layout(hv.Shape(dimensions), [4, 8, 1], 0)
         recipe = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.serial_index()
         ).with_index_order(order)

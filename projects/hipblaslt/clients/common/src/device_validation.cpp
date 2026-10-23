@@ -70,7 +70,7 @@ namespace
             return std::numeric_limits<double>::quiet_NaN();
         return hn::Tensor::copyEncodedBackingStorage(
                    hipblaslt::hostnumerics::scalarType(type),
-                   hn::Layout(hn::Shape{}, {}),
+                   hn::Layout(hn::Shape{}, {}, 0),
                    std::span<const std::byte>(static_cast<const std::byte*>(data) + index * bytes,
                                               bytes))
             .item<double>();
@@ -767,7 +767,8 @@ namespace
         auto host = hn::Tensor::allocateUninitialized(
             hipblaslt::hostnumerics::scalarType(m.type),
             hn::Layout(hn::Shape{size_t(batch_count), size_t(m.rows), size_t(m.cols)},
-                       {m.rows * m.cols, 1, m.rows}));
+                       {m.rows * m.cols, 1, m.rows},
+                       0));
         if(copy_matrix_to_host(host.rawEncodedBackingStorage().data(), m, batch_count, stream)
            != hipSuccess)
             return std::nullopt;

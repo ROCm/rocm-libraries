@@ -8,8 +8,8 @@ void testReferenceSoftmax() {
     using namespace roc::hostnumerics;
 
     const Shape shape{2, 3, 2};
-    Tensor input(ScalarType::Float16, Layout(shape, {1, 3, 10}));
-    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
+    Tensor input(ScalarType::Float16, Layout(shape, {1, 3, 10}, 0));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}, 0));
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
             for (size_t column = 0; column < 3; ++column) {
@@ -52,7 +52,7 @@ void testReferenceLayerNorm() {
     using namespace roc::hostnumerics;
 
     const Shape shape{2, 3, 2};
-    Tensor input(ScalarType::Float32, Layout(shape, {1, 3, 10}));
+    Tensor input(ScalarType::Float32, Layout(shape, {1, 3, 10}, 0));
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
             for (size_t column = 0; column < 3; ++column)
@@ -66,9 +66,9 @@ void testReferenceLayerNorm() {
                                                           std::span<const float>(gammaValues));
     const Tensor beta = Tensor::copyValuesWithConversion(ScalarType::BFloat16, Shape{3},
                                                          std::span<const float>(betaValues));
-    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}));
-    Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}));
-    Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 12}, 0));
+    Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}, 0));
+    Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}, 0));
 
     LayerNormOptions options;
     options.axis = 1;

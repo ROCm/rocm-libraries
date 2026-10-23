@@ -177,7 +177,7 @@ void testGenerationRecipeIndexOrder() {
     require(!sameStorage(first.data, last.data),
             "MX generation ignored the recipe's logical index order.");
 
-    const Layout dataLayout(Shape{3, 5}, {1, 3});
+    const Layout dataLayout(Shape{3, 5}, {1, 3}, 0);
     require(sameStorage(first.data, generate(ScalarType::Float8E4M3, dataLayout,
                                              firstDimensionFastest.data.recipe())),
             "MX generation changed a first-dimension-fastest recipe stream.");

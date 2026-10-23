@@ -89,7 +89,7 @@ class Layout {
     }
 
     // Requires one stride per shape dimension.
-    Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset = 0)
+    Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
         if (m_shape.rank() != m_strides.size())
             throw std::runtime_error("Tensor stride count " + std::to_string(m_strides.size()) +
@@ -97,10 +97,10 @@ class Layout {
                                      std::to_string(m_shape.rank()) + ".");
     }
 
-    Layout(Shape shape, std::initializer_list<ptrdiff_t> strides, ptrdiff_t offset = 0)
+    Layout(Shape shape, std::initializer_list<ptrdiff_t> strides, ptrdiff_t offset)
         : Layout(std::move(shape), std::vector<ptrdiff_t>(strides), offset) {}
 
-    Layout(Shape shape, std::span<const ptrdiff_t> strides, ptrdiff_t offset = 0)
+    Layout(Shape shape, std::span<const ptrdiff_t> strides, ptrdiff_t offset)
         : Layout(std::move(shape), std::vector<ptrdiff_t>(strides.begin(), strides.end()), offset) {
     }
 
@@ -132,7 +132,7 @@ class Layout {
             }
             stride = *next;
         }
-        return Layout(shape, std::move(strides));
+        return Layout(shape, std::move(strides), 0);
     }
 
     static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(const Shape& shape) {

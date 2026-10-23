@@ -8,7 +8,7 @@ void testTensorStorageOwnership() {
     using namespace roc::hostnumerics;
     Tensor tensor(ScalarType::Float32, Shape{2, 3});
     tensor.storeFrom({1, 2}, 7.0f);
-    Tensor broadcast(ScalarType::Float32, Layout(Shape{2, 2}, {0, 0}));
+    Tensor broadcast(ScalarType::Float32, Layout(Shape{2, 2}, {0, 0}, 0));
     broadcast.storeFrom({0, 0}, 5.0f);
     Tensor broadcastCopy = broadcast.copyConvertedTo(ScalarType::Float32);
     broadcastCopy.storeFrom({0, 0}, 7.0f);
@@ -65,7 +65,7 @@ void testTensorStorageOwnership() {
 
     Tensor collidingCopySource = Tensor::copyValuesWithConversion(
         ScalarType::Int32, Shape{2}, std::span<const int>(overlappingValues).first(2));
-    Tensor collidingCopyDestination(ScalarType::Int32, Layout(Shape{2}, {0}));
+    Tensor collidingCopyDestination(ScalarType::Int32, Layout(Shape{2}, {0}, 0));
     requireError([&] { collidingCopyDestination.copyLogicalElementsFrom(collidingCopySource); },
                  "Tensor copy accepted a destination with colliding logical element offsets.");
 }

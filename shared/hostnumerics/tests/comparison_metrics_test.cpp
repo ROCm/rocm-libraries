@@ -307,7 +307,7 @@ void testComparisonMetrics() {
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
         std::numeric_limits<float>::infinity()};
-    Tensor guardedView = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 3}),
+    Tensor guardedView = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 3}, 0),
                                                           std::span<const float>(guarded));
     require(checkUnusedTensorStorage(guardedView, guarded.size()).passed(),
             "Unwritten tensor padding sentinel was rejected.");

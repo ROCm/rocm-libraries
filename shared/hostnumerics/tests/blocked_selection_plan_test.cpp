@@ -11,9 +11,9 @@ void testSmallEdgeBlock() {
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     Tensor d(ScalarType::Float32, Shape{2, 2});
     GemmTestCase problem(
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
-        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
-        d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
+        d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2}, 0)), ScalarType::Float32);
     require(queryGemmSupport(problem, GemmBackend::Blocked).supported,
             "Blocked backend unexpectedly rejected the test GEMM.");
     const GemmTestRunInfo full = referenceGemm(problem, GemmBackend::Blocked);
