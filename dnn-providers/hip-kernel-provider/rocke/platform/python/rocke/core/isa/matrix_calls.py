@@ -239,8 +239,8 @@ def _wmma(
     ),
     decl_key: str | None = None,
 ) -> MatrixCall:
-    """A gfx11 or gfx12 WMMA: A and B in one register type, the accumulator and
-    the result in another, the arguments in ``args`` order."""
+    """A WMMA whose A and B share one register type and whose accumulator and
+    result share another, the arguments in ``args`` order."""
     return MatrixCall(
         intrinsic=f"llvm.amdgcn.{intrinsic}",
         args=args,
@@ -310,22 +310,46 @@ def _gfx11_16bit_out_wmma(intrinsic: str, register: VectorType) -> MatrixCall:
     )
 
 
-# gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result:
-# (neg A, A, neg B, B, C modifier, C, reuse A, reuse B), every modifier 0. The
-# result type differs from the accumulator's, so the call returns <8 x bfloat>
-# while C passes as <8 x float>.
+# The gfx1250 16-bit, fp32 and integer WMMA modifiers. A 16-bit or fp32 WMMA
+# takes (neg A, A, neg B, B, C modifier, C, reuse A, reuse B); an fp8 / bf8 one
+# (A, B, C modifier, C, reuse A, reuse B); an integer one (signed A, A, signed
+# B, B, C, clamp, reuse A, reuse B), each flag from its operand's dtype in the
+# catalog row. Every other modifier is 0.
+_GFX1250_WMMA_ARGS = (
+    Imm(I1, 0),
+    MatrixOperand.A,
+    Imm(I1, 0),
+    MatrixOperand.B,
+    Imm(I16, 0),
+    MatrixOperand.C,
+    Imm(I1, 0),
+    Imm(I1, 0),
+)
+_GFX1250_FP8_WMMA_ARGS = (
+    MatrixOperand.A,
+    MatrixOperand.B,
+    Imm(I16, 0),
+    MatrixOperand.C,
+    Imm(I1, 0),
+    Imm(I1, 0),
+)
+_GFX1250_INTEGER_WMMA_ARGS = (
+    Signedness(MatrixOperand.A),
+    MatrixOperand.A,
+    Signedness(MatrixOperand.B),
+    MatrixOperand.B,
+    MatrixOperand.C,
+    Imm(I1, 0),
+    Imm(I1, 0),
+    Imm(I1, 0),
+)
+
+# gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result, every
+# modifier 0. The result type differs from the accumulator's, so the call
+# returns <8 x bfloat> while C passes as <8 x float>.
 _GFX1250_BF16F32 = MatrixCall(
     intrinsic="llvm.amdgcn.wmma.bf16f32.16x16x32.bf16.v8bf16.v16bf16.v8f32",
-    args=(
-        Imm(I1, 0),
-        MatrixOperand.A,
-        Imm(I1, 0),
-        MatrixOperand.B,
-        Imm(I16, 0),
-        MatrixOperand.C,
-        Imm(I1, 0),
-        Imm(I1, 0),
-    ),
+    args=_GFX1250_WMMA_ARGS,
     a=AsIs(VectorType(BF16, 16)),
     b=AsIs(VectorType(BF16, 16)),
     c=AsIs(VectorType(F32, 8)),
@@ -462,5 +486,52 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
         # gfx1250 bf16 -> bf16 through an fp32 accumulator: sixteen bf16 of A
         # and of B per lane, eight fp32 accumulator values, eight bf16 results.
         "wmma_gfx1250_bf16f32_16x16x32_bf16": _GFX1250_BF16F32,
+        # gfx1250 f32 -> f32: two fp32 of A and of B per lane.
+        "wmma_gfx1250_f32_16x16x4_f32": _wmma(
+            "wmma.f32.16x16x4.f32.v8f32.v2f32",
+            VectorType(F32, 2),
+            _F32_X8,
+            _GFX1250_WMMA_ARGS,
+        ),
+        # gfx1250 f16 -> f16 and bf16 -> bf16: sixteen 16-bit values of A and
+        # of B per lane, eight results; bf16 passes as bfloat.
+        "wmma_gfx1250_f16_16x16x32_f16": _wmma(
+            "wmma.f16.16x16x32.f16.v8f16.v16f16",
+            VectorType(F16, 16),
+            VectorType(F16, 8),
+            _GFX1250_WMMA_ARGS,
+        ),
+        "wmma_gfx1250_bf16_16x16x32_bf16": _wmma(
+            "wmma.bf16.16x16x32.bf16.v8bf16.v16bf16",
+            VectorType(BF16, 16),
+            VectorType(BF16, 8),
+            _GFX1250_WMMA_ARGS,
+        ),
+        # gfx1250 fp8 / bf8 -> f16: 32 8-bit values of A and of B per lane in
+        # eight words (K 64), 64 in sixteen words (K 128); eight f16 results.
+        **{
+            f"wmma_gfx1250_f16_16x16x{k}_{a}_{b}": _wmma(
+                f"wmma.f16.16x16x{k}.{a}.{b}.v8f16.v{k // 8}i32",
+                VectorType(I32, k // 8),
+                VectorType(F16, 8),
+                _GFX1250_FP8_WMMA_ARGS,
+            )
+            for k in (64, 128)
+            for a in ("fp8", "bf8")
+            for b in ("fp8", "bf8")
+        },
+        # gfx1250 i8 -> i32: 32 i8 per lane in eight words. This is the LLVM 23
+        # call; LLVM 22 declares the instruction without the clamp argument
+        # (its arch-domain column records this declaration as unknown).
+        **_integer_wmma(
+            "wmma_gfx1250_i32_16x16x64_iu8",
+            8,
+            _wmma(
+                "wmma.i32.16x16x64.iu8.v8i32.v8i32",
+                _I32_X8,
+                _I32_X8,
+                _GFX1250_INTEGER_WMMA_ARGS,
+            ),
+        ),
     }
 )

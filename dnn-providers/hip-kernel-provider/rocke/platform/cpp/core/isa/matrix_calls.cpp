@@ -55,8 +55,8 @@ static constexpr rocke_matrix_call_t
                                NULL};
 }
 
-/* A gfx11 or gfx12 WMMA (Python _wmma): A and B in one register type, the
- * accumulator and the result in another, the arguments in `args` order. */
+/* A WMMA (Python _wmma) whose A and B share one register type and whose
+ * accumulator and result share another, the arguments in `args` order. */
 template <int N>
 static constexpr rocke_matrix_call_t wmma(const char* intrinsic,
                                           const rocke_matrix_arg_t (&args)[N],
@@ -143,11 +143,14 @@ static constexpr rocke_matrix_call_t gfx11_16bit_out_wmma(const char* intrinsic,
         NULL};
 }
 
-/* gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result (Python
- * _GFX1250_BF16F32): (neg A, A, neg B, B, C modifier, C, reuse A, reuse B),
- * every modifier 0. The result type differs from the accumulator's, so the
- * call returns <8 x bfloat> while C passes as <8 x float>. */
-static const rocke_matrix_arg_t k_gfx1250_bf16f32_args[] = {
+/* The gfx1250 16-bit, fp32 and integer WMMA modifiers (Python
+ * _GFX1250_WMMA_ARGS, _GFX1250_FP8_WMMA_ARGS, _GFX1250_INTEGER_WMMA_ARGS). A
+ * 16-bit or fp32 WMMA takes (neg A, A, neg B, B, C modifier, C, reuse A,
+ * reuse B); an fp8 / bf8 one (A, B, C modifier, C, reuse A, reuse B); an
+ * integer one (signed A, A, signed B, B, C, clamp, reuse A, reuse B), each
+ * flag from its operand's dtype in the catalog row. Every other modifier is
+ * 0. */
+static const rocke_matrix_arg_t k_gfx1250_wmma_args[] = {
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
     {ROCKE_MATRIX_ARG_A, NULL, 0, false},
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
@@ -157,11 +160,33 @@ static const rocke_matrix_arg_t k_gfx1250_bf16f32_args[] = {
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
 };
+static const rocke_matrix_arg_t k_gfx1250_fp8_wmma_args[] = {
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i16", 0, true},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
+static const rocke_matrix_arg_t k_gfx1250_integer_wmma_args[] = {
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_A},
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_SIGNEDNESS, NULL, 0, true, ROCKE_MATRIX_ARG_B},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
 
+/* gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result (Python
+ * _GFX1250_BF16F32), every modifier 0. The result type differs from the
+ * accumulator's, so the call returns <8 x bfloat> while C passes as
+ * <8 x float>. */
 static constexpr rocke_matrix_call_t k_gfx1250_bf16f32
     = {"llvm.amdgcn.wmma.bf16f32.16x16x32.bf16.v8bf16.v16bf16.v8f32",
-       k_gfx1250_bf16f32_args,
-       (int)(sizeof(k_gfx1250_bf16f32_args) / sizeof(k_gfx1250_bf16f32_args[0])),
+       k_gfx1250_wmma_args,
+       (int)(sizeof(k_gfx1250_wmma_args) / sizeof(k_gfx1250_wmma_args[0])),
        as_is(reg("bf16", 16)),
        as_is(reg("bf16", 16)),
        as_is(reg("f32", 8)),
@@ -284,6 +309,75 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
     /* gfx1250 bf16 -> bf16 through an fp32 accumulator: sixteen bf16 of A and
      * of B per lane, eight fp32 accumulator values, eight bf16 results. */
     {"wmma_gfx1250_bf16f32_16x16x32_bf16", k_gfx1250_bf16f32},
+    /* gfx1250 f32 -> f32: two fp32 of A and of B per lane. */
+    {"wmma_gfx1250_f32_16x16x4_f32",
+     wmma("llvm.amdgcn.wmma.f32.16x16x4.f32.v8f32.v2f32",
+          k_gfx1250_wmma_args,
+          reg("f32", 2),
+          reg("f32", 8))},
+    /* gfx1250 f16 -> f16 and bf16 -> bf16: sixteen 16-bit values of A and of
+     * B per lane, eight results; bf16 passes as bfloat. */
+    {"wmma_gfx1250_f16_16x16x32_f16",
+     wmma("llvm.amdgcn.wmma.f16.16x16x32.f16.v8f16.v16f16",
+          k_gfx1250_wmma_args,
+          reg("f16", 16),
+          reg("f16", 8))},
+    {"wmma_gfx1250_bf16_16x16x32_bf16",
+     wmma("llvm.amdgcn.wmma.bf16.16x16x32.bf16.v8bf16.v16bf16",
+          k_gfx1250_wmma_args,
+          reg("bf16", 16),
+          reg("bf16", 8))},
+    /* gfx1250 fp8 / bf8 -> f16: 32 8-bit values of A and of B per lane in
+     * eight words (K 64), 64 in sixteen words (K 128); eight f16 results. */
+    {"wmma_gfx1250_f16_16x16x64_fp8_fp8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x64.fp8.fp8.v8f16.v8i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 8),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x64_fp8_bf8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x64.fp8.bf8.v8f16.v8i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 8),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x64_bf8_fp8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x64.bf8.fp8.v8f16.v8i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 8),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x64_bf8_bf8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x64.bf8.bf8.v8f16.v8i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 8),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x128_fp8_fp8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8.v8f16.v16i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 16),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x128_fp8_bf8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8.v8f16.v16i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 16),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x128_bf8_fp8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8.v8f16.v16i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 16),
+          reg("f16", 8))},
+    {"wmma_gfx1250_f16_16x16x128_bf8_bf8",
+     wmma("llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8.v8f16.v16i32",
+          k_gfx1250_fp8_wmma_args,
+          reg("i32", 16),
+          reg("f16", 8))},
+    /* gfx1250 i8 -> i32: 32 i8 per lane in eight words. This is the LLVM 23
+     * call; LLVM 22 declares the instruction without the clamp argument (its
+     * arch-domain column records this declaration as unknown). */
+    ROCKE_INTEGER_WMMA("wmma_gfx1250_i32_16x16x64_iu8",
+                       8,
+                       wmma("llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32",
+                            k_gfx1250_integer_wmma_args,
+                            reg("i32", 8),
+                            reg("i32", 8))),
 };
 
 #undef ROCKE_INTEGER_WMMA

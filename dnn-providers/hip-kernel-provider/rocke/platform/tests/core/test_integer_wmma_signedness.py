@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Integer WMMA signedness comes from the operand dtypes, never from a literal.
 
-Every integer WMMA (gfx11 i8 and i4, gfx12 i8 and i4 at K 16 and K 32) takes
-one ``i1`` flag before A and one before B: 1 selects a signed operand, 0 an
-unsigned one. Each instruction has one catalog row per signedness combination
--- the signed op_id, and the op_id with ``_u8_i8`` (A unsigned), ``_i8_u8``
-(B unsigned) or ``_u8_u8`` appended (``_u4_i4`` ... for 4-bit operands) -- and
-the lowering reads each flag from that row's operand dtype.
+Every integer WMMA (gfx11 i8 and i4, gfx12 i8 and i4 at K 16 and K 32, gfx1250
+i8 at K 64) takes one ``i1`` flag before A and one before B: 1 selects a signed
+operand, 0 an unsigned one. Each instruction has one catalog row per signedness
+combination -- the signed op_id, and the op_id with ``_u8_i8`` (A unsigned),
+``_i8_u8`` (B unsigned) or ``_u8_u8`` appended (``_u4_i4`` ... for 4-bit
+operands) -- and the lowering reads each flag from that row's operand dtype.
 
 The cases below pin, for every integer WMMA and all four combinations, the two
 flags both engines emit at every LLVM flavor, that the gfx11 unsigned rows
@@ -41,6 +41,7 @@ _INSTRUCTIONS = (
     ("wmma_gfx12_i32_16x16x16_iu8", 8, "gfx12-generic"),
     ("wmma_gfx12_i32_16x16x16_iu4", 4, "gfx12-generic"),
     ("wmma_gfx12_i32_16x16x32_iu4", 4, "gfx12-generic"),
+    ("wmma_gfx1250_i32_16x16x64_iu8", 8, "gfx1250"),
 )
 # The (A, B) flags of the signed row and of each unsigned combination, in
 # integer_mma_op_ids order: signed x signed, unsigned x signed,

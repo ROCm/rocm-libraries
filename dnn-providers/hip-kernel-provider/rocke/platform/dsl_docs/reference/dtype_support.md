@@ -519,18 +519,25 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
+| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, i8, u8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
-  and ten matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
-  omitted block-scaled formats.
+  and twenty-four matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1
+  lists the omitted block-scaled formats.
 - `wmma_gfx1250_bf16f32_16x16x32_bf16` accumulates bf16 x bf16 in fp32 and
   returns bf16: its row records the result dtype as `dst` (`bf16`) beside the
   fp32 accumulator `c`. A query selects it only when it names the result dtype
   (`dst_dtype="bf16"`); without one it answers with the fp32-result atom. It has
   no lane maps yet, and no family uses it.
+- The gfx1250 16-bit-output (f16 -> f16, bf16 -> bf16), fp8 / bf8 -> f16 (K 64
+  and K 128) and `iu8` WMMA atoms are declared; they have no lane maps yet, and
+  no family uses them. The `iu8` call is the LLVM 23 form: LLVM 22 declares the
+  instruction without its clamp argument and rejects it.
+- `wmma_gfx1250_f32_16x16x4_f32` lowers; its A and B lane maps follow CK's
+  parameters (lane `l` holds row `l % 16` of A, column `l % 16` of B, and K
+  `2 * (l // 16) + slot`) and are not validated on hardware.
 - The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
   only) and the mixed `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only
   gfx942's `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
@@ -549,7 +556,7 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 
 The following gaps compare section 4A with section 4B and concern atom
 declarations only. The gfx942 XF32, gfx1201 fp8/bf8 WMMA (4C.2), CDNA integer
-MFMA (4C.3), gfx1201 integer WMMA (4C.4) and CDNA f64 MFMA (4C.6) declaration
+MFMA (4C.3), gfx1201 and gfx1250 integer WMMA (4C.4) and CDNA f64 MFMA (4C.6) declaration
 gaps are now closed; section 4D describes XF32's logical
 dtype and remaining integration boundaries.
 
@@ -570,12 +577,12 @@ forms are covered by 4C.5.
 declared (section 4B); no family uses them yet, which keeps `i8` at C5=1
 (section 2.5).
 
-#### 4C.4 RDNA4 / CDNA5 -- integer WMMA (closed on gfx1201)
+#### 4C.4 RDNA4 / CDNA5 -- integer WMMA (closed)
 gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
 K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
-`V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. gfx1201 now declares
-the three dense forms in every operand signedness (section 4B), so the remaining
-integer declaration gap is **gfx1250 integer WMMA**. `gfx1151` and
+`V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. gfx1201 declares the
+three dense forms and gfx1250 its dense `IU8` form, each in every operand
+signedness (section 4B); the sparse forms are covered by 4C.5. `gfx1151` and
 `gfx11-generic` declare, in every operand signedness, `wmma_i32_16x16x16_iu8` and
 `wmma_i32_16x16x16_iu4` (§4B). The existing integer WMMA GEMM builders (§5)
 and quant epilogues give `i8` some family coverage; its C5=1 score reflects
