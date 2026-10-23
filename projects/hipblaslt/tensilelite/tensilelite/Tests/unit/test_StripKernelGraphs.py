@@ -1,19 +1,23 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for removing rocRoller's debug kernel-graph dumps.
+"""Unit tests for removing rocRoller's codegen provenance.
 
 A custom kernel is a hand-captured assembly file that hipBLASLt ships alongside
 the kernels it generates. Each carries a YAML block inside its
 ``.amdgpu_metadata`` section: ``custom.config`` is the registration record that
 drives kernel launch, and ``amdhsa.kernels`` is what the GPU runtime reads.
-Kernels captured from rocRoller also arrive with a dump of rocRoller's internal
-view of the kernel, under three keys that nothing reads: ``.kernel_graph``,
-``.kernel_graph_dot`` and ``.command``.
+Kernels captured from rocRoller also arrive with rocRoller's internal view of
+the kernel, in two forms that nothing reads: a graph dump under the
+``.kernel_graph``, ``.kernel_graph_dot`` and ``.command`` keys, and whole-line
+``//`` comments narrating codegen.
 
-``StripKernelGraphs`` deletes those three keys. These tests pin the properties
-that make the deletion safe to apply to a kernel that ships: it must leave
-instructions, ``.amdgcn_target``, ``custom.config`` and ``amdhsa.kernels``
-untouched, and it must act only inside the metadata section.
+``StripKernelGraphs`` deletes both. These tests pin the properties that make
+the deletion safe to apply to a kernel that ships: it must leave instructions,
+their trailing comments, ``.amdgcn_target``, ``custom.config`` and
+``amdhsa.kernels`` untouched; it must act on the graph keys only inside the
+metadata section and on comments only outside it; it must keep licence and
+annotation comments; and it must leave a kernel that did not come from
+rocRoller entirely alone.
 """
 
 import os
@@ -22,7 +26,8 @@ import pytest
 import yaml
 
 import tensilelite
-from tensilelite.StripKernelGraphs import main, processFile, stripLines
+from tensilelite.StripKernelGraphs import (COMMENT_LABEL, main, processFile,
+                                           stripLines, stripTraceComments)
 
 pytestmark = pytest.mark.unit
 
@@ -111,13 +116,50 @@ amdhsa.kernels:
 # it rather than swallowing it along with the block above.
 TRAILING_SIBLING = "    .max_flat_workgroup_size: 64\n"
 
+# Codegen-trace comments, copied in shape from the shipped kernels: register
+# allocation, expression lowering, liveness, and the options banner. Note the
+# varying indentation, including the tab rocRoller uses for nested records.
+TRACE_COMMENTS = [
+    "// (op 1122) Assign stride expression\n",
+    " // Allocated : 1 VGPR (Value: UInt32) (op 1243): v0\n",
+    " // Freeing : 1 SGPR (Value: Int32) (op 481): s14\n",
+    "// Deleting tag 84\n",
+    "//\tt.unitStride = 0\n",
+    " // ------Dst: {LDS:(Offset: 0, Size: 8192), }\n",
+    " //   maxVGPRs:                                 256\n",
+    " // Kernel execution starts here. Use this label instead of the kernel"
+    " name when setting a breakpoint.\n",
+    "//   E_Mul 11, 9, 5\n",
+]
 
-def buildSource(dump="", trailing="", preamble=None, configFirst=True):
+# Comments that must survive: the licence header the repository requires, and
+# the markers a human writes when leaving a note in a captured kernel.
+LICENCE_COMMENTS = [
+    "// Copyright Advanced Micro Devices, Inc., or its affiliates.\n",
+    "// SPDX-License-Identifier: MIT\n",
+    "// Portions under the Apache License.\n",
+    "// copyright holder in lower case\n",
+]
+
+ANNOTATION_COMMENTS = [
+    "// TODO: recapture once the ABI settles\n",
+    "// FIXME: kernarg 3 is mis-sized\n",
+    "// NOTE: the grid is driven by custom.config, not by this comment\n",
+    "// XXX do not reorder these two stores\n",
+    "// HACK: works around a scheduler bug\n",
+    "// WARNING: assembles only with sramecc+\n",
+]
+
+
+def buildSource(dump="", trailing="", preamble=None, configFirst=True,
+                comments="", origin="rocroller"):
     """Assemble a synthetic custom kernel around an optional dump."""
     head = TARGET_LINE + INSTRUCTIONS if preamble is None else preamble
-    body = CUSTOM_CONFIG + KERNEL_HEAD if configFirst else KERNEL_HEAD + CUSTOM_CONFIG
+    config = CUSTOM_CONFIG.replace("Origin: rocroller", f"Origin: {origin}")
+    body = config + KERNEL_HEAD if configFirst else KERNEL_HEAD + config
     return (
-        head
+        comments
+        + head
         + ".amdgpu_metadata\n---\n"
         + body
         + dump
@@ -436,6 +478,173 @@ def test_strip_lines_preserves_line_endings(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Codegen-trace comments go
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("comment", TRACE_COMMENTS)
+def test_each_trace_comment_shape_is_removed(tmp_path, comment):
+    path = writeKernel(tmp_path, buildSource(comments=comment))
+    removed, bytesRemoved = processFile(str(path))
+    assert removed == {COMMENT_LABEL: 1}
+    assert bytesRemoved == len(comment.encode("utf-8"))
+    assert comment not in path.read_text(encoding="utf-8")
+
+
+def test_a_run_of_trace_comments_goes_in_one_pass(tmp_path):
+    path = writeKernel(tmp_path, buildSource(comments="".join(TRACE_COMMENTS)))
+    removed, _ = processFile(str(path))
+    assert removed == {COMMENT_LABEL: len(TRACE_COMMENTS)}
+    assert "//" not in path.read_text(encoding="utf-8")
+
+
+def test_trace_comments_between_instructions_go(tmp_path):
+    preamble = (
+        TARGET_LINE
+        + ".text\n"
+        + "// (op 1) Assign VGPR stride\n"
+        + "k:\n"
+        + " // Allocated : 1 VGPR (Value: UInt32) (op 5): v0\n"
+        + "    s_endpgm\n"
+    )
+    path = writeKernel(tmp_path, buildSource(preamble=preamble))
+    removed, _ = processFile(str(path))
+    assert removed == {COMMENT_LABEL: 2}
+    text = path.read_text(encoding="utf-8")
+    assert TARGET_LINE in text and "k:\n" in text and "    s_endpgm\n" in text
+
+
+def test_graphs_and_comments_are_reported_separately(tmp_path):
+    source = buildSource(dump=KERNEL_GRAPH + COMMAND,
+                         comments="".join(TRACE_COMMENTS))
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == {
+        "kernel_graph": 9, "command": 5, COMMENT_LABEL: len(TRACE_COMMENTS),
+    }
+
+
+# --------------------------------------------------------------------------
+# Load-bearing comments stay
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("comment", LICENCE_COMMENTS + ANNOTATION_COMMENTS)
+def test_a_marked_comment_is_kept(tmp_path, comment):
+    source = buildSource(comments=comment + "".join(TRACE_COMMENTS))
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == {COMMENT_LABEL: len(TRACE_COMMENTS)}
+    assert comment in path.read_text(encoding="utf-8")
+
+
+def test_the_licence_header_survives_byte_for_byte(tmp_path):
+    header = "".join(LICENCE_COMMENTS[:2]) + "\n"
+    source = buildSource(comments=header + "".join(TRACE_COMMENTS))
+    path = writeKernel(tmp_path, source)
+    processFile(str(path))
+    assert path.read_text(encoding="utf-8").startswith(header)
+
+
+def test_an_instruction_keeps_its_trailing_comment(tmp_path):
+    preamble = TARGET_LINE + ".text\nk:\n    s_nop 0 // (op 1243) reg expression\n"
+    path = writeKernel(tmp_path, buildSource(preamble=preamble,
+                                             comments=TRACE_COMMENTS[0]))
+    removed, _ = processFile(str(path))
+    assert removed == {COMMENT_LABEL: 1}
+    assert "    s_nop 0 // (op 1243) reg expression\n" in path.read_text(
+        encoding="utf-8")
+
+
+def test_a_comment_inside_the_metadata_section_is_kept(tmp_path):
+    # "//" is not a YAML comment, so a line like this inside the metadata
+    # block would be data. The strip must not reach into the section.
+    source = buildSource(trailing="    .note: // not a comment here\n",
+                         comments=TRACE_COMMENTS[0])
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == {COMMENT_LABEL: 1}
+    assert "    .note: // not a comment here\n" in path.read_text(
+        encoding="utf-8")
+
+
+def test_blank_lines_and_directives_around_a_comment_are_kept(tmp_path):
+    preamble = TARGET_LINE + "\n" + TRACE_COMMENTS[0] + "\n" + INSTRUCTIONS
+    path = writeKernel(tmp_path, buildSource(preamble=preamble))
+    processFile(str(path))
+    assert TARGET_LINE + "\n\n" + INSTRUCTIONS in path.read_text(
+        encoding="utf-8")
+
+
+@pytest.mark.parametrize("configFirst", [True, False])
+def test_custom_config_survives_the_comment_strip(tmp_path, configFirst):
+    source = buildSource(comments="".join(TRACE_COMMENTS),
+                         configFirst=configFirst)
+    path = writeKernel(tmp_path, source)
+    processFile(str(path))
+    assert CUSTOM_CONFIG in path.read_text(encoding="utf-8")
+
+
+def test_the_registration_record_still_parses_after_both_strips(tmp_path):
+    source = buildSource(dump=KERNEL_GRAPH + KERNEL_GRAPH_DOT + COMMAND,
+                         comments="".join(TRACE_COMMENTS))
+    path = writeKernel(tmp_path, source)
+    processFile(str(path))
+    parsed = metadataYaml(path.read_text(encoding="utf-8"))
+    assert set(parsed) == {"custom.config", "amdhsa.version", "amdhsa.kernels"}
+    assert parsed["custom.config"] == metadataYaml(source)["custom.config"]
+
+
+# --------------------------------------------------------------------------
+# Only rocRoller's kernels are touched
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("origin", ["tensile", "ck", "triton", "wave"])
+def test_a_kernel_from_another_source_keeps_its_comments(tmp_path, origin):
+    source = buildSource(comments="".join(TRACE_COMMENTS), origin=origin)
+    path = writeKernel(tmp_path, source)
+    removed, bytesRemoved = processFile(str(path))
+    assert removed == {}
+    assert bytesRemoved == 0
+    assert path.read_text(encoding="utf-8") == source
+
+
+def test_a_kernel_with_no_metadata_keeps_its_comments(tmp_path):
+    source = TARGET_LINE + "".join(TRACE_COMMENTS) + INSTRUCTIONS
+    path = writeKernel(tmp_path, source)
+    assert processFile(str(path)) == ({}, 0)
+    assert path.read_text(encoding="utf-8") == source
+
+
+def test_a_graph_dump_is_still_removed_from_a_non_rocroller_kernel(tmp_path):
+    # The origin gate guards comments only: a dump is unread whoever wrote it.
+    source = buildSource(dump=KERNEL_GRAPH, comments=TRACE_COMMENTS[0],
+                         origin="tensile")
+    path = writeKernel(tmp_path, source)
+    removed, _ = processFile(str(path))
+    assert removed == {"kernel_graph": 9}
+    assert TRACE_COMMENTS[0] in path.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# stripTraceComments works on lines alone
+# --------------------------------------------------------------------------
+
+def test_strip_trace_comments_is_idempotent(tmp_path):
+    source = buildSource(dump=KERNEL_GRAPH, comments="".join(TRACE_COMMENTS))
+    once, removed = stripLines(source.splitlines(keepends=True))
+    assert removed
+    twice, removedAgain = stripLines(list(once))
+    assert twice == once
+    assert removedAgain == {}
+
+
+def test_strip_trace_comments_preserves_line_endings(tmp_path):
+    source = buildSource(comments="".join(TRACE_COMMENTS)).replace("\n", "\r\n")
+    newLines, removed = stripTraceComments(source.splitlines(keepends=True))
+    assert removed == len(TRACE_COMMENTS)
+    assert all(line.endswith("\r\n") for line in newLines)
+
+
+# --------------------------------------------------------------------------
 # Command-line behaviour
 # --------------------------------------------------------------------------
 
@@ -466,6 +675,14 @@ def test_strip_mode_writes_and_exits_zero(tmp_path):
     assert ".kernel_graph:" not in path.read_text(encoding="utf-8")
 
 
+def test_check_mode_reports_trace_comments_by_name(tmp_path, capsys):
+    writeKernel(tmp_path, buildSource(comments="".join(TRACE_COMMENTS)))
+    assert main(["--check", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert f"{COMMENT_LABEL} ({len(TRACE_COMMENTS)} lines)" in out
+    assert f"  {COMMENT_LABEL}: {len(TRACE_COMMENTS)} lines" in out
+
+
 def test_a_directory_argument_finds_nested_kernels(tmp_path):
     nested = tmp_path / "rocroller"
     nested.mkdir()
@@ -483,12 +700,39 @@ def test_a_directory_argument_finds_nested_kernels(tmp_path):
 # Against the kernels that actually ship
 # --------------------------------------------------------------------------
 
-def test_no_shipped_custom_kernel_carries_a_dump(capsys):
-    """Regression gate: a kernel added later must not bring the dump back."""
+def customKernelRoot():
     root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     assert os.path.isdir(root)
-    assert main(["--check", root]) == 0
+    return root
+
+
+def test_no_shipped_custom_kernel_carries_provenance(capsys):
+    """Regression gate: a kernel added later must not bring provenance back."""
+    assert main(["--check", customKernelRoot()]) == 0
     assert "0 of" in capsys.readouterr().out
+
+
+def test_shipped_rocroller_kernels_keep_only_their_licence_header():
+    root = os.path.join(customKernelRoot(), "rocroller")
+    for name in sorted(f for f in os.listdir(root) if f.endswith(".s")):
+        with open(os.path.join(root, name), encoding="utf-8") as handle:
+            whole = [l for l in handle if l.lstrip().startswith("//")]
+        assert all("Copyright" in l or "SPDX" in l for l in whole), name
+
+
+def test_the_other_shipped_custom_kernels_keep_their_comments():
+    """The origin gate must leave hand-written kernels documented."""
+    root = customKernelRoot()
+    kept = 0
+    for base, _, names in os.walk(root):
+        if os.path.basename(base) == "rocroller":
+            continue
+        for name in names:
+            if not name.endswith(".s"):
+                continue
+            with open(os.path.join(base, name), encoding="utf-8") as handle:
+                kept += sum(1 for l in handle if l.lstrip().startswith("//"))
+    assert kept > 100
 
 
 def test_the_shipped_rocroller_kernels_still_expose_their_registration_record():

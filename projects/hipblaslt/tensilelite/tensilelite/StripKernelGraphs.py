@@ -1,11 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Remove rocRoller's debug kernel-graph dumps from checked-in custom kernels.
+"""Remove rocRoller's codegen provenance from checked-in custom kernels.
 
-rocRoller emits its internal kernel representation alongside the kernel it
+rocRoller emits its internal view of the kernel alongside the kernel it
 generates, and the capture procedure that turns a generated kernel into a
-checked-in ``.s`` file keeps that dump.  Three YAML keys inside the
-``.amdgpu_metadata`` section carry it:
+checked-in ``.s`` file keeps all of it.  It arrives in two forms.
+
+**Kernel-graph dumps.**  Three YAML keys inside the ``.amdgpu_metadata``
+section:
 
   ``.kernel_graph``      the control and coordinate graphs, as nested YAML
   ``.kernel_graph_dot``  the same two graphs again, as one Graphviz string
@@ -17,19 +19,35 @@ deserialises the whole YAML block and its callers take only ``custom.config``
 (the kernel descriptor and argument layout the GPU runtime needs), so the dump
 costs parse time and repository size and returns nothing.
 
-This script deletes those three keys and the lines they own.  It never touches
-instructions, assembler directives such as ``.amdgcn_target``, the
-``.amdhsa_kernel`` descriptor block, ``custom.config``, or ``amdhsa.kernels``:
-it only edits lines between ``.amdgpu_metadata`` and ``.end_amdgpu_metadata``,
-and within that region only a matched key and the more-deeply-indented lines
-that follow it.
+**Codegen-trace comments.**  Whole-line ``//`` comments outside the metadata
+section, which narrate how rocRoller lowered the kernel: register allocation
+(``// Allocated : 1 VGPR ...``), expression lowering (``// (op 1122) Assign
+stride expression``), liveness (``// Deleting tag 84``), and so on.  They are
+comments, so the assembler discards them; they outnumber the instructions they
+annotate by better than ten to one.
+
+This script deletes both.  What it never touches:
+
+  * anything between ``.amdgpu_metadata`` and ``.end_amdgpu_metadata`` other
+    than the three graph keys -- so ``custom.config`` and ``amdhsa.kernels``
+    come through byte for byte;
+  * any line that carries something besides a comment, so instructions keep
+    their trailing ``// (op N)`` tags and directives such as
+    ``.amdgcn_target`` are left alone;
+  * comments that carry a licence or an annotation marker (see
+    ``_KEEP_COMMENT_RE``), so the SPDX header and any hand-written note
+    survive;
+  * every comment in a kernel that did not come from rocRoller.  The other
+    custom kernels in the tree are hand-written and their comments are load
+    bearing, so the trace strip runs only where ``custom.config`` says
+    ``Origin: rocroller``.
 
 Usage:
     python -m tensilelite.StripKernelGraphs [--check] FILE_OR_DIR [...]
 
 ``--check`` reports what would be removed and exits non-zero if anything
-would be, which lets continuous integration fail a kernel that reintroduces a
-dump.
+would be, which lets continuous integration fail a kernel that reintroduces
+provenance.
 """
 
 import argparse
@@ -44,6 +62,27 @@ GRAPH_KEYS = ("kernel_graph", "kernel_graph_dot", "command")
 _KEY_RE = re.compile(r"^(\s*)\.(?:" + "|".join(GRAPH_KEYS) + r"):")
 _METADATA_BEGIN = ".amdgpu_metadata"
 _METADATA_END = ".end_amdgpu_metadata"
+
+# The label under which trace-comment removals are counted and reported.  It is
+# not a YAML key, so it is printed without the leading dot the graph keys get.
+COMMENT_LABEL = "trace comments"
+
+# A line whose first content is "//" carries nothing but a comment.  A line
+# with code before the "//" is never a candidate: removing it would delete an
+# instruction, and rewriting it would mean parsing the instruction.
+_COMMENT_ONLY_RE = re.compile(r"^\s*//")
+
+# Comments worth keeping.  The licence words are matched case-insensitively
+# because headers vary; the annotation markers are matched as written, because
+# that is how a human writes them and rocRoller never does.
+_KEEP_COMMENT_RE = re.compile(
+    r"(?i:copyright|spdx|licen[cs]e)|\b(?:TODO|FIXME|XXX|HACK|NOTE|WARNING)\b"
+)
+
+# Only rocRoller writes trace comments.  Every other custom kernel in the tree
+# is hand-written, and its comments are the only documentation it has, so the
+# trace strip runs solely on kernels whose custom.config declares this origin.
+_ROCROLLER_ORIGIN_RE = re.compile(r"^\s*Origin:\s*rocroller\s*$", re.IGNORECASE)
 
 
 def _indent(line):
@@ -72,7 +111,7 @@ def _metadataRegion(lines):
     return begin, end
 
 
-def stripLines(lines):
+def stripGraphDumps(lines):
     """Return (newLines, removedByKey) with the graph dumps deleted.
 
     ``removedByKey`` maps each key found to the number of lines it owned.
@@ -117,8 +156,66 @@ def stripLines(lines):
     return [line for line, k in zip(lines, keep) if k], removed
 
 
+def isRocRollerKernel(lines):
+    """True when custom.config declares the kernel came out of rocRoller."""
+    begin, end = _metadataRegion(lines)
+    if begin is None:
+        return False
+    return any(_ROCROLLER_ORIGIN_RE.match(line) for line in lines[begin:end])
+
+
+def stripTraceComments(lines):
+    """Return (newLines, removedCount) with rocRoller's trace comments deleted.
+
+    A line goes only when all four hold: the kernel is rocRoller's, the line
+    lies outside the metadata section, its first content is ``//``, and it
+    carries no licence or annotation marker.  Everything else -- instructions
+    and their trailing comments, directives, blank lines, the whole metadata
+    section -- is returned as it came in.
+    """
+    if not isRocRollerKernel(lines):
+        return lines, 0
+
+    begin, end = _metadataRegion(lines)
+    if begin is None:
+        begin = end = len(lines)
+
+    keep = []
+    removed = 0
+    for i, line in enumerate(lines):
+        protected = begin <= i < end
+        if (not protected and _COMMENT_ONLY_RE.match(line)
+                and not _KEEP_COMMENT_RE.search(line)):
+            removed += 1
+            continue
+        keep.append(line)
+    if not removed:
+        return lines, 0
+    return keep, removed
+
+
+def stripLines(lines):
+    """Return (newLines, removedByLabel) with all rocRoller provenance gone.
+
+    ``removedByLabel`` maps each graph key found to the number of lines it
+    owned, plus ``COMMENT_LABEL`` to the number of trace comments removed.
+    Labels that removed nothing are absent.
+    """
+    lines, removed = stripGraphDumps(lines)
+    lines, comments = stripTraceComments(lines)
+    if comments:
+        removed = dict(removed)
+        removed[COMMENT_LABEL] = comments
+    return lines, removed
+
+
+def _label(key):
+    """How a removal label is printed: graph keys are YAML keys, dot and all."""
+    return key if key == COMMENT_LABEL else "." + key
+
+
 def processFile(path, check=False):
-    """Strip one file.  Returns (removedByKey, bytesRemoved)."""
+    """Strip one file.  Returns (removedByLabel, bytesRemoved)."""
     with open(path, "r", encoding="utf-8", newline="") as handle:
         lines = handle.readlines()
     before = sum(len(line.encode("utf-8")) for line in lines)
@@ -165,12 +262,13 @@ def main(argv=None):
         for key, count in removed.items():
             totals[key] = totals.get(key, 0) + count
         print(f"{'would strip' if args.check else 'stripped'} {path}: "
-              + ", ".join(f".{k} ({v} lines)" for k, v in sorted(removed.items())))
+              + ", ".join(f"{_label(k)} ({v} lines)"
+                          for k, v in sorted(removed.items())))
 
-    print(f"{touched} of {len(files)} file(s) carried a kernel-graph dump; "
+    print(f"{touched} of {len(files)} file(s) carried rocRoller provenance; "
           f"{totalBytes} bytes removed")
     for key, count in sorted(totals.items()):
-        print(f"  .{key}: {count} lines")
+        print(f"  {_label(key)}: {count} lines")
     return 1 if (args.check and touched) else 0
 
 
