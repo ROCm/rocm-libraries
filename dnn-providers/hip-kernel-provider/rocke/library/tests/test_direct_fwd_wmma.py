@@ -114,6 +114,26 @@ class TestFwdWmmaSpec(unittest.TestCase):
             self.assertIsNotNone(why, (pkw, knobs))
             self.assertIn(needle, why)
 
+    def test_pingpong_rejects(self):
+        for knobs, needle in (
+            (dict(pingpong=True, prefetch=True), "pingpong replaces"),
+            (dict(pingpong=True, split_barrier=True), "pingpong replaces"),
+            (dict(pingpong=True, row_ring=True), "pingpong replaces"),
+            (dict(pingpong=True, wave_epilogue=True), "block epilogue"),
+            (dict(pingpong=True, waves_k=1, waves_p=3), "even wave count"),
+            (dict(pingpong=True, tile_w=8, tile_n=4), "rank 0"),
+            (dict(pp_group=2), "pp_group"),
+            (dict(pingpong=True, pp_group=0), "pp_group"),
+        ):
+            why = fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(), **knobs))
+            self.assertIsNotNone(why, knobs)
+            self.assertIn(needle, why)
+        self.assertIsNone(
+            fwd_wmma_reason(
+                DirectFwdWmmaSpec(problem=_problem(), pingpong=True, pp_group=3)
+            )
+        )
+
     def test_rejects_bad_knobs_without_raising(self):
         """Bad knobs are reasons, not exceptions (validate_direct_spec only
         catches ValueError)."""
@@ -278,6 +298,34 @@ _CASES = (
     (
         dict(N=2, H=14, W=15, C=64, K=32, PAD=1, dil_h=3, stride=2),
         dict(tiles_k=1, tiles_p=2, tile_w=8, phase_split=True),
+    ),
+    # Ping-pong ranks: several chunks, a 3-deep ring, ragged channels and
+    # pixels, phase groups that do not divide the steps, several images,
+    # stride 2 with split halos, packed groups and fp16.
+    (dict(N=1, H=18, W=33, C=256, K=128), dict(tiles_k=2, tiles_p=2, pingpong=True)),
+    (
+        dict(N=2, H=17, W=20, C=200, K=96),
+        dict(tiles_k=2, tiles_p=2, stages=3, pingpong=True, pp_group=2),
+    ),
+    (
+        dict(N=2, H=17, W=20, C=96, K=96),
+        dict(waves_k=1, waves_p=8, tiles_k=2, tiles_p=2, pingpong=True, pp_group=3),
+    ),
+    (
+        dict(N=5, H=7, W=9, C=64, K=64, dtype="fp16"),
+        dict(tiles_k=2, tiles_p=2, tile_w=8, tile_n=2, pingpong=True),
+    ),
+    (
+        dict(N=2, H=13, W=21, C=96, K=64, stride=2),
+        dict(tiles_k=1, phase_split=True, pingpong=True, pp_group=2),
+    ),
+    (
+        dict(N=2, H=9, W=12, C=32, K=32, groups=8),
+        dict(waves_k=1, tiles_k=2, pack_groups=8, pingpong=True),
+    ),
+    (
+        dict(N=2, H=13, W=11, C=64, K=32, PAD=1, dil_h=3),
+        dict(tiles_k=1, tiles_p=2, tile_w=8, pingpong=True, sched="iterative-ilp"),
     ),
     # Weights one filter row per stage (row_ring): several chunks, a 3-deep
     # ring, ragged channels, several images, stride 2 (split halo), 5x5,

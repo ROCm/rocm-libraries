@@ -359,6 +359,20 @@ FWD_WMMA_KNOBS = (
     (2, 4, 6, 8, 16, 1, 32, 2, False, False, False, False, True),
     (2, 4, 8, 6, 16, 1, 32, 2, False, False, False, False, True),
 )
+# Ping-pong (two wave ranks a barrier apart) on the dense stride-1 grid:
+# (waves_k, waves_p, tiles_k, tiles_p, tile_w, tile_n, ck, pp_group, sched).
+# Measured winners on gfx1250: the 240-block SDXL 40x40 layer (c#122) and the
+# deep-C 48x48 layer (c#129), plus the 64x64 / 384x384 SD and Flux layers.
+FWD_WMMA_PP_KNOBS = (
+    (2, 4, 4, 10, 16, 1, 32, 1, None),
+    (2, 4, 4, 10, 16, 1, 32, 1, "iterative-ilp"),
+    (2, 4, 4, 6, 16, 1, 32, 3, "iterative-ilp"),
+    (2, 4, 4, 6, 16, 1, 32, 1, None),
+    (1, 8, 4, 6, 32, 1, 32, 3, "iterative-ilp"),
+    (1, 8, 4, 6, 32, 1, 32, 2, "iterative-ilp"),
+    (1, 8, 4, 8, 16, 1, 32, 2, "iterative-ilp"),
+    (1, 8, 2, 8, 32, 1, 32, 3, None),
+)
 FWD_WMMA_PACKED_KNOBS = (
     (1, 2, 2, 2, 16, 1, 32, 2, True, False, False, False, False),
     (1, 4, 2, 2, 32, 1, 32, 2, True, False, False, False, False),
@@ -1180,6 +1194,23 @@ def _knob_grid(
             )
         else:
             yield from _fwd_wmma_knobs(FWD_WMMA_KNOBS)
+            for wk, wp, tk, tp, tw, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
+                knobs = dict(
+                    waves_k=wk,
+                    waves_p=wp,
+                    tiles_k=tk,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    tile_n=tn,
+                    ck=ck,
+                    stages=2,
+                    pingpong=True,
+                )
+                if pg > 1:
+                    knobs["pp_group"] = pg
+                if sched:
+                    knobs["sched"] = sched
+                yield knobs
     elif variant == "direct_wgrad":
         for (wk, wc, wq), hpb, mk in itertools.product(
             wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
