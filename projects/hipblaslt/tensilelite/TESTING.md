@@ -689,11 +689,11 @@ artifacts and applies both floors. The GitHub Actions lane runs them as two name
 floors; Math CI's `tensilelite-unit-codecov` runs only the first, so it cannot be failed by a gate it
 does not own.
 
-The practical benefit is local reproduction. `coverage-gate` sets `skip_install = true` and depends
-only on `coverage[toml]`, so it builds no rocisa, needs no ROCm, and runs no tests. Run
-`coverage-unit` once, then re-run `coverage-gate` as often as you like against the `coverage.json`
-you already have. Chasing a floor failure costs seconds rather than another pass over the full test
-suite.
+The practical benefit is local reproduction. `coverage-gate` installs only the `coverage` dependency
+group from `uv.lock`: `coverage[toml]` and its dependencies. It builds no rocisa, needs no ROCm, and
+runs no tests. Run `coverage-unit` once, then re-run `coverage-gate` as often as you like against the
+`coverage.json` you already have. Chasing a floor failure costs seconds rather than another pass over
+the full test suite.
 
 ### Targets
 

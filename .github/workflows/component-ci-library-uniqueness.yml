@@ -24,10 +24,13 @@ jobs:
           # Logic YAML is the corpus under test. The other two directories
           # supply tox.ini, SolutionIdGen.py, and the uniqueness test.
           # Parent-directory files such as tox.ini are included with them.
+          # uv also needs rocisa's workspace metadata to validate uv.lock;
+          # the test group does not install or build rocisa.
           sparse-checkout: |
             projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic
             projects/hipblaslt/tensilelite/tensilelite/Common
             projects/hipblaslt/tensilelite/tensilelite/Tests/unit
+            projects/hipblaslt/tensilelite/rocisa
           sparse-checkout-cone-mode: true
 
       - name: Set up Python
