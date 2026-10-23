@@ -105,7 +105,7 @@ protected:
     // One bundle for each way a lane can judge a bundle:
     //   0 batchnorm            CPU validates; outside the GPU set
     //   1 costly Sdpa          too costly for CPU; GPU validates
-    //   2 ragged Sdpa          a known gap for CPU; GPU validates
+    //   2 ragged Sdpa          both validate (the CPU reference has no known gaps left)
     //   3 fp8 batch Sdpa       CPU validates; a known gap for GPU
     //   4 no golden outputs    nothing to validate
     //   5 matmul               outside both sets
@@ -127,16 +127,16 @@ protected:
 } // namespace
 
 // The common CI shape. The costly bundle is left to the GPU lane, which runs, so
-// the CPU lane registers nothing for it. The ragged bundle is a known gap for the
-// CPU lane, which asserts the decline, and the GPU lane validates it. Only the
-// matmul, which no lane covers, fails.
+// the CPU lane registers nothing for it. Both lanes validate the ragged bundle; the fp8
+// bundle is a known gap for the GPU lane, which asserts the decline. Only the matmul,
+// which no lane covers, fails.
 TEST_F(TestGoldenDataPlan, BothLanesWithADeviceCoverEachBundleOnceOrFailIt)
 {
     const auto plan = planGoldenDataValidation(_bundles, session(true, true, true));
 
     const std::vector<Planned> expected{
         {PlannedKind::VALIDATE, "quick_BatchnormFwdInference_x_CpuRef", "Small"},
-        {PlannedKind::EXPECT_DECLINE,
+        {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
         {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
@@ -162,7 +162,7 @@ TEST_F(TestGoldenDataPlan, NoDeviceTurnsTheCostExclusionIntoASkipNamingTheGap)
     const std::vector<Planned> expected{
         {PlannedKind::VALIDATE, "quick_BatchnormFwdInference_x_CpuRef", "Small"},
         {PlannedKind::SKIP, "quick_SdpaFwd_x_CpuRef", "Large"},
-        {PlannedKind::EXPECT_DECLINE,
+        {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
         {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
@@ -185,7 +185,7 @@ TEST_F(TestGoldenDataPlan, ASingleLaneChecksNothingAcrossLanes)
     const std::vector<Planned> cpuOnly{
         {PlannedKind::VALIDATE, "quick_BatchnormFwdInference_x_CpuRef", "Small"},
         {PlannedKind::SKIP, "quick_SdpaFwd_x_CpuRef", "Large"},
-        {PlannedKind::EXPECT_DECLINE,
+        {PlannedKind::VALIDATE,
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small_CpuRef",
          "Small"},
         {PlannedKind::VALIDATE, "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small_CpuRef", "Small"},
@@ -279,6 +279,8 @@ TEST(TestGoldenDataPlanJudgeLane, EachBundleGetsTheVerdictItsLaneEarns)
          "quick_SdpaFwd_x.Small",
          ReferenceExecutorType::CPU,
          LaneVerdict::TOO_COSTLY},
+        // No CPU gap entry is left, so this row only shows the cost verdict; it keeps a
+        // future CPU gap entry from outranking the cost gate.
         {"cost is checked before a gap entry",
          graphBundle(buildSdpaGraph(8192), true),
          "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
