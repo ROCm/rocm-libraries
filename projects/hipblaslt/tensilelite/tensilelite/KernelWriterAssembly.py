@@ -20647,7 +20647,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SAddU32(sgpr(offsetIdx), sgpr(offsetIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
     return mod
 
-  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False) -> Module:
+  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False,
+                                        preparedGlobalAddr: Optional[int] = None) -> Module:
     """Initialize a wave's descriptor, or refresh its tile-dependent fields.
 
     updateOnly is used by the audited DataParallel PAP path before the current
@@ -20655,6 +20656,7 @@ class KernelWriterAssembly(KernelWriter):
     between tiles; the LDS address already names PAP's destination bank. Enable,
     global address, tensor dimensions and iterate count must be refreshed.
     """
+    assert preparedGlobalAddr is None or updateOnly, "prepared addresses require incremental PAP"
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     tlu: int = tP["tlu"]
@@ -20715,9 +20717,13 @@ class KernelWriterAssembly(KernelWriter):
     if updateOnly:
       # HalfPLR/RAP can null this word during the final current-tile loads.
       mod.add(SMovB32(sgpr(f"{descSgprName(0)}+0"), 1, "PAP: re-enable TDM for the next tile"))
-      with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
-                             tag="papTdmGlobalAddr") as tmpSgprRes:
-        mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
+      if preparedGlobalAddr is not None:
+        mod.add(SMovB64(sgpr(f"{descSgprName(0)}+2", 2), sgpr(preparedGlobalAddr, 2),
+                        "PAP: commit prepared global address; retain current LDS bank"))
+      else:
+        with self.allocTmpSgpr(max(2, self.states.laneSGPRCount),
+                               tag="papTdmGlobalAddr") as tmpSgprRes:
+          mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
     else:
       # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
       mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
@@ -20906,8 +20912,10 @@ class KernelWriterAssembly(KernelWriter):
     guarded(tPB, wavesB, tcB)
     return mod
 
-  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False) -> Module:
+  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx", *, updateOnly=False,
+                                    preparedGlobalAddr: Optional[int] = None) -> Module:
     #TODO: TDM implement
+    assert preparedGlobalAddr is None or updateOnly, "prepared addresses require incremental PAP"
     mod = Module("TDM Update Wave Separated" if updateOnly else "TDM Init Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -20929,10 +20937,12 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
 
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr, updateOnly=updateOnly))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr, updateOnly=updateOnly,
+                                                   preparedGlobalAddr=preparedGlobalAddr))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
     mod.add(tdmInitLblB)
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr, updateOnly=updateOnly))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr, updateOnly=updateOnly,
+                                                   preparedGlobalAddr=preparedGlobalAddr))
     mod.add(tdmInitLblEnd)
     return mod
 
@@ -21117,8 +21127,180 @@ class KernelWriterAssembly(KernelWriter):
             and not kernel.get("StaggerU", 0)
             and not kernel.get("ProblemType", {}).get("Sparse", 0))
 
-  def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True) -> Module:
+  def papTdmSupportsShadowAddressPair(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> bool:
+    """Whether this pair supports bounded pure classic PAP address arithmetic.
+
+    With SupportUserArgs, the caller may consume a prepared address only when
+    ArgType's low byte is zero. Other modes may speculate, but must discard
+    preparation and use ordinary mapping/descriptor refresh at the handoff.
+    """
+    pt = kernel["ProblemType"]
+    if not (kernel.get("TileProcessingStrategy") in ("DataParallel", "StreamK")
+            and kernel.get("WorkAssignment") == "StaticGrid"
+            and KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
+            and tuple(getattr(self.states, "version", ())) == (12, 5, 0)
+            and self.states.asmCaps.get("HasSMulHi", False)
+            and kernel.get("PrefetchAcrossPersistent")
+            and kernel.get("ScheduleIterAlg") == 4
+            and kernel.get("PrefetchGlobalRead") == 2
+            and kernel.get("WavefrontSize") == 32
+            and not kernel.get("HalfPLR")
+            and not kernel.get("SuppressNoLoadLoop")
+            and not kernel.get("ReuseAcrossPersistent")
+            and not kernel.get("UseCustomMainLoopSchedule")
+            and not kernel.get("SpaceFillingAlgo")
+            and kernel.get("WorkGroupMapping") == 1
+            and kernel.get("GlobalSplitU", 0) == 0
+            and pt.get("Batched") and pt.get("StridedBatched")
+            and not pt.get("GroupedGemm")
+            and pt.get("IndicesSummation") == [3]
+            and pt.get("NumIndicesC", 3) == 3):
+      return False
+    members = {tPA["tensorChar"], tPB["tensorChar"]}
+    if members not in ({"A", "B"}, {"MXSA", "MXSB"}):
+      return False
+    if tPA["bpeGR"] != tPB["bpeGR"] or tPA["bpeGR"] not in (0.5, 0.75, 1, 2, 4, 8):
+      return False
+    for tP in (tPA, tPB):
+      tc = tP["tensorChar"]
+      idx = 0 if tc.endswith("A") else 1
+      if (tP["idx"] != idx or tP.get("isM") or tP.get("is_sparse")
+          or len(tP["ia"]) != 3 or tP["ia"][2] != 2
+          or set(tP["ia"]) != {idx, 2, 3}
+          or tdmWaveComponents(kernel, tc) != (kernel["NumWaves"] // 2, 1)):
+        return False
+      if tc.startswith("MX"):
+        block = pt.get(f"MXBlock{tc[-1]}", 0)
+        if (block <= 0 or kernel["MatrixInstK"] % block != 0
+            or kernel["DepthU"] < kernel["MatrixInstK"]
+            or kernel["DepthU"] % kernel["MatrixInstK"] != 0):
+          return False
+    return True
+
+  def papTdmPrepareAddressPair(self, kernel: Mapping, tPA: Mapping, tPB: Mapping,
+                               nextWorkgroups: Mapping[int, int], dstAddr: int,
+                               tmpSgprRes: ContinuousRegister) -> Module:
+    """Prepare one wave-selected encoded address without touching live state.
+
+    The caller owns an aligned output pair, three aligned scratch SGPRs, and
+    the mapped next WorkGroup0/1/2 inputs. They are disjoint and remain reserved
+    through their emitted uses. Only the output, scratch and SCC are written;
+    there are no memory operations, branches, or hidden register allocations.
+    Tensor bases/strides and Serial must remain live until preparation runs.
+    SupportUserArgs requires caller validity gating on (ArgType & 0xff) == 0;
+    other modes can execute this arithmetic but must not consume its output.
+    """
+    assert self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB), "unsupported PAP address pair"
+    assert isinstance(dstAddr, int) and dstAddr >= 0 and dstAddr % 2 == 0
+    assert tmpSgprRes.size >= 3 and tmpSgprRes.idx >= 0 and tmpSgprRes.idx % 2 == 0
+    assert set(nextWorkgroups) == {0, 1, 2}
+    coordinates = [nextWorkgroups[i] for i in range(3)]
+    assert all(isinstance(reg, int) and reg >= 0 for reg in coordinates)
+    assert len(set(coordinates)) == 3
+    output = {dstAddr, dstAddr + 1}
+    scratch = set(range(tmpSgprRes.idx, tmpSgprRes.idx + tmpSgprRes.size))
+    assert not output.intersection(scratch)
+    assert not set(coordinates).intersection(output | scratch)
+
+    even, odd = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    pair = (even, odd)
+    s0, s1, s2 = (tmpSgprRes.idx + i for i in range(3))
+    isMX = even["tensorChar"].startswith("MX")
+    bpe = even["bpeGR"]
+    numComp = kernel["NumWaves"] // 2
+    mod = Module(f"PAP prepare address pair {even['tensorChar']}/{odd['tensorChar']}")
+
+    def parity():
+      mod.add(VReadfirstlaneB32(sgpr(s2), vgpr("Serial"), "PAP address preparation wave id"))
+      mod.add(SLShiftRightB32(sgpr(s2), int(log2(kernel["WavefrontSize"])), sgpr(s2)))
+      mod.add(SBitcmp1B32(sgpr(s2), 0, "PAP address tensor parity"))
+
+    def select(dst, values, comment):
+      a, b = values
+      if str(a) == str(b):
+        mod.add(SMovB32(sgpr(dst), a, comment))
+      elif isinstance(a, int) and isinstance(b, int):
+        # A SALU instruction cannot encode two distinct literal operands.
+        mod.add(SMovB32(sgpr(dst), a, comment))
+        mod.add(SCSelectB32(sgpr(dst), b, sgpr(dst), comment))
+      else:
+        mod.add(SCSelectB32(sgpr(dst), b, a, comment))
+
+    def mxUnit(tP):
+      return kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{tP['tensorChar'][-1]}"]
+
+    def tileBytes(tP):
+      unit = mxUnit(tP) if isMX else 1
+      return round(kernel[f"MacroTile{tP['idx']}"] * unit * bpe)
+
+    parity()
+    select(dstAddr, [sgpr(f"Address{tP['tensorChar']}") for tP in pair], "PAP select tensor base low")
+    select(dstAddr + 1, [sgpr(f"Address{tP['tensorChar']}+1") for tP in pair], "PAP select tensor base high")
+    select(s1, [sgpr(nextWorkgroups[tP["idx"]]) for tP in pair], "PAP select next free coordinate")
+    select(s2, [tileBytes(tP) for tP in pair], "PAP select free-tile byte factor")
+    if not isMX:
+      select(s0, [self.strideRef(tP["tensorChar"], tP["idx"]) for tP in pair], "PAP select free stride")
+    # Type bits precede offset arithmetic, matching the ordinary initializer.
+    mod.add(SOrB32(sgpr(dstAddr + 1), sgpr(dstAddr + 1), hex(2 << 30), "PAP descriptor type 2(image)"))
+    if isMX:
+      # Preserve the scale-layout helper's 32-bit free-tile product.
+      mod.add(SMulI32(sgpr(s0), sgpr(s1), sgpr(s2), "PAP scale free-tile offset"))
+      mod.add(SMovB32(sgpr(s2), 0))
+    else:
+      mod.add(SMulI32(sgpr(s0), sgpr(s0), sgpr(s2), "PAP free stride times tile bytes"))
+      # High first: the low result overwrites a multiplicand. Direct scalar
+      # instructions avoid s_mul_u64_u32's unconditional two-VGPR checkout.
+      mod.add(SMulHIU32(sgpr(s2), sgpr(s0), sgpr(s1), "PAP free-tile offset high"))
+      mod.add(SMulI32(sgpr(s0), sgpr(s0), sgpr(s1), "PAP free-tile offset low"))
+    mod.add(SAddU32(sgpr(dstAddr), sgpr(dstAddr), sgpr(s0), "PAP add free-tile offset low"))
+    mod.add(SAddCU32(sgpr(dstAddr + 1), sgpr(dstAddr + 1), sgpr(s2), "PAP add free-tile offset high"))
+
+    def waveFactor(tP):
+      mt = kernel[f"MacroTile{tP['idx']}"]
+      if not isMX:
+        tile1 = kernel["DepthU"] if tP["tlu"] else mt
+        return round(tile1 // numComp * bpe)
+      unit = mxUnit(tP)
+      kGroups = kernel["DepthU"] // kernel["MatrixInstK"]
+      return unit * kGroups // numComp if kGroups >= numComp else round(mt // numComp * unit * bpe)
+
+    def waveStride(tP):
+      if not isMX:
+        return self.strideRef(tP["tensorChar"], 3 if tP["tlu"] else tP["idx"])
+      kGroups = kernel["DepthU"] // kernel["MatrixInstK"]
+      return sgpr(f"Size{INDEX_CHARS[tP['idx']]}") if kGroups >= numComp else 1
+
+    parity()
+    select(s0, [waveFactor(tP) for tP in pair], "PAP select component byte factor")
+    select(s1, [waveStride(tP) for tP in pair], "PAP select component stride")
+    mod.add(SLShiftRightB32(sgpr(s2), 1, sgpr(s2), "PAP component = wave id / 2"))
+    mod.add(SMulI32(sgpr(s0), sgpr(s0), sgpr(s2), "PAP component offset"))
+    mod.add(SMulI32(sgpr(s0), sgpr(s0), sgpr(s1), "PAP component offset times stride"))
+    mod.add(SAddU32(sgpr(dstAddr), sgpr(dstAddr), sgpr(s0), "PAP add component offset low"))
+    mod.add(SAddCU32(sgpr(dstAddr + 1), sgpr(dstAddr + 1), 0, "PAP add component offset carry"))
+
+    parity()
+    select(s0, [sgpr(f"Stride{tP['tensorChar']}{self.states.indexChars[tP['ia'][2]]}")
+                for tP in pair], "PAP select batch stride")
+    mod.add(SMulHIU32(sgpr(s1), sgpr(s0), sgpr(nextWorkgroups[2]), "PAP batch offset high"))
+    mod.add(SMulI32(sgpr(s0), sgpr(s0), sgpr(nextWorkgroups[2]), "PAP batch offset low"))
+    mod.add(scalarMultiply64Bpe(s0, s0, bpe, s2, comment="PAP batch byte offset"))
+    mod.add(SAddU32(sgpr(dstAddr), sgpr(dstAddr), sgpr(s0), "PAP add batch offset low"))
+    mod.add(SAddCU32(sgpr(dstAddr + 1), sgpr(dstAddr + 1), sgpr(s1), "PAP add batch offset high"))
+    if isStreamK(kernel):
+      inc = f"tdm{tPA['tensorChar']}{tPB['tensorChar']}Incs"
+      mod.add(SMulHIU32(sgpr(s1), sgpr("StreamKLocalStart"), sgpr(inc), "PAP next local K offset high"))
+      mod.add(SMulI32(sgpr(s0), sgpr("StreamKLocalStart"), sgpr(inc), "PAP next local K offset low"))
+      mod.add(SAddU32(sgpr(dstAddr), sgpr(dstAddr), sgpr(s0), "PAP add next local K offset"))
+      mod.add(SAddCU32(sgpr(dstAddr + 1), sgpr(dstAddr + 1), sgpr(s1), "PAP next local K address carry"))
+    return mod
+
+  def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True,
+                             *, preparedGlobalAddr: Optional[int] = None) -> Module:
     # Each call requires a distinct descriptor range; PAP rejects grouping aliases.
+    if preparedGlobalAddr is not None:
+      assert preservePapBank and self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB)
+      assert isinstance(preparedGlobalAddr, int) and preparedGlobalAddr >= 0 and preparedGlobalAddr % 2 == 0
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -21138,7 +21320,8 @@ class KernelWriterAssembly(KernelWriter):
       # TDMSplit can leave within-bank LDS offsets and modified iterate state.
       incremental = preservePapBank and KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
       if incremental:
-        mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr, updateOnly=True))
+        mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr, updateOnly=True,
+                                                     preparedGlobalAddr=preparedGlobalAddr))
       elif preservePapBank and blkOffset != 0:
         with self.allocTmpSgpr(1) as tmpSgprRes:
           papBankSgpr = tmpSgprRes.idx
@@ -21151,9 +21334,10 @@ class KernelWriterAssembly(KernelWriter):
                   comment="restore PAP LDS bank after descriptor refresh"))
       else:
         mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
-      mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
-      if isPersistent(kernel):
-        mod.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tPA, tPB))
+      if preparedGlobalAddr is None:
+        mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
+        if isPersistent(kernel):
+          mod.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tPA, tPB))
     return mod
 
   def papTdmSaveLdsBank(self, kernel: Mapping) -> Module:
