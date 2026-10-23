@@ -516,12 +516,12 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
 | `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
-| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
+| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x8,32x32x4}_bf16` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
 | `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
-| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
+| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (every format pair; fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
+| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 
@@ -547,20 +547,28 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   the call zero-pads to sixteen words. The f4 atom has no lane maps yet. No
   family uses them yet.
 - The gfx950 dense f8f6f4 atoms (`mfma_f32_16x16x128_f8f6f4_<a>_<b>` and
-  `mfma_f32_32x32x64_f8f6f4_<a>_<b>`, one per (A, B) format pair with a 6-bit or
-  4-bit operand) are declared. Each operand holds 32 values per lane in the
+  `mfma_f32_32x32x64_f8f6f4_<a>_<b>`, one per (A, B) format pair) are declared;
+  fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`, the K=128 atom the
+  fused-MoE fp8 mega-kernel uses. Each operand holds 32 values per lane in the
   f8f6f4 operand layout of its own format (four groups of 16 lanes at
   16x16x128, two groups of 32 at 32x32x64, as the public CDNA4 ISA operand
   tables give); an fp8 / bf8 operand is passed as its logical values and a
   narrower one as its packed words, which the call zero-pads to eight words.
   They lower to the f8f6f4 scaled-MFMA intrinsic with every scale argument 0,
-  which LLVM selects as the unscaled instruction. No family uses them yet.
+  which LLVM selects as the unscaled instruction. They are the largest K for
+  their pair and shape, so fp8 / bf8 selection on gfx950 picks them.
+- The gfx1250 fp8 / bf8 -> f32 atoms at K 128
+  (`wmma_gfx1250_f32_16x16x128_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`) are
+  declared, 64 values of A and of B per lane; they keep the result map of the
+  K 64 atoms, have no A or B lane maps yet, and are what fp8 / bf8 -> f32
+  selection picks. They need an LLVM 22 or newer compiler.
 - `wmma_gfx1250_f32_16x16x4_f32` lowers; its A and B lane maps follow CK's
   parameters (lane `l` holds row `l % 16` of A, column `l % 16` of B, and K
   `2 * (l // 16) + slot`) and are not validated on hardware.
 - The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
-  only) and the mixed `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only
-  gfx942's `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
+  and gfx90a; on gfx90a the `_1k` atoms keep the larger K) and the mixed
+  `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only gfx942's
+  `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
 - The gfx12 fp8 / bf8 -> f32, `iu8`, `iu4` and 16-bit-output (f16 -> f16,
   bf16 -> bf16) WMMA atoms are declared on `gfx12-generic` (and so on
   `gfx1201`); no family uses them yet.

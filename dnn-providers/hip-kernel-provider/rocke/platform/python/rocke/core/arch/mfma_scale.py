@@ -47,6 +47,17 @@ def narrow_matrix_format_pairs() -> list[tuple[str, str]]:
     ]
 
 
+def eight_bit_matrix_format_pairs() -> list[tuple[str, str]]:
+    """Every (A, B) pair of :data:`MATRIX_FORMATS` whose A and B are both 8-bit.
+
+    A-major in format-code order, 4 pairs: ``(fp8e4m3, fp8e4m3)``,
+    ``(fp8e4m3, bf8e5m2)``, ``(bf8e5m2, fp8e4m3)``, ``(bf8e5m2, bf8e5m2)``.
+    With :func:`narrow_matrix_format_pairs` they are every pair.
+    """
+    wide = [name for name in MATRIX_FORMATS if dtype_info(name).encoded_bits == 8]
+    return [(a, b) for a in wide for b in wide]
+
+
 def matrix_operand_layout(
     dtype: str, words: int, lane_groups: int, lanes_per_group: int
 ) -> MatrixFragmentLayout:

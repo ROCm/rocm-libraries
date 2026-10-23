@@ -3,9 +3,13 @@
 """The gfx950 f8f6f4 16x16x128 and 32x32x64 MFMA instructions.
 
 The gfx950 row lists f8f6f4 -> f32 at 16x16x128 and at 32x32x64 for each of the
-21 (A, B) format pairs with a 6-bit or 4-bit operand: 42 rows. This file pins:
+25 (A, B) format pairs: 50 rows. fp8 x fp8 at 16x16x128 is
+``mfma_f32_16x16x128_fp8``, which its hand-written handler lowers; every other
+row lowers from its ``MATRIX_CALLS`` entry. This file pins:
 
 - the catalog rows (dtypes, shape, fragment lengths in logical values per lane);
+- that selection now picks the f8f6f4 op for an 8-bit x 8-bit pair, the largest
+  K at its shape;
 - the lane maps: each operand's map is its own format's f8f6f4 operand layout,
   checked against the public CDNA4 ISA operand tables transcribed below, and
   the result map is the shape's f32 accumulator;
@@ -28,8 +32,12 @@ import re
 
 import pytest
 from rocke.core.arch import ArchTarget
-from rocke.core.arch.mfma_scale import MATRIX_FORMATS, narrow_matrix_format_pairs
-from rocke.core.arch.target import narrow_f8f6f4_op_ids
+from rocke.core.arch.mfma_scale import (
+    MATRIX_FORMATS,
+    eight_bit_matrix_format_pairs,
+    narrow_matrix_format_pairs,
+)
+from rocke.core.arch.target import gfx950_eight_bit_f8f6f4_op_ids, narrow_f8f6f4_op_ids
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.lower_llvm import LLVM_FLAVORS
@@ -45,9 +53,11 @@ _SHAPES = {
 _OPS = {
     op_id: (shape, a, b)
     for shape in _SHAPES
-    for op_id, (a, b) in narrow_f8f6f4_op_ids(
-        "mfma_f32_{}x{}x{}_f8f6f4".format(*shape)
-    ).items()
+    for op_ids in (
+        narrow_f8f6f4_op_ids("mfma_f32_{}x{}x{}_f8f6f4".format(*shape)),
+        gfx950_eight_bit_f8f6f4_op_ids(shape),
+    )
+    for op_id, (a, b) in op_ids.items()
 }
 
 
@@ -62,17 +72,40 @@ def _op(op_id: str):
 # --- the catalog rows -----------------------------------------------------------
 
 
-def test_gfx950_lists_one_f8f6f4_op_per_narrow_pair_and_shape():
-    pairs = narrow_matrix_format_pairs()
-    assert list(_OPS) == [
-        f"mfma_f32_{m}x{n}x{k}_f8f6f4_{a}_{b}" for m, n, k in _SHAPES for a, b in pairs
-    ]
+def _op_id(shape, a: str, b: str) -> str:
+    """The op_id of the f8f6f4 row reading ``a`` x ``b`` at ``shape``."""
+    if (shape, a, b) == ((16, 16, 128), "fp8e4m3", "fp8e4m3"):
+        return "mfma_f32_16x16x128_fp8"
+    return "mfma_f32_{}x{}x{}_f8f6f4_{}_{}".format(*shape, a, b)
+
+
+def test_gfx950_lists_one_f8f6f4_op_per_format_pair_and_shape():
+    pairs = narrow_matrix_format_pairs() + eight_bit_matrix_format_pairs()
+    assert len(pairs) == len(set(pairs)) == len(MATRIX_FORMATS) ** 2
+    assert sorted(_OPS) == sorted(
+        _op_id(shape, a, b) for shape in _SHAPES for a, b in pairs
+    )
     listed = [
         op.op_id
         for op in ArchTarget.from_gfx("gfx950").mma.ops
-        if "_f8f6f4_" in op.op_id and op.family == "mma"
+        if op.family == "mma"
+        and (op.m, op.n, op.k) in _SHAPES
+        and {op.a_dtype, op.b_dtype} <= set(MATRIX_FORMATS)
     ]
-    assert listed == list(_OPS)
+    assert sorted(listed) == sorted(_OPS)
+
+
+@pytest.mark.parametrize("shape", list(_SHAPES))
+@pytest.mark.parametrize("a, b", eight_bit_matrix_format_pairs())
+def test_an_8_bit_pair_selects_its_f8f6f4_op(shape, a, b):
+    """The f8f6f4 op is the largest K for an 8-bit x 8-bit pair at its shape
+    (K 128 at 16 x 16, K 64 at 32 x 32), so selection moves to it."""
+    m, n, k = shape
+    selected = ArchTarget.from_gfx("gfx950").mma.select_largest_k(
+        a_dtype=a, b_dtype=b, c_dtype="fp32", m=m, n=n
+    )
+    assert selected.op_id == _op_id(shape, a, b)
+    assert selected.k == k
 
 
 @pytest.mark.parametrize("op_id", list(_OPS))
@@ -248,12 +281,15 @@ def test_both_engines_call_the_f8f6f4_mfma_with_its_formats(op_id, flavor):
 
 
 # The pairs compiled for gfx950 at both shapes: both operands narrow, an 8-bit
-# operand with a narrow one, and the bf8 / bf6 format codes.
+# operand with a narrow one, the bf8 / bf6 format codes, and two 8-bit x 8-bit
+# pairs (fp8 x fp8 lowered by its hand-written handler at 16x16x128).
 _COMPILED_PAIRS = [
     ("fp4e2m1", "fp4e2m1"),
     ("fp8e4m3", "fp4e2m1"),
     ("fp6e2m3", "fp6e2m3"),
     ("bf8e5m2", "fp6e3m2"),
+    ("fp8e4m3", "fp8e4m3"),
+    ("bf8e5m2", "fp8e4m3"),
 ]
 
 
@@ -265,8 +301,7 @@ def test_gfx950_compiles_links_and_selects_the_f8f6f4_instruction(shape, a, b):
     run. Every scale argument is 0, so LLVM selects the unscaled instruction;
     cbsz carries A's format code and blgp B's."""
     m, n, k = shape
-    op_id = f"mfma_f32_{m}x{n}x{k}_f8f6f4_{a}_{b}"
-    text = lower_with_both_engines(_kernel(op_id), "gfx950")
+    text = lower_with_both_engines(_kernel(_op_id(shape, a, b)), "gfx950")
     (mfma,) = [i for i in target_instructions(text, "gfx950") if "v_mfma" in i]
     assert re.search(rf"\bv_mfma_f32_{m}x{n}x{k}_f8f6f4\b", mfma), mfma
     for modifier, dtype in (("cbsz", a), ("blgp", b)):

@@ -1,11 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The gfx1250 WMMA instructions with a 16-bit or integer result, and f32 16x16x4.
+"""The gfx1250 WMMA instructions with a 16-bit or integer result, fp8 / bf8 ->
+f32 at K 128, and f32 16x16x4.
 
 The gfx1250 row lists f16 -> f16 and bf16 -> bf16 at K 32, the four fp8 / bf8
--> f16 pairs at K 64 and at K 128, i8 -> i32 at K 64 in every operand
-signedness, and f32 -> f32 at K 4, which was listed before but had no lowering.
-Each case below pins, for one instruction:
+-> f16 pairs at K 64 and at K 128, the same four pairs -> f32 at K 128 (K 64 was
+listed before), i8 -> i32 at K 64 in every operand signedness, and f32 -> f32 at
+K 4, which was listed before but had no lowering. Each case below pins, for one
+instruction:
 
 - the catalog row (dtypes, shape, fragment lengths in logical values per lane);
 - the lowered call in both engines at every LLVM flavor: the intrinsic, the
@@ -16,8 +18,10 @@ Each case below pins, for one instruction:
   not accept gfx1250, and for the i8 instruction where the compiler is older
   than LLVM 23).
 
-The new instructions have no lane maps yet: no map is checked against an
-independent source. The f32 16x16x4 A and B maps are CK's (lane l holds row
+The new instructions have no A or B lane maps yet: no map is checked against an
+independent source. The fp8 / bf8 -> f32 K 128 instructions keep the result map
+of their K 64 forms; the others have none. Selection of fp8 / bf8 -> f32 moves
+from K 64 to K 128. The f32 16x16x4 A and B maps are CK's (lane l holds row
 l % 16 of A, column l % 16 of B, and the K values 2 * (l // 16) + slot); they
 are not validated on hardware. The C++ engine's rows and maps are pinned to
 the same data by ``tests/core/gfx1250_wmma_ops.cpp``.
@@ -67,9 +71,9 @@ def _modified(operand: str, accumulator: str) -> tuple[str, ...]:
 
 
 # (A, B, C modifier, C, reuse A, reuse B), every modifier 0.
-def _fp8(words: int) -> tuple[str, ...]:
+def _fp8(words: int, accumulator: str) -> tuple[str, ...]:
     operand = f"<{words} x i32>"
-    return (operand, operand, "i16 0", "<8 x half>", "i1 0", "i1 0")
+    return (operand, operand, "i16 0", accumulator, "i1 0", "i1 0")
 
 
 # The signedness flag of an operand of each integer dtype.
@@ -96,11 +100,20 @@ def _integer_cases() -> dict[str, _Case]:
     }
 
 
+# The fp8 / bf8 -> f32 K 128 op_id of each (A, B) pair.
+_F32_K128_OP_IDS = {
+    (a, b): f"wmma_gfx1250_f32_16x16x128_{a}_{b}"
+    for a in ("fp8", "bf8")
+    for b in ("fp8", "bf8")
+}
+
+
 def _fp8_cases() -> dict[str, _Case]:
     """The fp8 / bf8 -> f16 cases: 32 values per lane in eight words at K 64,
-    64 in sixteen words at K 128."""
+    64 in sixteen words at K 128; and the fp8 / bf8 -> f32 cases at K 128."""
     dtype = {"fp8": "fp8e4m3", "bf8": "bf8e5m2"}
-    return {
+    pairs = list(_F32_K128_OP_IDS)
+    f16 = {
         f"wmma_gfx1250_f16_16x16x{k}_{a}_{b}": _Case(
             dtype[a],
             dtype[b],
@@ -108,13 +121,26 @@ def _fp8_cases() -> dict[str, _Case]:
             k,
             k // 2,
             f"llvm.amdgcn.wmma.f16.16x16x{k}.{a}.{b}.v8f16.v{k // 8}i32",
-            _fp8(k // 8),
+            _fp8(k // 8, "<8 x half>"),
             f"v_wmma_f16_16x16x{k}_{a}_{b}",
         )
         for k in (64, 128)
-        for a in ("fp8", "bf8")
-        for b in ("fp8", "bf8")
+        for a, b in pairs
     }
+    f32 = {
+        _F32_K128_OP_IDS[a, b]: _Case(
+            dtype[a],
+            dtype[b],
+            "fp32",
+            128,
+            64,
+            f"llvm.amdgcn.wmma.f32.16x16x128.{a}.{b}.v8f32.v16i32",
+            _fp8(16, "<8 x float>"),
+            f"v_wmma_f32_16x16x128_{a}_{b}",
+        )
+        for a, b in pairs
+    }
+    return {**f16, **f32}
 
 
 _F32_OP_ID = "wmma_gfx1250_f32_16x16x4_f32"
@@ -249,10 +275,32 @@ def test_gfx1250_compiles_links_and_selects_the_instruction(op_id):
 
 @pytest.mark.parametrize("op_id", _UNMAPPED)
 def test_the_new_instructions_have_no_lane_maps_yet(op_id):
+    """No A or B map; no result map either, except on the fp8 / bf8 -> f32 K 128
+    instructions, whose result map is their K 64 forms'."""
     op = _op(op_id)
-    for layout in (op.a_layout, op.b_layout, op.c_layout):
+    unmapped = [op.a_layout, op.b_layout]
+    if op_id not in _F32_K128_OP_IDS.values():
+        unmapped.append(op.c_layout)
+    for layout in unmapped:
         with pytest.raises(NotImplementedError, match="no verified"):
             layout()
+
+
+@pytest.mark.parametrize("pair", sorted(_F32_K128_OP_IDS))
+def test_fp8_to_f32_selects_k128_and_keeps_the_k64_result_map(pair):
+    a, b = pair
+    catalog = ArchTarget.from_gfx("gfx1250").mma
+    selected = catalog.select_largest_k(
+        family="wmma", a_dtype=a, b_dtype=b, c_dtype="fp32", m=16, n=16
+    )
+    assert selected.op_id == _F32_K128_OP_IDS[pair]
+    k64 = catalog.op_for_shape(
+        family="wmma", a_dtype=a, b_dtype=b, c_dtype="fp32", m=16, n=16, k=64
+    )
+    assert k64.op_id == f"wmma_gfx1250_f32_16x16x64_{a}_{b}"
+    assert lane_placements(selected.c_layout(), 32) == lane_placements(
+        k64.c_layout(), 32
+    )
 
 
 def test_the_f32_16x16x4_maps_are_ck_s_and_place_every_element_once():
