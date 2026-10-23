@@ -7206,7 +7206,8 @@ static bool matchesRocRollerSelectedKernel(const std::string&                 ke
 }
 
 // rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
-// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it.
+// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it
+// by name and that kernel's own predicates accept the problem.
 // No match yields an empty list, which the caller reports as not implemented.
 // Problems outside useRocRoller() never reach this function.
 static rocblaslt_status
@@ -7252,12 +7253,29 @@ static rocblaslt_status
             {
                 if(!entry.second)
                     continue;
-                if(matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
-                   || matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
-                {
-                    found = entry.second;
-                    break;
-                }
+                if(!matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
+                   && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
+                    continue;
+
+                // The name carries the tile shape and the operand types, and
+                // nothing else. Every other condition a checked-in rocRoller
+                // kernel was captured under -- scale layout, size multiples and
+                // windows, batch count, buffer-addressing extent -- lives in its
+                // predicates, which a library lookup would have evaluated and
+                // this hand-rolled search otherwise skips. Without them a
+                // one-sided-MX problem name-matches a two-sided kernel and
+                // faults the GPU. hardware and problem only, as in the grouped
+                // path below: taskPredicate needs a Task, which needs the
+                // workspace size that is checked separately right after.
+                if(entry.second->hardwarePredicate
+                   && !(*entry.second->hardwarePredicate)(*hardware))
+                    continue;
+                if(entry.second->problemPredicate
+                   && !(*entry.second->problemPredicate)(tensileProblem))
+                    continue;
+
+                found = entry.second;
+                break;
             }
         }
         // The rocRoller-on path rejects a ranked tile whose kernel needs more
