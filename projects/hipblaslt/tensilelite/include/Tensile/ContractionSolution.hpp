@@ -1564,13 +1564,29 @@ namespace TensileLite
         // rocRoller partitions work differently and substituting Tensile's
         // decomposition would silently corrupt its fixup pass.
         //
-        // Currently the CU count (honouring smCountTarget and persistentMaxCUs)
-        // clamped to the flag region's capacity, StreamKFlagElements. That is a
-        // valid Stream-K grid, but not necessarily the grid the rocRoller JIT
-        // path chooses. The intended replacement is a port of rocRoller's
-        // chooseStreamKGridSize -- origami::streamk::select_reduction followed
-        // by select_grid_size, as already adapted elsewhere in this file --
-        // keyed on customKernel.occupancy, once that value is validated.
+        // A port of rocRoller's chooseStreamKGridSize
+        // (library/src/amd_detail/rocblaslt/src/rocroller/runtime_args_selection.cpp):
+        // origami::streamk::select_reduction then select_grid_size, both in
+        // k_split_aware mode, over the same field set rocRoller populates. The
+        // marshalling lives in RocRollerStreamKGrid.hpp so the oracle test
+        // (tests/RocRollerStreamKGrid_test.cpp) can hold it against a verbatim
+        // transcription of that function.
+        //
+        // Deliberately NOT getPersistentGridImpl()'s origami adapter: that one
+        // also sets a_transpose, b_transpose, mi and workgroup_mapping and uses
+        // depthU for mt.k, which selects a different grid.
+        //
+        // Two deviations, both documented at the definition:
+        //  * customKernel.occupancy == 0 (not recorded by the logic file) means
+        //    the grid cannot be reproduced at all, so this falls back to the
+        //    pre-port behaviour -- the CU count honouring smCountTarget and
+        //    persistentMaxCUs, clamped to StreamKFlagElements.
+        //  * the result is clamped to StreamKFlagElements, which the flag region
+        //    requires. Measured over 76464 points that satisfy the ranker's own
+        //    Stream-K gate the clamp never fires and the grid never exceeds 256,
+        //    so it is a safety net rather than an expected path; if it ever does
+        //    fire the launch has diverged from the rocRoller JIT path. See the
+        //    definition.
         uint32_t rocRollerStreamKGrid(Problem const& problem, Hardware const& hardware) const;
 
         // Same StreamK grid / reduction solve() packs, including the

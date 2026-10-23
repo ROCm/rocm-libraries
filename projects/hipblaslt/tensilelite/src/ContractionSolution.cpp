@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
 #include <Tensile/RocRollerStreamKKernargs.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 
@@ -6900,15 +6901,105 @@ namespace TensileLite
         if(pAMDGPU == nullptr)
             throw std::runtime_error("rocRoller Stream-K grid needs AMDGPU hardware");
 
-        int grid = pAMDGPU->computeUnitCount;
-        if(problem.getParams().smCountTarget() > 0)
-            grid = std::min(grid, problem.getParams().smCountTarget());
-        if(pAMDGPU->persistentMaxCUs > 0)
-            grid = std::min(grid, pAMDGPU->persistentMaxCUs);
-        // The flag region holds one int per workgroup and nothing else bounds
-        // this path; a wider grid would write into the next region.
-        grid = std::min(grid, static_cast<int>(StreamKFlagElements));
-        return static_cast<uint32_t>(std::max(1, grid));
+        // The CU count clamped to the caller's budgets: the grid this function
+        // returned before the origami port, and still the answer whenever the
+        // port's inputs are not all available. A valid Stream-K grid, but not
+        // necessarily the one the rocRoller JIT path picks.
+        auto clampedCuCount = [&]() -> uint32_t {
+            int grid = pAMDGPU->computeUnitCount;
+            if(problem.getParams().smCountTarget() > 0)
+                grid = std::min(grid, problem.getParams().smCountTarget());
+            if(pAMDGPU->persistentMaxCUs > 0)
+                grid = std::min(grid, pAMDGPU->persistentMaxCUs);
+            grid = std::min(grid, static_cast<int>(StreamKFlagElements));
+            return static_cast<uint32_t>(std::max(1, grid));
+        };
+
+        // Behaviour 1 -- occupancy == 0 fallback. customKernel.occupancy is 0
+        // when the logic file did not record it. origami's grid solve is keyed
+        // on occupancy (config_t::is_valid rejects <= 0), so without it this
+        // path cannot reproduce rocRoller's grid at all; substituting 1, or
+        // anything else, would be a guess that silently diverges from the JIT
+        // launch. Fall back to the pre-port clamped CU count instead, and never
+        // hand 0 to origami.
+        if(customKernel.occupancy == 0)
+            return clampedCuCount();
+
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return clampedCuCount();
+
+        size_t m     = 1;
+        size_t n     = 1;
+        size_t k     = 1;
+        size_t batch = 1;
+        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            m *= problem.freeSizeA(i);
+        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            n *= problem.freeSizeB(i);
+        for(size_t i = 0; i < problem.boundIndices().size(); i++)
+            k *= problem.boundSize(i);
+        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+            batch *= problem.batchSize(i);
+
+        // rocRoller reads the element widths off its kernel's own A/B types;
+        // for the kernel selected to serve this problem those are the problem's
+        // types, which is all TensileLite has here.
+        auto elementBits = [](rocisa::DataType type) -> size_t {
+            return static_cast<size_t>(rocisa::GetElementSize(type) * 8.0f + 0.5f);
+        };
+
+        RocRollerStreamKGridInputs in;
+        in.m     = m;
+        in.n     = n;
+        in.k     = k;
+        in.batch = batch;
+        // Only sm_count_target: rocRoller has no persistentMaxCUs notion, and
+        // folding one in here would move the grid off the JIT path's answer.
+        in.numCUs                = static_cast<size_t>(std::max(0, problem.getParams().smCountTarget()));
+        in.tileM                 = static_cast<size_t>(customKernel.macrotile.x);
+        in.tileN                 = static_cast<size_t>(customKernel.macrotile.y);
+        in.tileK                 = static_cast<size_t>(customKernel.macrotile.z);
+        in.occupancy             = static_cast<int>(customKernel.occupancy);
+        in.workspaceSize         = problem.workspaceSize();
+        in.workspaceSizePerElemC = sizeMapping.workspaceSizePerElemC;
+        in.aDtype                = datatypeToAnalyticalDatatype(problem.a().dataType());
+        in.bDtype                = datatypeToAnalyticalDatatype(problem.b().dataType());
+        in.aElementBits          = elementBits(problem.a().dataType());
+        in.bElementBits          = elementBits(problem.b().dataType());
+
+        uint32_t grid = TensileLite::rocRollerStreamKGrid(in, *(hipAMDGPU->analyticalHardware));
+
+        // Behaviour 2 -- flag-region clamp. The per-stream Stream-K flag region
+        // holds StreamKFlagElements ints, one per workgroup; a wider grid writes
+        // into the next region, so the clamp is a memory-safety requirement.
+        //
+        // When it fires, this launch has diverged from the grid the rocRoller
+        // JIT path would use. The numWGs kernarg and the partial-tile workspace
+        // are derived from this same function, so they stay consistent with the
+        // launch geometry -- the divergence is from the JIT path, not within
+        // this launch.
+        //
+        // It should not fire for any problem that can reach a Stream-K kernel.
+        // The ranker only picks Stream-K when numTiles < usableCUs and
+        // itersPerTile >= 16 (chooseSolutionIndexParameters in
+        // rocroller/solution_selection.cpp), which bounds the tile count below
+        // the CU count. Swept against this same origami solve on a modelled
+        // 256-CU gfx950 over 76464 points satisfying that gate -- 10 macrotiles
+        // from 16x16x128 to 256x192x128, 9 shapes, batch 1 and 4, CU budgets
+        // 0/224/256, 9 MX type pairs, with and without a workspace, occupancy 1
+        // to 24 -- the grid never exceeded 256, and occupancy did not change the
+        // answer at all. Drop the gate and it is easy to exceed 2048, because
+        // k_split_aware then returns the whole tile count; that is why this
+        // clamp stays rather than becoming an assert.
+        //
+        // If it ever does fire, truncating is the wrong answer: refusing the
+        // solution at selection time, or raising StreamKFlagElements in step
+        // with _rocblaslt_handle::c_syncSkSlotElements, is the real fix.
+        //
+        // The lower bound is the same kind of net -- a zero grid would be an
+        // unlaunchable dim3(0, 1, 1).
+        return std::max(1u, std::min(grid, StreamKFlagElements));
     }
 
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,
