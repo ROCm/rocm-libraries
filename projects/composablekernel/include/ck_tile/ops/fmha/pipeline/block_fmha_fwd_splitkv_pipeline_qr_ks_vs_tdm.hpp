@@ -692,7 +692,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 else
                     set_tile(m, sink_v * C_LOG2E);
 #else
-                set_tile(m, sink_v);
+                // Unreachable: FAST_EXP2 is asserted above. Kept in step with
+                // block_fmha_fwd_splitkv_pipeline_qr_ks_vs, where #12229 showed
+                // the non-FAST_EXP2 seed also owes scale_s.
+                set_tile(m, sink_v * scale_s);
 #endif
                 set_tile(l, SMPLComputeDataType{1.0f});
             }
