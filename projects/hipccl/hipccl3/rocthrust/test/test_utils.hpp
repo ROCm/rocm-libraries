@@ -509,19 +509,19 @@ struct custom_compare_less
 
 struct user_swappable
 {
-  inline __host__ __device__ user_swappable(bool swapped = false)
+  inline __host__ __device__ user_swappable(bool swapped = false) noexcept
       : was_swapped(swapped)
   {}
 
   bool was_swapped;
 };
 
-inline __host__ __device__ bool operator==(const user_swappable& x, const user_swappable& y)
+inline __host__ __device__ bool operator==(const user_swappable& x, const user_swappable& y) noexcept
 {
   return x.was_swapped == y.was_swapped;
 }
 
-inline __host__ __device__ void swap(user_swappable& x, user_swappable& y)
+inline __host__ __device__ void swap(user_swappable& x, user_swappable& y) noexcept
 {
   x.was_swapped = true;
   y.was_swapped = false;
