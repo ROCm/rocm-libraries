@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -40,6 +41,8 @@ private:
     // serializeBackendPlan() call and reused by all subsequent size/fill calls.
     // A finalized plan is immutable, so this never needs invalidation.
     mutable std::vector<uint8_t> _serializedPlanCache;
+    // Guards _serializedPlanCache. serializeBackendPlan() is const and can run on several threads.
+    mutable std::mutex _serializedPlanCacheMutex;
 
     // Process-unique plan id. Logs use it to tell plans apart, because a plan address
     // can be reused after the plan is destroyed.
