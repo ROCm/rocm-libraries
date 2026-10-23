@@ -34,6 +34,10 @@ namespace TensileLite
     {
         std::vector<size_t> sizes;
         size_t totalSize;
+        // Bytes copied per rotation for this problem alone. sizes/totalSize come from
+        // the shared pristine buffers, which are sized for the largest problem in the
+        // run and therefore over-state every smaller problem's footprint.
+        size_t problemSize;
         size_t rotatingNum;
     };
 
@@ -48,7 +52,7 @@ namespace TensileLite
     public:
         explicit RotatingMemory(size_t num) : m_rotatingBufferNum(num) {}
         ~RotatingMemory() {}
-        void addRotatingSize(std::vector<size_t> sizes);
+        void addRotatingSize(std::vector<size_t> sizes, size_t problemSize);
         void createRotatingMemory(int32_t mode, size_t rotatingSize);
         std::vector<std::vector<RotatingMemoryUnit>> getRotatingMemory() const;
         std::shared_ptr<void> getData() const;
