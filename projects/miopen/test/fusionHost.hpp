@@ -418,7 +418,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
             mean_accum /= nhw;
             variance_accum /= nhw;
             variance_accum += (-mean_accum * mean_accum);
-            inv_Var = 1.0 / sqrt(variance_accum);
+            inv_Var = 1.0 / sqrt(variance_accum + epsilon);
 
             mean   = mean_accum;
             invVar = inv_Var;

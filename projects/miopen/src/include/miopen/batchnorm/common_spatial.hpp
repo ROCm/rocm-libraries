@@ -405,9 +405,10 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
-        //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
+        //  - if C / vectorsize is odd, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
+        if((!bfp32parm &&
+            ((c / vectorsize) % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
            ((last_ylocalsize < stash_values) &&
             (last_zlocalsize < static_cast<size_t>(stash_values))))
         {
