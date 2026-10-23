@@ -37,6 +37,7 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t 
             }
         }
 
+        this->m_transpose_free = that->m_transpose_free;
         this->copy_pivot_info_async(that, stream);
         THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
