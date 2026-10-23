@@ -71,6 +71,7 @@ def test_tests_for_module_respects_dotted_boundary():
 def test_classify_staged_buckets():
     staged = [
         TL / "pyproject.toml",
+        TL / "uv.lock",
         TL / "scripts" / "helper.py",
         TL / "rocisa" / "src.cpp",
         TL / "tensilelite" / "Tests" / "unit" / "conftest.py",
@@ -83,6 +84,7 @@ def test_classify_staged_buckets():
     broad, tests, sources, ignored = hook.classify_staged(staged)
     broad_str = set(broad)
     assert "pyproject.toml" in broad_str
+    assert "uv.lock" in broad_str
     assert "scripts/helper.py" in broad_str
     assert "rocisa/src.cpp (native ext)" in broad_str
     assert any("conftest.py" in b for b in broad_str)
