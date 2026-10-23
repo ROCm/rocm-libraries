@@ -11,8 +11,9 @@ wider ROCm/LLVM/gfx problem; this doc is its §4 R1+R2 written out),
 (bug record B1–B11).
 
 > **Provenance.** The hand-run probes quoted in §3 were taken on AMD clang
-> 23.0.0git at `/opt/rocm/lib/llvm/bin/clang` (comgr reports ROCm 7.13, so rocke
-> detects flavor `llvm23`). They are a **single-flavor snapshot, kept only as the
+> 23.0.0git at `/opt/rocm/lib/llvm/bin/clang`, paired with COMGR package metadata
+> reporting ROCm 7.13. Flavor `llvm23` follows the compiler’s LLVM version, not
+> the package-release label. They are a **single-flavor snapshot, kept only as the
 > argument that motivated S1** — they are not the data. The data is the generated
 > artifact, one column per flavor, under
 > `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`; each column
@@ -428,8 +429,8 @@ form of these measurements that is gated:
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
 
 # detected flavor and its basis
-python3 -c "from rocke.core import lower_llvm as L; \
-  print(L._resolve_llvm_flavor(), L._comgr_lib_rocm_version())"
+python3 -c "from rocke.core import lower_llvm as L; from rocke.runtime import comgr; \
+  print(L._resolve_llvm_flavor(), comgr.loaded_compiler_info().describe())"
 
 # one cell, one family, or the whole column -- on this host's flavor only
 python3 tools/gen_arch_domain.py --only ds.read.tr --arch gfx950 --verbose
