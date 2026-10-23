@@ -471,7 +471,11 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
-    bounds = PagedBounds(b) if spec.metadata_containment else None
+    bounds = (
+        PagedBounds(b, sliding_window=SLIDING_WINDOW)
+        if spec.metadata_containment
+        else None
+    )
     k_strides = v_strides = None
     if loader_kind is AttentionKVLoaderKind.STRIDED:
         k_strides = declare_strided_kv_params(b, "k")

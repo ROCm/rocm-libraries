@@ -31,6 +31,7 @@ typedef struct rocke_paged_bounds
 {
     rocke_value_t *status, *pages, *capacity, *cols, *k_bytes, *v_bytes;
     rocke_value_t *tid, *slot, *failures;
+    int sliding_window;
 } rocke_paged_bounds_t;
 
 static inline rocke_value_t*
@@ -71,8 +72,10 @@ static inline rocke_value_t* rocke_bounds_masked_load(rocke_ir_builder_t* b,
 {
     return rocke_b_masked_global_load(b, ptr, index, mask, fallback, rocke_i32(), 4);
 }
-static inline void rocke_bounds_declare(rocke_ir_builder_t* B, rocke_paged_bounds_t* state)
+static inline void
+    rocke_bounds_declare(rocke_ir_builder_t* B, rocke_paged_bounds_t* state, int sliding_window)
 {
+    state->sliding_window = sliding_window;
     rocke_value_t* t1 = rocke_bounds_ptr_param(B, "metadata_status_ptr", false);
     state->status = t1;
     rocke_value_t* t2 = rocke_b_param(B, "physical_pages", rocke_i32(), NULL);
@@ -177,8 +180,8 @@ static inline rocke_value_t* rocke_bounds_physical(rocke_ir_builder_t* B,
     rocke_value_t* good = t15;
     rocke_value_t* t16 = rocke_b_const_i32(B, 0);
     rocke_value_t* t17 = rocke_b_const_i32(B, 0);
-    rocke_value_t* t18 = rocke_b_cmp_ne(B, t16, t17);
-    rocke_value_t* t19 = rocke_b_cmp_eq(B, good, t18);
+    rocke_value_t* false_ = rocke_b_cmp_ne(B, t16, t17);
+    rocke_value_t* t19 = rocke_b_cmp_eq(B, good, false_);
     rocke_value_t* t20 = rocke_b_land(B, live, t19);
     rocke_bounds_mark(B, state, t20);
     rocke_value_t* t21 = rocke_b_const_i32(B, 0);
@@ -210,6 +213,15 @@ static inline rocke_value_t* rocke_bounds_offset(rocke_ir_builder_t* B,
     rocke_value_t* t8 = rocke_b_cmp_lt(B, token, length);
     rocke_value_t* t9 = rocke_b_land(B, t7, t8);
     rocke_value_t* live = t9;
+    if(state->sliding_window > 0)
+    {
+        rocke_value_t* window_zero = rocke_b_const_i32(B, 0);
+        rocke_value_t* window = rocke_b_const_i32(B, state->sliding_window);
+        rocke_value_t* window_start_raw = rocke_b_sub(B, length, window);
+        rocke_value_t* window_start = rocke_b_smax(B, window_zero, window_start_raw);
+        rocke_value_t* window_ok = rocke_b_cmp_ge(B, token, window_start);
+        live = rocke_b_land(B, live, window_ok);
+    }
     rocke_value_t* t10 = rocke_b_const_i32(B, 0);
     rocke_value_t* t11 = rocke_b_select(B, live, token, t10);
     rocke_value_t* safe_token = t11;
@@ -309,8 +321,8 @@ static inline void rocke_bounds_reject(rocke_ir_builder_t* B,
 {
     rocke_value_t* t1 = rocke_b_const_i32(B, 0);
     rocke_value_t* t2 = rocke_b_const_i32(B, 0);
-    rocke_value_t* t3 = rocke_b_cmp_ne(B, t1, t2);
-    rocke_value_t* failed = t3;
+    rocke_value_t* false_ = rocke_b_cmp_ne(B, t1, t2);
+    rocke_value_t* failed = false_;
     rocke_value_t* t4 = rocke_b_const_i32(B, (nkh * segments));
     rocke_value_t* t5 = rocke_b_mul(B, seq, t4);
     rocke_value_t* base = t5;

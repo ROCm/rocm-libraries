@@ -12,6 +12,8 @@ from kernels.common._attention_paged_bounds import PagedBounds
 
 
 class Interpreter(paged.AddressInterpreter):
+    sub = staticmethod(lambda a, b: a - b)
+    smax = staticmethod(max)
     cmp_ge = staticmethod(lambda a, b: a >= b)
     cmp_ne = staticmethod(lambda a, b: a != b)
     cmp_eq = staticmethod(lambda a, b: a == b)
@@ -29,8 +31,9 @@ class Interpreter(paged.AddressInterpreter):
 
 
 class Bounds(PagedBounds):
-    def __init__(self, b, pages, cols):
+    def __init__(self, b, pages, cols, sliding_window=0):
         self.b, self.pages, self.cols = b, pages, cols
+        self.sliding_window = sliding_window
         self.failed = False
 
     def mark(self, invalid):
@@ -53,6 +56,53 @@ def test_tail_does_not_read_poison_table(page):
     bounds = Bounds(b, 2, 1)
     got = bounds.offset(b, [], 0, 0, 0, 64, 1, 64, page, 32, 1)
     assert got == 0x7FFFFFFF and not bounds.failed and not b.reads
+
+
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("window", [1, 33, 65, 66])
+def test_window_excluded_tokens_do_not_read_table(page, window):
+    length, hd = 65, 64
+    begin = max(0, length - window)
+    cols = (length + page - 1) // page
+    table = [-1 if (i + 1) * page <= begin else 0 for i in range(cols)]
+    for token in range(length + 1):
+        b = Interpreter()
+        bounds = Bounds(b, 1, cols, sliding_window=window)
+        tile, row = divmod(token, 32)
+        got = bounds.offset(b, table, 0, 0, tile, row * hd, length, hd, page, 32, 1)
+        live = begin <= token < length
+        assert b.reads == ([token // page] if live else [])
+        assert not bounds.failed
+        assert got == ((token % page) * hd * 2 if live else 0x7FFFFFFF)
+
+
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("window", [0, 1, 33, 65, 66])
+@pytest.mark.parametrize("physical", [-2147483648, -1, 1, 2147483647])
+def test_window_boundary_keeps_consumed_ids_checked(page, window, physical):
+    length, hd = 65, 64
+    begin = max(0, length - window) if window else 0
+    cols = (length + page - 1) // page
+    table = [0] * cols
+    table[begin // page] = physical
+    for token in (begin - 1, begin, length):
+        b = Interpreter()
+        bounds = Bounds(b, 1, cols, sliding_window=window)
+        tile, row = divmod(token, 32)
+        got = bounds.offset(b, table, 0, 0, tile, row * hd, length, hd, page, 32, 1)
+        live = begin <= token < length
+        assert bounds.failed == live
+        assert b.reads == ([token // page] if live else [])
+        assert got == ((token % page) * hd * 2 if live else 0x7FFFFFFF)
+
+
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("window", [0, 1, 33])
+def test_zero_length_window_does_not_read_table(page, window):
+    b = Interpreter()
+    bounds = Bounds(b, 1, 1, sliding_window=window)
+    assert bounds.offset(b, [-1], 0, 0, 0, 0, 0, 64, page, 32, 1) == 0x7FFFFFFF
+    assert not bounds.failed and not b.reads
 
 
 def test_table_row_escape_is_masked():

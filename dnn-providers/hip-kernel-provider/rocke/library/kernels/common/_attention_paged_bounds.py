@@ -8,8 +8,9 @@ from rocke.core.ir import I32, PtrType
 class PagedBounds:
     """Private per-CTA state; each lane owns its sticky LDS failure slot."""
 
-    def __init__(self, b):
+    def __init__(self, b, sliding_window: int = 0):
         self.b = b
+        self.sliding_window = sliding_window
         self.status = b.param("metadata_status_ptr", PtrType(I32, "global"), align=4)
         self.pages = b.param("physical_pages", I32)
         self.capacity = b.param("max_seqlen_k", I32)
@@ -77,9 +78,8 @@ class PagedBounds:
             b.cmp_ge(physical, b.const_i32(0)), b.cmp_lt(physical, self.pages)
         )
         good = b.land(lookup_ok, physical_ok)
-        self.mark(
-            b.land(live, b.cmp_eq(good, b.cmp_ne(b.const_i32(0), b.const_i32(0))))
-        )
+        false_ = b.cmp_ne(b.const_i32(0), b.const_i32(0))
+        self.mark(b.land(live, b.cmp_eq(good, false_)))
         return b.select(good, physical, b.const_i32(0))
 
     def offset(
@@ -90,6 +90,11 @@ class PagedBounds:
             b.mul(tile, b.const_i32(tile_size)), b.div(linear, b.const_i32(hd))
         )
         live = b.land(b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, length))
+        if self.sliding_window > 0:
+            window_start = b.smax(
+                b.const_i32(0), b.sub(length, b.const_i32(self.sliding_window))
+            )
+            live = b.land(live, b.cmp_ge(token, window_start))
         safe_token = b.select(live, token, b.const_i32(0))
         physical = self.physical(
             table, base, b.div(safe_token, b.const_i32(page)), live
@@ -134,7 +139,8 @@ def bounded_reduce_params(b):
 def reject_failed_sequence(
     b, status, seq, head, tid, out, dtype, hd, nqh, nkh, segments
 ):
-    failed = b.cmp_ne(b.const_i32(0), b.const_i32(0))
+    false_ = b.cmp_ne(b.const_i32(0), b.const_i32(0))
+    failed = false_
     base = b.mul(seq, b.const_i32(nkh * segments))
     for chunk in range((nkh * segments + 63) // 64):
         slot = b.add(b.const_i32(chunk * 64), tid)

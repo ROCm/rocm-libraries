@@ -320,7 +320,7 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
     if(ctx->metadata_containment)
-        rocke_bounds_declare(B, &ctx->bounds);
+        rocke_bounds_declare(B, &ctx->bounds, CFG.SLIDING_WINDOW);
     if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");

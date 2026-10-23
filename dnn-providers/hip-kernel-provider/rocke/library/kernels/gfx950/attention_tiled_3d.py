@@ -579,7 +579,11 @@ def build_unified_attention_3d_tiled(
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
-    bounds = PagedBounds(b) if spec.metadata_containment else None
+    bounds = (
+        PagedBounds(b, sliding_window=SLIDING_WINDOW)
+        if spec.metadata_containment
+        else None
+    )
     k_strides = v_strides = None
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")

@@ -149,3 +149,150 @@ def test_live_metadata_failure_and_recovery(gpu, monkeypatch, page, dtype_name, 
         if owner is not None:
             owner.close()
         au.clear_attention_3d_graph_cache()
+
+
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("dtype_name", ["fp16", "bf16"])
+@pytest.mark.parametrize("mode", ["eager", "prepared", "graph", "external"])
+@pytest.mark.parametrize("use_sinks", [False, True])
+def test_window_excluded_metadata_and_recovery(
+    gpu, monkeypatch, page, dtype_name, mode, use_sinks
+):
+    torch, arch = gpu
+    if arch not in ("gfx942", "gfx950"):
+        pytest.skip("bounded decode targets gfx942/gfx950")
+    from dispatch.attention import (
+        AttentionRequest,
+        AttentionMaskType,
+        dispatch_attention,
+    )
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+    from tests.test_paged_kv_decode_numeric import _feature_reference
+
+    monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", "1")
+    dtype = torch.float16 if dtype_name == "fp16" else torch.bfloat16
+    capacity, dim, batch, hq, hk = 65, 64, 2, 8, 2
+    torch.manual_seed(113)
+    qh = torch.randn(batch, hq, dim, dtype=dtype)
+    pages = (capacity + page - 1) // page
+    count = batch * pages
+    kh = torch.randn(count, page, hk, dim, dtype=dtype)
+    vh = torch.randn_like(kh)
+    qback = torch.full((batch + 2, hq, dim), 19.0, dtype=dtype).cuda()
+    oback = torch.full((batch + 2, hq, dim), 23.0, dtype=dtype).cuda()
+    q, out = qback[1:-1], oback[1:-1]
+    q.copy_(qh)
+    k, v = kh.cuda(), vh.cuda()
+    cu = torch.arange(batch + 1, dtype=torch.int32).cuda()
+    used = torch.full((batch,), capacity, dtype=torch.int32).cuda()
+    valid_table = torch.arange(count, dtype=torch.int32).reshape(batch, pages)
+    table = valid_table.cuda()
+    sink_host = torch.linspace(-1, 2, hq).to(dtype) if use_sinks else None
+    sinks = sink_host.cuda() if use_sinks else None
+    logical_k = kh.reshape(batch, pages * page, hk, dim).permute(0, 2, 1, 3)
+    logical_v = vh.reshape(batch, pages * page, hk, dim).permute(0, 2, 1, 3)
+    features = dict(softcap=0, sinks=sink_host, alibi_slopes=None, qq_bias=None)
+
+    for window in (1, 33):
+        req = AttentionRequest(
+            batch=batch,
+            nhead_q=hq,
+            nhead_k=hk,
+            seqlen_q=1,
+            seqlen_k=capacity,
+            hdim_q=dim,
+            hdim_v=dim,
+            arch=arch,
+            dtype=dtype_name,
+            kv_block_size=page,
+            algorithm="auto" if page == 1 else "paged_decode_t32",
+            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            sliding_window=window,
+            use_sinks=use_sinks,
+            target_ctas=8,
+        )
+        selected = dispatch_attention(req)
+        assert selected.candidate.name == "attention_paged_decode_t32"
+        assert selected.spec.kernel_spec.metadata_containment
+        assert selected.spec.reduce_spec.metadata_containment
+        args = dict(
+            problem=_problem(req),
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            cu_seqlens_q=cu,
+            seqused_k=used,
+            block_table=table,
+            sinks=sinks,
+            softmax_scale=1 / math.sqrt(dim),
+            softcap=0.0,
+            backend="3d",
+            tuning_spec=selected.spec,
+            use_graph=mode == "graph",
+        )
+        table.copy_(valid_table)
+        used.copy_(torch.full((batch,), capacity, dtype=torch.int32))
+        owner = None
+        graph = None
+        try:
+            if mode in ("prepared", "external"):
+                owner = au.prepare_unified_attention_torch(**args)
+            if mode == "external":
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    owner.launch()
+
+            def launch():
+                if graph is not None:
+                    graph.replay()
+                elif owner is not None:
+                    owner.launch()
+                else:
+                    au.run_unified_attention_torch(**args)
+                torch.cuda.synchronize()
+
+            expected = _feature_reference(
+                torch, qh, logical_k, logical_v, [capacity] * batch, window, features
+            )
+            begin = capacity - window
+            live_page = begin // page
+            for invalid in (-1, count, -2147483648, 2147483647):
+                # A partly live page is retained; only wholly excluded pages
+                # may have evicted IDs. The same graph observes each mutation.
+                evicted = valid_table.clone()
+                evicted[0, :live_page] = invalid
+                table.copy_(evicted)
+                launch()
+                torch.testing.assert_close(
+                    out.cpu().float(), expected, atol=0.01, rtol=0.02
+                )
+                consumed = evicted.clone()
+                consumed[0, live_page] = invalid
+                table.copy_(consumed)
+                launch()
+                assert torch.isnan(out[0].cpu()).all()
+                torch.testing.assert_close(
+                    out[1].cpu().float(), expected[1], atol=0.01, rtol=0.02
+                )
+                table.copy_(evicted)
+                launch()
+                torch.testing.assert_close(
+                    out.cpu().float(), expected, atol=0.01, rtol=0.02
+                )
+            # Empty sequences must remain neutral even with a sink and poison.
+            table.copy_(torch.full_like(valid_table, -2147483648))
+            used.copy_(torch.zeros(batch, dtype=torch.int32))
+            launch()
+            assert torch.count_nonzero(out.cpu()) == 0
+            assert torch.equal(
+                qback.cpu()[[0, -1]], torch.full((2, hq, dim), 19.0, dtype=dtype)
+            )
+            assert torch.equal(
+                oback.cpu()[[0, -1]], torch.full((2, hq, dim), 23.0, dtype=dtype)
+            )
+        finally:
+            if owner is not None:
+                owner.close()
+            au.clear_attention_3d_graph_cache()
