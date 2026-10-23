@@ -438,7 +438,7 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     EXPECT_EQ(spanCopy, layout);
     EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
     EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
-    EXPECT_EQ(Layout(Shape{}, {}), Layout{});
+    EXPECT_EQ(Layout(Shape{}, {}, 0), Layout{});
     const auto offset = layout.elementOffset(std::array<size_t, 2>{1, 2});
     ASSERT_TRUE(offset);
     EXPECT_EQ(*offset, 5);
@@ -465,7 +465,7 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         Layout assigned;
         assigned = original;
         EXPECT_EQ(assigned, original);
-        Layout moveAssigned(Shape{9}, {1});
+        Layout moveAssigned(Shape{9}, {1}, 0);
         moveAssigned = std::move(assigned);
         EXPECT_EQ(moveAssigned, original);
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
@@ -503,7 +503,7 @@ TEST(LayoutCpp, OffsetFailuresCarryContextWithoutThrowing) {
     static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>, ptrdiff_t>);
     static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>,
                                                   Unexpected<LayoutFailure>>);
-    const Layout layout(Shape{3, 3}, {std::numeric_limits<ptrdiff_t>::max(), 1});
+    const Layout layout(Shape{3, 3}, {std::numeric_limits<ptrdiff_t>::max(), 1}, 0);
     const auto rank = layout.elementOffset(std::array<size_t, 1>{0});
     ASSERT_FALSE(rank);
     EXPECT_EQ(rank.error().error, LayoutError::CoordinateRankMismatch);
