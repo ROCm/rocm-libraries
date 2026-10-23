@@ -33,13 +33,6 @@ enum class LayoutError {
     CoordinateOutOfRange,
 };
 
-struct LayoutFailure {
-    LayoutError error;
-    size_t dimension = 0;
-    size_t value = 0;
-    size_t limit = 0;
-};
-
 inline constexpr std::string_view message(LayoutError error) noexcept {
     switch (error) {
         case LayoutError::ExtentOutOfRange:
@@ -62,47 +55,32 @@ inline constexpr std::string_view message(LayoutError error) noexcept {
     return "Unknown LayoutError failure.";
 }
 
-inline std::string message(const LayoutFailure& failure) {
-    switch (failure.error) {
-        case LayoutError::CoordinateRankMismatch:
-            return "Tensor coordinate rank " + std::to_string(failure.value) +
-                   " does not match shape rank " + std::to_string(failure.limit) + ".";
-        case LayoutError::CoordinateOutOfRange:
-            return "Tensor coordinate " + std::to_string(failure.value) + " in dimension " +
-                   std::to_string(failure.dimension) + " is outside [0, " +
-                   std::to_string(failure.limit) + ").";
-        default:
-            return std::string(message(failure.error));
+struct LayoutFailure {
+    LayoutError error;
+    size_t dimension = 0;
+    size_t value = 0;
+    size_t limit = 0;
+
+    // Formatting a diagnostic can allocate, so this operation can throw.
+    std::string message() const {
+        switch (error) {
+            case LayoutError::CoordinateRankMismatch:
+                return "Tensor coordinate rank " + std::to_string(value) +
+                       " does not match shape rank " + std::to_string(limit) + ".";
+            case LayoutError::CoordinateOutOfRange:
+                return "Tensor coordinate " + std::to_string(value) + " in dimension " +
+                       std::to_string(dimension) + " is outside [0, " + std::to_string(limit) +
+                       ").";
+            default:
+                return std::string(detail::message(error));
+        }
     }
-}
+};
 
-inline std::optional<ptrdiff_t> getOffsetMultiply(size_t value, ptrdiff_t factor) noexcept {
-    if (value == 0 || factor == 0) return 0;
-    const bool negative = factor < 0;
-    const uintmax_t magnitude =
-        negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
-    const uintmax_t limit = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) +
-                            static_cast<uintmax_t>(negative);
-    if (static_cast<uintmax_t>(value) > limit / magnitude) return std::nullopt;
-    const uintmax_t product = static_cast<uintmax_t>(value) * magnitude;
-    if (!negative) return static_cast<ptrdiff_t>(product);
-    if (product == limit) return std::numeric_limits<ptrdiff_t>::min();
-    return -static_cast<ptrdiff_t>(product);
-}
-inline std::optional<ptrdiff_t> getOffsetAdd(ptrdiff_t left, ptrdiff_t right) noexcept {
-    if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
-        (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
-        return std::nullopt;
-    return left + right;
-}
 }  // namespace detail
-
-// Maps logical coordinates to signed element offsets, independently of datatype
-// or storage. Strides and the starting offset count elements, not bytes. Zero
-// strides represent repeated addresses; negative strides represent reversal.
-// This value owns its Shape and strides and does not check allocation bounds.
-// elementOffset is a checked user-facing operation; production element loops
-// should reuse a prepared mapping after validating their inputs once.
+// Maps logical coordinates to element offsets using a shape, strides and a
+// starting offset. Offsets count elements. The caller supplies the element type
+// and memory, and is responsible for keeping the resulting offsets in bounds.
 class Layout {
    public:
     Layout() = default;
@@ -126,8 +104,7 @@ class Layout {
         return *this;
     }
 
-    // Lvalue vectors are copied; rvalue vectors transfer their storage. Lists
-    // and spans are copied too, so no constructor borrows the supplied strides.
+    // Requires one stride per shape dimension.
     Layout(Shape shape, std::vector<ptrdiff_t> strides, ptrdiff_t offset = 0)
         : m_shape(std::move(shape)), m_strides(std::move(strides)), m_offset(offset) {
         if (m_shape.rank() != m_strides.size())
@@ -146,8 +123,39 @@ class Layout {
     // Order lists axes from slowest to fastest, as in Shape::linearIndex.
     // Validation failures are returned; allocating the owned metadata can throw.
     static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(
-        const Shape& shape, std::span<const size_t> order);
-    static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(const Shape& shape);
+        const Shape& shape, std::span<const size_t> order) {
+        using namespace detail;
+        if (order.size() != shape.rank()) return Unexpected(LayoutError::OrderRankMismatch);
+
+        const auto dimensions = shape.dimensions();
+        std::vector<ptrdiff_t> strides(shape.rank(), -1);
+        // Mark axes in the output vector before replacing the marks with strides.
+        for (size_t axis : order) {
+            if (axis >= shape.rank() || strides[axis] != -1)
+                return Unexpected(LayoutError::InvalidOrder);
+            strides[axis] = 0;
+        }
+        ptrdiff_t stride = 1;
+        for (size_t position = shape.rank(); position > 0; --position) {
+            const size_t axis = order[position - 1];
+            strides[axis] = stride;
+            if (!std::in_range<ptrdiff_t>(dimensions[axis])) {
+                return Unexpected(LayoutError::ExtentOutOfRange);
+            }
+            const auto next = getOffsetMultiply(dimensions[axis], stride);
+            if (!next) {
+                return Unexpected(LayoutError::ContiguousStrideOverflow);
+            }
+            stride = *next;
+        }
+        return Layout(shape, std::move(strides));
+    }
+
+    static detail::Expected<Layout, detail::LayoutError> getContiguousLayout(const Shape& shape) {
+        std::vector<size_t> order(shape.rank());
+        std::iota(order.begin(), order.end(), size_t{0});
+        return getContiguousLayout(shape, order);
+    }
 
     static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
         auto result = getContiguousLayout(shape, order);
@@ -224,45 +232,34 @@ class Layout {
     bool operator==(const Layout&) const noexcept = default;
 
    private:
+    static std::optional<ptrdiff_t> getOffsetMultiply(size_t value, ptrdiff_t factor) noexcept {
+        if (value == 0 || factor == 0) return 0;
+        const bool negative = factor < 0;
+        // -(factor + 1) is representable even for PTRDIFF_MIN. Add the missing one
+        // after converting to unsigned, where the full magnitude is representable.
+        const uintmax_t magnitude =
+            negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
+        // A negative result can have magnitude PTRDIFF_MAX + 1 (PTRDIFF_MIN).
+        const uintmax_t limit = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) +
+                                static_cast<uintmax_t>(negative);
+        // Test against the bound before multiplying, so the product cannot wrap.
+        if (static_cast<uintmax_t>(value) > limit / magnitude) return std::nullopt;
+        const uintmax_t product = static_cast<uintmax_t>(value) * magnitude;
+        if (!negative) return static_cast<ptrdiff_t>(product);
+        // This magnitude has no positive ptrdiff_t representation to negate.
+        if (product == limit) return std::numeric_limits<ptrdiff_t>::min();
+        return -static_cast<ptrdiff_t>(product);
+    }
+    static std::optional<ptrdiff_t> getOffsetAdd(ptrdiff_t left, ptrdiff_t right) noexcept {
+        if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
+            (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
+            return std::nullopt;
+        return left + right;
+    }
+
     Shape m_shape;
     std::vector<ptrdiff_t> m_strides;
     ptrdiff_t m_offset = 0;
 };
-
-inline detail::Expected<Layout, detail::LayoutError> Layout::getContiguousLayout(
-    const Shape& shape, std::span<const size_t> order) {
-    using namespace detail;
-    if (order.size() != shape.rank()) return Unexpected(LayoutError::OrderRankMismatch);
-
-    const auto dimensions = shape.dimensions();
-    std::vector<ptrdiff_t> strides(shape.rank(), -1);
-    // Mark axes in the output vector before replacing the marks with strides.
-    for (size_t axis : order) {
-        if (axis >= shape.rank() || strides[axis] != -1)
-            return Unexpected(LayoutError::InvalidOrder);
-        strides[axis] = 0;
-    }
-    ptrdiff_t stride = 1;
-    for (size_t position = shape.rank(); position > 0; --position) {
-        const size_t axis = order[position - 1];
-        strides[axis] = stride;
-        if (!std::in_range<ptrdiff_t>(dimensions[axis])) {
-            return Unexpected(LayoutError::ExtentOutOfRange);
-        }
-        const auto next = getOffsetMultiply(dimensions[axis], stride);
-        if (!next) {
-            return Unexpected(LayoutError::ContiguousStrideOverflow);
-        }
-        stride = *next;
-    }
-    return Layout(shape, std::move(strides));
-}
-
-inline detail::Expected<Layout, detail::LayoutError> Layout::getContiguousLayout(
-    const Shape& shape) {
-    std::vector<size_t> order(shape.rank());
-    std::iota(order.begin(), order.end(), size_t{0});
-    return getContiguousLayout(shape, order);
-}
 
 }  // namespace roc::hostnumerics

@@ -60,7 +60,7 @@ compare and hash by their shape, strides, and offset.
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {
                 const auto result = layout.elementOffset(indices);
-                if (!result) throw std::runtime_error(message(result.error()));
+                if (!result) throw std::runtime_error(result.error().message());
                 return *result;
             },
             "indices"_a,

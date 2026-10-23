@@ -1,10 +1,17 @@
 ## Error handling
 
-HostNumerics-owned terminal errors throw `std::runtime_error`.
-Expected support and compatibility failures should use explicit results
-or checks. Allocation, system, dependency and visitor errors retain their
-original types. Dispatch rejects invalid enum values before invoking the visitor
-or moving its arguments. This policy does not promise exceptions-disabled builds.
+HostNumerics-owned terminal errors throw one exception type, `std::runtime_error`.
+These errors mean the operation cannot continue; callers are not expected to
+catch them to recover. Recoverable support and compatibility failures use
+`Expected` results or explicit checks. Catching an exception must not select a
+fallback, retry, or successful alternative path.
+
+Reporting boundaries may catch a terminal error to report the failed operation.
+Cleanup may catch and rethrow, and workers may transport the original exception
+to the joining caller. Allocation, system, dependency and visitor errors retain
+their original types. Dispatch rejects invalid enum values before invoking the
+visitor or moving its arguments. This policy does not promise exceptions-disabled
+builds.
 
 ## Internal C++ results
 
