@@ -120,9 +120,11 @@ namespace
             {
                 const int64_t cnt = rng.range(0, 3);
                 for(int64_t q = 0; q < cnt; ++q)
-                    row[rng.range(lo, hi)] = round_to<T>(
-                        cplx(0.125 * rng.range(-3, 3),
-                             is_complex_t<T>::value ? 0.125 * rng.range(-1, 1) : 0.0));
+                {
+                    const double re = 0.125 * rng.range(-3, 3);
+                    const double im = is_complex_t<T>::value ? 0.125 * rng.range(-1, 1) : 0.0;
+                    row[rng.range(lo, hi)] = round_to<T>(cplx(re, im));
+                }
             }
             if(c.garbage)
             {
@@ -133,9 +135,7 @@ namespace
             }
             if(!unit && !(c.missing_diag && i == c.singular_row))
             {
-                cplx d = round_to<T>(
-                    cplx((rng.range(0, 1) ? 1.0 : -1.0) * (2.5 + 0.5 * rng.range(0, 4)),
-                         is_complex_t<T>::value ? 0.25 * rng.range(-2, 2) : 0.0));
+                cplx d = round_to<T>(rand_diag<T>(rng));
                 if(i == c.singular_row)
                     d = cplx(0.0, 0.0);
                 row[i] = d;

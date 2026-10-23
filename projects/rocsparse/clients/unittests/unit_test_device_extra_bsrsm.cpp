@@ -106,18 +106,14 @@ namespace
                 for(int64_t r = 0; r < c.bd; ++r)
                     for(int64_t k = 0; k < c.bd; ++k)
                     {
-                        cplx v(scale * rng.range(-4, 4),
-                               is_complex_t<T>::value ? scale * rng.range(-4, 4) : 0.0);
+                        const double re = scale * rng.range(-4, 4);
+                        cplx         v(re, is_complex_t<T>::value ? scale * rng.range(-4, 4) : 0.0);
                         if(j == i)
                         {
                             // The other triangle of the diagonal block holds 37, which
                             // the solve must not read.
                             if(r == k)
-                                v = unit ? cplx(11.0, 0.0)
-                                         : cplx((rng.range(0, 1) ? 1.0 : -1.0)
-                                                    * (2.5 + 0.5 * rng.range(0, 4)),
-                                                is_complex_t<T>::value ? 0.25 * rng.range(-2, 2)
-                                                                       : 0.0);
+                                v = unit ? cplx(11.0, 0.0) : rand_diag<T>(rng);
                             else if((lower && k > r) || (!lower && k < r))
                                 v = cplx(37.0, 0.0);
                             else if(unit)

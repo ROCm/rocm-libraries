@@ -135,11 +135,27 @@ namespace extra_ut
     template <typename T>
     inline cplx rand_val(Rng& rng)
     {
-        const double re = static_cast<double>(rng.range(1, 4)) * (rng.range(0, 1) ? 1.0 : -1.0);
-        const double im = is_complex_t<T>::value ? static_cast<double>(rng.range(1, 3))
-                                                       * (rng.range(0, 1) ? 1.0 : -1.0)
-                                                 : 0.0;
-        return cplx(re, im);
+        const int64_t re_mag  = rng.range(1, 4);
+        const int64_t re_sign = rng.range(0, 1);
+        double        im      = 0.0;
+        if(is_complex_t<T>::value)
+        {
+            const int64_t im_mag  = rng.range(1, 3);
+            const int64_t im_sign = rng.range(0, 1);
+            im                    = static_cast<double>(im_mag) * (im_sign ? 1.0 : -1.0);
+        }
+        return cplx(static_cast<double>(re_mag) * (re_sign ? 1.0 : -1.0), im);
+    }
+
+    // Diagonal entry of a triangular test matrix: +-(2.5 to 4.5), plus a small imaginary
+    // part for complex types.
+    template <typename T>
+    inline cplx rand_diag(Rng& rng)
+    {
+        const int64_t sign = rng.range(0, 1);
+        const int64_t mag  = rng.range(0, 4);
+        const double  im   = is_complex_t<T>::value ? 0.25 * rng.range(-2, 2) : 0.0;
+        return cplx((sign ? 1.0 : -1.0) * (2.5 + 0.5 * mag), im);
     }
 
     // ----- host sparse matrix (CSR, zero based, double complex values) -----
