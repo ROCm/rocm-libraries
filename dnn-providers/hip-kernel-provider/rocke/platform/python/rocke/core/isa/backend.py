@@ -31,6 +31,8 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
+from ..ir import BF16, F16, F32, I32, I64
+from ..wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
 from ..ir import I32, Op, VectorType
 from .wmma_scale import ScaledWmmaLLVM
 
@@ -233,8 +235,17 @@ class ISABackend:
             raise NotImplementedError(
                 f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
             )
-        if len(op.operands) != 5:
-            raise ValueError(f"{name} expects 5 operands, got {len(op.operands)}")
+        if len(op.operands) != 5 or len(op.results) != 1:
+            raise ValueError(f"{name} expects 5 operands and 1 result")
+        if op.operands[2].type != VectorType(F32, 8) or op.result.type != VectorType(
+            F32, 8
+        ):
+            raise ValueError("scaled WMMA requires src2 and dst to be vec<f32x8>")
+        validate_scaled_wmma_sources(
+            op,
+            tuple(src.frag_len for src in spec.atom.srcs[:2]),
+            I64 if spec.scale16 else I32,
+        )
         # Declarations describe physical signatures, independently of matrix encodings.
         signature = ScaledWmmaLLVM(spec)
         decl_key = signature.declaration_key
@@ -449,6 +460,9 @@ class Gfx11RdnaBackend(ISABackend):
                 f"known: {sorted(_RDNA_WMMA) + sorted(_RDNA_WMMA_INT)}"
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16 if ssa_elt == "half" else BF16, source_count=16
+        )
         a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
@@ -488,7 +502,8 @@ class Gfx11RdnaBackend(ISABackend):
         i32 range -> ``clamp = 0`` (exact wrap).
         """
         decl_key, intrinsic, op_vec, acc_vec = spec
-        c = op.operands[2]
+        validate_unscaled_wmma(op, I32, acc_vec, source_elem=I32, source_count=op_vec)
+        a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._mma_operand(op, "a", VectorType(I32, op_vec))
         b_arg = lowerer._mma_operand(op, "b", VectorType(I32, op_vec))
@@ -530,6 +545,9 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
                 f"known: {sorted(_RDNA_GFX12_WMMA)}"
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16 if ssa_elt == "half" else BF16, source_count=8
+        )
         a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
@@ -643,6 +661,9 @@ class Gfx1250Backend(Gfx12RdnaBackend):
                 f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(scaled_ops)}"
             )
         decl_key, intrinsic, elt = spec
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16 if elt == "half" else BF16, source_count=16
+        )
         a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._operand(a)
@@ -666,7 +687,8 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         reuse immediates pinned to 0 (plain unscaled MMA).
         """
         decl_key, intrinsic = spec
-        c = op.operands[2]
+        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8)
+        a, b, c = op.operands
         lowerer._need(decl_key)
         a_arg = lowerer._mma_operand(op, "a", VectorType(I32, 8))
         b_arg = lowerer._mma_operand(op, "b", VectorType(I32, 8))

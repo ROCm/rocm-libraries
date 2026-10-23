@@ -708,8 +708,8 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
-    """Zero accumulator vector sized from the resolved op's ``c_frag_len``."""
-    return b.zero_vec_f32(op.c_frag_len)
+    """Zero input accumulator vector sized from the resolved op's ``src2``."""
+    return b.zero_vec_f32(op.srcs[2].frag_len)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:

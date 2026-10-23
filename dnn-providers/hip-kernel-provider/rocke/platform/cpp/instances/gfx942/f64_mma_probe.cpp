@@ -39,18 +39,18 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
         rocke_value_t* ck = rocke_b_const_i32(b, k);
         rocke_value_t* indices[4];
         rocke_value_t* c_values[4];
-        for(int slot = 0; slot < atom->c_frag_len; ++slot)
+        for(int slot = 0; slot < atom->srcs[2].frag_len; ++slot)
         {
             rocke_value_t *r, *col;
-            rocke_layout_map_coord(atom->c_layout, b, lane, slot, &r, &col);
+            rocke_layout_map_coord(atom->srcs[2].layout, b, lane, slot, &r, &col);
             rocke_value_t* offset = rocke_b_mul(b, r, cn);
             indices[slot] = rocke_b_add(b, offset, col);
             c_values[slot] = rocke_b_global_load(b, cc, indices[slot], rocke_f64(), 8);
         }
-        rocke_value_t* acc = rocke_b_vec_pack(b, c_values, atom->c_frag_len, rocke_f64());
+        rocke_value_t* acc = rocke_b_vec_pack(b, c_values, atom->srcs[2].frag_len, rocke_f64());
         rocke_value_t *a_row, *a_k, *b_row, *b_col;
-        rocke_layout_map_coord(atom->a_layout, b, lane, 0, &a_row, &a_k);
-        rocke_layout_map_coord(atom->b_layout, b, lane, 0, &b_row, &b_col);
+        rocke_layout_map_coord(atom->srcs[0].layout, b, lane, 0, &a_row, &a_k);
+        rocke_layout_map_coord(atom->srcs[1].layout, b, lane, 0, &b_row, &b_col);
         for(int step = 0; step < k / 4; ++step)
         {
             rocke_value_t* a_off = rocke_b_mul(b, a_row, ck);
@@ -64,7 +64,7 @@ rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int 
             rocke_value_t* bv = rocke_b_global_load(b, bb, b_index, rocke_f64(), 8);
             acc = rocke_b_mma(b, atom->op_id, av, bv, acc, NULL, 0);
         }
-        for(int slot = 0; slot < atom->c_frag_len; ++slot)
+        for(int slot = 0; slot < atom->dst.frag_len; ++slot)
         {
             rocke_value_t* value = rocke_b_vec_extract(b, acc, slot);
             rocke_b_global_store(b, d, indices[slot], value, 8);

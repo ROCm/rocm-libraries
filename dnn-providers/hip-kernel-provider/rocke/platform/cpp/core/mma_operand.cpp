@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: MIT
 /* Mirrors core/mma_operand.py: the rule for passing an MMA operand as the
  * instruction's register type. The lowerers only render its answer. */
-#include "rocke/mma_operand_internal.h"
-
 #include <string.h>
+
 #include <utility>
 
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
+#include "rocke/mma_operand_internal.h"
 
 /* The multiplicand roles: A and B. The operand rule applies to no other. */
 static bool is_multiplicand(rocke_mma_role_t role)
 {
-    return role == ROCKE_MMA_ROLE_A || role == ROCKE_MMA_ROLE_B;
+    return role == ROCKE_MMA_ROLE_SRC0 || role == ROCKE_MMA_ROLE_SRC1;
 }
 
 const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_role_t role)
@@ -21,7 +21,7 @@ const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_rol
     if(!is_multiplicand(role))
         throw ckc::ValueError("an MMA operand role is A or B");
     /* A is operand 0 and B operand 1; C, the accumulator, follows them. */
-    const int index = role == ROCKE_MMA_ROLE_A ? 0 : 1;
+    const int index = role == ROCKE_MMA_ROLE_SRC0 ? 0 : 1;
     if(op->num_operands <= index)
         throw ckc::ValueError(ckc::format_error("%s has %d operands; an MMA op takes A, B and C",
                                                 op->name ? op->name : "(unnamed op)",
@@ -51,7 +51,7 @@ static int admitted_elements(const char* op_id,
     if(!catalog_op)
         return count;
     const rocke_type_t* catalog_element = rocke_require_ir_type(
-        role == ROCKE_MMA_ROLE_A ? catalog_op->a_dtype : catalog_op->b_dtype);
+        role == ROCKE_MMA_ROLE_SRC0 ? catalog_op->srcs[0].dtype : catalog_op->srcs[1].dtype);
     /* A packed-only catalog element (i4 for the iu4 instructions) is never a
      * value's element type, so those operands arrive in the register type. */
     if(rocke_i_is_packed_only(catalog_element))
@@ -74,7 +74,7 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
     if(rocke_type_eq(operand_type, register_type))
         return false;
     /* Python spells the roles "a" and "b". */
-    const char* role_name = role == ROCKE_MMA_ROLE_A ? "a" : "b";
+    const char* role_name = role == ROCKE_MMA_ROLE_SRC0 ? "a" : "b";
     const rocke_type_t* element = rocke_i_elem_of(operand_type);
     const rocke_type_t* admitted[2];
     const int num_admitted = admitted_elements(op_id, role, register_type, gfx, admitted);

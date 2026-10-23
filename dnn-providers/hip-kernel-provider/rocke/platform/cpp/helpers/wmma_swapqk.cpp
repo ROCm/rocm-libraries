@@ -12,8 +12,6 @@
  * Python source is hoisted into ordered local temporaries below, matching the
  * value-creation order the Python interpreter would produce.
  */
-#include "rocke/helper_rocke.helpers.wmma_swapqk.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +19,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
+#include "rocke/helper_rocke.helpers.wmma_swapqk.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -95,7 +94,7 @@ static rocke_value_t* rocke_swapqk_load_operand(rocke_ir_builder_t* b,
                                                 int k_offset,
                                                 const rocke_type_t* dtype_ir)
 {
-    const rocke_layout_map_t* lmap = role_is_a ? op->a_layout : op->b_layout;
+    const rocke_layout_map_t* lmap = role_is_a ? op->srcs[0].layout : op->srcs[1].layout;
     rocke_value_t* out0 = NULL;
     rocke_value_t* out1 = NULL;
     rocke_layout_map_coord(lmap, b, lane, 0, &out0, &out1);
@@ -105,7 +104,8 @@ static rocke_value_t* rocke_swapqk_load_operand(rocke_ir_builder_t* b,
     for(int i = 0; i < 3; ++i)
         global[i] = rocke_b_add(b, window->origin[i], local[i]);
     rocke_value_t* offset = rocke_tensor_descriptor_offset(b, &window->view->desc, global, 3);
-    return rocke_b_global_load_vN(b, window->view->base, offset, dtype_ir, op->a_frag_len, 2);
+    return rocke_b_global_load_vN(
+        b, window->view->base, offset, dtype_ir, op->srcs[role_is_a ? 0 : 1].frag_len, 2);
 }
 
 /* --------------------------------------------------------------- k_window *
@@ -169,7 +169,8 @@ static rocke_value_t* rocke_swapqk_p_transpose_reg(rocke_ir_builder_t* b,
  *     elem0 = b.add(b.add(kvh_off, b.mul(k_base, stride_v_token)), d_col)
  *     voff = b.mul(elem0, c2)
  *     v_a = b.undef_vec(F16, a_frag)
- *     for j in range(a_frag): v_a = b.vec_insert(v_a, b.buffer_load_f16_d16(v_rsrc, voff, soff_list[j]), j)
+ *     for j in range(a_frag): v_a = b.vec_insert(v_a, b.buffer_load_f16_d16(v_rsrc, voff,
+ * soff_list[j]), j)
  */
 static rocke_value_t* rocke_swapqk_load_col(rocke_ir_builder_t* b,
                                             rocke_value_t* v_rsrc,
@@ -266,7 +267,8 @@ static void rocke_swapqk_dual_gather_finish(rocke_ir_builder_t* b,
  *         row, col = cmap.coord(b, lane, r)
  *         val = b.vec_extract(acc, r)
  *         val = transform(b, val, r, row, col)
- *         window.store_scalar(b, c0, row, b.add(c_off, col), value=b.cast_f32_to(val, F16), align=2)
+ *         window.store_scalar(b, c0, row, b.add(c_off, col), value=b.cast_f32_to(val, F16),
+ * align=2)
  */
 static void rocke_swapqk_store_col(rocke_ir_builder_t* b,
                                    const rocke_tile_window_t* owin,
@@ -279,11 +281,11 @@ static void rocke_swapqk_store_col(rocke_ir_builder_t* b,
                                    const rocke_type_t* dtype_ir)
 {
     rocke_value_t* c_off = rocke_b_const_i32(b, col_offset);
-    for(int r = 0; r < op->c_frag_len; ++r)
+    for(int r = 0; r < op->dst.frag_len; ++r)
     {
         rocke_value_t* row = NULL;
         rocke_value_t* col = NULL;
-        rocke_layout_map_coord(op->c_layout, b, lane, r, &row, &col);
+        rocke_layout_map_coord(op->dst.layout, b, lane, r, &row, &col);
         rocke_value_t* val = rocke_b_vec_extract(b, acc, r);
         rocke_value_t* rescaled = rocke_b_fmul(b, val, inv_l);
         rocke_value_t* store_col = rocke_b_add(b, c_off, col);
@@ -357,16 +359,24 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
 
     const char* op_id = bf16 ? "wmma_f32_16x16x16_bf16" : "wmma_f32_16x16x16_f16";
     const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(&target->mma, op_id);
-    if(op == NULL || op->a_layout == NULL || op->b_layout == NULL || op->c_layout == NULL)
+    if(op == NULL || op->srcs[0].layout == NULL || op->srcs[1].layout == NULL
+       || op->dst.layout == NULL)
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "wmma_swapqk: %s atom/layout absent on %s", op_id, arch);
         return ROCKE_ERR_VALUE;
     }
+    if(op->srcs[2].layout == NULL || op->srcs[2].frag_len != op->dst.frag_len
+       || strcmp(op->srcs[2].dtype, op->dst.dtype) != 0
+       || op->srcs[2].layout->fn != op->dst.layout->fn)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_swapqk: incompatible accumulator/result layouts");
+        return ROCKE_ERR_VALUE;
+    }
     const rocke_type_t* dtype_ir = bf16 ? rocke_bf16() : rocke_f16();
     const int wave = op->wave_size;
-    const int c_frag = op->c_frag_len;
-    const int a_frag = op->a_frag_len;
+    const int c_frag = op->srcs[2].frag_len;
+    const int a_frag = op->srcs[0].frag_len;
     const int hs = head_size;
     const int n_dk = hs / 16;
     const int n_kv_sub = block_n / 16;
@@ -566,7 +576,7 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
             {
                 rocke_value_t* kv_rel = NULL;
                 rocke_value_t* q_rel = NULL;
-                rocke_layout_map_coord(op->c_layout, b, lane, i, &kv_rel, &q_rel);
+                rocke_layout_map_coord(op->dst.layout, b, lane, i, &kv_rel, &q_rel);
                 rocke_value_t* slot = rocke_b_vec_extract(b, subs[ns], i);
                 rocke_value_t* s_i = rocke_b_fmul(b, slot, scale_log2);
                 rocke_value_t* k_idx = rocke_b_add(b, kv_base, kv_rel);

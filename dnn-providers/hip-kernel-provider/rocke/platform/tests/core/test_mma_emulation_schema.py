@@ -97,9 +97,9 @@ class TestEmulationDescriptor(unittest.TestCase):
         """The whole point of physical_op_id: derive, never restate."""
         emulated = _build_mma_op(_row())
         physical = _MMA_FRAGMENT_INFO[PHYSICAL]
-        self.assertEqual(emulated.a_frag_len, physical.a_frag_len)
-        self.assertEqual(emulated.b_frag_len, physical.b_frag_len)
-        self.assertEqual(emulated.c_frag_len, physical.c_frag_len)
+        self.assertEqual(emulated.a_frag_len, physical.srcs[0].frag_len)
+        self.assertEqual(emulated.b_frag_len, physical.srcs[1].frag_len)
+        self.assertEqual(emulated.c_frag_len, physical.dst.frag_len)
         self.assertEqual(emulated.wave_size, physical.wave_size)
         # Layout maps too -- the logical fragment occupies the same coordinates.
         self.assertIsNotNone(emulated.a_layout())

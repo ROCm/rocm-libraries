@@ -60,14 +60,14 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec):
     cn = b.const_i32(cols)
     ck = b.const_i32(spec.k)
     c_values, out_indices = [], []
-    for slot in range(atom.c_frag_len):
-        r, col = atom.c_layout().coord(b, lane, slot)
+    for slot in range(atom.srcs[2].frag_len):
+        r, col = atom.src_layout(2).coord(b, lane, slot)
         index = b.add(b.mul(r, cn), col)
         out_indices.append(index)
         c_values.append(b.global_load(cc, index, F64, align=8))
     acc = b.vec_pack(c_values, F64)
-    a_row, a_k = atom.a_layout().coord(b, lane, 0)
-    b_row, b_col = atom.b_layout().coord(b, lane, 0)
+    a_row, a_k = atom.src_layout(0).coord(b, lane, 0)
+    b_row, b_col = atom.src_layout(1).coord(b, lane, 0)
     for step in range(spec.k // 4):
         a_index = b.add(b.mul(a_row, ck), b.add(b.const_i32(step * 4), a_k))
         b_slab_row = b.add(b.const_i32(step * slab_rows), b_row)

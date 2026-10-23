@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
+from rocke.core.ir import BF16, F32, TF32, IRBuilder, KernelDef, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _flavor_for_llvm, _lower_kernel_to_llvm_python
 
@@ -71,6 +71,9 @@ def _mma_kernel(op_id: str, *, bare: bool = False) -> KernelDef:
         # as logical TF32, not an fp32 vector.
         a = builder.bitcast(a, VectorType(TF32, atom.a_frag_len))
         b = builder.bitcast(b, VectorType(TF32, atom.b_frag_len))
+    else:
+        a = builder.param("a_bf16", VectorType(BF16, atom.a_frag_len))
+        b = builder.param("b_bf16", VectorType(BF16, atom.b_frag_len))
     c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
     builder.mma(op_id if bare else atom, a, b, c)
     builder.ret()

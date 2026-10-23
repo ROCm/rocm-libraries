@@ -7,8 +7,6 @@
  * Python builder-call order, operands and compile-time constants op-for-op so
  * the emitted IR is byte-identical to the Python helper's emission.
  */
-#include "rocke/helper_rocke.helpers.mfma_attention.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,6 +16,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/helper_rocke.helpers.distribution.h"
+#include "rocke/helper_rocke.helpers.mfma_attention.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -834,10 +833,10 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     }
     const bool fp8_kv = p->kv_dtype != NULL && strcmp(p->kv_dtype, "fp8e4m3") == 0;
 
-    const rocke_layout_map_t* a_map = op->a_layout;
-    const rocke_layout_map_t* c_map = op->c_layout;
-    int a_frag = op->a_frag_len;
-    int c_frag = op->c_frag_len;
+    const rocke_layout_map_t* a_map = op->srcs[0].layout;
+    const rocke_layout_map_t* c_map = op->dst.layout;
+    int a_frag = op->srcs[0].frag_len;
+    int c_frag = op->dst.frag_len;
     int n_dk = head_size / 16;
     int v_total = p->wmma_v_head_size != 0 ? p->wmma_v_head_size : head_size;
     int value_head_size = p->wmma_value_tile_size != 0 ? p->wmma_value_tile_size : v_total;

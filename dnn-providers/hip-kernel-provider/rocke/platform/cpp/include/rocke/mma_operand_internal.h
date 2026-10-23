@@ -20,7 +20,7 @@
 #include "rocke/ir.h"
 
 /* MMA operand `role` of `op` (Python mma_operand_value): operand 0 for
- * ROCKE_MMA_ROLE_A, operand 1 for ROCKE_MMA_ROLE_B. Throws ckc::ValueError for
+ * ROCKE_MMA_ROLE_SRC0, operand 1 for ROCKE_MMA_ROLE_SRC1. Throws ckc::ValueError for
  * any other role, or when `op` has fewer than two operands. */
 const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_role_t role);
 

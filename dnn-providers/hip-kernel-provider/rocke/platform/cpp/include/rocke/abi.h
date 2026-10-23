@@ -82,8 +82,10 @@ extern "C" {
  *    mid-enum gfx1250 cluster/prefetch opcodes.
  * 3: rocke_mma_op_t gained emulation_recipe and emulation_physical_op_id at its
  *    end, which changes sizeof and with it the stride of every ops[] array a
- *    catalog hands out. */
-#define ROCKE_ABI_VERSION 3
+ *    catalog hands out.
+ * 4: indexed matrix sources, independent destination, and source-owned scales
+ *    replace the flat MMA fields and role enum; native consumers must rebuild. */
+#define ROCKE_ABI_VERSION 4
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */
