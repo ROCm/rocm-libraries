@@ -72,10 +72,10 @@ typedef enum rocke_mma_role
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
  * lane Value and a compile-time slot index, it emits the index arithmetic for
- * the two coordinates and writes them to *out0/*out1. This is the C analog of
+ * the two coordinates and writes them to *out0 and *out1. This is the C analog of
  * the Python `_LaneCoordFn` closure (`(builder, lane, slot) -> (c0, c1)`); the
  * coordinate meaning depends on the role (see rocke_mma_role_t). On a failed
- * builder it is a no-op leaving *out0/*out1 = NULL. */
+ * builder it is a no-op leaving *out0 and *out1 = NULL. */
 typedef void (*rocke_lane_coord_fn)(rocke_ir_builder_t* b,
                                     rocke_value_t* lane,
                                     int slot,
@@ -93,7 +93,7 @@ typedef struct rocke_layout_map
 } rocke_layout_map_t;
 
 /* Emit the index math for (lane, slot) and write the coordinate pair to
- * *out0/*out1. Validates slot in [0, frag_len) (Python LayoutMap.coord's
+ * *out0 and *out1. Validates slot in [0, frag_len) (Python LayoutMap.coord's
  * ValueError); on out-of-range it sets the builder error (ROCKE_ERR_VALUE) and
  * writes NULLs. Returns true on success. Mirrors LayoutMap.coord. */
 bool rocke_layout_map_coord(const rocke_layout_map_t* m,
@@ -372,15 +372,10 @@ const rocke_mma_op_t*
  * rocke.core.ir.IRBuilder.mma consults. */
 
 /* dst fragment length for op_id -- the dst.frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO. Returns 0 for an unknown atom (the
-#undef ROCKE_MMA_DEFAULT_SCALES
-
-/* Accumulator fragment length for op_id -- the c_frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
- * target._frag_info(op_id).c_frag_len). An emulated atom's logical op_id
- * resolves through the physical atom it expands into
- * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom (the
- * zero-length _FragInfo fallback). */
+ * target.py::_frag_info(op_id). An emulated atom's logical op_id resolves
+ * through the physical atom it expands into
+ * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom,
+ * matching the zero-length _FragInfo fallback. */
 int rocke_arch_mma_dst_frag_len(const char* op_id);
 
 /* Canonical (normalised) result-dtype key, as produced by

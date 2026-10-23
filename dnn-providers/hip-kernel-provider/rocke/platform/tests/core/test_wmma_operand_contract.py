@@ -9,7 +9,19 @@ from dataclasses import replace
 import pytest
 
 from rocke.core.arch import ArchTarget
-from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, PtrType, Value, VectorType
+from rocke.core.ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F32,
+    FP8E4M3,
+    I8,
+    I32,
+    IRBuilder,
+    PtrType,
+    Value,
+    VectorType,
+)
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -198,6 +210,54 @@ def test_wmma_hip_contract(case, concrete, kind, role):
         _assert_python_rejects(
             lambda: lower_kernel_to_hip(candidate, arch=case[0]), error
         )
+
+
+@pytest.mark.parametrize(
+    "case,elem,count",
+    [
+        (CASES[0], I32, 4.0),
+        (CASES[0], I8, 16.0),
+        (CASES[1], I32, 2.0),
+        (CASES[8], I32, 8.0),
+        (CASES[8], FP8E4M3, 32.0),
+        (CASES[11], BF8E5M2, 32.0),
+    ],
+)
+@pytest.mark.parametrize("role", [0, 1])
+@pytest.mark.parametrize(
+    "flavor,concrete",
+    [(flavor, False) for flavor in FLAVORS] + [("hip", False), ("hip", True)],
+)
+def test_wmma_rejects_non_integer_carrier_counts(
+    case, elem, count, role, concrete, flavor
+):
+    from rocke.core.lower_hip import _Lowerer as HipLowerer
+    from rocke.core.lower_llvm import _Lowerer as LlvmLowerer
+
+    kernel, op = _kernel(case)
+    malformed = VectorType(elem, count)
+    op.operands[role].type = malformed
+    kernel.params[role].type = malformed
+    if concrete:
+        op.name = f"tile.{op.attrs.pop('op_id')}"
+    # LLVM WMMA dispatch uses tile.mma; HIP also supports concrete operations.
+    # Parsing rejects decimal counts, so exercise actual SSA at the final gate.
+    lowerer = (
+        HipLowerer(kernel, arch=case[0])
+        if flavor == "hip"
+        else LlvmLowerer(kernel, arch=case[0], llvm_flavor=flavor)
+    )
+    with pytest.raises(ValueError) as caught:
+        lowerer.lower_op(op)
+    assert str(caught.value) == (
+        f"MMA operand {('a', 'b')[role]} of {case[1]!r} requires an integer "
+        f"operand vector count, got {count!r}"
+    )
+    if flavor == "hip":
+        assert lowerer.lines == []
+    else:
+        assert lowerer._needs_intrin == {}
+        assert all(block.lines == [] for block in lowerer._blocks)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])

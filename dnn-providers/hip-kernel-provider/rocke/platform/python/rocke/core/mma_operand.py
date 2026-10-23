@@ -78,11 +78,17 @@ def mma_operand_needs_reinterpret(
 
     Raises ``ValueError`` for an operand holding another number format (its
     values would have to be converted, which is the kernel's decision, not the
-    lowerer's) and for an operand of another bit width.
+    lowerer's), an operand of another bit width, or a vector type whose count
+    is not an integer.
     """
+    label = f"MMA operand {role} of {op_id!r}"
+    for kind, ty in (("operand", operand_type), ("register", register_type)):
+        if isinstance(ty, VectorType) and type(ty.count) is not int:
+            raise ValueError(
+                f"{label} requires an integer {kind} vector count, got {ty.count!r}"
+            )
     if operand_type == register_type:
         return False
-    label = f"MMA operand {role} of {op_id!r}"
     element = _element_type(operand_type)
     admitted = _admitted_elements(op_id, role, register_type, arch)
     if element not in admitted:
