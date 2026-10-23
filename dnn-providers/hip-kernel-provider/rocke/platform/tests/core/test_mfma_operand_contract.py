@@ -386,6 +386,48 @@ def test_mfma_unsigned_byte_carriers_preserve_unsupported_hip(case, concrete):
             lower_kernel_to_hip(candidate, arch=case[0])
 
 
+@pytest.mark.parametrize(
+    "case,elem,count",
+    [
+        (CASES[-4], I8, 8.0),
+        (CASES[-3], I8, 12.0),
+        (CASES[-1], I8, 32.0),
+        (CASES[-4], I64, True),
+        (CASES[-4], I8, "8"),
+        (CASES[-4], I8, None),
+        (CASES[13], I8, 8.0),
+    ],
+)
+@pytest.mark.parametrize("concrete", [False, True])
+def test_mfma_rejects_non_integer_carrier_counts(case, elem, count, concrete):
+    kernel, op = _kernel(case, concrete=concrete)
+    _corrupt_type(kernel, op, "src0", VectorType(elem, count))
+    # Serialization cannot express non-integer vector counts. Exercise the
+    # actual Python IR directly, at the last gate before instruction emission.
+    lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor="llvm23")
+    with pytest.raises(ValueError, match=f"^{_type_error(case, 'src0')}$"):
+        lowerer.lower_op(op)
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize("case", [*CASES[13:17], *CASES[-4:]])
+@pytest.mark.parametrize("concrete", [False, True])
+def test_mfma_hip_gate_rejects_non_integer_carrier_counts(case, concrete):
+    from rocke.core.lower_hip import _Lowerer as HipLowerer
+
+    kernel, op = _kernel(case, concrete=concrete)
+    count = case[4] // 8 if case[4] else 8
+    _corrupt_type(kernel, op, "src0", VectorType(I8, float(count)))
+    lowerer = HipLowerer(kernel, arch=case[0])
+    if case == CASES[-2]:
+        with pytest.raises(NotImplementedError, match="no HIP lowering"):
+            lowerer.lower_op(op)
+    else:
+        with pytest.raises(ValueError, match=f"^{_type_error(case, 'src0')}$"):
+            lowerer.lower_op(op)
+
+
 @pytest.mark.parametrize("case", CASES[-1:])
 @pytest.mark.parametrize("role", ["src3", "src4"])
 @pytest.mark.parametrize("ty", [F32, I64, VectorType(I32, 1), VectorType(I8, 4)])

@@ -53,7 +53,7 @@ _CARRIER_BITS = {
 
 def _carrier_bits(ty: Type) -> int:
     if isinstance(ty, VectorType):
-        if type(ty.elem) is not Type or ty.count <= 0:
+        if type(ty.elem) is not Type or type(ty.count) is not int or ty.count <= 0:
             return 0
         return _CARRIER_BITS.get(ty.elem.name, 0) * ty.count
     return _CARRIER_BITS.get(ty.name, 0) if type(ty) is Type else 0
@@ -85,6 +85,7 @@ def validate_mfma(op: Op) -> None:
         if source == VectorType(I8, 8):
             valid = all(
                 isinstance(v.type, VectorType)
+                and type(v.type.count) is int
                 and v.type.count == 8
                 and v.type.elem in (I8, U8, FP8E4M3, BF8E5M2)
                 for v in op.operands[:2]
