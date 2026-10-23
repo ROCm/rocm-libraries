@@ -102,7 +102,7 @@ TEST(TestGpuSdpaPagedFwdSignatureKey, CreateFromNodeAndTensorMap)
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
-TEST(TestGpuSdpaPagedFwdSignatureKey, RegistersBf16AndFp16Builders)
+TEST(TestGpuSdpaPagedFwdSignatureKey, RegistersBf16AndHalfBuilders)
 {
     const auto builders = GpuSdpaPagedFwdSignatureKey::getPlanBuilders();
     for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})

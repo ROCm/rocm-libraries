@@ -335,7 +335,7 @@ TEST(TestGpuSdpaPagedFwdPlanBuilder, IsApplicableForBf16DenseQ)
     EXPECT_TRUE(isApplicable<Bf16Builder>(makePagedGraph()));
 }
 
-TEST(TestGpuSdpaPagedFwdPlanBuilder, IsApplicableForFp16DenseQ)
+TEST(TestGpuSdpaPagedFwdPlanBuilder, IsApplicableForHalfDenseQ)
 {
     const auto graph = makePagedGraph({}, DataType::HALF);
     EXPECT_TRUE(isApplicable<Fp16Builder>(graph));
