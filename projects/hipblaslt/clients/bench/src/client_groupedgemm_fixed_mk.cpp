@@ -638,31 +638,36 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                         Layout(Shape{static_cast<size_t>(m[i]),
                                                      static_cast<size_t>(k[i]),
                                                      static_cast<size_t>(batch_count[i])},
-                                               {a_stride_1[i], a_stride_2[i], stride_a[i]})));
+                                               {a_stride_1[i], a_stride_2[i], stride_a[i]},
+                                               0)));
         hb.emplace_back(allocatedTensor(scalarType<Tin>(),
                                         size_b[i],
                                         Layout(Shape{static_cast<size_t>(k[i]),
                                                      static_cast<size_t>(n[i]),
                                                      static_cast<size_t>(batch_count[i])},
-                                               {b_stride_1[i], b_stride_2[i], stride_b[i]})));
+                                               {b_stride_1[i], b_stride_2[i], stride_b[i]},
+                                               0)));
         hc.emplace_back(allocatedTensor(scalarType<Tout>(),
                                         size_c[i],
                                         Layout(Shape{static_cast<size_t>(m[i]),
                                                      static_cast<size_t>(n[i]),
                                                      static_cast<size_t>(batch_count[i])},
-                                               {1, ldc[i], stride_c[i]})));
+                                               {1, ldc[i], stride_c[i]},
+                                               0)));
         hd.emplace_back(allocatedTensor(scalarType<Tout>(),
                                         size_d[i],
                                         Layout(Shape{static_cast<size_t>(m[i]),
                                                      static_cast<size_t>(n[i]),
                                                      static_cast<size_t>(batch_count[i])},
-                                               {1, ldd[i], stride_d[i]})));
+                                               {1, ldd[i], stride_d[i]},
+                                               0)));
         hd_gold.emplace_back(allocatedTensor(scalarType<Tout>(),
                                              size_d[i],
                                              Layout(Shape{static_cast<size_t>(m[i]),
                                                           static_cast<size_t>(n[i]),
                                                           static_cast<size_t>(batch_count[i])},
-                                                    {1, ldd[i], stride_d[i]})));
+                                                    {1, ldd[i], stride_d[i]},
+                                                    0)));
         h_bias.emplace_back(ScalarType::Float32, Shape{static_cast<size_t>(size_bias[i])});
 
         // Reserve one consecutive seed per operand role for every grouped

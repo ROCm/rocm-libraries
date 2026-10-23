@@ -43,7 +43,7 @@ namespace hipblaslt::client
             const std::array<size_t, 3> batchCoordinates{0, 0, batch};
             const auto                  result = batchAddressLayout.elementOffset(batchCoordinates);
             if(!result)
-                throw std::runtime_error(roc::hostnumerics::detail::message(result.error()));
+                throw std::runtime_error(result.error().message());
             offset = *result;
         }
 
@@ -133,7 +133,8 @@ namespace hipblaslt::client
                              static_cast<size_t>(batchCount)},
                        {1,
                         normalizeStride(leadingDimension, "matrix leading dimension"),
-                        normalizeStride(batchStride, "matrix batch stride")}),
+                        normalizeStride(batchStride, "matrix batch stride")},
+                       0),
                 static_cast<size_t>(allocationElements),
             };
         }

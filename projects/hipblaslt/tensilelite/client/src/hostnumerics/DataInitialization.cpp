@@ -288,7 +288,7 @@ namespace TensileLite::Client
                 logicalStrides[denseDimension] = metadataLayout.stride(metadataDimension);
                 ++metadataDimension;
             }
-            return Layout(Shape(std::move(logicalDimensions)), std::move(logicalStrides));
+            return Layout(Shape(std::move(logicalDimensions)), std::move(logicalStrides), 0);
         }
 
         StructuredSparsityPattern sparsePattern(PruneSparseMode mode, size_t sparseAxis)
@@ -426,7 +426,8 @@ namespace TensileLite::Client
         // Natural MX scale coordinates reverse the operand's dimension order.
         const auto scales = generated.scales.shareStorageWithLayout(roc::hostnumerics::Layout(
             roc::hostnumerics::Shape{generated.scales.shape()[1], generated.scales.shape()[0]},
-            {generated.scales.layout().stride(1), generated.scales.layout().stride(0)}));
+            {generated.scales.layout().stride(1), generated.scales.layout().stride(0)},
+            0));
         initializeStorageWithHostNumerics(scales.type(),
                                           scaleType,
                                           scaleInitialization,

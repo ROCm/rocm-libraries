@@ -186,7 +186,8 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
     const roc::hostnumerics::Layout layout(
         roc::hostnumerics::Shape{
             static_cast<size_t>(m), static_cast<size_t>(n), static_cast<size_t>(batch_count)},
-        {1, lda, stride});
+        {1, lda, stride},
+        0);
     const roc::hostnumerics::Tensor generated = roc::hostnumerics::generate(
         scalar,
         layout,

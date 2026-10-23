@@ -82,7 +82,7 @@ namespace rocRoller::hostnumerics
         const size_t blockCount
             = reductionExtent / blockSize + static_cast<size_t>(reductionExtent % blockSize != 0);
         return Tensor::copyEncodedBackingStorage(
-            scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
+            scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}, 0), std::as_bytes(values));
     }
 
     roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
@@ -101,7 +101,7 @@ namespace rocRoller::hostnumerics
             throw std::runtime_error("rocRoller block scales require a scale data type.");
         if(values.size() == 1)
             return Tensor::copyEncodedBackingStorage(
-                scalarType, Layout(layout.shape(), {0, 0}), std::as_bytes(values));
+                scalarType, Layout(layout.shape(), {0, 0}, 0), std::as_bytes(values));
 
         auto const requiredBytes = storageBytesForLayout(scalarType, layout);
         if(values.size_bytes() != requiredBytes)
@@ -150,7 +150,7 @@ namespace rocRoller::hostnumerics
         const size_t rows = a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::runtime_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
-        const Layout outputLayout(Shape{rows, b.shape()[1]}, {1, static_cast<ptrdiff_t>(rows)});
+        const Layout outputLayout(Shape{rows, b.shape()[1]}, {1, static_cast<ptrdiff_t>(rows)}, 0);
         std::optional<Tensor> result;
         if(alpha != 0.0f && a.shape()[1] != 0)
         {

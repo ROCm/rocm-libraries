@@ -85,7 +85,7 @@ TEST(GemmResourceFailure, ValidationFailurePropagatesInsteadOfBecomingUnsupporte
 TEST(GemmResourceFailure, CheckedGeometryDoesNotAllocateButOwningFactoriesCan) {
     using namespace roc::hostnumerics;
     const Shape shape{2, 3};
-    const Layout layout(shape, {3, 1});
+    const Layout layout(shape, {3, 1}, 0);
     const std::array<size_t, 2> order{0, 1};
     const std::array<size_t, 2> valid{1, 2}, invalid{2, 0};
     withAllocationFailure([&] {

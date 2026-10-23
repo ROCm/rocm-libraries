@@ -336,7 +336,7 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
     Shape shape(std::move(tensorDimensions));
     if (empty) {
         return Tensor::copyEncodedBackingStorage(
-            type, Layout(std::move(shape), std::move(tensorStrides)),
+            type, Layout(std::move(shape), std::move(tensorStrides), 0),
             std::span<const std::byte>(reinterpret_cast<const std::byte*>(view.buf), 0));
     }
     if (!view.buf) throw std::runtime_error("Nonempty NumPy Tensor has a null data pointer.");

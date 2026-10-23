@@ -304,10 +304,11 @@ namespace TensileLite::Client::hostnumerics
             if(!bounds)
                 return Unexpected(DescriptorFailure(bounds.error()));
             if(bounds->second < bounds->first)
-                return std::pair{Layout(layout.shape(),
-                                        std::vector<ptrdiff_t>(layout.strides().begin(),
-                                                               layout.strides().end())),
-                                 ptrdiff_t{0}};
+                return std::pair{
+                    Layout(layout.shape(),
+                           std::vector<ptrdiff_t>(layout.strides().begin(), layout.strides().end()),
+                           0),
+                    ptrdiff_t{0}};
             const ptrdiff_t lowerOffset = bounds->first;
             if(lowerOffset < 0)
             {
@@ -380,7 +381,8 @@ namespace TensileLite::Client::hostnumerics
             return readC ? Tensor::copyEncodedBackingStorage(typeC, layout, source)
                          : Tensor(typeC,
                                   Layout(layout.shape(),
-                                         std::vector<ptrdiff_t>(layout.shape().rank(), 0)));
+                                         std::vector<ptrdiff_t>(layout.shape().rank(), 0),
+                                         0));
         }
 
         static Tensor makeOutputTensorForType(ScalarType type, const Layout& layout)
@@ -1079,10 +1081,10 @@ namespace TensileLite::Client::hostnumerics
             const detail::BatchPlan& plan = batchPlans[batch];
             Tensor                   currentA
                 = readA ? Tensor::copyEncodedBackingStorage(typeA, plan.a.layout, plan.a.storage)
-                        : Tensor(typeA, Layout(Shape{m, k}, {0, 0}));
+                        : Tensor(typeA, Layout(Shape{m, k}, {0, 0}, 0));
             Tensor currentB
                 = readB ? Tensor::copyEncodedBackingStorage(typeB, plan.b.layout, plan.b.storage)
-                        : Tensor(typeB, Layout(Shape{k, n}, {0, 0}));
+                        : Tensor(typeB, Layout(Shape{k, n}, {0, 0}, 0));
             Tensor currentC = makeAddendTensor(plan.c.layout, plan.c.storage);
             Tensor currentD
                 = referenceOutputs ? makeOutputTensor(plan.d.layout) : Tensor(typeD, Shape{0});

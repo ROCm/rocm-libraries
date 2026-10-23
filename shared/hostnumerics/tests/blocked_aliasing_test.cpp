@@ -16,7 +16,7 @@ void testOverlappingOutputIsRejectedAcrossBackends() {
         std::fill_n(a.data() + row * reductionElements, reductionElements,
                     static_cast<float>(row + 1));
     const std::vector<float> b(reductionElements * columns, 1.0f);
-    Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}));
+    Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}, 0));
     GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
 
     require(!queryGemmSupport(problem, GemmBackend::Blocked),

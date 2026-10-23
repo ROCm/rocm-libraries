@@ -72,9 +72,10 @@ int main(int argc, char** argv) {
     std::vector<float> pruned = input;
     std::vector<float> compressed(rows * columns / 2);
     std::vector<uint8_t> metadata(rows * columns / 8);
-    const Layout inputLayout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)});
-    const Layout compressedLayout(Shape{rows, columns / 2}, {1, static_cast<ptrdiff_t>(rows)});
-    const Layout metadataLayout(Shape{rows, columns / 8}, {static_cast<ptrdiff_t>(columns / 8), 1});
+    const Layout inputLayout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}, 0);
+    const Layout compressedLayout(Shape{rows, columns / 2}, {1, static_cast<ptrdiff_t>(rows)}, 0);
+    const Layout metadataLayout(Shape{rows, columns / 8}, {static_cast<ptrdiff_t>(columns / 8), 1},
+                                0);
     StructuredSparsityPattern pattern;
     pattern.axis = 1;
     pattern.fixedPositions = {0, 1};

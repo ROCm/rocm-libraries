@@ -61,7 +61,7 @@ namespace hipblaslt::hostnumerics
             const std::array<size_t, 3> origin{0, 0, batch};
             const auto                  offset = tensor.layout().elementOffset(origin);
             if(!offset)
-                throw std::runtime_error(roc::hostnumerics::detail::message(offset.error()));
+                throw std::runtime_error(offset.error().message());
             return tensor.shareStorageWithLayout(
                 Layout(Shape{tensor.shape()[0], tensor.shape()[1]},
                        {tensor.layout().stride(0), tensor.layout().stride(1)},

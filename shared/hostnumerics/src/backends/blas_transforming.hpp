@@ -22,7 +22,7 @@
 namespace roc::hostnumerics {
 namespace {
 Layout columnMajorLayout(const Shape& shape) {
-    return Layout(shape, {1, static_cast<ptrdiff_t>(shape[0])});
+    return Layout(shape, {1, static_cast<ptrdiff_t>(shape[0])}, 0);
 }
 
 size_t saturatedSum(size_t left, size_t right) {

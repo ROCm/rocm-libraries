@@ -10,7 +10,7 @@ void testComparisonProgram() {
     using namespace roc::hostnumerics;
 
     const std::array<float, 0> emptyStorage{};
-    const Layout emptyLayout(Shape{0, 3}, {1, 1});
+    const Layout emptyLayout(Shape{0, 3}, {1, 1}, 0);
     ComparisonOptions emptyOptions;
     emptyOptions.computeElementwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
@@ -137,7 +137,7 @@ void testComparisonProgram() {
 
     const std::array<float, 5> paddedExpected{1.0f, 2.0f, 99.0f, 3.0f, 4.0f};
     const std::array<float, 5> paddedObserved{1.0f, 2.0f, -99.0f, 3.0f, 4.0f};
-    const Layout paddedLayout(Shape{2, 2}, {1, 3});
+    const Layout paddedLayout(Shape{2, 2}, {1, 3}, 0);
     require(compare(Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedObserved)),
                     Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedExpected)),
                     encodedEquality)
@@ -224,7 +224,7 @@ void testComparisonProgram() {
     auto observedStorage = expectedStorage;
     observedStorage[4] += 0.5f;
     observedStorage[6] += 1.0f;
-    const Layout layout(Shape{2, 3}, {1, 3});
+    const Layout layout(Shape{2, 3}, {1, 3}, 0);
 
     ComparisonOptions selected;
     selected.selection = OutputSelection::strided(0, 2, std::numeric_limits<size_t>::max(),
@@ -410,7 +410,7 @@ void testComparisonProgram() {
     for (const size_t index : {size_t{3}, largeComparisonElements / 2, largeComparisonElements - 2})
         largeObserved[index] += 1.0f;
 
-    const Layout largeLayout(Shape{3, largeComparisonElements / 3}, {1, 3});
+    const Layout largeLayout(Shape{3, largeComparisonElements / 3}, {1, 3}, 0);
     const Tensor largeObservedTensor =
         Tensor::copyNativeStorage(largeLayout, std::span<const float>(largeObserved));
     const Tensor largeExpectedTensor =

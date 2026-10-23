@@ -8,9 +8,9 @@ void testTensorOperations() {
     using namespace roc::hostnumerics;
 
     const Shape shape{2, 2, 2};
-    Tensor x(ScalarType::Float16, Layout(shape, {1, 3, 6}));
-    Tensor y(ScalarType::BFloat16, Layout(shape, {3, 1, 6}));
-    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 8}));
+    Tensor x(ScalarType::Float16, Layout(shape, {1, 3, 6}, 0));
+    Tensor y(ScalarType::BFloat16, Layout(shape, {3, 1, 6}, 0));
+    Tensor output(ScalarType::Float32, Layout(shape, {1, 4, 8}, 0));
     for (size_t batch = 0; batch < 2; ++batch) {
         for (size_t row = 0; row < 2; ++row) {
             for (size_t column = 0; column < 2; ++column) {

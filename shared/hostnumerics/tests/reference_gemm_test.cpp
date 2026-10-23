@@ -10,17 +10,17 @@ void testRuntimeReferenceGemm() {
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     const std::array<float, 4> c{1, 1, 1, 1};
-    Tensor d(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}));
+    Tensor d(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}, 0));
     const std::array<float, 2> bias{1, -10000};
     const std::array<float, 2> scaleA{2, 3};
     const std::array<float, 2> scaleB{5, 7};
 
     const Tensor operandA =
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a));
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a));
     const Tensor operandB =
-        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b));
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b));
     const Tensor inputC =
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c));
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}, 0), std::span<const float>(c));
     const Tensor biasTensor =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(bias))
@@ -45,7 +45,7 @@ void testRuntimeReferenceGemm() {
         64 * 2 * 7 + 2 + 1,
         0,
     };
-    require(compare(d, Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}),
+    require(compare(d, Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}, 0),
                                                         std::span<const float>(expected)))
                 .passed(),
             "Runtime reference GEMM result mismatch.");
@@ -84,9 +84,9 @@ void testRuntimeReferenceGemm() {
 
     // An explicit empty layout need not have representable contiguous strides.
     const size_t huge = std::numeric_limits<size_t>::max();
-    const Tensor emptyA(ScalarType::Float32, Layout(Shape{0, 1}, {0, 0}));
-    const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}));
-    const Layout emptyOutputLayout(Shape{0, huge}, {0, 0});
+    const Tensor emptyA(ScalarType::Float32, Layout(Shape{0, 1}, {0, 0}, 0));
+    const Tensor broadcastB(ScalarType::Float32, Layout(Shape{1, huge}, {0, 0}, 0));
+    const Layout emptyOutputLayout(Shape{0, huge}, {0, 0}, 0);
     const Tensor emptyProduct =
         matmul(emptyA, broadcastB, ScalarType::Float32, MatmulOptions{}, emptyOutputLayout);
     require(emptyProduct.layout() == emptyOutputLayout &&
