@@ -525,6 +525,14 @@ that was canonical where it was recorded, and where scope drops one of those kno
 refused, naming the dropped knobs. `auto` runs the selected tile's base configuration: every
 knob at its default (flags off, hints `default`, `waves_per_eu` `0`).
 
+Not every listed configuration has run on a device. For one request the space is large (GDN,
+plain, bf16 state, D128: 54 tiles and 2,384 configurations at `production`). The fp32-checked
+device suites cover each knob alone on every configured tile, every applicable knob together on
+two fused tiles, `waves_per_eu` `0` and `4`, and sampled pinned configurations per mode. Other knob
+combinations and `waves_per_eu` `1`–`3` and `5`–`8` are pinnable but not device-verified. The
+space is meant to shrink: a follow-up measures every configuration, each checked against the fp32
+reference before it is timed, and removes the knobs and values that do not help.
+
 KDA remains keyed on `work = batch × num_v_heads`. Tensor-parallel sharding
 changes `num_v_heads` per rank, so two launches with the same batch can expose
 different amounts of GPU work:
