@@ -50,6 +50,9 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
+        "projects/hipblaslt/tensilelite/pyproject.toml",
+        "projects/hipblaslt/tensilelite/uv.lock",
+        "projects/hipblaslt/tensilelite/rocisa/pyproject.toml",
         ".github/workflows/component-ci-library-uniqueness.yml",
     ],
 }

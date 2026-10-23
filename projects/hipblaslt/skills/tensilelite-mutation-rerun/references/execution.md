@@ -74,8 +74,6 @@ docker run -d --name tl-mut \
   hipblaslt-mutation
 
 docker exec tl-mut /opt/tl-mut-tools/bin/tox -e mutation-unit --notest
-docker exec tl-mut \
-  /opt/tl-mut/mutation-unit/bin/pip install ./rocisa
 ```
 
 The image contains the ROCm, Python, native-build, and tox bootstrap tooling,

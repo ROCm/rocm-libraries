@@ -611,8 +611,8 @@ tox `commands`, `preliminary` through an explicit exit-code guard between its tw
 through plain sequential ordering. One early failure means you get no information at all from the
 stages behind it, which is why a red run so often says less than it appears to.
 
-**The goldens are asserted in all four lanes.** Every tox environment involved inherits syrupy from
-the base `[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
+**The goldens are asserted in all four lanes.** Every tox environment involved gets syrupy from
+the locked `dev` group, which includes `test`, and TheRock's installed-artifact lane installs it from
 [`requirements-test.txt`](requirements-test.txt)
 ([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
 [TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Three of those lanes gate, so a stale
@@ -689,11 +689,11 @@ artifacts and applies both floors. The GitHub Actions lane runs them as two name
 floors; Math CI's `tensilelite-unit-codecov` runs only the first, so it cannot be failed by a gate it
 does not own.
 
-The practical benefit is local reproduction. `coverage-gate` sets `skip_install = true` and depends
-only on `coverage[toml]`, so it builds no rocisa, needs no ROCm, and runs no tests. Run
-`coverage-unit` once, then re-run `coverage-gate` as often as you like against the `coverage.json`
-you already have. Chasing a floor failure costs seconds rather than another pass over the full test
-suite.
+The practical benefit is local reproduction. `coverage-gate` installs only the `coverage` dependency
+group from `uv.lock`: `coverage[toml]` and its dependencies. It builds no rocisa, needs no ROCm, and
+runs no tests. Run `coverage-unit` once, then re-run `coverage-gate` as often as you like against the
+`coverage.json` you already have. Chasing a floor failure costs seconds rather than another pass over
+the full test suite.
 
 ### Targets
 

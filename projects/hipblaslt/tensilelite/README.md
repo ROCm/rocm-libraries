@@ -22,6 +22,15 @@ Subsequently, you can run just the Tensile unit tests via:
 tox -e unit -- tensilelite/Tests/unit
 ```
 
+Tox uses [tox-uv](https://github.com/tox-dev/tox-uv/tree/1.36.0#uvlock-support)
+to synchronize its environments from `uv.lock`; tox provisions the plugin and uv itself.
+Most test environments use the `dev` dependency group and rebuild rocisa once before tests.
+Lint/format/security commands use only `lint`; mutation wrapper self-tests and library
+uniqueness checks use only `test`. These source-only tools need no ROCm SDK.
+Each environment that installs rocisa keeps a separate native build tree. If you delete
+that tree or its environment and the rebuild reports a missing build directory, run
+`tox --recreate -e <environment>` to rebuild the cached editable installation.
+
 ### Generate coverage report with Tox
 
 ```
@@ -41,6 +50,35 @@ tox -e coverage-unit
 ```
 
 Runs only Python unit tests.
+
+### Development environment with uv
+
+From the TensileLite directory, with the ROCm SDK and Python development headers available:
+
+```bash
+uv sync
+uv run pytest rocisa/test
+```
+
+After native source changes, rebuild editable rocisa before running tests:
+
+```bash
+uv run python -c "import importlib.util; importlib.util.find_spec('rocisa').loader.rebuild()"
+```
+
+Tox and the affected-tests hook run this
+[manual rebuild](https://scikit-build-core.readthedocs.io/en/stable/configuration/editable.html#triggering-a-rebuild-manually)
+before tests.
+
+When using multiple venvs in the same source checkout, set a separate rocisa
+`<build-dir>` for each. Tox already sets a per-environment directory.
+
+```bash
+uv sync --config-settings-package "rocisa:skbuild.build-dir=<build-dir>"
+```
+
+Pass the same setting to subsequent `uv sync` and `uv run` commands, or use
+`uv run --no-sync` after setup to retain the existing installation.
 
 ### Updating Python dependencies
 
@@ -62,14 +100,12 @@ Regenerate the requirements afterward and review the version changes. See uv's
 An opt-in git pre-commit hook runs the unit + characterization tests affected by
 your staged TensileLite changes and blocks the commit on real failures (it falls
 back to the full unit + characterization suite when it cannot narrow the set). It
-runs `uv run pytest`, which imports rocisa (a HIP native extension), so install and
+runs `uv run --no-sync pytest`, which imports rocisa (a HIP native extension), so install and
 commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
-headers). Editable rocisa currently rebuilds on import for compatibility, but
-that behavior is deprecated; use `invoke rocisa --no-rebuild-on-import` to opt
-out now, and use the explicit `invoke build --rebuild-rocisa` path after native
-changes. Mount the repo at the same absolute path inside the container as on the
-host — git worktrees use an absolute gitdir pointer, so a different mount breaks
-git.
+headers). The hook uses the [uv development setup](#development-environment-with-uv) and
+rebuilds changed native sources once before starting pytest. Mount the repo and its Git
+metadata at their host paths inside the container; linked worktrees can point to Git
+metadata outside the worktree.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
