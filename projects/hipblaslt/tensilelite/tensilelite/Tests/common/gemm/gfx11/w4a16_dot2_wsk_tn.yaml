@@ -1,0 +1,195 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# W4A16 decode (N <= 4) as dot2 WaveSplitK kernels: int4 A is dequantized before
+# the LDS write, then multiplied with v_dot2_f32_{f16,bf16}.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeScaleA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitSeed: 24681
+  PrintLevel: 2
+  ClientLogLevel: 2
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  CpuThreads: -1
+
+BenchmarkProblems:
+  ########################################
+  # fp16, UnsignedBias8, symmetric, G128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [128]
+      Int4EncodingA: UnsignedBias8
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [1, 4]
+        - WorkGroup:
+          - [4, 1, 32]
+          - [8, 1, 16]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [8]
+        # N=1 tiles (MT1=1) have too few B elements per thread for 8-wide loads.
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - AssertSummationElementMultiple: [256]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 512]
+          - Exact: [37, 3, 1, 768]
+          - Exact: [512, 4, 1, 3584]
+  ########################################
+  # fp16, UnsignedBias8, zero point, G32 (MT0 % 8 == 0)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: i4
+      MacDataTypeA: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [32]
+      ScaleZeroPointA: True
+      Int4EncodingA: UnsignedBias8
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [1, 4]
+        - WorkGroup:
+          - [8, 1, 32]
+          - [8, 1, 16]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [8]
+        # N=1 tiles (MT1=1) have too few B elements per thread for 8-wide loads.
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - AssertSummationElementMultiple: [256]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 512]
+          # Odd M: exercises the roundUp(M,2) pad in the zero-point layout.
+          - Exact: [37, 3, 1, 768]
+          - Exact: [512, 4, 1, 3584]
+  ########################################
+  # bf16, Signed, symmetric, G128
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DataTypeA: i4
+      MacDataTypeA: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Block
+      ScaleBlockSizesA: [128]
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [1, 4]
+        - WorkGroup:
+          - [4, 1, 32]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [8]
+        # N=1 tiles (MT1=1) have too few B elements per thread for 8-wide loads.
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+        - AssertSummationElementMultiple: [256]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 1, 1, 512]
+          - Exact: [37, 3, 1, 768]
+          - Exact: [512, 4, 1, 3584]
