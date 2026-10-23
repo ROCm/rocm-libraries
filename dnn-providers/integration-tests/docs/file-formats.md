@@ -335,12 +335,13 @@ Rules:
   or case is outside the claim model; see
   [Support Claim Enforcement](support-claim-enforcement.md#expected-rejection-bundles-are-outside-the-claim-model).
 
-Checked-in example: `integration-test-bundles/quick/Matmul/nc/fp16/ExpectedRejectionMatmulComputeHalf/ExpectedRejectionMatmulComputeHalf.json`
-(with its `.meta.json`; no sidecar, no golden data). It is a rank-2 fp16 Matmul
-copied from a hipBLASLt-claimed `quick/Matmul/Default` case, with the matmul
-node's `compute_data_type` set to `half`. hipBLASLt requires `float`, so it drops
-the graph from its ranked list. The claimed valid twin (sweep case
-`16_128_fp16_05e316`) passing in the same lane is the positive control. The other
+Checked-in example: `integration-test-bundles/quick/Matmul/ncl/fp32/ExpectedRejectionMatmulBatchMismatch/ExpectedRejectionMatmulBatchMismatch.json`
+(with its `.meta.json`; no sidecar, no golden data). It is a rank-3 fp32 Matmul
+copied from a hipBLASLt-claimed `quick/Matmul/Default` case, with the batch
+dimension of B changed from 1 to 2 (A and C have 3), which is invalid per the
+Matmul contract. hipBLASLt refuses it (`Unsupported input matrix batch
+dimensions`), so it drops the graph from its ranked list. The claimed valid twin
+(sweep case `3_16_128_fp32_ncl_6d8970`) passing in the same lane is the positive control. The other
 lanes (MIOpen, hip-kernel) have no Matmul support, so they reject vacuously.
 
 ## Golden data — `.tensors.dvc` and `.bin`

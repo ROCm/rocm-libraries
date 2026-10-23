@@ -711,11 +711,11 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
     def test_checked_in_expected_rejection_example_passes(self) -> None:
         bundle_dir = (
             SCRIPT_PATH.parent.parent
-            / "integration-test-bundles/quick/Matmul/nc/fp16"
-            / "ExpectedRejectionMatmulComputeHalf"
+            / "integration-test-bundles/quick/Matmul/ncl/fp32"
+            / "ExpectedRejectionMatmulBatchMismatch"
         )
         meta = json.loads(
-            (bundle_dir / "ExpectedRejectionMatmulComputeHalf.meta.json").read_text()
+            (bundle_dir / "ExpectedRejectionMatmulBatchMismatch.meta.json").read_text()
         )
         self.assertIs(meta["expected_rejection"], True)
 

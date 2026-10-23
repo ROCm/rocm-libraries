@@ -228,9 +228,10 @@ The test is never executed or compared
 ([format](file-formats.md#expected-rejection-bundles)).
 
 1. **Choose one engine-visible invalid property.** The graph must load and
-   deserialize, and the engine must see the problem. Example: hipBLASLt requires
-   Matmul compute type `float`, so set the matmul node's `compute_data_type` to
-   `half`. A property that the JSON or the graph schema cannot even load is not
+   deserialize, and the engine must see the problem. Example: hipBLASLt
+   refuses a Matmul whose batch dimensions are neither equal, nor 1 on one
+   side, nor broadcast-compatible (they are invalid per the Matmul contract too),
+   so change the batch dimension of one input. A property that the JSON or the graph schema cannot even load is not
    engine-visible: it is a red `Failed to load expected_rejection bundle …` test.
 2. **Derive it from a claimed valid case.** Copy the graph of a case that an
    engine claims (here a hipBLASLt-claimed `quick/Matmul/Default` case) and
@@ -240,7 +241,7 @@ The test is never executed or compared
    `integration-test-bundles/<tier>/<Op>/<Layout>/<DataType>/<Name>/<Name>.json`:
    six path segments under the bundle root, as `verify_golden_bundles.py`
    expects. Example:
-   `integration-test-bundles/quick/Matmul/nc/fp16/ExpectedRejectionMatmulComputeHalf/ExpectedRejectionMatmulComputeHalf.json`.
+   `integration-test-bundles/quick/Matmul/ncl/fp32/ExpectedRejectionMatmulBatchMismatch/ExpectedRejectionMatmulBatchMismatch.json`.
 4. **Write `<Name>.meta.json`** with `format_version`, `generator` and
    `reference_source` (the verifier requires both as non-empty strings) and
    `expected_rejection: true`:
@@ -259,7 +260,7 @@ The test is never executed or compared
    ```bash
    build/bin/hipdnn_integration_tests --test-article <plugin> --test-engine HIPBLASLT_ENGINE \
        --test-config dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml \
-       --gtest_filter='quick_Matmul_nc_fp16_ExpectedRejectionMatmulComputeHalf.*'
+       --gtest_filter='quick_Matmul_ncl_fp32_ExpectedRejectionMatmulBatchMismatch.*'
    ```
 
    The test prints `[ VERIFIER ] rejected(<stage>): <path>`. For this example
