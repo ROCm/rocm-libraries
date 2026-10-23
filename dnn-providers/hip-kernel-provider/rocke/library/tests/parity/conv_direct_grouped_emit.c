@@ -82,9 +82,60 @@ enum
 /* The direct wgrad kernels (tiled, depthwise fold / cols / lds, gather) follow
  * the 11 grouped non-grouped configs. */
 #define WGRAD_DIRECT_CFG_BASE 114
-/* Depthwise forward on a wave32 target (gfx1250) follows the 34 direct wgrad
- * ones: see _wave32_spec in the Python emitter. */
-#define WAVE32_CFG_BASE 148
+/* bf16 4c configs 148..150 follow the direct wgrad ones. */
+#define FOURC_BF16_CFG_BASE 148
+/* Depthwise forward on a wave32 target (gfx1250), configs 151..155, follows
+ * the bf16 4c ones: see _wave32_spec in the Python emitter. */
+#define WAVE32_CFG_BASE 151
+
+/* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
+ * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
+static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char** arch)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.cpg = 4;
+    p.kpg = 4;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
+    p.stride = 1;
+    p.dtype = "bf16";
+    *s4 = rocke_direct_conv_4c_spec_default();
+    switch(idx)
+    {
+    case 0:
+        p.N = 2;
+        p.H = 13;
+        p.W = 13;
+        p.groups = 32;
+        s4->block_q = 4;
+        s4->block_groups = 16;
+        *arch = "gfx950";
+        break;
+    case 1:
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 16;
+        s4->block_q = 8;
+        s4->block_groups = 16;
+        *arch = "gfx942";
+        break;
+    case 2:
+        p.N = 2;
+        p.H = 15;
+        p.W = 15;
+        p.groups = 32;
+        s4->block_q = 16;
+        s4->block_groups = 32;
+        *arch = "gfx950";
+        break;
+    default:
+        return -1;
+    }
+    s4->problem = p;
+    return 0;
+}
 
 static rocke_direct_conv_problem_t
     mk_dw_problem(int N, int H, int W, int groups, int KH, int PAD, int stride, const char* dtype)
@@ -1955,6 +2006,15 @@ int main(int argc, char** argv)
     if(idx >= WAVE32_CFG_BASE)
     {
         if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= FOURC_BF16_CFG_BASE)
+    {
+        kind = KIND_4C;
+        if(make_4c_bf16_cfg(idx - FOURC_BF16_CFG_BASE, &s4, &arch) != 0)
         {
             fprintf(stderr, "unknown config index %d\n", idx);
             return 2;
