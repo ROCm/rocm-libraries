@@ -1092,6 +1092,168 @@ class TestAttentionHelpers(unittest.TestCase):
         # ALiBi kernel name suffix.
         self.assertIn("_alibi", ll)
 
+    def test_unified_attention_2d_tiled_additive_bias(self):
+        """Additive-bias variant emits the correct ABI params and kernel name token."""
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            use_additive_bias=True,
+        )
+        k = build_unified_attention_2d_tiled(spec)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
+        # Additive-bias ABI: f32 pointer (opaque ptr in LLVM IR) + 3 stride scalars.
+        self.assertIn("%additive_bias_ptr", ll)
+        self.assertIn("i32 %additive_bias_batch_stride", ll)
+        self.assertIn("i32 %additive_bias_head_stride", ll)
+        self.assertIn("i32 %additive_bias_sq_stride", ll)
+        # OOB-safe masked load: select guards the GEP index.
+        self.assertIn("select i1", ll)
+        # Kernel name carries the "addb" token.
+        self.assertIn("addb", k.name)
+
+    def test_unified_attention_additive_bias_abi_matches_signature(self):
+        """gfx950 kernel param order must equal the launcher signature order.
+
+        KernelLauncher packs kernargs positionally from the signature, so any
+        drift silently feeds the wrong pointer/stride. Also pins that the
+        non-bias ABI carries no additive-bias params.
+        """
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_2d_tiled,
+            build_unified_attention_3d_tiled,
+        )
+        from kernels.common.attention_unified import _3d_signature, _attn_signature
+
+        common = dict(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+        for use_ab in (False, True):
+            with self.subTest(kind="2d", use_additive_bias=use_ab):
+                k = build_unified_attention_2d_tiled(
+                    UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab)
+                )
+                sig = _attn_signature(
+                    "bf16",
+                    include_bt_stride=True,
+                    include_qq_bias_stride=True,
+                    include_additive_bias=use_ab,
+                )
+                self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
+                self.assertEqual(
+                    use_ab, any("additive_bias" in p.name for p in k.params)
+                )
+            with self.subTest(kind="3d", use_additive_bias=use_ab):
+                seg = build_unified_attention_3d_tiled(
+                    UnifiedAttention3DTiledSpec(
+                        **common, num_segments=4, use_additive_bias=use_ab
+                    )
+                )
+                sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
+
+    def test_unified_attention_additive_bias_must_be_bool(self):
+        """The flag appends ABI params, so a truthy non-bool must not enable it."""
+        from kernels import (
+            UnifiedAttention2DTiledSpec,
+            UnifiedAttention3DTiledSpec,
+            UnifiedAttentionProblem,
+        )
+
+        common = dict(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=32,
+            dtype="bf16",
+        )
+        spec_common = dict(common, use_sinks=False, sliding_window=0, has_softcap=False)
+        makers = {
+            "2d": lambda v: UnifiedAttention2DTiledSpec(
+                **spec_common, use_additive_bias=v
+            ),
+            "3d": lambda v: UnifiedAttention3DTiledSpec(
+                **spec_common, num_segments=4, use_additive_bias=v
+            ),
+            "problem": lambda v: UnifiedAttentionProblem(
+                **common,
+                total_q=64,
+                num_seqs=1,
+                max_seqlen_q=64,
+                max_seqlen_k=64,
+                use_additive_bias=v,
+            ),
+        }
+        for kind, make in makers.items():
+            for bad in ("false", 1, None):
+                with self.subTest(kind=kind, value=bad):
+                    with self.assertRaisesRegex(ValueError, "must be a bool"):
+                        make(bad)
+
+    def test_unified_attention_2d_additive_bias_rejects_unrouted_paths(self):
+        """Bias is emitted only on the 16x16 and plain transposed 32x32 paths,
+        the ones the selectors route a bias problem to. Hand-built specs for the
+        other 32x32 variants must be rejected rather than build untested IR."""
+        from dataclasses import replace
+
+        from kernels import UnifiedAttentionProblem
+        from kernels.common.attention_unified import _tiled_spec_from_problem
+
+        problem = UnifiedAttentionProblem(
+            total_q=812,
+            num_seqs=2,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=512,
+            max_seqlen_k=512,
+            dtype="bf16",
+            use_additive_bias=True,
+        )
+        spec = _tiled_spec_from_problem(problem, "gfx950")
+        self.assertTrue(spec.use_mfma_32x32 and spec.use_transposed_qk_32x32)
+        variants = {
+            "mask_once": dict(
+                use_transposed_scalar_state=True, use_transposed_mask_once=True
+            ),
+            "invariant_hoist": dict(
+                use_transposed_scalar_state=True, use_transposed_invariant_hoist=True
+            ),
+            "non_transposed_32x32": dict(
+                use_transposed_qk_32x32=False,
+                use_transposed_half_local_pv=False,
+                use_transposed_scalar_state=False,
+            ),
+        }
+        for name, knobs in variants.items():
+            with self.subTest(variant=name):
+                with self.assertRaisesRegex(
+                    ValueError, "use_additive_bias does not support"
+                ):
+                    replace(spec, **knobs)
+                # The same variant without bias is still a valid spec.
+                replace(spec, use_additive_bias=False, **knobs)
+
     def test_unified_attention_3d_tiled_kernel_compiles(self):
         from kernels import (
             UnifiedAttention3DTiledSpec,
@@ -1914,13 +2076,14 @@ class TestAttentionHelpers(unittest.TestCase):
             num_queries_per_kv=8,
             use_alibi=False,
             use_qq_bias=False,
+            use_additive_bias=False,
             use_fp8=False,
             q_dtype=None,
         )
         ok_fp16, _ = supports_tiled_2d(**base)
         self.assertTrue(ok_fp16)
         # head_size in {64, 128, 256}, block_size in {16, 32, 64}, dtype=bf16,
-        # alibi, qq_bias all supported.
+        # alibi, qq_bias, additive_bias all supported.
         for accept in [
             dict(head_size=256),
             dict(head_size=64),
@@ -1929,6 +2092,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(dtype="bf16"),
             dict(use_alibi=True),
             dict(use_qq_bias=True),
+            dict(use_additive_bias=True),
         ]:
             kwargs = dict(base)
             kwargs.update(accept)

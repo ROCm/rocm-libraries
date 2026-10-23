@@ -40,11 +40,6 @@ public:
         const hipsparseStatus_t status = hipsparseCreateDnVec(&descr, size, values, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroyDnVec(descr);
-                descr = nullptr;
-            }
             std::cerr << "hipsparseCreateDnVec failed: " << hipsparseGetErrorName(status)
                       << std::endl;
             throw(status);
