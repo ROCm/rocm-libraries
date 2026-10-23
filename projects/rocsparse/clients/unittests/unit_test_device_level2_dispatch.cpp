@@ -537,7 +537,7 @@ namespace
                 rocsparse_spmv_stage_compute,
                 k.again ? 2 : 1,
                 k.unsupported);
-            if(ran && !k.unsupported)
+            if(ran)
                 expect_near(csr_gemv(m.a, k.op, alpha, m.x0, beta, y0), to_host(m.y), "spmv");
         }
     }
@@ -600,7 +600,7 @@ namespace
                                              nullptr);
                 },
                 k.unsupported);
-            if(ran && !k.unsupported)
+            if(ran)
                 expect_near(csr_gemv(m.a, k.op, alpha, m.x0, beta, y0), to_host(m.y), "v2 spmv");
         }
     }
