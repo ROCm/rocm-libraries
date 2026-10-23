@@ -1820,7 +1820,7 @@ TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCa
         << R"({"version": 1, "claims": {"E": [{"cases": ["claimed_fp32_nchw"],
                 "support": {"gfx942": ["linux"]}}]}})";
 
-    detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir)};
+    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir)};
     ASSERT_EQ(set.bundles.size(), 2u);
 
     const auto before = supportClaimCoverage();
