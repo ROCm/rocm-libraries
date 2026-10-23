@@ -288,6 +288,15 @@ def _supportStreamKPerTileExtraIters(state):
   """
   return isStreamK(state) and not hasDynamicAssignment(state) and not isCustomKernelConfig(state)
 
+def storeRemapMultiColumn(state):
+  """StoreRemap whose lanes per M column (MT0 / SRVW) dont divide the wave, so one store spans
+  a fraction of a column or more than one. The single-column path needs WavefrontSize % lanes == 0."""
+  srvw = state["StoreRemapVectorWidth"]
+  if srvw <= 0:
+    return False
+  lanesPerCol = state["MacroTile0"] // srvw
+  return lanesPerCol > state["WavefrontSize"] or state["WavefrontSize"] % lanesPerCol != 0
+
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
   """Legacy validation entry point retained for downstream callers."""
@@ -6587,7 +6596,9 @@ class Solution(collections.abc.Mapping):
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
         return
-      if state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1:
+      # gfx1250 multi-column remap scales the lane base by VWA (LDS write) and the columns by VWB (store)
+      if (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1) and \
+          not (tuple(state["ISA"])[:2] == (12, 5) and storeRemapMultiColumn(state)):
         reject(state, printRejectionReason, "VW>1 not compatible with StoreRemap")
         return
 
@@ -6664,7 +6675,9 @@ class Solution(collections.abc.Mapping):
       if state["MatrixInstBN"] > 1 and state["MatrixInstN"] == 4:
         reject(state, printRejectionReason, "storeRemap doesn't support MI4x4 multi blocks in N direction yet")
         return
-      if not math.log(state["MacroTile0"],2).is_integer():
+      # gfx1250 takes any MT0 the multi-column remap below can cover, see storeRemapMultiColumn
+      srGfx1250 = tuple(state["ISA"])[:2] == (12, 5)
+      if not math.log(state["MacroTile0"],2).is_integer() and not srGfx1250:
         reject(state, printRejectionReason, "storeRemap only supports power-of-2 MT0")
         # TODO - this return should be here, but this is a hotfix,
         # Somehow we have a "Validation Failed" kernel in rocBLAS now (SRVW=4 and MT0=96) and this will stop the whole building process
@@ -6687,7 +6700,19 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "StoreRemapVectorWidth %u is not allowed for this data type" % state["StoreRemapVectorWidth"])
         return
 
-      if state["StoreRemapVectorWidth"] * state["WavefrontSize"] < state["MacroTile0"]:
+      if storeRemapMultiColumn(state):
+        # lanes walk column-major over the wave's columns, MT0 / SRVW lanes per column; the lane pattern
+        # repeats every srPhases stores, so the store count has to be a whole number of phases
+        srLanesPerCol = state["MacroTile0"] // state["StoreRemapVectorWidth"]
+        srColsPerWave = state["MatrixInstN"] // state["MIWaveGroup"][0]
+        srPhases = srLanesPerCol // math.gcd(srLanesPerCol, state["WavefrontSize"])
+        if not srGfx1250 or state["MacroTile0"] % state["StoreRemapVectorWidth"] or \
+            (srLanesPerCol * srColsPerWave) % state["WavefrontSize"] or \
+            ((srLanesPerCol * srColsPerWave) // state["WavefrontSize"]) % srPhases:
+          reject(state, printRejectionReason, "storeRemap: MT0 %u with StoreRemapVectorWidth %u doesn't split into whole stores per wave" % \
+                 (state["MacroTile0"], state["StoreRemapVectorWidth"]))
+          return
+      elif state["StoreRemapVectorWidth"] * state["WavefrontSize"] < state["MacroTile0"]:
         reject(state, printRejectionReason, "storeRemap: Per wave single global write instruction doesn't enough to write one M column." + \
                " Please use larger StoreRemapVectorWidth.")
         return
