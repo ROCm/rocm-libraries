@@ -86,7 +86,10 @@ def _assert_multicast_completion(src):
     # Delimit the next-tile arrival by its actual no-next-tile branch target.
     arrival = code[close.end():code.index(close["done"] + ":", close.end())]
     assert arrival.startswith("s_wait_dscnt 0\ns_barrier_signal -1\ns_barrier_wait -1\n")
-    signal = re.search(r"s_cbranch_scc0 (?P<skip>label_\w+)\n"
+    signal = re.search(r"v_readfirstlane_b32 (?P<elect>s\d+), v\[vgprSerial(?:[-+]\d+)?\]\n"
+                       r"(?:s_(?:delay|wait)_alu [^\n]*\n)*"
+                       r"s_cmp_eq_u32 (?P=elect), 0\n"
+                       r"s_cbranch_scc0 (?P<skip>label_\w+)\n"
                        r"s_barrier_signal -3\n(?P=skip):\n", arrival)
     assert signal, "only wave zero signals after the LDS drain and workgroup barrier"
 
@@ -136,7 +139,21 @@ def test_streamk_cluster_completion_assembles(tmp_path, feature, cluster, pgr, t
             assert "s_barrier_signal -3" not in source
             assert "s_barrier_wait -3" not in source
         if not tree:
-            fixup = source[source.index("input partial tile index"):]
-            flag_read = re.search(r"^buffer_load_b32 .*acquire: get flag \(VMEM\)", fixup, re.M)
-            assert flag_read, "linear fixup must load a producer flag"
-            assert "physical partial slot = cluster * peers + peer" in fixup[:flag_read.start()]
+            code = _assembly_code(source)
+            fixup = code[code.index("\nlabel_SK_Fixup:\n"):]
+            flag = re.search(r"^buffer_load_b32 [^,\n]+, [^,\n]+, s\[(?P<srd>\d+):\d+\], "
+                             r"(?P<offset>s\d+) ", fixup, re.M)
+            assert flag, "linear fixup must load a producer flag"
+            before = fixup[:flag.start()]
+            shift = (cluster[0] * cluster[1]).bit_length() - 1
+            slot = re.search(rf"^s_lshl_b32 {flag['offset']}, (?P<producer>s\d+), {shift}\n"
+                             rf"s_add_u32 {flag['offset']}, {flag['offset']}, s\[sgprStreamKClusterPeer\]\n"
+                             rf"s_lshl_b32 {flag['offset']}, {flag['offset']}, 2\n", before, re.M)
+            assert slot, "flag load must use 4 * (logical producer * peers + peer)"
+            assert re.search(rf"^s_add_u32 {slot['producer']}, {slot['producer']}, 1$", fixup, re.M)
+            assert re.search(rf"^s_mov_b64 s\[{flag['srd']}:\d+\], "
+                             r"s\[sgprAddressFlags:sgprAddressFlags\+1\]$", before, re.M)
+            # Flag descriptor setup must not overwrite the scalar byte offset.
+            writes = re.findall(r"^\w+ s(?:(\d+)|\[(\d+):(\d+)\]),", before[slot.end():], re.M)
+            assert all(int(flag["offset"][1:]) not in range(int(one or lo), int(one or hi) + 1)
+                       for one, lo, hi in writes)
