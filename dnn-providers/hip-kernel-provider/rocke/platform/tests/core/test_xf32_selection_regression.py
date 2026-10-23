@@ -61,6 +61,7 @@ def _queries(op: MmaOp) -> dict[str, Any]:
         "a_dtype": op.a_dtype,
         "b_dtype": op.b_dtype,
         "c_dtype": op.c_dtype,
+        "dst_dtype": op.dst_dtype,
         "scales": (op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k),
     }
 
@@ -194,8 +195,20 @@ class TestEmulatedRowsAreUnreachableFromOldQueries(unittest.TestCase):
                         [
                             cand
                             for cand in stripped.ops
-                            if (cand.family, cand.a_dtype, cand.b_dtype, cand.c_dtype)
-                            == (op.family, op.a_dtype, op.b_dtype, op.c_dtype)
+                            if (
+                                cand.family,
+                                cand.a_dtype,
+                                cand.b_dtype,
+                                cand.c_dtype,
+                                cand.dst_dtype,
+                            )
+                            == (
+                                op.family,
+                                op.a_dtype,
+                                op.b_dtype,
+                                op.c_dtype,
+                                op.dst_dtype,
+                            )
                             and (
                                 cand.a_scale_dtype,
                                 cand.b_scale_dtype,

@@ -444,6 +444,13 @@ class MmaOp:
     op_ids without verified layout maps still carry frag lengths but raise from
     the accessor until a map is added.
 
+    ``dst_dtype`` is the dtype of the instruction's result. It equals
+    ``c_dtype`` (the accumulator the instruction adds into) for every atom but
+    the few whose result is narrower than their accumulator, such as a bf16
+    result from an fp32 accumulator; a catalog row records it as ``dst`` only
+    there, and leaving it ``None`` here gives ``c_dtype``. The C layout map and
+    ``c_frag_len`` describe the result as well as the accumulator.
+
     ``emulation`` is ``None`` for an atom the hardware encodes directly. When
     set, the atom has no native encoding and the lowering expands it into
     repeated issues of ``emulation.physical_op_id``; the frag lengths and layout
@@ -489,7 +496,13 @@ class MmaOp:
     # :attr:`is_native` when all you need is "does the hardware do this".
     emulation: Optional[MmaEmulation] = None
 
+    # The result dtype; ``None`` at construction means "equal to c_dtype" and
+    # is replaced by it, so a built op always holds the dtype it returns.
+    dst_dtype: Optional[str] = None
+
     def __post_init__(self) -> None:
+        if self.dst_dtype is None:
+            object.__setattr__(self, "dst_dtype", self.c_dtype)
         a, b, block_k = _normalize_mma_scales(
             self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
         )
@@ -1244,6 +1257,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         _wmma_gfx1250_b_16x16x32,
         _wmma_gfx12_acc_16x16,
     ),
+    # bf16 x bf16 with an fp32 accumulator and a bf16 result: sixteen A and B
+    # values and eight results per lane. No lane maps until one is checked
+    # against an independent source.
+    "wmma_gfx1250_bf16f32_16x16x32_bf16": _FragInfo(16, 16, 8, 32),
 }
 
 
@@ -1408,6 +1425,11 @@ class MmaCatalog:
     Scale dtypes accept ``MmaScaleDType`` members or their string spellings.
     ``None`` leaves scales unconstrained; ``(None, None, None)`` selects unscaled
     atoms. Exact selection and largest-K ties must be unambiguous.
+
+    ``dst_dtype`` selects the result dtype. ``None`` means "equal to
+    ``c_dtype``", not "any": a query that does not name a result dtype only
+    sees atoms whose result is their accumulator, so an atom with a narrower
+    result is selected only by naming it.
     """
 
     def __init__(self, ops: List[MmaOp]) -> None:
@@ -1424,6 +1446,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: Optional[int] = None,
         n: Optional[int] = None,
@@ -1437,11 +1460,12 @@ class MmaCatalog:
             normalize_dtype(b_dtype),
             normalize_dtype(c_dtype),
         )
+        dst = c if dst_dtype is None else normalize_dtype(dst_dtype)
         out = []
         for op in self._ops:
             if op.family != family:
                 continue
-            if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
+            if (op.a_dtype, op.b_dtype, op.c_dtype, op.dst_dtype) != (a, b, c, dst):
                 continue
             if (
                 scales is not None
@@ -1462,6 +1486,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1474,6 +1499,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 scales=scales,
                 m=m,
                 n=n,
@@ -1487,6 +1513,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1499,6 +1526,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 scales=scales,
                 m=m,
                 n=n,
@@ -1530,6 +1558,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1540,6 +1569,7 @@ class MmaCatalog:
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
+            dst_dtype=dst_dtype,
             scales=scales,
             m=m,
             n=n,
@@ -1658,6 +1688,35 @@ def _op_id_c_dtype() -> Dict[str, str]:
                     f"({prev!r} vs {c!r}). An op_id names a specific atom, so its "
                     f"accumulator dtype must be invariant across the arches that "
                     f"list it; fix the catalog so every row agrees."
+                )
+    return out
+
+
+@lru_cache(maxsize=1)
+def _op_id_dst_dtype() -> Dict[str, str]:
+    """``op_id -> normalized result dtype``, aggregated across every arch row in
+    the JSON catalog: the row's ``dst``, or its accumulator ``c`` when the row
+    has none.
+
+    The result dtype sizes the value :meth:`rocke.core.ir.IRBuilder.mma`
+    returns for a bare ``op_id`` string. Same first-hit and raise-on-drift
+    contract as :func:`_op_id_c_dtype` -- an op_id names a specific atom, so its
+    result dtype must be invariant across the arches that list it. Mirrored by
+    ``rocke_arch_mma_op_id_dst_dtype`` in ``query.cpp``.
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            op_id = o["op_id"]
+            dst = normalize_dtype(o.get("dst", o["c"]))
+            prev = out.setdefault(op_id, dst)  # first hit wins
+            if prev != dst:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
+                    f"inconsistent result dtype across arches ({prev!r} vs "
+                    f"{dst!r}). An op_id names a specific atom, so its result "
+                    f"dtype must be invariant across the arches that list it; fix "
+                    f"the catalog so every row agrees."
                 )
     return out
 
@@ -1808,6 +1867,7 @@ def _build_mma_op(o: dict) -> MmaOp:
         a_dtype=a_dtype,
         b_dtype=b_dtype,
         c_dtype=normalize_dtype(o["c"]),
+        dst_dtype=normalize_dtype(o["dst"]) if "dst" in o else None,
         m=o["m"],
         n=o["n"],
         k=o["k"],

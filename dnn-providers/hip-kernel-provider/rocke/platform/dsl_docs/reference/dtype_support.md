@@ -517,13 +517,18 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 | `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` | f32, f16, bf16, fp8, bf8, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
+| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4, u8, u4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
-  and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
+  and ten matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
   omitted block-scaled formats.
+- `wmma_gfx1250_bf16f32_16x16x32_bf16` accumulates bf16 x bf16 in fp32 and
+  returns bf16: its row records the result dtype as `dst` (`bf16`) beside the
+  fp32 accumulator `c`. A query selects it only when it names the result dtype
+  (`dst_dtype="bf16"`); without one it answers with the fp32-result atom. It has
+  no lane maps yet, and no family uses it.
 - The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
   only) and the mixed `fp8_bf8` / `bf8_fp8` atoms are declared; no family uses
   them yet.

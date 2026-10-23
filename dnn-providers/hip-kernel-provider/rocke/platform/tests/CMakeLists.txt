@@ -419,6 +419,24 @@ if(BUILD_TESTING)
                  rocke_gfx11_wmma_ops)
   endif()
 
+  # The MMA result dtype where it differs from the accumulator: catalog rows,
+  # queries and the tile.mma result type.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_result_dtype.cpp")
+    add_executable(rocke_mma_result_dtype core/mma_result_dtype.cpp)
+    target_link_libraries(rocke_mma_result_dtype PRIVATE rocke_core)
+    add_test(NAME rocke_mma_result_dtype
+             COMMAND rocke_mma_result_dtype)
+    set_tests_properties(rocke_mma_result_dtype
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_result_dtype)
+    set_target_properties(rocke_mma_result_dtype
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mma_result_dtype
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mma_result_dtype)
+  endif()
+
   # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
   # that rocke_b_mma consults to size a tile.mma result vector.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_frag_ssot.cpp")

@@ -115,6 +115,15 @@ void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k)
         *k = op->k;
 }
 
+const char* rocke_mma_op_dst_dtype(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.dst_dtype: a row that records no result dtype returns its
+     * accumulator. */
+    if(!op)
+        return NULL;
+    return op->dst_dtype ? op->dst_dtype : op->c_dtype;
+}
+
 /* MmaOp._require_layout: returns the map, or NULL + (on a non-NULL builder)
  * the NotImplementedError-equivalent sticky error with byte-identical text. */
 static const rocke_layout_map_t* rocke_ati_require_layout(const rocke_mma_op_t* op,
@@ -188,13 +197,14 @@ const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int*
 }
 
 /* Shared predicate matching MmaCatalog.enumerate's per-op filter. dtypes here
- * are already-normalised canonical keys (a/b/c). family is non-NULL. m/n < 0
- * mean "any" (Python None). */
+ * are already-normalised canonical keys (a/b/c/dst; dst already defaulted to
+ * c). family is non-NULL. m/n < 0 mean "any" (Python None). */
 static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
                                  const char* family,
                                  const char* a,
                                  const char* b,
                                  const char* c,
+                                 const char* dst,
                                  int m,
                                  int n,
                                  const rocke_mma_scale_filter_t* scales)
@@ -206,6 +216,8 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
     if(strcmp(op->b_dtype, b) != 0)
         return false;
     if(strcmp(op->c_dtype, c) != 0)
+        return false;
+    if(strcmp(rocke_mma_op_dst_dtype(op), dst) != 0)
         return false;
     if(m >= 0 && op->m != m)
         return false;
@@ -228,6 +240,7 @@ static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
                                             const char* a,
                                             const char* b,
                                             const char* c,
+                                            const char* dst,
                                             int m,
                                             int n,
                                             const rocke_mma_scale_filter_t* scales)
@@ -242,7 +255,7 @@ static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
             continue;
         if(other->m != op->m || other->n != op->n || other->k != op->k)
             continue;
-        if(rocke_ati_op_matches(other, family, a, b, c, m, n, scales))
+        if(rocke_ati_op_matches(other, family, a, b, c, dst, m, n, scales))
             return true;
     }
     return false;
@@ -257,12 +270,22 @@ static bool rocke_ati_op_selectable(const rocke_mma_catalog_t* cat,
                                     const char* a,
                                     const char* b,
                                     const char* c,
+                                    const char* dst,
                                     int m,
                                     int n,
                                     const rocke_mma_scale_filter_t* scales)
 {
-    return rocke_ati_op_matches(op, family, a, b, c, m, n, scales)
-           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, m, n, scales);
+    return rocke_ati_op_matches(op, family, a, b, c, dst, m, n, scales)
+           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, dst, m, n, scales);
+}
+
+/* The result dtype a query selects: the normalised dst_dtype, or c (already
+ * normalised) when the caller names none -- MmaCatalog's "None means equal to
+ * c_dtype". */
+static const char*
+    rocke_ati_query_dst(const char* dst_dtype, const char* c, char* buf, size_t buf_size)
+{
+    return dst_dtype ? rocke_normalize_dtype(dst_dtype, buf, buf_size) : c;
 }
 
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
@@ -274,10 +297,11 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_filter_t* scales)
+                                const rocke_mma_scale_filter_t* scales,
+                                const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i, total = 0;
 
     if(!cat)
@@ -287,11 +311,12 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(out && total < cap)
             out[total] = op;
@@ -308,10 +333,11 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int m,
                                  int n,
                                  int k,
-                                 const rocke_mma_scale_filter_t* scales)
+                                 const rocke_mma_scale_filter_t* scales,
+                                 const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i;
 
     if(!cat)
@@ -321,12 +347,13 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     /* Python enumerates with m=m, n=n then checks op.shape == (m, n, k). */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(op->m == m && op->n == n && op->k == k)
             return true;
@@ -342,10 +369,11 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          int m,
                                                          int n,
                                                          int k_max,
-                                                         const rocke_mma_scale_filter_t* scales)
+                                                         const rocke_mma_scale_filter_t* scales,
+                                                         const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     const rocke_mma_op_t* best = NULL;
     int i;
     bool ambiguous = false;
@@ -357,11 +385,12 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(k_max >= 0 && op->k > k_max)
             continue; /* Python: k_max is None || op.k <= k_max */
@@ -401,10 +430,11 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      int m,
                                                      int n,
                                                      int k,
-                                                     const rocke_mma_scale_filter_t* scales)
+                                                     const rocke_mma_scale_filter_t* scales,
+                                                     const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i;
     const rocke_mma_op_t* match = NULL;
 
@@ -415,12 +445,13 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     /* Exact selection requires a unique contract. */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(op->k == k)
         {
@@ -483,6 +514,14 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
         }
     }
     return NULL;
+}
+
+const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id)
+{
+    /* Mirrors target._op_id_dst_dtype()[op_id]: the first catalog row that
+     * lists op_id, its dst_dtype or else its c_dtype. NULL when no catalog
+     * lists op_id. */
+    return rocke_mma_op_dst_dtype(rocke_arch_mma_op_by_id(op_id));
 }
 
 bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)

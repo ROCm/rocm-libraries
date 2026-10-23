@@ -27,10 +27,10 @@
 /*
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
- * the accumulator fragment length and dtype for the atom. Both come from the
- * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len (the
- * _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
- * rocke_arch_mma_op_id_c_dtype (the JSON catalog aggregation). This bucket keeps
+ * the accumulator fragment length and the result dtype for the atom. Both come
+ * from the arch SSOT (core/arch/target): frag lengths from
+ * rocke_arch_mma_c_frag_len (the _MMA_FRAGMENT_INFO projection) and the result
+ * dtype from rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
  *
@@ -59,13 +59,14 @@ static int rocke_mma_c_frag_len(const char* op_id)
     return rocke_arch_mma_c_frag_len(op_id);
 }
 
-/* The accumulator dtype of op_id, from the arch catalog SSOT
- * (target._op_id_c_dtype). Op_ids absent from the catalog accumulate in fp32.
- * Mirrors Python _mma_c_dtype. */
-static const char* rocke_mma_c_dtype(const char* op_id)
+/* The result dtype of op_id, from the arch catalog SSOT
+ * (target._op_id_dst_dtype): the accumulator dtype, except for an atom whose
+ * result dtype differs from it. Op_ids absent from the catalog return fp32.
+ * Mirrors Python _mma_dst_dtype. */
+static const char* rocke_mma_dst_dtype(const char* op_id)
 {
-    const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL ? c_dtype : "fp32";
+    const char* dst_dtype = rocke_arch_mma_op_id_dst_dtype(op_id);
+    return dst_dtype != NULL ? dst_dtype : "fp32";
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
@@ -659,9 +660,9 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
     }
-    /* The result element is the instruction's accumulator dtype. C has no MmaOp
-     * argument, so Python's "the MmaOp's own c_dtype" case has no twin here. */
-    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_c_dtype(op_id)), c_frag_len);
+    /* The result element is the instruction's result dtype. C has no MmaOp
+     * argument, so Python's "the MmaOp's own dst_dtype" case has no twin here. */
+    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_dst_dtype(op_id)), c_frag_len);
     if(!vt)
     {
         return NULL;
