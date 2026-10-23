@@ -23,6 +23,7 @@
 #include "data_set_descriptor.h"
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <map>
 #include <numeric>
@@ -1116,4 +1117,147 @@ TEST_F(data_descriptor_test, offsets_ignored_by_relative_queries)
     EXPECT_EQ(shifted_whole.is_contiguous(), whole.is_contiguous());
     EXPECT_EQ(shifted_whole.buffer_element_count(), whole.buffer_element_count());
     EXPECT_EQ(shifted_chunk.buffer_element_count(), chunk.buffer_element_count());
+}
+
+TEST_F(data_descriptor_test, max_offset_and_stride_contiguous)
+{
+    // 1D, 2D, 3D: last element of a packed layout
+    const auto l1 = data_descriptor_t::default_full_layout({16}, 1);
+    const auto l2 = data_descriptor_t::default_full_layout({4, 8}, 3);
+    const auto l3 = data_descriptor_t::default_full_layout({2, 3, 4}, 5);
+    EXPECT_EQ(l1.max_offset(), 15u);
+    EXPECT_EQ(l1.max_stride(), 16u); // distance of the unit batch axis
+    EXPECT_EQ(l2.max_offset(), 95u);
+    EXPECT_EQ(l2.max_stride(), 32u);
+    EXPECT_EQ(l3.max_offset(), 119u);
+    EXPECT_EQ(l3.max_stride(), 24u);
+
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        const auto packed = data_descriptor_t::default_full_layout(random_vec(uniform(1, 4), 1, 16),
+                                                                   random_vec(uniform(1, 3), 1, 5));
+        SCOPED_TRACE(packed.str());
+        EXPECT_EQ(packed.max_offset(), packed.logical_count() - 1);
+    }
+}
+
+TEST_F(data_descriptor_test, max_offset_and_stride_padded_and_unordered)
+{
+    // real in-place padding: rows of 4 reals occupy 6 slots
+    const auto padded = data_descriptor_t::default_full_layout({4, 8}, 3, true);
+    EXPECT_EQ(padded.max_offset(), 3u + 7u * 6u + 2u * 48u);
+    EXPECT_EQ(padded.max_stride(), 48u);
+
+    // largest stride on the first length axis, batch axis interleaved in between
+    const auto unordered = data_descriptor_t::full_layout({4, 8}, {24, 1}, 3, 8);
+    EXPECT_EQ(unordered.max_stride(), 24u);
+    EXPECT_EQ(unordered.max_offset(), 3u * 24u + 7u + 2u * 8u);
+    EXPECT_EQ(unordered.max_offset(), unordered.logical_count() - 1);
+
+    // two batch axes, the length axis being the slowest
+    const data_descriptor_t multi_batch({0, 0, 0}, {4, 8, 3}, {24, 1, 8}, 2);
+    EXPECT_EQ(multi_batch.max_stride(), 24u);
+    EXPECT_EQ(multi_batch.max_offset(), 95u);
+}
+
+// lower bounds are logical coordinates: the first element sits at the offset
+TEST_F(data_descriptor_test, max_offset_ignores_lower_bounds)
+{
+    const data_descriptor_t sub({1, 2, 1}, {4, 8, 3}, {1, 4, 32});
+    const data_descriptor_t zero_based({0, 0, 0}, {3, 6, 2}, {1, 4, 32});
+    EXPECT_EQ(sub.max_offset(), 2u * 1u + 5u * 4u + 1u * 32u);
+    EXPECT_EQ(sub.max_offset(), zero_based.max_offset());
+    EXPECT_EQ(sub.max_stride(), 32u);
+
+    // multiple batch axes with non-zero lower bounds
+    const data_descriptor_t multi_batch({2, 1, 3}, {4, 8, 5}, {1, 4, 32}, 2);
+    EXPECT_EQ(multi_batch.max_offset(), 1u + 6u * 4u + 1u * 32u);
+}
+
+// a sub-dimensional embedded layout keeps all axes (as batch axes), so it
+// reaches the same elements and carries the same strides
+TEST_F(data_descriptor_test, max_offset_and_stride_embedded)
+{
+    const data_descriptor_t layout(rocfft_precision_double,
+                                   rocfft_array_type_complex_interleaved,
+                                   {1, 0, 2, 0},
+                                   {4, 8, 6, 3},
+                                   {200, 1, 16, 1000},
+                                   1,
+                                   {7, 0});
+    const size_t            expected = 7u + 2u * 200u + 7u * 1u + 3u * 16u + 2u * 1000u;
+    EXPECT_EQ(layout.max_offset(), expected);
+    EXPECT_EQ(layout.max_stride(), 1000u);
+    for(const auto& len_indices :
+        {std::set<size_t>{0}, std::set<size_t>{1, 2}, std::set<size_t>{0, 1, 2}})
+    {
+        const auto sub = layout.get_layout_for_len_axes(len_indices);
+        SCOPED_TRACE(sub.str());
+        EXPECT_EQ(sub.max_offset(), expected);
+        EXPECT_EQ(sub.max_stride(), 1000u);
+        const auto embedding = sub.get_embedding_layout();
+        EXPECT_EQ(embedding.max_offset(), expected);
+        EXPECT_EQ(embedding.max_stride(), 1000u);
+    }
+}
+
+TEST_F(data_descriptor_test, max_offset_over_planes)
+{
+    const auto base  = data_descriptor_t::default_full_layout({8, 4}, 2);
+    const auto count = base.buffer_element_count();
+    for(auto type : all_array_types)
+    {
+        const auto layout = with_type(base, rocfft_precision_single, type, offsets_for(type, 3, 5));
+        SCOPED_TRACE(layout.str());
+        EXPECT_EQ(layout.max_offset(), (is_planar(type) ? 5u : 3u) + count - 1);
+        EXPECT_EQ(layout.max_stride(), base.max_stride());
+    }
+    // the larger offset wins whichever plane holds it
+    const auto first_larger
+        = with_type(base, rocfft_precision_single, rocfft_array_type_complex_planar, {9, 2});
+    EXPECT_EQ(first_larger.max_offset(), 9u + count - 1);
+    for(size_t plane = 0; plane < first_larger.num_planes(); plane++)
+        EXPECT_LE(first_larger.get_offset(plane) + count - 1, first_larger.max_offset());
+}
+
+TEST_F(data_descriptor_test, max_offset_rejects_empty_range)
+{
+    const data_descriptor_t empty_len({0, 0}, {0, 4}, {1, 4});
+    EXPECT_TRUE(empty_len.is_empty());
+    EXPECT_THROW(empty_len.max_offset(), std::logic_error);
+    EXPECT_EQ(empty_len.max_stride(), 4u);
+
+    const data_descriptor_t empty_batch({0, 0, 0}, {4, 8, 0}, {1, 4, 32}, 2);
+    EXPECT_THROW(empty_batch.max_offset(), std::logic_error);
+    EXPECT_EQ(empty_batch.max_stride(), 32u);
+}
+
+// values beyond 32 bits are exact, so they can feed 32-bit index limit checks
+TEST_F(data_descriptor_test, max_offset_and_stride_beyond_32_bits)
+{
+    const size_t u32_max = std::numeric_limits<uint32_t>::max();
+    const size_t big     = u32_max + 1;
+
+    const auto two_batches = data_descriptor_t::full_layout({2}, {1}, 2, big);
+    EXPECT_EQ(two_batches.max_stride(), big);
+    EXPECT_EQ(two_batches.max_offset(), big + 1);
+    EXPECT_GT(two_batches.max_offset(), u32_max);
+
+    // an unused distance (unit batch) exceeds the limit without moving max_offset
+    const auto one_batch = data_descriptor_t::full_layout({2}, {1}, 1, big);
+    EXPECT_GT(one_batch.max_stride(), u32_max);
+    EXPECT_EQ(one_batch.max_offset(), 1u);
+
+    // an offset alone may push the last element beyond the limit
+    const auto shifted = with_type(data_descriptor_t::default_full_layout({8}, 1),
+                                   rocfft_precision_single,
+                                   rocfft_array_type_complex_planar,
+                                   {0, u32_max});
+    EXPECT_EQ(shifted.max_offset(), u32_max + 7);
+    EXPECT_LE(shifted.max_stride(), u32_max);
+
+    // a layout reaching just below the limit stays below it
+    const auto at_limit = data_descriptor_t::full_layout({2}, {u32_max - 1}, 1, 1);
+    EXPECT_EQ(at_limit.max_offset(), u32_max - 1);
+    EXPECT_EQ(at_limit.max_stride(), u32_max - 1);
 }

@@ -374,6 +374,23 @@ size_t data_descriptor_t::buffer_size_bytes() const
     return buffer_element_count() * element_size();
 }
 
+size_t data_descriptor_t::max_offset() const
+{
+    if(is_empty())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " is undefined for an empty logical index range.");
+    return *std::max_element(offsets.begin(), offsets.begin() + num_planes())
+           + buffer_element_count() - 1;
+}
+
+size_t data_descriptor_t::max_stride() const
+{
+    size_t ret = 0;
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+        ret = std::max(ret, (*this)[dim].inbuffer_stride);
+    return ret;
+}
+
 data_descriptor_t data_descriptor_t::reinterpret_as(rocfft_array_type new_array_type) const
 {
     if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)
