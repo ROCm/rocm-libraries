@@ -5638,13 +5638,13 @@ class KernelWriterAssembly(KernelWriter):
   # Independent dequantize chains per source dword, one scratch register each.
   FP16_PK_CHAINS = 4
 
-  def blockScaleADequantFp16Pk(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx,
+  def blockScaleADequantFp16Pk(self, kernel, tP, destVgprPrefix, g2lIdx, srcIdx, loadIdx,
                                numSrcDwords, vSrc, vTmps, vScalePk, vNegZPk):
     """Lift nibbles, subtract the exact integer bias, then round the scaled pair."""
     module = Module("blockScaleADequantFp16Pk")
     nLift = len(self.FP16_PK_LIFTS)
     for d in range(numSrcDwords):
-      src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)
+      src = destVgprPrefix + "+%u+%u" % (srcIdx + tP["shiftGR"], d)
       unsigned = kernel["ProblemType"]["Int4EncodingA"] != "Signed"
       source = vgpr(src)
       if not unsigned:
@@ -5695,11 +5695,11 @@ class KernelWriterAssembly(KernelWriter):
                            comment="w4a16: restore sequential fp16 pair %u" % pair))
     return module
 
-  def blockScaleADequant(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):
+  def blockScaleADequant(self, kernel, tP, destVgprPrefix, g2lIdx, srcIdx, loadIdx, numSrcDwords):
     """Expand `numSrcDwords` dwords of packed signed int4 into bf16, scaled by
     this load's group scale.
 
-    Source dword d sits at G2L[g2lIdx + shiftGR + d] and holds 8 int4 in
+    Source dword d sits at G2L[srcIdx + shiftGR + d] and holds 8 int4 in
     little-endian nibble order (element 2n in the low nibble of byte n). Each
     source dword produces 4 destination dwords of 2 bf16 each, written back
     over G2L[g2lIdx ...] where the ds_write will pick them up.
@@ -5844,14 +5844,14 @@ class KernelWriterAssembly(KernelWriter):
 
     if fp16Pk:
       module.add(self.blockScaleADequantFp16Pk(
-          kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords,
+          kernel, tP, destVgprPrefix, g2lIdx, srcIdx, loadIdx, numSrcDwords,
           vSrc, [tmp + 6 + i for i in range(self.FP16_PK_CHAINS)],
           vScale, vNegZS))
       self.vgprPool.checkIn(tmp)
       return module
 
     for d in range(numSrcDwords):
-      src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)
+      src = destVgprPrefix + "+%u+%u" % (srcIdx + tP["shiftGR"], d)
       # The expansion overwrites the source register, so stash it first.
       if biasedSymmetric:
         module.add(VXorB32(dst=vgpr(vSrc), src0="0x88888888", src1=vgpr(src),
@@ -13885,6 +13885,10 @@ class KernelWriterAssembly(KernelWriter):
                 if tP["isM"]:
                   needToSplitMetadata = True
                   metadataScalar = max(1, self.states.bpr // int(tP["glvw"] * tP["bpeGR"]))
+            # One int4 load expands into several ds_writes along K.
+            int4Expand = isAB and kernel["ProblemType"]["DataType%s"%tc].isInt4()
+            if int4Expand:
+              sPara = s * tP["nwcvpi"]
             #print("perp:{}/{} para:{}/{} sPerp:{} sPara:{}".format(perp,tP["nrp"],para,tP["nrc"],sPerp,sPara))
             (offset, i, comment) = self.calculateLdsWriteOffset(perp, para, sPerp, sPara, kernel, tP)
 
@@ -13903,6 +13907,12 @@ class KernelWriterAssembly(KernelWriter):
               g2lIdx = int((i * blockWidth) * metadataScalar)
               if isBpeInputLarger:
                 g2lIdx *= int(tP["bpeGR"]// tP["bpeDS"])
+
+            if int4Expand:
+              # i counts loads here, not writes: each load is one instruction.
+              assert tP["nrcv"] == tP["nrcvpi"]
+              dstDwordsPerLoad = int(tP["glvw"] * tP["bpeDS"]) // self.states.bpr
+              g2lIdx = (i - sPara) * dstDwordsPerLoad + s * int(blockWidth)
 
             graIdx = i * self.states.rpgo if kernel["BufferLoad"] else i * self.states.rpga
 
@@ -13958,7 +13968,8 @@ class KernelWriterAssembly(KernelWriter):
             isHigh16Bits = False
             isCvtHighBits = False
             datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["MacDataType%s"%tc if (tc=='A' or tc=='B') else "DataType"]
-            if (datatype.isHalf() or datatype.isBFloat16()) and isAB:
+            # The int4 expansion always writes whole dwords.
+            if (datatype.isHalf() or datatype.isBFloat16()) and isAB and not int4Expand:
               if s%2==1:
                 isHigh16Bits = True
               if (blockWidth == 0.5) and (instHi % 2 == 1):
@@ -14293,15 +14304,17 @@ class KernelWriterAssembly(KernelWriter):
               elif (kernel["ProblemType"]["DataType%s"%tc].isInt4() and \
                     (kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16() or \
                      kernel["ProblemType"]["MacDataType%s"%tc].isHalf())):
-                # w4a16 group dequantization. BlockDequant.py pins one loaded
-                # dword (8 int4) per A load, so g2lIdx addresses exactly the 4
-                # destination dwords this ds_write will consume, and the load
-                # index is g2lIdx // blockWidth.
+                # w4a16 group dequantization. Each loaded dword (8 int4) expands
+                # to 4 dwords; a load wider than one ds_write is split over
+                # consecutive writes, which share its scale.
                 assert kernel["ProblemType"]["UseScaleAB"] == "Block"
-                assert tP["globalReadInstruction"].blockWidth == 1
-                loadIdx = int(g2lIdx // blockWidth)
+                srcDwordsPerWrite = int(blockWidth) // 4
+                assert blockWidth % 4 == 0 and dstDwordsPerLoad % blockWidth == 0
+                loadIdx = int(g2lIdx // dstDwordsPerLoad)
+                srcIdx = loadIdx * dstDwordsPerLoad + int(g2lIdx % dstDwordsPerLoad) // 4
                 localWriteCVTCode.add(self.blockScaleADequant(
-                    kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords=1))
+                    kernel, tP, destVgprPrefix, g2lIdx, srcIdx, loadIdx,
+                    numSrcDwords=srcDwordsPerWrite))
               elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
                 if tP["glvw"] == 1:
