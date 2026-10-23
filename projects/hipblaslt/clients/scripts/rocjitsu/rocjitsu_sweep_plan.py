@@ -24,7 +24,7 @@ def regular_problem(solution, directory, target):
     metadata = LibraryMetadata(
         directory, target, (solution["index"],), {solution["index"]: solution}
     )
-    return metadata.get_problem(solution["index"], reduction_blocks=8)
+    return metadata.choose_single_problem(solution["index"], reduction_blocks=8)
 
 
 def sha256(path):

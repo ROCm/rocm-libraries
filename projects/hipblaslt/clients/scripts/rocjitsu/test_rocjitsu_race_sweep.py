@@ -194,6 +194,40 @@ class SweepTests(unittest.TestCase):
                     )
                 )
 
+    def test_batch_diagnostics_are_reported_as_one_failed_batch(self):
+        jobs = [job(), job()]
+        for i, j in enumerate(jobs):
+            j.update(id=i, batch_id=0)
+            j["solutions"][0]["index"] = 7 + i
+            j["cases"] = j["cases"][:1]
+            j["target_dispatches_per_case"] = 1
+        for diagnostic, rc in (("RACE example\n", 0), ("", -6)):
+            with self.subTest(diagnostic=diagnostic, rc=rc):
+                results = sweep.classify_bench_batch(
+                    jobs, diagnostic + "".join(bench_log(j) for j in jobs), rc
+                )
+                for result in results:
+                    result["batch_id"] = 0
+                self.assertEqual(sweep.failed_batch_ids(results), [0])
+                self.assertTrue(
+                    all(r["cases"][0]["status"] == "PASSED" for r in results)
+                )
+                manifest = dict(
+                    backend="bench",
+                    seed=0,
+                    policy=plan.REGULAR_POLICY,
+                    preparation_seconds=0,
+                    artifact_fingerprint="test",
+                    jobs=jobs,
+                )
+                report = sweep.render_report(
+                    manifest, {"results": results, "passed": False}
+                )
+                self.assertIn("Failed batches: 1/1.", report)
+                self.assertIn("| 7 | BATCH FAILED | 1/1 |", report)
+                self.assertIn("| 8 | BATCH FAILED | 1/1 |", report)
+                self.assertNotIn("| FAIL |", report)
+
     def test_batch_queue_is_asynchronous_and_accounts_for_claimed_indices(self):
         slow = threading.Event()
         snapshots = []
@@ -269,12 +303,30 @@ class SweepTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            records = [solution(i) for i in range(5)]
+            records = [solution(i) for i in range(7)]
+            for record in records:
+                record["hardwarePredicate"]["value"] = "gfx950"
             records[4]["sizeMapping"].update(
-                tileProcessingStrategy="StreamK", globalSplitU=0
+                tileProcessingStrategy="StreamK", streamK=3, globalSplitU=0
             )
+            records[5]["sizeMapping"].update(streamK=3, globalSplitU=0, depthU=256)
+            records[5]["problemType"].update(
+                operationIdentifier="Contraction_l_Alik_Bljk_Cijk_Dijk",
+                transA=True,
+                transB=False,
+                aType="Float4",
+                bType="Float4",
+                cType="Half",
+                dType="Half",
+                mxBlockA=32,
+                mxBlockB=32,
+                mxTypeA="E8",
+                mxTypeB="E8",
+                mxScaleFormat=1,
+            )
+            records[6]["problemType"]["useE"] = True
             records[0]["sizeMapping"]["globalSplitU"] = 4
-            path = root / "library_gfx942.dat"
+            path = root / "library_gfx950.dat"
             path.with_suffix(".co").write_bytes(b"kernel")
             for indexed in (False, True):
                 with self.subTest(indexed=indexed):
@@ -282,16 +334,14 @@ class SweepTests(unittest.TestCase):
                         path, {"solutions": records, "library": {}}, indexed=indexed
                     )
                     full = plan.make_plan(
-                        root, "gfx942", {}, 4, "0", policy=plan.REGULAR_POLICY
+                        root, "gfx950", {}, 6, "0", policy=plan.REGULAR_POLICY
                     )
                     small = plan.make_plan(
-                        root, "gfx942", {}, 2, "0", policy=plan.REGULAR_POLICY
+                        root, "gfx950", {}, 2, "0", policy=plan.REGULAR_POLICY
                     )
                     self.assertEqual(small["jobs"], full["jobs"][:2])
-                    self.assertEqual(full["planned_cases"], 4)
-                    self.assertEqual(
-                        full["coverage_gaps"], {"tileProcessingStrategy=StreamK": 1}
-                    )
+                    self.assertEqual(full["planned_cases"], 6)
+                    self.assertEqual(full["coverage_gaps"], {"useE": 1})
                     selected = next(
                         j for j in full["jobs"] if j["solutions"][0]["index"] == 0
                     )
@@ -302,10 +352,23 @@ class SweepTests(unittest.TestCase):
                         (0, 0, 0),
                     )
                     self.assertEqual(row["lda"], 64)
+                    persistent = next(
+                        j for j in full["jobs"] if j["solutions"][0]["index"] == 4
+                    )
+                    self.assertEqual(persistent["cases"][0]["shape"], [64, 96, 1, 256])
+                    mx = next(
+                        j for j in full["jobs"] if j["solutions"][0]["index"] == 5
+                    )
+                    self.assertEqual(mx["cases"][0]["shape"], [64, 96, 1, 2048])
+                    row = yaml.safe_load(mx["bench_yaml"])[0]
+                    self.assertEqual(
+                        (row["scaleA"], row["scaleB"], row["initialization"]),
+                        (1001, 1001, "hpl"),
+                    )
             records[0]["sizeMapping"]["globalSplitU"] = 0
             writeMessagePack(path, {"solutions": records, "library": {}}, indexed=True)
             with self.assertRaisesRegex(ValueError, "invalid globalSplitU"):
-                plan.make_plan(root, "gfx942", {}, 2, "0", policy=plan.REGULAR_POLICY)
+                plan.make_plan(root, "gfx950", {}, 2, "0", policy=plan.REGULAR_POLICY)
 
     def test_complex_regular_bench_requires_one_dispatch_and_identity(self):
         j = job()

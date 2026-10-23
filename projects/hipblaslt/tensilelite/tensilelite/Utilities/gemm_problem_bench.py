@@ -36,6 +36,15 @@ _COMPUTE_NAMES = {
     "ComplexFloat": "c_f32_r",
     "ComplexDouble": "c_f64_r",
 }
+# Values belong to the client's hipblaslt_scaling_format, not the public API enum.
+_MX_SCALE_MODES = {
+    (32, "E8"): 3,
+    (16, "E8"): 4,
+    (32, "Float8"): 5,
+    (16, "Float8"): 6,
+    (32, "E5M3"): 7,
+    (16, "E5M3"): 8,
+}
 
 
 class UnsupportedBenchProblem(Exception):
@@ -52,6 +61,28 @@ def _datatype_name(problem: GemmProblem, dtype: str) -> str:
         return _BENCH_DATATYPE_NAMES[dtype]
     except KeyError:
         raise UnsupportedBenchProblem(problem.solution_index, f"datatype {dtype}") from None
+
+
+def _mx_scale_mode(problem: GemmProblem, operand: str) -> int | str:
+    block = getattr(problem, f"mx_block_{operand}")
+    if not block:
+        return "none"
+    dtype = getattr(problem, f"mx_type_{operand}")
+    layout = problem.mx_scale_format
+    if layout == 1:
+        # The gfx950 preswizzled client layout requires A transposed and B normal.
+        if (block, dtype) == (32, "E8") and getattr(problem, f"trans_{operand}") == (
+            operand == "a"
+        ):
+            return 1001
+    elif layout in (0, 2) and (block, dtype) in _MX_SCALE_MODES:
+        # The client prepares the TDM scale layout for gfx1250 automatically.
+        if (layout == 2) == problem.target.startswith("gfx1250"):
+            return _MX_SCALE_MODES[block, dtype]
+    raise UnsupportedBenchProblem(
+        problem.solution_index,
+        f"MX {operand.upper()} block={block}, type={dtype}, layout={layout}, target={problem.target}",
+    )
 
 
 def bench_yaml(problems: Iterable[GemmProblem]) -> str:
@@ -99,11 +130,12 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             "scale_type": _datatype_name(problem, problem.compute_type),
             "alpha": 1,
             "beta": 0,
-            "initialization": "rand_int",
+            # Bounded MX inputs avoid overflowing FP16 outputs at large DepthU.
+            "initialization": "hpl" if problem.mx_block_a or problem.mx_block_b else "rand_int",
             "bias_vector": False,
             "activation_type": "none",
-            "scaleA": "none",
-            "scaleB": "none",
+            "scaleA": _mx_scale_mode(problem, "a"),
+            "scaleB": _mx_scale_mode(problem, "b"),
             "scaleC": False,
             "scaleD": False,
             "scaleAlpha_vector": False,

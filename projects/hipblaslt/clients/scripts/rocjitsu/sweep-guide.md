@@ -13,6 +13,8 @@ not prevent the second. CI setup, invocation and report publication belong in
 `.github`; inventory, case generation, execution and result checking live here.
 The Tensile metadata reader and client-option mapping are shared with existing
 component tools through `tensilelite.Utilities` without importing the generator.
+The installed package also includes the one-problem guide at
+`tensilelite/Utilities/gemm_problem_for_solution.md`.
 
 ## Selection and shapes
 
@@ -55,10 +57,16 @@ unsupported features and other/unknown hardware. A sampled solution that cannot
 produce bounded cases remains a failure; it is never replaced by an easier one.
 Explicit selection does not bypass these checks or any native predicates.
 
-CI uses `--backend bench --policy regular-v1`: one full output tile and
-`K = 8 * DepthU * fixed_split` from the shared regular GEMM descriptor. Optional
-epilogues are disabled. This supports double, complex and FNUZ types as well as
-the initial real types. StreamK, automatic split-K and the descriptor's other
+CI uses `--backend bench --policy regular-v1`: one full output tile from the
+shared [one-problem constructor](../../../docs/how-to/choose-gemm-for-solution.md).
+K is `8 * DepthU * fixed_split` for ordinary solutions and `8 * DepthU` for
+Stream-K or persistent DataParallel. The native runtime assigns persistent work;
+this small shape does not exercise every Stream-K scheduling/reduction path.
+Optional epilogues are disabled. This supports double, complex, FNUZ and MX
+operands as well as the initial real types. MX block sizes, scale datatypes and
+scale layout come from metadata; the native client initializes the operands and
+scales and computes the numerical reference. MX uses bounded HPL input values.
+Automatic split-K and the descriptor's other
 unimplemented features are counted as coverage gaps by reason; malformed
 metadata fails preparation. A selected workload that exceeds the buffer budget
 or fails native predicates remains selected and fails the run.
@@ -66,7 +74,7 @@ or fails native predicates remains selected and fails the run.
 The independent TensileLite stage retains `--policy tile-depth-v1`. These two
 policies have different eligible inventories and shapes. Both retain aliases,
 use the same seed and report their policy explicitly. Complete gfx950 coverage
-will additionally need scheduling/layout adapters and virtual device profiles.
+will additionally need the remaining feature adapters and virtual device profiles.
 
 The daily `therock-multi-arch-ci-nightly.yml` calls the reusable CPU race workflow
 for gfx942. It consumes BLAS/test artifacts from the same GitHub run and waits
@@ -211,7 +219,7 @@ not a hard process-memory limit.
 
 Each backend writes into a fresh report directory:
 
-- `summary.md`: solution index, PASS/FAIL/SKIPPED/PASS WITH SKIPS, numerical passes, dispatch counts,
+- `summary.md`: solution index, PASS/FAIL/BATCH FAILED/SKIPPED/PASS WITH SKIPS, numerical passes, dispatch counts,
   elapsed time and reasons. Updated atomically after each result and published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
 - `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
@@ -235,7 +243,11 @@ The console reports each solution when its batch finishes. The parser checks
 numerics, index, solution name, kernel name and dispatch count separately for
 each input record, including aliases that share a kernel name and shape.
 A process failure, timeout, race, warning or inconsistent batch record/dispatch
-count prevents the affected batch from passing. Diagnostics before the first
+count prevents the affected batch from passing. Its rows report `BATCH FAILED`,
+and the report counts failed batches, not failed member indices. The structured
+summary lists `failed_batch_ids`; a per-index `failed` flag includes these shared
+batch checks and must not be counted as an index that produced a race or bad numerics.
+Diagnostics before the first
 record and during shutdown count too; they cannot reliably be attributed to
 one index. Completed numerical records remain visible even when the batch fails.
 Missing output in a claimed batch is reported as missing; unclaimed batches are
