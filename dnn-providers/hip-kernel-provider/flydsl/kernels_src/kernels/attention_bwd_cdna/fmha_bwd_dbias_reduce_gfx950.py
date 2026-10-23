@@ -256,4 +256,5 @@ def build_fmha_bwd_dbias_reduce_gfx950_module_primary(dtype_str):
     def _launch(*args, **kwargs):
         return flyc.compile(launch_fmha_bwd_dbias_reduce_gfx950, *args, **kwargs)
 
+    _launch.kernel = fmha_bwd_dbias_reduce_gfx950_kernel
     return _launch

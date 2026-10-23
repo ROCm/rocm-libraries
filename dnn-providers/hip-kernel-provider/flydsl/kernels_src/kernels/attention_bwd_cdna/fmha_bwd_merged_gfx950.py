@@ -26,6 +26,11 @@ K/V staging (plus the staged bias tile of a bias build, behind K/V) at the same 
 longer job) until one kind runs out, then the rest of the other kind.
 
 ABI: the dK/dV launch's argument list with O added (pointer + three strides) and every output (DK, DV, DQ, DB) present; no Delta.
+**dBias reduction.** `dbias_reduce=True` (bias builds) adds a second launch of `fmha_bwd_dbias_reduce_gfx950`'s kernel after the main one, so the object
+carries two kernel symbols: the merged kernel and the reduce (`fmha_bwd_dbias_reduce_gfx950_kernel_1`). The launcher's arguments gain the reduce
+launch's (`DBias`, `reduce_batch`, `reduce_head`, `stride_ws_*`, `stride_out_*`; its `DB` is the merged kernel's `DB`); they serve compilation only, since
+each kernel's kernarg is packed from its own declaration. The reduce launch resets the merged module's fast-math compile hints: the reduce sums
+in IEEE fp32 (its standalone build has no hints), so the merged kernel's `fast_fp_math` must not reach it.
 Causal / window: each role runs its split causal body (window and bottom-right resolution are runtime wire values, as in the split kernels).
 `gqa_pack` (dK/dV knob, 16-row family; causal, window and dropout included): the dK/dV role walks the packed (group, q) row axis; its in-kernel Delta reads O at
 the packed row's (head, q) address.
@@ -36,6 +41,9 @@ import contextlib
 from types import SimpleNamespace as _WireArgs
 
 from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi
+from kernels.attention_bwd_cdna import (
+    fmha_bwd_dbias_reduce_gfx950 as dbias_reduce_module,
+)
 from kernels.attention_bwd_cdna import fmha_bwd_dkdv_gfx950 as dkdv
 from kernels.attention_bwd_cdna import fmha_bwd_dkdv_m16_gfx950 as m16
 from kernels.attention_bwd_cdna import fmha_bwd_dq_gfx950 as dq
@@ -389,7 +397,7 @@ def _wire(**kw):
 
 
 def build_fmha_bwd_merged_gfx950_module_primary(
-    dk_meta, dk_knobs, dq_meta, dq_knobs, role_order="concat"
+    dk_meta, dk_knobs, dq_meta, dq_knobs, role_order="concat", dbias_reduce=False
 ):
     """Build the merged kernel from the two roles' resolved (meta, knobs) pairs. `dq_knobs` must be at the dK/dV block size."""
     if role_order not in ROLE_ORDERS:
@@ -413,14 +421,25 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         or kt.ENABLE_DROPOUT != qt.ENABLE_DROPOUT
     ):
         raise ValueError("the roles must agree on dtype, bias and dropout")
+    if dbias_reduce and not kt.BIAS_TYPE:
+        raise ValueError("dbias_reduce: a bias build only")
     BLOCK_SIZE = kt.BLOCK_SIZE
     WPE = min(kt.WAVES_PER_EU, qt.WAVES_PER_EU)
     BUILD_SM_SCALE = dk_meta.sm_scale
     ELEM_BYTES = kt.BF16_BYTES
     DK_ELEMS = kt.LDS_STREAM_TOTAL_SIZE + kt.NUM_WAVES * kt.BLOCK_Q * 4 // ELEM_BYTES
     DQ_ELEMS = qt.LDS_KV_TOTAL_SIZE + qt.BIAS_LDS_BYTES // ELEM_BYTES
+    REDUCE_VEC = dbias_reduce_module.VEC
+    REDUCE_BLOCK = dbias_reduce_module.BLOCK_THREADS
+    reduce_kernel = (
+        dbias_reduce_module.build_fmha_bwd_dbias_reduce_gfx950_module_primary(
+            kt.DTYPE_STR
+        ).kernel
+        if dbias_reduce
+        else None
+    )
     _lds_elem_dtype = dualwave.dtype_to_elem_type(kt.DTYPE_STR)
-    _cache_tag = (dk.cache_tag, dqb.cache_tag, role_order, WPE)
+    _cache_tag = (dk.cache_tag, dqb.cache_tag, role_order, WPE, bool(dbias_reduce))
 
     @fx.struct
     class Arena:
@@ -721,6 +740,15 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         stride_db_head: fx.Int64,
         stride_db_seq_q: fx.Int64,
         rt_flags: fx.Int32,
+        DBias: fx.Pointer,
+        reduce_batch: fx.Int32,
+        reduce_head: fx.Int32,
+        stride_ws_batch: fx.Int64,
+        stride_ws_head: fx.Int64,
+        stride_ws_seq: fx.Int64,
+        stride_out_batch: fx.Int64,
+        stride_out_head: fx.Int64,
+        stride_out_seq: fx.Int64,
         stream: fx.Stream = fx.Stream(None),
     ):
         _ = _cache_tag
@@ -813,6 +841,38 @@ def build_fmha_bwd_merged_gfx950_module_primary(
                 "passthrough": passthrough_entries,
             },
         ).launch(grid=(total, 1, 1), block=(BLOCK_SIZE, 1, 1), stream=stream)
+        if const_expr(dbias_reduce):
+            nvec = (fx.Index(max_seqlen_k) + fx.Index(REDUCE_VEC - 1)) // fx.Index(
+                REDUCE_VEC
+            )
+            nblk = (
+                fx.Index(max_seqlen_q) * nvec + fx.Index(REDUCE_BLOCK - 1)
+            ) // fx.Index(REDUCE_BLOCK)
+            out_b = (reduce_batch != fx.Int32(0)).select(fx.Int32(1), batch_size)
+            out_h = (reduce_head != fx.Int32(0)).select(fx.Int32(1), num_head_q)
+            with CompilationContext.compile_hints(
+                {"fastmath": None, "fast_fp_math": False, "unsafe_fp_math": False}
+            ):
+                reduce_kernel(
+                    DB,
+                    DBias,
+                    batch_size,
+                    num_head_q,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    reduce_batch,
+                    reduce_head,
+                    stride_ws_batch,
+                    stride_ws_head,
+                    stride_ws_seq,
+                    stride_out_batch,
+                    stride_out_head,
+                    stride_out_seq,
+                ).launch(
+                    grid=(nblk, fx.Index(out_b) * fx.Index(out_h), 1),
+                    block=(REDUCE_BLOCK, 1, 1),
+                    stream=stream,
+                )
 
     def _launch(*args, **kwargs):
         raise NotImplementedError(

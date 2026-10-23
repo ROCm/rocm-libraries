@@ -29,6 +29,14 @@ different objects: LLVM's AMDGPU backend is not deterministic for some kernels
 reported, never retried; one build per spec. Comparing an object against a pin, and
 deciding which outcomes are red, is the caller's job (``tools/sdpa_bwd_compare.py``).
 
+The ``bias`` rows of ``sdpa_bwd_merged`` build one object with two kernels: the merged kernel and the
+dBias reduce kernel (``reduce_symbol``). Its per-kernel gate (``tools/sdpa_bwd_gate.py``) holds the merged
+kernel's function bytes and resource row to the standalone merged pin and the reduce kernel's resource row
+to the reduce pin. ``generate`` for that op ships pins (``--reference-dir``): a non-bias row ships its pin's
+bytes and its rebuild only verifies it; a bias row ships the combined rebuild. A row that does not build
+(``error``; for a combined row also ``dual_object``) or a red per-kernel gate stops the run, and nothing
+is shipped.
+
 The kernels are the ones under ``kernels_src/kernels/attention_bwd_cdna/``. Each is
 traced with no tensors: the launchers take raw pointers and integers, so the arguments
 are synthesised from the launcher's own signature. Every build constructs a fresh
@@ -59,10 +67,11 @@ from ._codeobject import (
     arg_records,
     describe,
     hkp_pack_module,
+    kernel_names,
     verify_arch,
 )
 from ._extract_hsaco import HsacoExtractionError, hsaco_from_dump
-from ._instances import instances_for
+from ._instances import SDPA_BWD_MERGED_REDUCE_SYMBOL, instances_for
 from ._manifest import FLYDSL_DIR, refresh_source_md, sha256, write_op_manifest
 from ._parallel import compile_all
 from ._sdpa_bwd_spec import (
@@ -392,6 +401,27 @@ def op_of(spec: Spec) -> str:
     return f"sdpa_bwd_{spec.kernel}"
 
 
+def reduce_symbol_of(spec: Spec) -> str:
+    """The dBias reduce kernel the object of @p spec carries beside its own: the merged ``bias`` objects only."""
+    return (
+        SDPA_BWD_MERGED_REDUCE_SYMBOL
+        if spec.kernel == "merged" and spec.cls == "bias"
+        else ""
+    )
+
+
+def geometry_of(built: Built) -> dict:
+    """The launch geometry the engine reads from a merged record (``block_threads``, ``block_kv``, ``block_m``)."""
+    if built.traits is None:
+        return {}
+    kt, qt = built.traits
+    return {
+        "block_threads": kt.BLOCK_SIZE,
+        "block_kv": kt.BLOCK_KV,
+        "block_m": qt.BLOCK_M,
+    }
+
+
 def hdv_of(kernel: str, tile: int) -> int:
     """dQ meta carries head_dim_v = the rung below the tile; dK/dV ignores it."""
     return rung_below(tile) if (kernel == "dq" and tile >= 64) else 0
@@ -413,6 +443,7 @@ class Built:
     meta: object
     knobs: object
     hints: dict
+    traits: object = None  # the merged launcher's (dK/dV, dQ) role traits
 
 
 def _single_jit(launch):
@@ -606,6 +637,7 @@ def build(spec: Spec) -> Built:
 def _build_merged(spec: Spec) -> Built:
     """The merged object: the dK/dV and dQ roles each resolved as their standalone Spec would be (policy defaults), except that the dQ
     role takes the dK/dV role's wave count (one workgroup size): BLOCK_M = 32 * num_waves, BLOCK_N and the rest from the dQ policy.
+    A ``bias`` object also launches the dBias reduce kernel.
     """
     from kernels.attention_bwd_cdna import (
         fmha_bwd_merged_gfx950 as mod,
@@ -638,7 +670,12 @@ def _build_merged(spec: Spec) -> Built:
         )
     )
     launch = mod.build_fmha_bwd_merged_gfx950_module_primary(
-        bd.meta, bd.knobs, bq.meta, bq.knobs, spec.role_order or "concat"
+        bd.meta,
+        bd.knobs,
+        bq.meta,
+        bq.knobs,
+        spec.role_order or "concat",
+        dbias_reduce=bool(reduce_symbol_of(spec)),
     )
     return Built(
         spec,
@@ -647,6 +684,7 @@ def _build_merged(spec: Spec) -> Built:
         (bd.meta, bq.meta),
         (bd.knobs, bq.knobs),
         _hints_of(mod, spec),
+        launch.traits,
     )
 
 
@@ -717,6 +755,9 @@ class Outcome:
     blob: bytes | None = None
     detail: str = ""
     gate: dict | None = None
+    geometry: dict | None = (
+        None  # the merged launch geometry, known once the launcher is built
+    )
 
 
 @contextlib.contextmanager
@@ -748,39 +789,52 @@ def _print_after_greedy() -> None:
         _print_after_set = True
 
 
-def _gate(blob: bytes, greedy: Path, spec: Spec) -> dict:
-    """The gates of @p blob, scanned with the dump of the compile that produced it."""
-    obj = greedy.with_name("obj.hsaco")
-    obj.write_bytes(blob)
-    done = subprocess.run(
-        [
-            sys.executable,
-            str(_GATE_TOOL),
-            "--hsaco",
-            str(obj),
-            "--greedy-dump",
-            str(greedy),
-            "--spec",
-            spec.key(),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _run_gate(
+    obj: Path,
+    greedy: Path | None,
+    spec: Spec,
+    reduce_symbol: str = "",
+    reference_dir: Path | None = None,
+) -> dict:
+    """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: R-MIR is not scanned)."""
+    command = [
+        sys.executable,
+        str(_GATE_TOOL),
+        "--hsaco",
+        str(obj),
+        "--spec",
+        spec.key(),
+    ]
+    if greedy is not None:
+        command += ["--greedy-dump", str(greedy)]
+    if reduce_symbol:
+        command += ["--reduce-symbol", reduce_symbol]
+        if reference_dir is not None:
+            command += ["--reference-dir", str(reference_dir)]
+    done = subprocess.run(command, capture_output=True, text=True, check=False)
     if done.returncode:
         raise GeneratorError(f"gate: {done.stderr.strip()}")
     gate = json.loads(done.stdout)
-    if gate["object_sha256"] != sha256(blob):
+    if gate["object_sha256"] != sha256(obj.read_bytes()):
         raise GeneratorError("gate: scanned an object other than the delivered one")
     return gate
 
 
-def _compile_one(task: tuple[str, str]) -> Outcome:
+def _gate(blob: bytes, greedy: Path, spec: Spec, reference_dir: Path | None) -> dict:
+    """The gates of @p blob, scanned with the dump of the compile that produced it."""
+    obj = greedy.with_name("obj.hsaco")
+    obj.write_bytes(blob)
+    return _run_gate(obj, greedy, spec, reduce_symbol_of(spec), reference_dir)
+
+
+def _compile_one(task: tuple[str, str, str]) -> Outcome:
     """Compile and gate one spec. Never raises for a build failure."""
-    spec_s, _ = task
+    spec_s, _, reference = task
+    geometry = None
     try:
         spec = Spec.parse(spec_s)
         built = build(spec)
+        geometry = geometry_of(built) or None
         dump_dir = Path(tempfile.mkdtemp(prefix=f"sdpa_bwd_{spec.hash()}_"))
         try:
             env.set_dump_dir(dump_dir / "ir")
@@ -790,25 +844,34 @@ def _compile_one(task: tuple[str, str]) -> Outcome:
                 with hints_ctx(built):
                     built.jf(*synth_compile_args(built.jf))
             blob, _ = hsaco_from_dump(dump_dir / "ir")
-            gate = _gate(blob, greedy, spec)
+            gate = _gate(blob, greedy, spec, Path(reference) if reference else None)
         finally:
             shutil.rmtree(dump_dir, ignore_errors=True)
     except HsacoExtractionError as exc:
         status = "dual_object" if _DUAL_OBJECT_MARK in str(exc) else "error"
-        return Outcome(status, detail=" ".join(str(exc).split())[:500])
+        return Outcome(
+            status, detail=" ".join(str(exc).split())[:500], geometry=geometry
+        )
     except Exception as exc:  # noqa: BLE001 - reported per spec, never retried
         return Outcome(
             "error",
             detail=f"{type(exc).__name__}: {' '.join(str(exc).split())}"[:500],
+            geometry=geometry,
         )
-    return Outcome("ok", blob, gate=gate)
+    return Outcome("ok", blob, gate=gate, geometry=geometry)
 
 
-def compile_specs(entries: list[Spec], arch: str) -> list[Outcome]:
-    """One build per spec, in order (``FLYDSL_GEN_JOBS`` workers); a dead worker raises ``GeneratorError``."""
+def compile_specs(
+    entries: list[Spec], arch: str, reference_dir: Path | None = None
+) -> list[Outcome]:
+    """One build per spec, in order (``FLYDSL_GEN_JOBS`` workers); a dead worker raises ``GeneratorError``.
+
+    With @p reference_dir, a combined object is gated against the pins there.
+    """
+    reference = str(reference_dir) if reference_dir else ""
     return compile_all(
         _compile_one,
-        [(spec.key(), spec.hash()) for spec in entries],
+        [(spec.key(), spec.hash(), reference) for spec in entries],
         arch,
         lambda task: task[1],
     )
@@ -829,20 +892,25 @@ def _params_key(spec: Spec) -> str:
     return "prep_sink" if spec.kernel == "prep" and spec.sink else spec.kernel
 
 
-def verify(blob: bytes, spec: Spec, arch: str, where: str) -> dict:
-    """The facts of @p blob, or ``GeneratorError``: its arch, kernarg layout, LDS and block size must be the declared ones."""
-    described = describe(blob, where)
+def _verify_kernel(
+    blob: bytes,
+    described: dict,
+    params_key: str,
+    wanted_threads: int | None,
+    arch: str,
+    where: str,
+) -> int:
+    """Check one kernel's arch, LDS, kernarg layout and block size against the declared ones; returns its threads per workgroup."""
     verify_arch(described, arch, where)
     if described["group_segment_fixed_size"] > _LDS_LIMIT_BYTES:
         raise GeneratorError(
             f"{where}: needs {described['group_segment_fixed_size']} bytes of LDS; "
             f"{arch} allows {_LDS_LIMIT_BYTES} per workgroup"
         )
-    key = _params_key(spec)
-    expected, _ = _signature(_PARAMS[key])
+    expected, _ = _signature(_PARAMS[params_key])
     if described["signature"] != expected:
         raise GeneratorError(
-            f"{where}: kernarg layout is\n  {described['signature']}\nbut {key} is declared as\n"
+            f"{where}: kernarg layout is\n  {described['signature']}\nbut {params_key} is declared as\n"
             f"  {expected}\nThe kernel's parameter list changed; update _PARAMS, the native "
             "dispatch and its signature together."
         )
@@ -852,14 +920,53 @@ def verify(blob: bytes, spec: Spec, arch: str, where: str) -> dict:
             f"{where}: kernarg segment is {described['kernarg_segment_size']} bytes, expected {size}"
         )
     threads = _max_flat_workgroup_size(blob, where, described["symbol"])
-    wanted = _FIXED_BLOCK.get(spec.kernel) or (spec.num_waves or 0) * 64 or None
-    if wanted is not None and threads != wanted:
+    if wanted_threads is not None and threads != wanted_threads:
         raise GeneratorError(
-            f"{where}: built for {threads} threads per workgroup, declared {wanted}"
+            f"{where}: built for {threads} threads per workgroup, declared {wanted_threads}"
         )
     if threads % 64 or not 64 <= threads <= 1024:
         raise GeneratorError(f"{where}: {threads} threads per workgroup")
-    return {**described, "block_threads": threads}
+    return threads
+
+
+def verify(
+    blob: bytes, spec: Spec, arch: str, where: str, reduce_symbol: str = ""
+) -> dict:
+    """The facts of @p blob, or ``GeneratorError``: its arch, kernarg layout, LDS and block size must be the declared ones.
+
+    With @p reduce_symbol the object holds exactly two kernels, the spec's own and the dBias reduce kernel
+    of that symbol, and each is checked against its declaration; the reduce kernel's facts are under
+    ``reduce``.
+    """
+    wanted = _FIXED_BLOCK.get(spec.kernel) or (spec.num_waves or 0) * 64 or None
+    if not reduce_symbol:
+        described = describe(blob, where)
+        threads = _verify_kernel(
+            blob, described, _params_key(spec), wanted, arch, where
+        )
+        return {**described, "block_threads": threads}
+    found = kernel_names(blob, where)
+    if len(found) != 2 or reduce_symbol not in found:
+        raise GeneratorError(
+            f"{where}: expected a {spec.kernel} kernel and {reduce_symbol!r}, found {found}"
+        )
+    main_symbol = next(name for name in found if name != reduce_symbol)
+    described = describe(blob, where, main_symbol)
+    reduce = describe(blob, where, reduce_symbol)
+    threads = _verify_kernel(blob, described, _params_key(spec), wanted, arch, where)
+    reduce_threads = _verify_kernel(
+        blob,
+        reduce,
+        "dbias_reduce",
+        _FIXED_BLOCK["dbias_reduce"],
+        arch,
+        f"{where} ({reduce_symbol})",
+    )
+    return {
+        **described,
+        "block_threads": threads,
+        "reduce": {**reduce, "block_threads": reduce_threads},
+    }
 
 
 def _read_specs(path: Path) -> list[str]:
@@ -977,8 +1084,62 @@ def run(argv: list[str] | None = None) -> int:
     return 1 if failed else 0
 
 
-def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> dict:
-    """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates."""
+# The ops that ship the sweep's pinned objects, not their rebuilds (D14).
+_SHIP_PINS_OPS = ("sdpa_bwd_merged",)
+
+_REFERENCE_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_reference.csv"
+
+
+@dataclass(frozen=True)
+class Pin:
+    """A pinned object: the sweep's bytes for a Spec, by the hash and sha256 its reference row gives."""
+
+    hash: str
+    sha256: str
+    blob: bytes | None = None  # read only for a pin that ships
+
+
+def read_reference(path: Path = _REFERENCE_CSV) -> dict[str, dict]:
+    """The reference rows by Spec hash."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {row["hash"]: row for row in csv.DictReader(handle)}
+
+
+def load_pin(
+    spec: Spec, reference_dir: Path, reference: dict[str, dict], *, ships: bool
+) -> Pin:
+    """The pin of @p spec, its object checked against its row; the bytes are read when @p ships."""
+    row = reference.get(spec.hash())
+    if row is None or row["spec"] != spec.key():
+        raise GeneratorError(f"the reference has no row for {spec.key()}")
+    if not ships:
+        return Pin(spec.hash(), row["sha256"])
+    path = reference_dir / f"{spec.hash()}.hsaco"
+    try:
+        blob = path.read_bytes()
+    except OSError as exc:
+        raise GeneratorError(f"{path}: {exc.strerror}") from exc
+    if sha256(blob) != row["sha256"]:
+        raise GeneratorError(f"{path} is not the pin its reference row names")
+    return Pin(spec.hash(), row["sha256"], blob)
+
+
+def _record(
+    instance,
+    spec: Spec,
+    outcome: Outcome,
+    op_dir: Path,
+    arch: str,
+    pin: Pin | None = None,
+) -> dict:
+    """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates.
+
+    With @p pin the row ships pinned objects (O10): a non-bias row ships ``pin.blob`` and its rebuild only
+    verifies it; a bias row (``pin`` is its merged pin, bytes unread) ships the combined rebuild. The record
+    adds ``pin_sha256``, ``rebuilt_sha256`` and ``ship`` (``pin`` | ``combined``); ``sha256`` is the shipped
+    bytes' and the resources are analysed from them. The R-MIR verdict is the rebuild's, and only when the
+    rebuilt object is the pin (else ``not scanned``).
+    """
     record = instance.to_record()
     record.update(
         {
@@ -989,15 +1150,38 @@ def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> 
             "sha256": "",
         }
     )
-    if outcome.status != "ok":
+    record["knobs"].update(outcome.geometry or {})
+    reduce_symbol = instance.knobs.get("reduce_symbol", "")
+    if reduce_symbol != reduce_symbol_of(spec):
+        raise GeneratorError(
+            f"{instance.name}: the row names reduce symbol {reduce_symbol!r}, its build has {reduce_symbol_of(spec)!r}"
+        )
+    shipped_pin = pin is not None and pin.blob is not None
+    if outcome.status != "ok" and not shipped_pin:
         record["detail"] = outcome.detail
         return record
+    if outcome.status != "ok":
+        record["detail"] = outcome.detail
+    blob = pin.blob if shipped_pin else outcome.blob
     filename = f"{instance.name}.hsaco"
     where = f"{arch}/{instance.op}/{filename}"
-    blob, gate = outcome.blob, outcome.gate
-    described = verify(blob, spec, arch, where)
+    described = verify(blob, spec, arch, where, reduce_symbol)
+    if (
+        outcome.geometry
+        and outcome.geometry["block_threads"] != described["block_threads"]
+    ):
+        raise GeneratorError(
+            f"{where}: built for {outcome.geometry['block_threads']} threads per workgroup, "
+            f"the object says {described['block_threads']}"
+        )
     (op_dir / filename).write_bytes(blob)
     delivered = sha256((op_dir / filename).read_bytes())
+    rebuilt = sha256(outcome.blob) if outcome.blob is not None else ""
+    if shipped_pin and rebuilt != pin.sha256:
+        # The pin is not the object the rebuild's gates saw: analyse the shipped bytes (R-MIR: the sweep's scan stands).
+        gate = _run_gate(op_dir / filename, None, spec)
+    else:
+        gate = outcome.gate
     _, names = _signature(_PARAMS[_params_key(spec)])
     rmir = gate["rmir"]
     record.update(
@@ -1026,18 +1210,73 @@ def _record(instance, spec: Spec, outcome: Outcome, op_dir: Path, arch: str) -> 
             },
         }
     )
+    if reduce_symbol:
+        if "pin_gate" not in gate:
+            raise GeneratorError(f"{where}: the build ran no per-kernel gate")
+        reduce = described["reduce"]
+        _, reduce_names = _signature(_PARAMS["dbias_reduce"])
+        record.update(
+            {
+                "reduce_block": [reduce["block_threads"], 1, 1],
+                "reduce_args": arg_records(reduce_names, reduce["signature"]),
+                "reduce_resources": gate["per_kernel"][reduce_symbol]["resources"],
+            }
+        )
+        record["gates"]["pin_gate"] = gate["pin_gate"]
+    if pin is not None:
+        record.update(
+            {
+                "pin_sha256": pin.sha256,
+                "rebuilt_sha256": rebuilt,
+                "ship": "pin" if shipped_pin else "combined",
+            }
+        )
+        if shipped_pin and outcome.gate is not None:
+            record["rebuilt_resources"] = outcome.gate["resources"]
     return record
 
 
-def generate(op: str, arch: str, out_root: Path, only: set[str] | None = None) -> int:
+def _stop_reasons(records: list[dict]) -> list[str]:
+    """Why a ship-pins run ships nothing (O9): a row that did not build and has no pin to ship, or a red per-kernel gate."""
+    reasons = []
+    for record in records:
+        combined = bool(record["knobs"].get("reduce_symbol"))
+        status = record["build_status"]
+        if status == "error" or (combined and status != "ok"):
+            reasons.append(f"{record['name']}: {status}: {record.get('detail', '')}")
+        elif combined and record["gates"]["pin_gate"]["verdict"] != "ok":
+            problems = "; ".join(record["gates"]["pin_gate"]["problems"])
+            reasons.append(f"{record['name']}: per-kernel gate red: {problems}")
+    return reasons
+
+
+def generate(
+    op: str,
+    arch: str,
+    out_root: Path,
+    only: set[str] | None = None,
+    reference_dir: Path | None = None,
+) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
 
     Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
     directory must not hold files already.
+
+    An op in ``_SHIP_PINS_OPS`` needs @p reference_dir (the sweep's pinned objects, checked
+    against ``tests/data/sdpa_bwd_reference.csv``) and ships pins (``_record``). It raises
+    ``GeneratorError``, with nothing left in the op directory, when a row has to stop the run
+    (``_stop_reasons``).
     """
     refusal = _refuse({op}, arch)
     if refusal:
         raise GeneratorError(refusal)
+    ship_pins = op in _SHIP_PINS_OPS
+    if ship_pins != (reference_dir is not None):
+        raise GeneratorError(
+            f"{op} ships its pinned objects and needs --reference-dir"
+            if ship_pins
+            else f"{op} takes no reference directory"
+        )
     instances = instances_for(op, arch)
     if only is not None:
         unknown = only - {to_spec(i).hash() for i in instances}
@@ -1047,19 +1286,39 @@ def generate(op: str, arch: str, out_root: Path, only: set[str] | None = None) -
     op_dir = out_root / op / arch
     if not _empty_dir(op_dir):
         raise GeneratorError(f"{op_dir} is not empty")
+    specs = [to_spec(instance) for instance in instances]
+    pins: list[Pin | None] = [None] * len(specs)
+    if ship_pins:
+        reference = read_reference()
+        pins = [
+            load_pin(spec, reference_dir, reference, ships=not reduce_symbol_of(spec))
+            for spec in specs
+        ]
     env.assert_flydsl_version()
     env.prepare(arch)
-    specs = [to_spec(instance) for instance in instances]
-    outcomes = compile_specs(specs, arch)
+    outcomes = compile_specs(specs, arch, reference_dir)
 
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
-    for instance, spec, outcome in zip(instances, specs, outcomes):
+    for instance, spec, outcome, pin in zip(instances, specs, outcomes, pins):
         try:
-            records.append(_record(instance, spec, outcome, op_dir, arch))
+            records.append(_record(instance, spec, outcome, op_dir, arch, pin))
         except GeneratorError as exc:
-            failed = Outcome("error", detail=" ".join(str(exc).split())[:500])
+            failed = Outcome(
+                "error",
+                detail=" ".join(str(exc).split())[:500],
+                geometry=outcome.geometry,
+            )
             records.append(_record(instance, spec, failed, op_dir, arch))
+    if ship_pins:
+        reasons = _stop_reasons(records)
+        if reasons:
+            for written in op_dir.iterdir():
+                written.unlink()
+            raise GeneratorError(
+                f"{len(reasons)} row(s) stop the run, nothing is shipped:\n  "
+                + "\n  ".join(reasons)
+            )
     # None of these kernels comes from AITER, so its pin is no part of how the bytes came to be.
     provenance = env.provenance(arch)
     provenance.pop("aiter_kernels_commit", None)
@@ -1074,6 +1333,19 @@ def generate(op: str, arch: str, out_root: Path, only: set[str] | None = None) -
         1 for r in records if r.get("gates", {}).get("rmir", {}).get("verdict") == "red"
     )
     print(f"{op}: {status}, {red} with an R-MIR spill finding; wrote {op_dir}")
+    if ship_pins:
+        shipped = {
+            kind: sum(r["ship"] == kind for r in records if "ship" in r)
+            for kind in ("pin", "combined")
+        }
+        differing = sum(
+            1
+            for r in records
+            if r.get("ship") == "pin" and r["rebuilt_sha256"] != r["pin_sha256"]
+        )
+        print(
+            f"shipped {shipped}; {differing} pinned row(s) rebuilt to other bytes (T2)"
+        )
     print(f"refreshed {source_md}")
     return status["error"]
 
@@ -1095,6 +1367,13 @@ def run_op(op: str, description: str, argv: list[str] | None = None) -> int:
         default=None,
         help="comma-separated Spec hashes: build just those rows (debugging)",
     )
+    if op in _SHIP_PINS_OPS:
+        parser.add_argument(
+            "--reference-dir",
+            type=Path,
+            default=None,
+            help="the sweep's pinned objects, <hash>.hsaco (required): the rows ship them",
+        )
     args = parser.parse_args(argv)
     refusal = _refuse({op}, args.arch)
     if refusal:
@@ -1102,7 +1381,9 @@ def run_op(op: str, description: str, argv: list[str] | None = None) -> int:
         return 1
     only = set(args.only.split(",")) if args.only else None
     try:
-        errors = generate(op, args.arch, args.out_dir, only)
+        errors = generate(
+            op, args.arch, args.out_dir, only, getattr(args, "reference_dir", None)
+        )
     except (GeneratorError, env.FlydslEnvError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

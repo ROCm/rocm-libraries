@@ -1510,6 +1510,9 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
 # their sweep names. ``_sdpa_bwd_spec.to_spec`` maps a row back to its Spec.
 SDPA_BWD_KINDS = ("prep", "dkdv", "dq", "merged", "dbias_reduce", "dsink_reduce")
 SDPA_BWD_TARGET = "gfx950"
+# The dBias reduce kernel of a `bias` merged object: the second kernel `fmha_bwd_merged_gfx950`'s
+# launcher emits (FlyDSL suffixes it `_1`, as the split-KV merge kernel's).
+SDPA_BWD_MERGED_REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
 SDPA_BWD_KNOBS = {
     "prep": ("sink",),
     "dkdv": (
@@ -3603,6 +3606,15 @@ def _sdpa_bwd_instances(kind: str, arch: str) -> list[Instance]:
                     "floor": floor,
                     "dform": dform,
                     **dict(zip(names, perf, strict=True)),
+                    **(
+                        {
+                            "reduce_symbol": (
+                                SDPA_BWD_MERGED_REDUCE_SYMBOL if cls == "bias" else ""
+                            )
+                        }
+                        if kind == "merged"
+                        else {}
+                    ),
                 },
             )
         )

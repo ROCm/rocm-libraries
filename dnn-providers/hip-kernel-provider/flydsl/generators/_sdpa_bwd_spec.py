@@ -255,6 +255,11 @@ class Spec:
         )
 
 
+def dbias_reduce_spec(dtype: str) -> Spec:
+    """The standalone dBias reduce object of @p dtype: the pin a merged bias object's reduce kernel is gated against."""
+    return Spec("dbias_reduce", dtype, LADDER[0])
+
+
 # The instance-row spelling of an unset knob: -1 for the int knobs (0 is legal for
 # ``tight_registers`` and ``store_db``), "auto" for the word knobs.
 UNSET_INT = -1
@@ -272,6 +277,11 @@ ROW_FIELDS = (
     "floor",
     "dform",
 )
+
+# Row fields a kernel's rows carry that are no part of its Spec: the object's content is
+# named by the key, these only describe how it is shipped. The merged rows carry the
+# symbol of the dBias reduce kernel their bias objects hold (`""` on the others).
+NON_KEY_FIELDS = {"merged": ("reduce_symbol",)}
 
 
 def to_spec(instance) -> Spec:
@@ -292,7 +302,12 @@ def to_spec(instance) -> Spec:
         value = knobs[name]
         if value not in (UNSET_INT, UNSET_WORD):
             set_knobs[name] = value
-    extra = set(knobs) - set(ROW_FIELDS) - set(KNOBS[kernel])
+    extra = (
+        set(knobs)
+        - set(ROW_FIELDS)
+        - set(KNOBS[kernel])
+        - set(NON_KEY_FIELDS.get(kernel, ()))
+    )
     if extra:
         raise ValueError(f"{instance.op}: knobs {sorted(extra)} do not belong to it")
     return Spec(

@@ -27,6 +27,12 @@ compared and the ops with no manifest. A reference row whose op has no manifest 
 narrows ``M`` to the rows a generator built (a ``--only`` run), so absent ops are
 listed but not compared.
 
+A manifest that ships pins (``sdpa_bwd_merged``, ``ship`` on its records) is compared by what was
+rebuilt: for a ``pin`` row the shipped object must be the pin (else red) and ``rebuilt_sha256`` /
+``rebuilt_resources`` stand in for the object's sha and resource row; a ``combined`` row is not the
+pin by construction, so its per-kernel gate verdict (``gates.pin_gate``) is reported instead and a red
+one is red here too. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
+
 Exit status 0 when there are differences only. Nonzero (red) on: a spill finding of the
 R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` that is
 neither in the known-flaky set nor ``dq`` causal; a reference row whose op has no
@@ -108,6 +114,7 @@ def compare(
     scope.sort(key=lambda item: item[0]["spec"])
 
     identical = 0
+    combined = combined_ok = 0
     diffs: list[str] = []
     red = 0
 
@@ -168,13 +175,27 @@ def compare(
                 f"{record['gates']['rmir']['spill_findings']} on a restored-from-slot register",
                 True,
             )
-        if _sha(obj) == row["sha256"]:
+        ship = record.get("ship")
+        if ship == "combined":
+            combined += 1
+            pin_gate = record["gates"]["pin_gate"]
+            if pin_gate["verdict"] == "ok":
+                combined_ok += 1
+            else:
+                report(
+                    "per-kernel gate", row, spec, "; ".join(pin_gate["problems"]), True
+                )
+            continue
+        shipped = _sha(obj)
+        if ship == "pin" and shipped != row["sha256"]:
+            report("shipped", row, spec, "the shipped object is not the pin", True)
+            continue
+        rebuilt = record["rebuilt_sha256"] if ship == "pin" else shipped
+        if rebuilt == row["sha256"]:
             identical += 1
         else:
-            report(
-                "sha differs", row, spec, f"{_sha(obj)[:12]} != {row['sha256'][:12]}"
-            )
-        got = record["resources"]
+            report("sha differs", row, spec, f"{rebuilt[:12]} != {row['sha256'][:12]}")
+        got = record.get("rebuilt_resources", record["resources"])
         columns = [c for c in RESOURCE_COLUMNS if str(got[c]) != row[c]]
         if columns:
             report(
@@ -189,6 +210,11 @@ def compare(
         f"{identical}/{len(scope)} byte-identical",
         f"ops compared: {', '.join(sorted(reference_ops & ops)) or 'none'}; "
         f"no manifest: {', '.join(sorted(reference_ops - ops)) or 'none'}",
+        *(
+            [f"{combined} combined object(s): {combined_ok} pass the per-kernel gate"]
+            if combined
+            else []
+        ),
         *diffs,
     ]
     if red:
