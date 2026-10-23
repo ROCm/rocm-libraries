@@ -403,6 +403,7 @@ After reviewing the qualification evidence, copy the candidate
 Then pack against that reviewed lock:
 
 ```bash
+mkdir -p "library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH"
 python library/tests/reference_common/artifact.py pack \
   --operation "$REFERENCE_OPERATION" --variant "$REFERENCE_VARIANT" \
   --bundle "$REFERENCE_WORK/bundle" \
