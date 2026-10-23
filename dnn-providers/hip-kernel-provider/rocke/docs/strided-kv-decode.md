@@ -85,8 +85,16 @@ context boundary and restore the caller's state. Callers must make input
 production visible to it and wait before consuming outputs on another stream.
 
 Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
-reuse bounded scratch owned by the problem and effective device/stream. A
-whole-pair submission lock protects segment/reducer ordering. Unchanged pointers
+reuse scratch owned by the resolved pipeline/launch geometry and effective
+device/stream. The cache holds at most eight resident eager owners: this is a
+count bound, not a byte budget. Each owner requires
+`4 * total_q * num_query_heads * num_segments * (head_size + 2)` bytes.
+A changing maximum KV length reuses an owner when its resolved spec and
+geometry stay identical; a selector bucket or segment-count change uses a
+different owner. Updating device length contents within a fixed validated
+maximum already reuses the same owner.
+
+A whole-pair submission lock protects segment/reducer ordering. Unchanged pointers
 and scalars reuse an immutable packed pair. Changed bindings rebuild it, retaining
 previous input storage and argument buffers until completion.
 
@@ -102,8 +110,18 @@ launch, rebind, replay and close on that same thread.
 
 The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
-periodically. Request-local input storage is released by that completion drain;
+after finite batches, with submission stopped before each drain. Request-local
+input storage is released by that completion drain;
 the eager cache owns only scratch and immutable packed addresses afterward.
+
+`clear_attention_3d_eager_cache()` drains each unique device/stream with a
+resident eager owner before dropping its scratch and packed bindings. Stop
+submission and call it on the submitting host thread, outside capture. A failed
+drain keeps affected owners for retry. Evicted owners remain in the completion
+registry while in flight; drain every submitted stream even if it no longer
+has a resident owner. This helper preserves prepared executions and internal
+graphs, which use `close()` and `clear_attention_3d_graph_cache()` respectively.
+It restores the caller's device/stream and adds no cleanup to ordinary calls.
 
 For a sequential decoding loop, prepare an execution once outside timing. Keep
 permuted K/V view objects stable, and update their storage and the device length

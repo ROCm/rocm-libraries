@@ -231,6 +231,24 @@ The per-stream FIFO solves two real correctness problems:
 
 `Runtime.release_pending_for_stream(stream)` drops retained refs after external synchronization; `Runtime.wait_stream(stream)` is the canonical "drain + release" primitive on ROCm (more reliable than `torch.cuda.synchronize()` for raw ctypes launches).
 
+### Bound-owner retention
+
+`Runtime.retain_until_drain(stream, owner, resources=None)` retains an immutable
+bound operation before enqueue. Owners are deduplicated by identity once per
+completion batch; a callable `resources` snapshots storage only on first
+retention. The bound registry is separate from the per-launch FIFO and is not
+released by completion-event polling. `wait_stream` or `sync` releases it only
+after successful completion; a failed drain preserves owners for retry.
+`release_pending_for_stream` requires caller-confirmed external completion.
+
+The launcher-level `retain_until_drain` delegates to this registry. Submit and
+clean up on the same host thread; stop enqueueing before every drain. This
+registry does not coordinate concurrent retain/enqueue/drain operations.
+Explicit stream cleanup works after the launch wrapper restores the caller's
+device. Default stream handles (0, 1, 2) remain scoped to the current device;
+select the submitting device before their cleanup. Device-wide synchronization
+releases only that device's owners.
+
 ### Launch Mechanism
 
 `hipModuleLaunchKernel` takes args via the "extra" buffer:

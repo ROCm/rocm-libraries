@@ -218,3 +218,5 @@ absolute timings depend on the GPU, ROCm/torch versions, clocks, and thermal
 state of the box, and are **not benchmarked into this folder**. Run
 `final_shapes_check.py` to produce the CK-vs-Torch eager/graph table for your own
 machine; the script prints, and gates on, the correctness result for every shape.
+
+The shared [decode host-overhead case study](../../gfx950/attention/CASE_STUDY_DECODE_HOST_OVERHEAD.md) documents ordinary runtime, saved-spec binding and scoped timing boundaries.

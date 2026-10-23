@@ -221,6 +221,7 @@ time_launches, no_fence
 synchronize_and_release
 wait_stream_and_release
 release_retained_for_stream
+retain_until_drain
 ```
 
 ## `from rocke.runtime.packing import ...`

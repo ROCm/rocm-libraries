@@ -283,6 +283,7 @@ _imp(
         "WorkspacePool",
         "no_fence",
         "release_retained_for_stream",
+        "retain_until_drain",
         "synchronize_and_release",
         "time_launches",
         "wait_stream_and_release",

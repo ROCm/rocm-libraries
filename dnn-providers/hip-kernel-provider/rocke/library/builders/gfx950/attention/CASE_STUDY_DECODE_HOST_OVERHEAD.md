@@ -10,20 +10,16 @@ kernel-performance claim; the emitted segment/reducer computation is unchanged.
 
 The ordinary gfx942/gfx950 3D path also reuses scratch and packed launch
 arguments without requiring callers to enter a replay scope. A bounded cache
-owns scratch by problem, segment count, device and effective stream. Its lock
+holds at most eight eager owners by resolved spec/launch geometry, segment
+count, device and effective stream. Its lock
 covers the complete segment/reducer submission. Stream FIFO ordering
 protects sequential reuse. Capture is checked again after switching to the
 selected stream and always uses graph-private allocations.
 
-The host caller contract is serialized: one host thread submits shared 3D
-attention calls and performs completion cleanup across bindings, prepared
-executions and graph caches. Preparation, launch, rebind, replay and close stay
-on that thread. Stop submitting before each stream/device drain, including
-external synchronization followed by retention cleanup. Concurrent or reentrant
-host calls and cross-thread cleanup are unsupported. Submission locks and the
-private-scratch fallback do not coordinate with completion drains. Queued
-asynchronous GPU launches and sequential submission to multiple explicit streams
-remain supported. This contract requires no additional per-call synchronization.
+Follow the canonical [attention caller and cache contract](../../../../docs/strided-kv-decode.md#streams-and-workspace-ownership):
+submit and clean up on one host thread, stop submission before drains, and use
+finite asynchronous batches. Eager-cache clearing, graph clearing and prepared
+execution closing are separate completion boundaries.
 
 Every ordinary invocation retains its support and architecture checks and reads
 live tensor addresses and scalar values. Unchanged bindings reuse immutable
@@ -70,8 +66,8 @@ For repeated fixed-binding loops, `Attention3DExecution.replay_scope()` moves
 validation and stream setup to entry, retaining either the captured graph or
 bound segment/reducer launch buffers until exit drains the stream. The decode
 benchmarks can explicitly time the yielded public callable with
-`--dsl-timing scoped`; their default `--dsl-timing ordinary` times the public
-dispatcher for each invocation. Binding changes go through
+`--dsl-timing scoped`; their default `--dsl-timing ordinary` times ordinary public
+runtime calls after route selection outside timing. Binding changes go through
 `rebind()` between scopes; the general `launch()` path retains its per-call
 validation and outer-capture support.
 
@@ -110,7 +106,7 @@ an isolated synthetic wrapper diagnostic, not a workload-wide tuning sweep.
    softmax over valid tokens, then multiply by V. Require finite output and
    `atol=0.01, rtol=0.02` before recording performance.
 5. Use `rocke.runtime.time_launches` on the same stream with 20 warmups and
-   300 iterations per sample. Collect nine samples per mode and use the median
+   300 iterations per sample. Collect seven samples per mode and use the median
    after discarding the first sample; report the median of three trial medians.
    Separately profile unfenced submission with `perf_counter_ns`, draining
    retained arguments after every batch. Preserve per-trial results and hashes
@@ -239,7 +235,8 @@ from the rocKE device kernels. This remains synthetic fixed-binding evidence.
 ## Benchmark timing boundaries
 
 The generic gfx942/gfx950 decode benchmarks default to ordinary public
-dispatcher timing. `--dsl-timing scoped` selects the prepared fixed-binding
+runtime calls, with route selection outside timing. Returned route names
+are metadata, not concrete emitted-kernel identities. `--dsl-timing scoped` selects the prepared fixed-binding
 callable for 3D entries, excluding preparation, scope entry/exit, and rebinding.
 A 2D entry remains ordinary in either mode. JSON output identifies the requested
 mode and actual per-entry mode; comparison baselines retain their ordinary
@@ -254,8 +251,37 @@ measures device replay separately and excludes most host submission costs.
 The scoped results above are separate from the ordinary eager submission gate
 described at the start of this study.
 
-The architecture-independent support gates now accept decorated target IDs.
+The architecture-independent support gates already parsed decorated target IDs
+on develop. The new shortcut returns early for canonical IDs.
 The common launch path already supplies canonical `gfx942`, `gfx950`, or
 `gfx1250`, so those inputs bypass repeated target parsing. Decorated and unknown
 target IDs retain the original parser; compile-cache architecture agreement
 checks remain in place. Host coverage checks both paths without a device probe.
+
+
+## Ordinary saved executable-spec reproduction
+
+The shared harness binds an executable `AttentionTuningSpec` through the
+candidate's `bind_torch` and measures ordinary binding `.launch()` calls.
+Default generic dispatch instead returns a routing `AttentionSpec`; passing
+that routing label as `tuning_spec` is invalid. Scoped and graph replay remain
+separate diagnostic modes.
+
+Run the synthetic default matrix on either gfx942 or gfx950:
+
+```bash
+python -m benchmarks.common.benchmark_decode_host_overhead --arch gfx942 --source-revision <commit> --output private-results.json
+```
+
+The harness disables internal graphs, uses seeded quantized inputs, checks an
+independent NumPy FP64 reference before and after timing (`atol=0.01`,
+`rtol=0.02` for BF16), and records finite unfenced host-enqueue batches with
+drains outside the host timer. HIP-event timings are recorded separately.
+Setup, saved-spec binding, compilation and numerical checks stay outside both
+timers. Input metadata remains fixed after binding; the changing-maximum mode
+creates bindings outside timing for compatible maxima in one selector bucket.
+The JSON includes absolute measurements and belongs in a private evidence
+record. For source comparisons use identical case/spec configurations, GPU,
+CPU affinity, environment and cache setup, with three rotating-order trials.
+Retain source/archive/compiler/adapter hashes and compare LLVM/HSACO and actual
+launch geometry before attributing changes solely to host work.

@@ -237,7 +237,9 @@ def _run_triton(
     if shape.use_fp8:
         return None
     try:
-        from aiter.ops.triton.attention.unified_attention import unified_attention as tri  # type: ignore
+        from aiter.ops.triton.attention.unified_attention import (
+            unified_attention as tri,
+        )  # type: ignore
     except ImportError:
         return None
 
@@ -289,11 +291,13 @@ def _run_dsl(
 
     Uses :func:`~dispatch.attention.dispatch_attention` to select the
     registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
-    then calls the validated runner on every ordinary iteration. Scoped timing
+    then calls the public runtime on every ordinary iteration. Route selection
+    stays outside timing; its name identifies routing metadata, not a saved
+    executable tuning spec. Scoped timing
     uses fixed bindings for 3D and excludes preparation and scope entry/exit;
     2D retains ordinary timing.
 
-    Returns (ms, path_name, kernel_name) or (None, None, None) on failure.
+    Returns (ms, path_name, selected_route_name) or (None, None, None) on failure.
     """
     from rocke.runtime import synchronize_and_release, time_launches
     import torch
@@ -337,7 +341,7 @@ def _run_dsl(
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
-        kernel_name = result.spec.kernel_name()
+        selected_route_name = result.spec.kernel_name()
         run_backend = "tiled" if path == "2d" else path
 
         prob = UnifiedAttentionProblem(
@@ -402,7 +406,7 @@ def _run_dsl(
         finally:
             if execution is not None:
                 execution.close()
-        return ms, path, kernel_name
+        return ms, path, selected_route_name
     except Exception:
         return None, None, None
 
@@ -823,10 +827,10 @@ def main() -> int:
         best_cus: Optional[int] = None
         best_ms: Optional[float] = None
         best_path: str = "n/a"
-        best_kernel_name: str = "n/a"
+        best_route_name: str = "n/a"
 
         for cus in args.num_cus_sweep:
-            ms, path, kname = _run_dsl(
+            ms, path, route_name = _run_dsl(
                 shape,
                 data,
                 cus,
@@ -849,7 +853,7 @@ def main() -> int:
                     best_ms = ms
                     best_cus = cus
                     best_path = path or "n/a"
-                    best_kernel_name = kname or "n/a"
+                    best_route_name = route_name or "n/a"
             else:
                 dsl_results[cus] = {"ms": None, "path": None, "timing_mode": None}
 
@@ -885,7 +889,7 @@ def main() -> int:
         print(
             f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {cu_cols}"
             f"  {best_cus or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
-            f"  {best_path}  {best_timing or 'n/a'}  {best_kernel_name}"
+            f"  {best_path}  {best_timing or 'n/a'}  {best_route_name}"
         )
 
         results.append(
@@ -914,6 +918,7 @@ def main() -> int:
                     best_spd_aot if math.isfinite(best_spd_aot) else None
                 ),
                 "best_path": best_path,
+                "best_selected_route": best_route_name,
                 "best_dsl_timing": best_timing,
                 "flydsl_ms": fly_ms,
                 "flydsl_kv_path": fly_kv_path,

@@ -29,7 +29,7 @@ def fake_runtime(monkeypatch, benchmark, path, *, scoped=False, fail_timer=False
         if benchmark.__name__.split(".")[1] == "gfx950":
             assert request.mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL
         return SimpleNamespace(
-            spec=SimpleNamespace(path=path, kernel_name=lambda: "selected_kernel")
+            spec=SimpleNamespace(path=path, kernel_name=lambda: "selected_route")
         )
 
     def module(name, **attributes):
@@ -40,6 +40,7 @@ def fake_runtime(monkeypatch, benchmark, path, *, scoped=False, fail_timer=False
 
     def ordinary(**arguments):
         assert "execution" not in arguments
+        assert "tuning_spec" not in arguments
         assert arguments["backend"] == ("tiled" if path == "2d" else "3d")
         events.append("ordinary")
 
@@ -125,7 +126,7 @@ def test_default_times_ordinary_calls_without_preparation(monkeypatch, benchmark
     assert benchmark._run_dsl(shape, data, 120, warmup=1, iters=2) == (
         0.125,
         path,
-        "selected_kernel",
+        "selected_route",
     )
     assert events == ["timer", "ordinary", "ordinary", "ordinary", "drain"]
 
@@ -138,7 +139,7 @@ def test_scoped_3d_prepares_outside_timing_and_drains_before_close(
     assert benchmark._run_dsl(shape, data, 120, warmup=1, iters=2, timing="scoped") == (
         0.125,
         "3d",
-        "selected_kernel",
+        "selected_route",
     )
     assert events == [
         "prepare",
@@ -158,7 +159,7 @@ def test_scoped_2d_keeps_ordinary_calls(monkeypatch, benchmark):
     assert benchmark._run_dsl(shape, data, 120, warmup=1, iters=2, timing="scoped") == (
         0.125,
         "2d",
-        "selected_kernel",
+        "selected_route",
     )
     assert events == ["timer", "ordinary", "ordinary", "ordinary", "drain"]
 

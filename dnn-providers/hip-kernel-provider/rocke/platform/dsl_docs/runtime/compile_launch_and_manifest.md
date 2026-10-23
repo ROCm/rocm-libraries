@@ -142,6 +142,22 @@ Construct **once** per (problem-shape, problem-dtype). The HIP module is loaded 
 
 `LaunchConfig.fence=True` (default) makes the launcher synchronize on the launch's completion before returning (`hipStreamSynchronize`). This matches CK Tile's `launch_kernel` contract; the per-call cost is ~0.3 us. `fence=False` is fire-and-forget; the caller must drain (`time_launches` does this under the hood).
 
+For immutable bound calls, retain their operation before enqueue:
+
+```python
+from rocke.runtime import no_fence, retain_until_drain, wait_stream_and_release
+
+with no_fence():
+    for _ in range(batch_size):  # finite batch, on the submitting host thread
+        retain_until_drain(stream, operation, resources=lambda: (input_tensor,))
+        operation()
+wait_stream_and_release(stream)  # submission has stopped; outside host timing
+```
+
+See [bound-owner retention](comgr_and_hipmodule.md#bound-owner-retention) for
+deduplication, failed-drain retry and device rules. Drain finite batches
+periodically; asynchronous submission retains resources until that boundary.
+
 The `no_fence()` context manager forces `fence=False` for every nested launcher call regardless of per-call config; `time_launches` uses it to wrap a timed loop.
 
 ## PipelineLauncher
