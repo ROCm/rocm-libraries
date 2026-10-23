@@ -2591,26 +2591,21 @@ class GlobalWriteBatchWriter:
               # DPP store-fold (SubtileStoreCachelineFill): coalesce two M-adjacent
               # pairs into all-lanes stores.  The fold fires at the SECOND pair (odd
               # pairIdx), coalescing it with the PREVIOUS pair (deferred at the first).
-              # foldable needs only the fold cvt allocation (vgprStoreData>=0); it now
-              # also fires on the guarded / plain-permlane16 path (NLL_C*_PlainNLL, the
-              # flag==0 arm that runs for non-owner / SAV / non-full-tile dispatches),
-              # not just the branch-free full-tile fused arm.  On the guarded path
-              # isFoldSecond takes its SubtileMGuard-gated branch: all-4-M-blocks-valid
-              # -> the coalesced repack, else -> _emitGuardedPairedNoRepack fallback
-              # (which reads the un-clobbered source slots, since the repack and the
-              # fallback are mutually-exclusive branches).
-              foldable = (self.cvtVgprStruct.vgprStoreData >= 0)
-              pairIdx     = tt0 // 2
+              # foldable needs the fold cvt allocation (foldAllocated) AND permlane16: the
+              # repack's cross-lane assembly has a permlane16 and a ds_bpermute path, but only
+              # permlane16 is validated, so the gate is permlane16-only -- MUST match the interior
+              # peel's foldableInterior gate (symmetric: one unverified path, gated off at both
+              # sites).  It fires on the guarded / plain-permlane16 path (NLL_C*_PlainNLL, the
+              # flag==0 arm for non-owner / SAV / non-full-tile dispatches), not just the
+              # branch-free full-tile fused arm.  On the guarded path isFoldSecond takes its
+              # SubtileMGuard-gated branch: all-4-M-blocks-valid -> the coalesced repack, else
+              # -> _emitGuardedPairedNoRepack fallback (which reads the un-clobbered source slots,
+              # since the repack and the fallback are mutually-exclusive branches).
+              foldable = (getattr(self, "_permlane16Active", False)
+                          and self.cvtVgprStruct.foldAllocated)
               prevSba0Idx = elementIdx - 3   # tt0-3 (batchA sba=0, m-lower)
               prevSba1Idx = elementIdx - 2   # tt0-2 (batchA sba=1)
-              def _samePair(i0, i1, ttlo):
-                return (i0 >= 0 and i1 < len(self.batchElements)
-                        and self.batchElements[i0][1] == ttlo
-                        and self.batchElements[i1][1] == ttlo + 1
-                        and self.batchElements[i0][0] == blockIdxN
-                        and self.batchElements[i1][0] == blockIdxN)
-              isFoldFirst  = foldable and (pairIdx % 2 == 0) and _samePair(elementIdx + 1, elementIdx + 2, tt0 + 1)
-              isFoldSecond = foldable and (pairIdx % 2 == 1) and _samePair(prevSba0Idx, prevSba1Idx, tt0 - 3)
+              isFoldFirst, isFoldSecond = self._subtileFoldPairing(elementIdx, tt0, blockIdxN, foldable)
 
               if isFoldFirst:
                 # First pair of a fold: keep the OOB / N-group bookkeeping, DEFER the store.
@@ -2634,6 +2629,9 @@ class GlobalWriteBatchWriter:
                   storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
                                                  comment=f"fold: all 4 M-blocks valid? (MGuard > {tt0})"))
                   storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment="not all valid -> unfolded fallback"))
+                  # EXEC-FULL contract (see repack docstring): the SCC branch above is a SCALAR
+                  # branch -- it does not touch EXEC -- so the repack's cross-lane DPP reads here
+                  # still run under full EXEC.
                   storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
                                         sumIdx0, sumIdx1, partnerAddrCalc, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
                                         forceSlc=fusedA2APushPass))
@@ -2645,10 +2643,12 @@ class GlobalWriteBatchWriter:
                 else:
                   # Fused full-tile path: register only pair P (batchB) gap B, between the two
                   # coalesced stores, for the weave MFMA latency-hiding.
+                  # EXEC-FULL contract (see repack docstring): the full-tile arm runs with full
+                  # EXEC, so the repack's cross-lane DPP reads are valid.
                   wpB = _weavePairIdx if (self._weaveMode and _weavePairIdx is not None) else None
                   storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
                                         sumIdx0, sumIdx1, partnerAddrCalc, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
-                                        weavePairA=None, weavePairB=wpB, forceSlc=fusedA2APushPass))
+                                        weavePairB=wpB, forceSlc=fusedA2APushPass))
                 if skipLabel is not None:
                   storeCodeModule.add(skipLabel)
                 self.storesIssued += 1
@@ -4234,13 +4234,7 @@ class GlobalWriteBatchWriter:
     # (every block provably valid) so the repack runs UNCONDITIONALLY -- no SubtileMGuard
     # both-blocks-valid test.  Requires permlane16 + the fold cvt allocation.  This is the
     # arm that runs for fully-interior tiles, so the fold must be here to execute.
-    foldableInterior = (usePermlane16 and self.cvtVgprStruct.vgprStoreData >= 0)
-    def _samePairInterior(i0, i1, ttlo, bN):
-      return (i0 >= 0 and i1 < len(self.batchElements)
-              and self.batchElements[i0][1] == ttlo
-              and self.batchElements[i1][1] == ttlo + 1
-              and self.batchElements[i0][0] == bN
-              and self.batchElements[i1][0] == bN)
+    foldableInterior = (usePermlane16 and self.cvtVgprStruct.foldAllocated)
     for elementIdx, element in enumerate(self.batchElements):
       tt0 = element[1]
       blockIdxN = element[0]
@@ -4256,11 +4250,7 @@ class GlobalWriteBatchWriter:
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
           # DPP fold: first pair deferred, second pair coalesces prev+this.
-          pairIdx = tt0 // 2
-          isFoldFirst  = (foldableInterior and pairIdx % 2 == 0
-                          and _samePairInterior(elementIdx + 1, elementIdx + 2, tt0 + 1, blockIdxN))
-          isFoldSecond = (foldableInterior and pairIdx % 2 == 1
-                          and _samePairInterior(elementIdx - 3, elementIdx - 2, tt0 - 3, blockIdxN))
+          isFoldFirst, isFoldSecond = self._subtileFoldPairing(elementIdx, tt0, blockIdxN, foldableInterior)
           if isFoldFirst:
             continue   # first pair of the fold: defer, coalesced at the second
           if isFoldSecond:
@@ -4269,9 +4259,11 @@ class GlobalWriteBatchWriter:
             aS0   = self.ss.elementSumIdx[elementIdx - 3]
             aS1   = self.ss.elementSumIdx[elementIdx - 2]
             lowBlockM = tt0 - 3
+            # EXEC-FULL contract (see repack docstring): the interior peel is guard-free (every
+            # block provably valid), so it runs under full EXEC -- the DPP reads are valid.
             mod.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
                       sumIdx0, sumIdx1, partnerAddrCalc, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
-                      weavePairA=None, weavePairB=None, forceSlc=forceSlc))
+                      forceSlc=forceSlc))
             continue
           issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)
         else:
@@ -4603,11 +4595,33 @@ class GlobalWriteBatchWriter:
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
 
+  def _subtileFoldPairing(self, elementIdx, tt0, blockIdxN, foldable):
+    """Single source of truth for DPP fold-pair detection, shared by the boundary store body
+    and the interior peel (they previously duplicated this verbatim).
+
+    The fold coalesces two M-adjacent pairs: pair P-1 (batchA, the EVEN pairIdx) is deferred,
+    and pair P (batchB, the ODD pairIdx) emits the coalesced repack of (prev, this).  A pair is
+    foldable only if the two elements it needs exist in `batchElements`, sit on adjacent tt0
+    rows (ttlo, ttlo+1), and share the SAME N-group (blockIdxN) -- the fold spans M, never N.
+
+    Returns (isFoldFirst, isFoldSecond).  The batchA source indices for the second pair are the
+    fixed stride elementIdx-3 (sba=0) / elementIdx-2 (sba=1); the caller reads those directly.
+    """
+    def _samePair(i0, i1, ttlo):
+      return (i0 >= 0 and i1 < len(self.batchElements)
+              and self.batchElements[i0][1] == ttlo
+              and self.batchElements[i1][1] == ttlo + 1
+              and self.batchElements[i0][0] == blockIdxN
+              and self.batchElements[i1][0] == blockIdxN)
+    pairIdx = tt0 // 2
+    isFoldFirst  = foldable and (pairIdx % 2 == 0) and _samePair(elementIdx + 1, elementIdx + 2, tt0 + 1)
+    isFoldSecond = foldable and (pairIdx % 2 == 1) and _samePair(elementIdx - 3, elementIdx - 2, tt0 - 3)
+    return isFoldFirst, isFoldSecond
+
   def _emit16bitSubtilePairedStoreRepack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
                                          partnerSumIdx0: int, partnerSumIdx1: int, partnerAddrCalc,
                                          tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0,
-                                         weavePairA=None, weavePairB=None, forceSlc: bool = False,
-                                         vPackAPrepacked: int = -1) -> Module:
+                                         weavePairB=None, forceSlc: bool = False) -> Module:
     """DPP store-repack (SubtileStoreCachelineFill) on the Phase1/Phase2 PLSIN path.
 
     Folds this paired store (batchA = sumIdx0/1 at addrCalc, m-rows 0-31) with the
@@ -4617,13 +4631,17 @@ class GlobalWriteBatchWriter:
     four half-line paired stores.  Same store count (2) and bytes written as the two
     un-folded pairs; only the address map changes.
 
-    Cross-lane DPP under partial exec is broken on gfx950 (an exec-inactive source
-    lane returns the destination register's own value), so the blend MUST use
-    v_cndmask with every DPP read under FULL exec -- never exec-masked DPP.
+    HARD PRECONDITION -- FULL EXEC: cross-lane DPP under partial exec is broken on gfx950
+    (an exec-inactive source lane returns the destination register's own value), so the blend
+    uses v_cndmask with an odd-lane mask and every DPP read MUST run under FULL exec -- never
+    exec-masked DPP.  The CALLER guarantees EXEC is full at the call site; the two current call
+    sites both satisfy it (full-tile arm leaves EXEC full; guarded second-pair arm reaches here
+    via a scalar s_cbranch, which does not touch EXEC).  A future edge/align8 change must keep
+    this invariant or the fold silently reads wrong lanes.
 
     Valid only on 256-aligned full macrotiles (the caller gates it on the
     all-4-M-blocks-valid path).  Requires the fold cvt allocation (isSubtileFold),
-    i.e. cvtVgprStruct.vgprStoreData >= 0.
+    i.e. cvtVgprStruct.foldAllocated is True.
     """
     module = Module("16bitSubtilePairedStoreRepack")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
@@ -4635,9 +4653,7 @@ class GlobalWriteBatchWriter:
     isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
 
-    # batchA lives in the ring quad when pre-packed one pair-iteration early
-    # (fold<->ring composition, vPackAPrepacked); otherwise it packs into the cvt quad here.
-    vPack        = vPackAPrepacked if vPackAPrepacked >= 0 else self.cvtVgprStruct.vgprBf16Temp
+    vPack        = self.cvtVgprStruct.vgprBf16Temp   # batchA packed data (cvt quad)
     vVoff        = self.cvtVgprStruct.vgprVoff        # per-store voffset (cndmask result, cvt)
     vBlend       = self.cvtVgprStruct.vgprBlendTmp    # shared temp: odd-data / store-2 even-addr (cvt)
     vPermAddr    = self.cvtVgprStruct.vgprPermAddr
@@ -4650,23 +4666,27 @@ class GlobalWriteBatchWriter:
     # two sba elements' 4-slot windows are never read again.  For subtile kernels the whole
     # ValuC block is pool-RESERVED, so reuse those slots for the batchB pack (vPack2) and the
     # blended store src (vSD) instead of fresh cvt scratch -- never grows the high-water.
-    assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0, \
-      f"ValuC reuse needs 2-aligned batchA element windows (sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
+    # The reuse writes two 4-register windows: [sumIdx0 .. sumIdx0+3] (vPack2) and
+    # [sumIdx1 .. sumIdx1+3] (vSD).  Correctness needs them 2-aligned (dwordx4 store) AND
+    # mutually DISJOINT -- the real hazard is overlap, not parity.  e.g. sumIdx1==sumIdx0+2
+    # passes a parity check but makes the windows alias at regs sumIdx0+2..+3, corrupting the
+    # store silently.  Require >= one full window apart.
+    FOLD_VALUC_WINDOW = 4
+    assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0 \
+           and abs(sumIdx1 - sumIdx0) >= FOLD_VALUC_WINDOW, \
+      f"ValuC reuse needs 2-aligned, disjoint {FOLD_VALUC_WINDOW}-reg batchA windows " \
+      f"(sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
     vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
     vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
 
     permlane16 = getattr(self, "_permlane16Active", False)
 
-    # Convert-interleave (spreading the 8 converts into a gap) is not ported here; emit the
-    # repack monolithically (phase1==phase2==module), which is byte-identical to the spread
-    # form.  The store-gap weave (gap B below) is kept -- that is the latency-hiding that makes
-    # the fold a net win on the block-scheduled path.
-    foldCvtInterleave = False
-    if foldCvtInterleave:
-      phase1Mod = Module("16bitSubtileRepackPhase1")
-      phase2Mod = Module("16bitSubtileRepackPhase2")
-    else:
-      phase1Mod = phase2Mod = module
+    # The repack is emitted monolithically: phase1 (the 8 converts) and phase2 (cross-lane
+    # assembly + the two coalesced stores) are aliases of `module`.  A convert-interleave that
+    # spreads the converts into a scheduling gap is possible future work; it is deliberately NOT
+    # scaffolded here, because emitting into separate phase modules without wiring them back into
+    # `module` would silently drop the body (and void the barrier assert at the end).
+    phase1Mod = phase2Mod = module
 
     def vc(sumIdx, vi):
       idx = sumIdx + vi - prefixOffset
@@ -4677,11 +4697,10 @@ class GlobalWriteBatchWriter:
 
     partnerTt0 = tt0 + 2
     phase1Mod.addComment1(f"DPP repack tt0={tt0}+{partnerTt0}: pack batchA -> v[{vPack}:{vPack+3}], batchB -> v[{vPack2}:{vPack2+3}]")
-    if vPackAPrepacked < 0:
-      packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
-      packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
-      packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
-      packPair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"batchA sba=1 tt0={tt0}[2:3]")
+    packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
+    packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
+    packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
+    packPair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"batchA sba=1 tt0={tt0}[2:3]")
     packPair(vPack2+0, vc(partnerSumIdx0, 0), vc(partnerSumIdx0, 1), f"batchB sba=0 tt0={partnerTt0}[0:1]")
     packPair(vPack2+1, vc(partnerSumIdx0, 2), vc(partnerSumIdx0, 3), f"batchB sba=0 tt0={partnerTt0}[2:3]")
     packPair(vPack2+2, vc(partnerSumIdx1, 0), vc(partnerSumIdx1, 1), f"batchB sba=1 tt0={partnerTt0}[0:1]")
@@ -4727,6 +4746,11 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     # batchB's m-base sits halfLine (=64) bytes above batchA within the same cache line.
     halfLine = (partnerAddrCalc.globalOffset * bpeDest // bpeCurr) - globalOffset
+    # halfLine is emitted as an immediate below; it MUST be a positive half-cacheline offset.
+    # A flipped element order would make it <=0 -> hex() emits a negative/invalid immediate
+    # silently.  Fail loud instead (same spirit as the SRD-bounds asserts).
+    assert halfLine > 0, \
+      f"DPP fold expects batchB above batchA within the cache line (halfLine={halfLine}B)"
 
     # Odd-lane mask (0xAAAA...) for every v_cndmask blend -- set once, never overwritten.
     oddMask = self.tmpS23
@@ -4790,7 +4814,6 @@ class GlobalWriteBatchWriter:
         {"gap": gap, "gapAnchor": flat[-1] if flat else None, "role": role})
       targetMod.add(gap)
 
-    _captureFoldGap(weavePairA, "A", phase2Mod)
     phase2Mod.addComment1("DPP repack store 1: even n-columns (quad_perm [0,0,2,2])")
     emitCoalescedStore(evenPerm=None,      oddPerm=[0,0,2,2], tag=f"even-cols tt0={tt0}")
     _captureFoldGap(weavePairB, "B", phase2Mod)

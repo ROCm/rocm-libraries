@@ -698,8 +698,12 @@ class ProblemPredicate(Properties.Predicate):
         # DPP store-fold is store-bound-only: gate the DPPStoreFold solution to
         # large outputs so the library selects it only when BOTH free dims are
         # >= DPPSF_FOLD_MIN_OUTPUT_DIM and otherwise picks a DPPStoreFold=False
-        # solution.  index 0 = M (free0), index 1 = N (free1); SizeGreaterThan is
-        # strict, hence the -1.
+        # solution.  index 0 = M (free0), index 1 = N (free1) -- same convention as
+        # the SizeEqual/SizeMultiple(index=0/1) CompoundPredicates above use for
+        # MacroTile0/1.  SizeGreaterThan is strict, hence the -1.
+        # NOTE: 4096 is a DELIBERATE conservative threshold, not the measured knee.
+        # The fold's loss->win crossover was measured at ~2.8-3.0k output; 4096 keeps
+        # a safety margin above it.  Do NOT "correct" it down to ~3072 without a sweep.
         if state.get('DPPStoreFold') and DPPSF_FOLD_MIN_OUTPUT_DIM > 0:
             rv += [cls('SizeGreaterThan', index=0, value=DPPSF_FOLD_MIN_OUTPUT_DIM - 1)]
             rv += [cls('SizeGreaterThan', index=1, value=DPPSF_FOLD_MIN_OUTPUT_DIM - 1)]

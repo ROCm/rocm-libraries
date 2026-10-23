@@ -17613,9 +17613,10 @@ class KernelWriterAssembly(KernelWriter):
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
-    # DPP store-fold (SubtileStoreCachelineFill) extras. Allocated only when
-    # isSubtileFold; batchB/store data reuse the +0..+3 pack quad (vgprStoreData==base).
-    vgprStoreData: int = -1       # blended store-data quad (reuses the pack quad)
+    # DPP store-fold (SubtileStoreCachelineFill) extras. Allocated only when isSubtileFold.
+    # foldAllocated is a SENTINEL (True == the 9-reg fold cvt block was reserved); the blended
+    # store src is NOT a dedicated reg -- it lives in a reused dead ValuC slot (vSD=sumIdx1).
+    foldAllocated: bool = False   # fold cvt-block reserved? (gates the fold in GlobalWriteBatch)
     vgprVoff: int = -1            # per-store blended voffset (base vs base+64B by odd-lane mask)
     vgprBlendTmp: int = -1        # scratch for the quad_perm data/addr blend
 
@@ -18311,18 +18312,25 @@ class KernelWriterAssembly(KernelWriter):
         base = 7 if kernel.get("UseSubtileImpl") else 4
         nxt  = base
         # DPP store-fold (SubtileStoreCachelineFill): append 2 cvt VGPRs for the per-store
-        # voffset blend (vVoff) and the quad_perm blend temp (vBlend).  The blended store
-        # data reuses the +0..+3 pack quad (vgprStoreData==cvtVgpr).  The +9-register cvt
-        # footprint is absorbed by the DPPStoreFold-driven operand lend (see
-        # _selectPlsinFusedStorePolicy), so the high-water does not grow.  MIWaveTile[0]==8
-        # is the proven config; other tiles take the fold only if the 9 VGPRs fit.
+        # voffset blend (vVoff) and the quad_perm blend temp (vBlend).  The blended store data
+        # is NOT a dedicated register -- it reuses a dead ValuC slot (see
+        # _emit16bitSubtilePairedStoreRepack).  This cvt footprint is absorbed by the
+        # DPPStoreFold-driven operand lend (see _selectPlsinFusedStorePolicy), so the high-water
+        # does not grow.
+        #
+        # Gate: MIWaveTile[0]==8 is the ONLY config the repack's row/half-line geometry is
+        # validated for.  Admit only that -- dropping the earlier `miwt[0]>=4` reg-fit escape,
+        # which shipped an UNPROVEN codegen path to 4/6-high tiles -- and only when the cvt block
+        # actually fits (footprint derived from the layout, not a bare literal).
+        FOLD_MIWT_PROVEN = 8
         miwt = kernel.get("MIWaveTile", [0, 0])
         maxVgpr = self.states.regCaps["MaxVgpr"]
-        foldFits = (self.vgprPool.size() + 9) <= maxVgpr
-        isSubtileFold = (kernel.get("DPPStoreFold")
-                         and kernel.get("UseSubtileImpl")
-                         and len(miwt) >= 2 and miwt[0] >= 4
-                         and (miwt[0] == 8 or foldFits))
+        foldCvtTotal = base + 2   # shared staging window (base) + foldVoff + foldBlend
+        foldFits = (self.vgprPool.size() + foldCvtTotal) <= maxVgpr
+        isSubtileFold = bool(kernel.get("DPPStoreFold")
+                             and kernel.get("UseSubtileImpl")
+                             and len(miwt) >= 2 and miwt[0] == FOLD_MIWT_PROVEN
+                             and foldFits)
         foldVoff = foldBlend = -1
         if isSubtileFold:
           foldVoff, foldBlend = nxt, nxt + 1
@@ -18355,7 +18363,7 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
                                                numPairPackQuads=pairQuads, \
-                                               vgprStoreData=(cvtVgpr) if isSubtileFold else -1, \
+                                               foldAllocated=isSubtileFold, \
                                                vgprVoff=(cvtVgpr+foldVoff) if isSubtileFold else -1, \
                                                vgprBlendTmp=(cvtVgpr+foldBlend) if isSubtileFold else -1)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
