@@ -28,11 +28,7 @@ from kernels.gfx950.gdn_decode import (
     STATE_DTYPES,
     fuse_conv_heads_error,
 )
-from rocke.dispatch.core import (
-    OperatorRequest,
-    normalize_selector,
-    selector_matches as _shared_selector_matches,
-)
+from rocke.dispatch.core import OperatorRequest, normalize_selector
 from rocke.dispatch.tuning import Knobs, normalize_knobs
 
 FAMILY = "gdn_decode"
@@ -279,7 +275,3 @@ def request_errors(req: OperatorRequest) -> list:
             "spec_id too"
         )
     return errors
-
-
-# Shared pin-selector, re-exported under this family's name (see dispatch core).
-selector_matches = _shared_selector_matches
