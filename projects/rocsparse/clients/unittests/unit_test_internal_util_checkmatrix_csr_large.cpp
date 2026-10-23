@@ -130,7 +130,8 @@ namespace
         {
             if(mat != nullptr)
             {
-                rocsparse_destroy_spmat_descr(mat);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(mat));
             }
         }
 
