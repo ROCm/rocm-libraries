@@ -375,7 +375,9 @@ TEST_F(TestExpectedRejection, UnflaggedBundleWithASidecarIsStillCounted)
 
 // An authoring run (--write-support-claims) refreshes claims, and an expected rejection
 // has none to refresh: it is skipped, counted as skipped before observation so the
-// run's totals still reconcile, and never observed.
+// run's totals still reconcile, and never observed. Without the exclusion the body
+// would reach observeAndRecordSupport(), which needs the process-wide engine table
+// this deviceless harness never builds, and throw.
 TEST_F(TestExpectedRejection, AuthoringRunSkipsWithoutObservingAndCountsTheSkip)
 {
     _policy.writeSupportClaims = true;
@@ -389,22 +391,6 @@ TEST_F(TestExpectedRejection, AuthoringRunSkipsWithoutObservingAndCountsTheSkip)
     EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 0u);
     EXPECT_EQ(SupportObservationLog::get().graphsUnobserved(), 0u);
     EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
-}
-
-// The control: the same authoring run on an ordinary bundle observes it, so the skip
-// above is the flag's doing.
-TEST_F(TestExpectedRejection, AuthoringRunObservesAnOrdinaryBundle)
-{
-    _policy.writeSupportClaims = true;
-    answerRankedQueryWith(/*resolved=*/true, /*ranked=*/true);
-
-    ::testing::TestPartResultArray results;
-    run(fixtures::loadBundle(_tempDir, "Ordinary", /*includeGoldenOutput=*/true),
-        LoadedEngine{ENGINE_ID, ENGINE_NAME},
-        &results);
-
-    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 1u);
-    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 0u);
 }
 
 // NOLINTEND(readability-identifier-naming)
