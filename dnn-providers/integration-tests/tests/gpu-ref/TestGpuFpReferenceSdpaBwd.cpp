@@ -1,0 +1,585 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+// GPU SDPA backward reference vs CPU backward reference. O and LSE come from the CPU forward, so
+// the inputs are a real attention; GPU outputs start as NaN so an element the kernels skip fails.
+
+#include "ConvShapeCase.hpp" // for gpu_conv_ref_test::assertAllClose
+#include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <string>
+#include <vector>
+
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref;
+using gpu_conv_ref_test::assertAllClose;
+
+namespace
+{
+
+struct BwdCase
+{
+    const char* name;
+    int64_t batch;
+    int64_t heads;
+    int64_t headsK;
+    int64_t headsV;
+    int64_t seqQ;
+    int64_t seqKv;
+    int64_t headDim;
+    int64_t headDimV;
+    bool useLse;
+    std::vector<int64_t> biasDims; // empty = no bias
+    bool dBias;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeft;
+    std::vector<int32_t> lensQ; // empty = no padding
+    std::vector<int32_t> lensKv;
+    bool deadRow; // bias masks every key of query row 1
+};
+
+std::string caseName(const ::testing::TestParamInfo<BwdCase>& info)
+{
+    return info.param.name;
+}
+
+constexpr float TOL_FP32 = 1e-4f;
+
+} // namespace
+
+class TestGpuSdpaBwdFp32 : public ::testing::TestWithParam<BwdCase>
+{
+};
+
+TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& c = GetParam();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const std::vector<int64_t> qDims = {c.batch, c.heads, c.seqQ, c.headDim};
+    const std::vector<int64_t> kDims = {c.batch, c.headsK, c.seqKv, c.headDim};
+    const std::vector<int64_t> vDims = {c.batch, c.headsV, c.seqKv, c.headDimV};
+    const std::vector<int64_t> oDims = {c.batch, c.heads, c.seqQ, c.headDimV};
+
+    Tensor<float> q(qDims);
+    Tensor<float> k(kDims);
+    Tensor<float> v(vDims);
+    Tensor<float> o(oDims);
+    Tensor<float> dO(oDims);
+    Tensor<float> lse({c.batch, c.heads, c.seqQ, 1});
+    q.fillWithRandomValues(-1.0f, 1.0f, 201);
+    k.fillWithRandomValues(-1.0f, 1.0f, 202);
+    v.fillWithRandomValues(-1.0f, 1.0f, 203);
+    dO.fillWithRandomValues(-1.0f, 1.0f, 204);
+
+    std::optional<Tensor<float>> bias;
+    if(!c.biasDims.empty())
+    {
+        bias.emplace(c.biasDims);
+        bias->fillWithRandomValues(-1.0f, 1.0f, 205);
+        if(c.deadRow)
+        {
+            // Bias [Sq, Skv]-shaped cases only: row 1 sees no key.
+            for(int64_t j = 0; j < c.seqKv; ++j)
+            {
+                std::vector<int64_t> idx(c.biasDims.size(), 0);
+                idx[idx.size() - 2] = 1;
+                idx[idx.size() - 1] = j;
+                bias->setHostValue(-std::numeric_limits<float>::infinity(), idx);
+            }
+        }
+    }
+
+    std::optional<Tensor<int32_t>> seqLenQ;
+    std::optional<Tensor<int32_t>> seqLenKv;
+    if(!c.lensQ.empty())
+    {
+        seqLenQ.emplace(std::vector<int64_t>{c.batch, 1, 1, 1});
+        seqLenKv.emplace(std::vector<int64_t>{c.batch, 1, 1, 1});
+        for(int64_t b = 0; b < c.batch; ++b)
+        {
+            seqLenQ->setHostValue(c.lensQ[static_cast<size_t>(b)], b, 0, 0, 0);
+            seqLenKv->setHostValue(c.lensKv[static_cast<size_t>(b)], b, 0, 0, 0);
+            // NaN in every pad: neither reference may read it.
+            for(int64_t h = 0; h < c.heads; ++h)
+            {
+                for(int64_t s = c.lensQ[static_cast<size_t>(b)]; s < c.seqQ; ++s)
+                {
+                    for(int64_t d = 0; d < c.headDim; ++d)
+                    {
+                        q.setHostValue(nan, b, h, s, d);
+                    }
+                    for(int64_t d = 0; d < c.headDimV; ++d)
+                    {
+                        dO.setHostValue(nan, b, h, s, d);
+                    }
+                }
+            }
+            for(int64_t s = c.lensKv[static_cast<size_t>(b)]; s < c.seqKv; ++s)
+            {
+                for(int64_t h = 0; h < c.headsK; ++h)
+                {
+                    for(int64_t d = 0; d < c.headDim; ++d)
+                    {
+                        k.setHostValue(nan, b, h, s, d);
+                    }
+                }
+                for(int64_t h = 0; h < c.headsV; ++h)
+                {
+                    for(int64_t d = 0; d < c.headDimV; ++d)
+                    {
+                        v.setHostValue(nan, b, h, s, d);
+                    }
+                }
+            }
+        }
+    }
+    auto* biasPtr = bias.has_value() ? &bias.value() : nullptr;
+    auto* seqQPtr = seqLenQ.has_value() ? &seqLenQ.value() : nullptr;
+    auto* seqKvPtr = seqLenKv.has_value() ? &seqLenKv.value() : nullptr;
+
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                0.4f,
+                                static_cast<const TensorBase<float>*>(biasPtr),
+                                c.leftBound,
+                                c.rightBound,
+                                c.topLeft,
+                                &lse,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                seqQPtr,
+                                seqKvPtr);
+
+    Tensor<float> dQCpu(qDims);
+    Tensor<float> dKCpu(kDims);
+    Tensor<float> dVCpu(vDims);
+    Tensor<float> dQGpu(qDims);
+    Tensor<float> dKGpu(kDims);
+    Tensor<float> dVGpu(vDims);
+    std::optional<Tensor<float>> dBiasCpu;
+    std::optional<Tensor<float>> dBiasGpu;
+    if(c.dBias)
+    {
+        dBiasCpu.emplace(c.biasDims);
+        dBiasGpu.emplace(c.biasDims);
+        dBiasGpu->fillWithValue(nan);
+    }
+    dQGpu.fillWithValue(nan);
+    dKGpu.fillWithValue(nan);
+    dVGpu.fillWithValue(nan);
+    for(auto* t : {&q, &k, &v, &o, &dO, &lse})
+    {
+        t->memory().hostData();
+    }
+
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQCpu,
+                                 dKCpu,
+                                 dVCpu,
+                                 0.4f,
+                                 c.useLse ? &lse : nullptr,
+                                 static_cast<const TensorBase<float>*>(biasPtr),
+                                 c.leftBound,
+                                 c.rightBound,
+                                 c.topLeft,
+                                 dBiasCpu.has_value() ? &dBiasCpu.value() : nullptr,
+                                 seqQPtr,
+                                 seqKvPtr);
+    GpuFpReferenceSdpa::bprop(q,
+                              k,
+                              v,
+                              o,
+                              dO,
+                              dQGpu,
+                              dKGpu,
+                              dVGpu,
+                              0.4f,
+                              c.useLse ? &lse : nullptr,
+                              static_cast<TensorBase<float>*>(biasPtr),
+                              c.leftBound,
+                              c.rightBound,
+                              c.topLeft,
+                              dBiasGpu.has_value() ? &dBiasGpu.value() : nullptr,
+                              seqQPtr,
+                              seqKvPtr);
+
+    assertAllClose(dQCpu, dQGpu, TOL_FP32);
+    assertAllClose(dKCpu, dKGpu, TOL_FP32);
+    assertAllClose(dVCpu, dVGpu, TOL_FP32);
+    if(c.dBias)
+    {
+        assertAllClose(dBiasCpu.value(), dBiasGpu.value(), TOL_FP32);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestGpuSdpaBwdFp32,
+    ::testing::Values(
+        BwdCase{"Plain", 2, 4, 4, 4, 7, 11, 16, 16, true, {}, false, -1, -1, true, {}, {}, false},
+        BwdCase{"PlainRecompute",
+                2,
+                4,
+                4,
+                4,
+                7,
+                11,
+                16,
+                16,
+                false,
+                {},
+                false,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"GqaKvHeadsDiffer",
+                1,
+                8,
+                2,
+                4,
+                5,
+                9,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"GqaKvHeadsDifferSwapped",
+                1,
+                8,
+                4,
+                2,
+                5,
+                9,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"Mqa", 2, 4, 1, 1, 5, 9, 8, 8, true, {}, false, -1, -1, true, {}, {}, false},
+        BwdCase{"DqkGtDv", 1, 2, 2, 2, 6, 8, 24, 8, true, {}, false, -1, -1, true, {}, {}, false},
+        BwdCase{"DqkLtDv", 1, 2, 2, 2, 6, 8, 8, 24, true, {}, false, -1, -1, true, {}, {}, false},
+        BwdCase{"CausalTopLeftSqLtSkv",
+                2,
+                2,
+                2,
+                2,
+                5,
+                9,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"CausalBottomRightSqLtSkv",
+                2,
+                2,
+                2,
+                2,
+                5,
+                9,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                false,
+                {},
+                {},
+                false},
+        BwdCase{"CausalBottomRightSqGtSkv",
+                2,
+                2,
+                2,
+                2,
+                9,
+                5,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                false,
+                {},
+                {},
+                false},
+        BwdCase{"DecodeBottomRight",
+                2,
+                2,
+                2,
+                2,
+                1,
+                7,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                false,
+                {},
+                {},
+                false},
+        BwdCase{
+            "BandBothBounds", 1, 2, 2, 2, 7, 9, 8, 8, true, {}, false, 2, 1, true, {}, {}, false},
+        BwdCase{"BandBottomRightRecompute",
+                1,
+                2,
+                2,
+                2,
+                7,
+                9,
+                8,
+                8,
+                false,
+                {},
+                false,
+                3,
+                0,
+                false,
+                {},
+                {},
+                false},
+        BwdCase{"BiasFullDBias",
+                2,
+                2,
+                2,
+                2,
+                5,
+                7,
+                8,
+                8,
+                true,
+                {2, 2, 5, 7},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"BiasPerHeadDBias",
+                2,
+                2,
+                2,
+                2,
+                5,
+                7,
+                8,
+                8,
+                true,
+                {1, 2, 5, 7},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"BiasPerKeyDBias",
+                2,
+                2,
+                2,
+                2,
+                5,
+                7,
+                8,
+                8,
+                true,
+                {2, 1, 1, 7},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"BiasSqSkvDBiasGqa",
+                2,
+                4,
+                2,
+                2,
+                5,
+                7,
+                8,
+                8,
+                true,
+                {5, 7},
+                true,
+                -1,
+                0,
+                false,
+                {},
+                {},
+                false},
+        BwdCase{"BiasScalarDBias",
+                1,
+                2,
+                2,
+                2,
+                5,
+                7,
+                8,
+                8,
+                true,
+                {1, 1, 1, 1},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                false},
+        BwdCase{"DeadRowWithLse",
+                1,
+                2,
+                2,
+                2,
+                4,
+                6,
+                8,
+                8,
+                true,
+                {4, 6},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                true},
+        BwdCase{"DeadRowRecompute",
+                1,
+                2,
+                2,
+                2,
+                4,
+                6,
+                8,
+                8,
+                false,
+                {4, 6},
+                true,
+                -1,
+                -1,
+                true,
+                {},
+                {},
+                true},
+        BwdCase{"PaddingNoMask",
+                3,
+                2,
+                2,
+                2,
+                9,
+                12,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                -1,
+                true,
+                {4, 9, 2},
+                {12, 5, 7},
+                false},
+        BwdCase{"PaddingCausalBottomRight",
+                3,
+                2,
+                2,
+                2,
+                9,
+                12,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                false,
+                {4, 9, 2},
+                {12, 5, 7},
+                false},
+        BwdCase{"PaddingRecomputeTopLeft",
+                3,
+                2,
+                2,
+                2,
+                9,
+                12,
+                8,
+                8,
+                false,
+                {},
+                false,
+                -1,
+                0,
+                true,
+                {4, 9, 2},
+                {12, 5, 7},
+                false},
+        BwdCase{"PaddingBiasDBiasBottomRight",
+                3,
+                2,
+                2,
+                2,
+                9,
+                12,
+                8,
+                8,
+                true,
+                {9, 12},
+                true,
+                -1,
+                0,
+                false,
+                {4, 9, 2},
+                {12, 5, 7},
+                false}),
+    caseName);

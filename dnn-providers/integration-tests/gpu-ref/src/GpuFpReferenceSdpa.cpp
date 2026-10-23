@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
@@ -19,6 +20,26 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefSdpaArgs.h> // NOLINT(misc-include-cleaner)
+
+// RAII fp32 device scratch for the backward row stats.
+struct DeviceScratch
+{
+    explicit DeviceScratch(int64_t count)
+    {
+        detail::throwOnHipError(
+            hipMalloc(&data, static_cast<size_t>(count > 0 ? count : 1) * sizeof(float)),
+            "hipMalloc");
+    }
+    ~DeviceScratch()
+    {
+        static_cast<void>(hipFree(data));
+    }
+    DeviceScratch(const DeviceScratch&) = delete;
+    DeviceScratch& operator=(const DeviceScratch&) = delete;
+    DeviceScratch(DeviceScratch&&) = delete;
+    DeviceScratch& operator=(DeviceScratch&&) = delete;
+    float* data = nullptr;
+};
 
 SdpaStrides toSdpaStrides(const std::vector<int64_t>& strides)
 {
@@ -119,6 +140,88 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
 
     auto totalElements = batch * numHeads * seqQ * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
+}
+
+// --- SDPA backward kernel launcher ---
+
+void GpuFpReferenceSdpa::launchSdpaBwd(const SdpaBwdLaunch& launch,
+                                       const std::vector<std::string>& defines)
+{
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto rows = launch.batch * launch.numHeads * launch.seqQ;
+    // Row-stats scratch: D, and the LSE or the recomputed max and exp-sum (fp32 [B, H, Sq]).
+    const DeviceScratch rowD(rows);
+    const DeviceScratch rowM(rows);
+    const DeviceScratch rowL(rows);
+
+    SdpaBwdArgs args{};
+    args.q = launch.q;
+    args.k = launch.k;
+    args.v = launch.v;
+    args.o = launch.o;
+    args.dO = launch.dO;
+    args.mask = launch.mask;
+    args.lse = launch.lse;
+    args.dQ = launch.dQ;
+    args.dK = launch.dK;
+    args.dV = launch.dV;
+    args.dBias = launch.dBias;
+    args.rowD = rowD.data;
+    args.rowM = rowM.data;
+    args.rowL = rowL.data;
+    const auto& st = launch.strides;
+    args.qStr = toSdpaStrides(st[0]);
+    args.kStr = toSdpaStrides(st[1]);
+    args.vStr = toSdpaStrides(st[2]);
+    args.oStr = toSdpaStrides(st[3]);
+    args.dOStr = toSdpaStrides(st[4]);
+    args.dQStr = toSdpaStrides(st[5]);
+    args.dKStr = toSdpaStrides(st[6]);
+    args.dVStr = toSdpaStrides(st[7]);
+    args.maskStr = toSdpaStrides(st[8]);
+    args.dBiasStr = toSdpaStrides(st[9]);
+    args.lseStr = toSdpaStrides(st[10]);
+    args.batch = static_cast<long long>(launch.batch);
+    args.numHeads = static_cast<long long>(launch.numHeads);
+    args.numHeadsK = static_cast<long long>(launch.numHeadsK);
+    args.numHeadsV = static_cast<long long>(launch.numHeadsV);
+    args.seqQ = static_cast<long long>(launch.seqQ);
+    args.seqKv = static_cast<long long>(launch.seqKv);
+    args.headDim = static_cast<long long>(launch.headDim);
+    args.headDimV = static_cast<long long>(launch.headDimV);
+    args.maskRank = static_cast<int>(launch.maskDims.size());
+    for(size_t i = 0; i < launch.maskDims.size() && i < 4; ++i)
+    {
+        args.maskDims[i] = static_cast<long long>(launch.maskDims[i]);
+    }
+    args.scale = launch.scale;
+    args.leftBound = static_cast<long long>(launch.leftBound);
+    args.rightBound = static_cast<long long>(launch.rightBound);
+    args.topLeftAlignment = launch.topLeftAlignment ? 1 : 0;
+    args.seqLenQ = launch.seqLenQ;
+    args.seqLenKv = launch.seqLenKv;
+    args.seqLenQStride = static_cast<long long>(launch.seqLenQStride);
+    args.seqLenKvStride = static_cast<long long>(launch.seqLenKvStride);
+
+    const auto run = [&](const char* name, int64_t elements) {
+        auto& kernel = compiler.getOrCompile("GpuRefSdpaBwd.cpp", defines, name);
+        detail::launchKernelForElements(kernel.function(), elements, &args, sizeof(args));
+    };
+    run("sdpaBwdRowStatsRef", rows);
+    run("sdpaBwdDqRef", rows * launch.headDim);
+    run("sdpaBwdDkRef", launch.batch * launch.numHeadsK * launch.seqKv * launch.headDim);
+    run("sdpaBwdDvRef", launch.batch * launch.numHeadsV * launch.seqKv * launch.headDimV);
+    if(launch.dBias != nullptr)
+    {
+        int64_t count = 1;
+        for(const auto dim : launch.maskDims)
+        {
+            count *= dim;
+        }
+        run("sdpaBwdDBiasRef", count);
+    }
+    // The scratch buffers are freed on return; finish the launches that read them first.
+    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
 }
 
 } // namespace hipdnn_gpu_ref

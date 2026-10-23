@@ -7,6 +7,7 @@
 #include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -264,7 +265,201 @@ public:
         }
     }
 
+    // --- Backward SDPA (bprop): dQ, dK, dV and optional dBias ---
+    //
+    // Same parameters, order and semantics as CpuFpReferenceSdpa::backward: fp32 accumulation,
+    // D = sum(dO * O) from the given O, LSE (rank 3 [B, H, Sq] or rank 4 [B, H, Sq, 1]) or
+    // softmax recompute when lse is null, additive bias with broadcast and dBias (unscaled dS
+    // summed into the bias shape), diagonal band, GQA/MQA with independent K and V heads,
+    // Dqk != Dv, and seq_len padding (padded rows and keys get exactly 0 and are never read).
+    template <class QDataType,
+              class KDataType = QDataType,
+              class VDataType = QDataType,
+              class ODataType = QDataType,
+              class DODataType = ODataType,
+              class DQDataType = QDataType,
+              class DKDataType = KDataType,
+              class DVDataType = VDataType,
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
+    static void bprop(
+        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+        hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+        hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+        hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+        std::optional<float> attnScaleValue = std::nullopt,
+        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
+            attnMask
+        = nullptr,
+        int64_t leftBound = -1,
+        int64_t rightBound = -1,
+        bool topLeftAlignment = true,
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
+            dBias
+        = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenQ = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<int32_t>* seqLenKv = nullptr)
+    {
+        validateInput(q.dims(), k.dims(), v.dims(), o.dims());
+        const auto batch = q.dims()[0];
+        const auto numHeads = q.dims()[1];
+        const auto seqQ = q.dims()[2];
+        const auto seqKv = k.dims()[2];
+        const auto headDim = q.dims()[3];
+        const auto headDimV = v.dims()[3];
+        const auto expect = [](bool ok, const char* what) {
+            if(!ok)
+            {
+                throw std::invalid_argument(std::string("GpuFpReferenceSdpa::bprop: ") + what);
+            }
+        };
+        expect(dO.dims() == o.dims(), "dO must have O's shape");
+        expect(dQ.dims() == q.dims(), "dQ must have Q's shape");
+        expect(dK.dims() == k.dims(), "dK must have K's shape");
+        expect(dV.dims() == v.dims(), "dV must have V's shape");
+        if(lse != nullptr)
+        {
+            const auto& ld = lse->dims();
+            expect((ld.size() == 3 || (ld.size() == 4 && ld[3] == 1)) && ld[0] == batch
+                       && ld[1] == numHeads && ld[2] == seqQ,
+                   "lse must be [B, H, Sq] or [B, H, Sq, 1]");
+        }
+        std::vector<int64_t> maskDims;
+        if(attnMask != nullptr)
+        {
+            maskDims = attnMask->dims();
+            expect(!maskDims.empty() && maskDims.size() <= 4, "attention mask must be rank 1..4");
+            const std::array<int64_t, 4> full = {batch, numHeads, seqQ, seqKv};
+            for(size_t i = 0; i < maskDims.size(); ++i)
+            {
+                const auto ctx = full[4 - maskDims.size() + i];
+                expect(maskDims[i] == 1 || maskDims[i] == ctx,
+                       "each attention mask dim must be 1 or the full size");
+            }
+        }
+        expect(dBias == nullptr || (attnMask != nullptr && dBias->dims() == maskDims),
+               "dBias requires an attention mask of the same shape");
+        expect((seqLenQ == nullptr) == (seqLenKv == nullptr),
+               "seqLenQ and seqLenKv must be given together");
+        for(auto* len : {seqLenQ, seqLenKv})
+        {
+            expect(len == nullptr
+                       || (static_cast<int64_t>(len->elementCount()) == batch
+                           && !len->dims().empty() && len->dims()[0] == batch),
+                   "seq_len tensors must hold one value per batch");
+        }
+
+        std::vector<std::string> defines
+            = {std::string("-DQ_TYPE=") + detail::HipRtcTypeName<QDataType>::VALUE,
+               std::string("-DK_TYPE=") + detail::HipRtcTypeName<KDataType>::VALUE,
+               std::string("-DV_TYPE=") + detail::HipRtcTypeName<VDataType>::VALUE,
+               std::string("-DO_TYPE=") + detail::HipRtcTypeName<ODataType>::VALUE,
+               std::string("-DDO_TYPE=") + detail::HipRtcTypeName<DODataType>::VALUE,
+               std::string("-DDQ_TYPE=") + detail::HipRtcTypeName<DQDataType>::VALUE,
+               std::string("-DDK_TYPE=") + detail::HipRtcTypeName<DKDataType>::VALUE,
+               std::string("-DDV_TYPE=") + detail::HipRtcTypeName<DVDataType>::VALUE,
+               std::string("-DMASK_TYPE=") + detail::HipRtcTypeName<MaskDataType>::VALUE,
+               std::string("-DCOMPUTE_TYPE=") + detail::HipRtcTypeName<ComputeDataType>::VALUE};
+
+        SdpaBwdLaunch launch;
+        launch.q = q.memory().deviceData();
+        launch.k = k.memory().deviceData();
+        launch.v = v.memory().deviceData();
+        launch.o = o.memory().deviceData();
+        launch.dO = dO.memory().deviceData();
+        launch.dQ = dQ.memory().deviceData();
+        launch.dK = dK.memory().deviceData();
+        launch.dV = dV.memory().deviceData();
+        launch.mask = attnMask != nullptr ? attnMask->memory().deviceData() : nullptr;
+        launch.dBias = dBias != nullptr ? dBias->memory().deviceData() : nullptr;
+        launch.lse
+            = lse != nullptr ? static_cast<const float*>(lse->memory().deviceData()) : nullptr;
+        launch.seqLenQ = seqLenQ != nullptr
+                             ? static_cast<const int32_t*>(seqLenQ->memory().deviceData())
+                             : nullptr;
+        launch.seqLenKv = seqLenKv != nullptr
+                              ? static_cast<const int32_t*>(seqLenKv->memory().deviceData())
+                              : nullptr;
+        launch.strides = {q.strides(),
+                          k.strides(),
+                          v.strides(),
+                          o.strides(),
+                          dO.strides(),
+                          dQ.strides(),
+                          dK.strides(),
+                          dV.strides(),
+                          attnMask != nullptr ? attnMask->strides() : std::vector<int64_t>{},
+                          dBias != nullptr ? dBias->strides() : std::vector<int64_t>{},
+                          lse != nullptr ? lse->strides() : std::vector<int64_t>{}};
+        launch.seqLenQStride = seqLenQ != nullptr ? seqLenQ->strides()[0] : 0;
+        launch.seqLenKvStride = seqLenKv != nullptr ? seqLenKv->strides()[0] : 0;
+        launch.maskDims = maskDims;
+        launch.batch = batch;
+        launch.numHeads = numHeads;
+        launch.numHeadsK = k.dims()[1];
+        launch.numHeadsV = v.dims()[1];
+        launch.seqQ = seqQ;
+        launch.seqKv = seqKv;
+        launch.headDim = headDim;
+        launch.headDimV = headDimV;
+        launch.scale = attnScaleValue.value_or(1.0F);
+        launch.leftBound = leftBound;
+        launch.rightBound = rightBound;
+        launch.topLeftAlignment = topLeftAlignment;
+        launchSdpaBwd(launch, defines);
+
+        dQ.memory().markDeviceModified();
+        dK.memory().markDeviceModified();
+        dV.memory().markDeviceModified();
+        if(dBias != nullptr)
+        {
+            dBias->memory().markDeviceModified();
+        }
+    }
+
 private:
+    // Host-side description of one backward launch (device pointers, strides and sizes).
+    struct SdpaBwdLaunch
+    {
+        const void* q = nullptr;
+        const void* k = nullptr;
+        const void* v = nullptr;
+        const void* o = nullptr;
+        const void* dO = nullptr;
+        void* dQ = nullptr;
+        void* dK = nullptr;
+        void* dV = nullptr;
+        const void* mask = nullptr;
+        void* dBias = nullptr;
+        const float* lse = nullptr;
+        const int32_t* seqLenQ = nullptr;
+        const int32_t* seqLenKv = nullptr;
+        // q, k, v, o, dO, dQ, dK, dV, mask, dBias, lse
+        std::array<std::vector<int64_t>, 11> strides;
+        int64_t seqLenQStride = 0;
+        int64_t seqLenKvStride = 0;
+        std::vector<int64_t> maskDims;
+        int64_t batch = 0;
+        int64_t numHeads = 0;
+        int64_t numHeadsK = 0;
+        int64_t numHeadsV = 0;
+        int64_t seqQ = 0;
+        int64_t seqKv = 0;
+        int64_t headDim = 0;
+        int64_t headDimV = 0;
+        float scale = 1.0F;
+        int64_t leftBound = -1;
+        int64_t rightBound = -1;
+        bool topLeftAlignment = true;
+    };
+
+    static void launchSdpaBwd(const SdpaBwdLaunch& launch, const std::vector<std::string>& defines);
+
     // --- Validation ---
     // No SDPA param validator exists; perform minimal shape checks only.
 
