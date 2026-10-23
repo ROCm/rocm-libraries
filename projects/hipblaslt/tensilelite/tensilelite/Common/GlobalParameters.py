@@ -198,6 +198,13 @@ globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+# Where A/B data come from. None keeps the default: mxDataGenerator for MX inputs only.
+# True:  A/B come from mxDataGenerator whether MX or not (non-MX A/B must be FP8/BF8), so F8 and
+#        MXF8 runs of the same problem get the same A/B bytes.
+# False: A/B use DataInitTypeA/B through the non-MX init path whether MX or not (Trig gives the
+#        plain F8 pattern) and MX scales use DataInitTypeMXSA/MXSB. MX data must be FP8/BF8/FP4
+#        (MXF8, MXF4, NVF4).
+globalParameters["MXDataGenerator"] = None
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
 # does not select a compiled tile-processing or work-assignment family.
@@ -666,6 +673,10 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
+    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
+    # -2 reads each cluster's XCC from the hardware.
+    {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
 ]
@@ -776,6 +787,7 @@ globalParameterTypeOverrides = {
     "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
+    "MXDataGenerator":         {type(None), bool},  # unset keeps the per-problem default
 }
 
 

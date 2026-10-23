@@ -178,7 +178,9 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmTail) \
         X_MACRO(RR_QuotientTilesByBlock) \
         X_MACRO(RR_MagicMultipleWgmMainBlock) \
-        X_MACRO(RR_MagicShiftAndSignWgmMainBlock)
+        X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
+        X_MACRO(AddressScaleZeroA) \
+        X_MACRO(ScaleBlockSizeA)
 
     enum class CustomArgSemantic
     {
@@ -475,6 +477,8 @@ namespace TensileLite
         int temporalHintB = 0;
 
         bool hasTemporalHint = false;
+        bool BufferLoad = true;
+        bool BufferStore = true;
 
         int cacheHintA() const
         {
@@ -1367,6 +1371,8 @@ namespace TensileLite
             bool swizzleTensorB             = false;
             bool fusedGemmA2A               = false;
             int  metadataLayout             = 0;
+            // w4a16 group size, zero-point and encoding come from predicates and the problem;
+            // a runtime-group kernel matches several group sizes.
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;

@@ -299,6 +299,20 @@ class ProblemType:
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
+        # W4A16 group scaling is independent of scalar/vector operand scales.
+        # Required for int4 A: one entry = fixed group; several = runtime group.
+        groups = d.get('ScaleBlockSizesA', [])
+        if not isinstance(groups, (list, tuple)):
+            raise ValueError("ScaleBlockSizesA must be a list of supported groups")
+        if any(type(g) is not int or g not in (32, 64, 128) for g in groups):
+            raise ValueError("ScaleBlockSizesA entries must be 32, 64 or 128")
+        if rv.aType.isInt4() and not groups:
+            raise ValueError("ScaleBlockSizesA must be non-empty for int4 A (W4A16)")
+        if groups and not rv.aType.isInt4():
+            raise ValueError("ScaleBlockSizesA requires int4 A")
+        rv.scaleBlockSizesA = tuple(sorted(set(groups)))
+        rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
+        rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
         rv.useScaleCD = False
         if 'UseScaleCD' in d:
             rv.useScaleCD = d['UseScaleCD']
@@ -458,6 +472,15 @@ class ProblemType:
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
+            if self.scaleBlockSizesA:
+                if len(self.scaleBlockSizesA) > 1:
+                    predicates.append(ProblemPredicate("Or", value=[
+                        ProblemPredicate("ScaleBlockSizeA", value=g)
+                        for g in self.scaleBlockSizesA]))
+                else:
+                    predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizesA[0]))
+                predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
+                predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))
             predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
             predicates.append(ProblemPredicate("Sparse", value=self.sparse))
@@ -807,7 +830,9 @@ class SizeMapping:
                  'DirectToLdsA',
                  'DirectToLdsB',
                  'ExpertSchedulingMode',
-                 'clusterDim'
+                 'clusterDim',
+                 'BufferLoad',
+                 'BufferStore'
                  ]
 
     @classmethod
@@ -907,7 +932,15 @@ class SizeMapping:
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim']
+                   clusterDim               = d['ClusterDim'],
+                   # BufferLoad/BufferStore were only added to SizeMapping's
+                   # serialized state by this change, so libraries built before
+                   # it won't have these keys; default to True (the prior,
+                   # implicit behavior) for backward compatibility, matching
+                   # the other newly-added-but-optional fields above (e.g.
+                   # PrefetchAcrossPersistent, TemporalHintA/B).
+                   BufferLoad               = bool(d.get('BufferLoad', True)),
+                   BufferStore              = bool(d.get('BufferStore', True))
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
