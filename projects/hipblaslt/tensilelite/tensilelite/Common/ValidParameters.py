@@ -417,7 +417,6 @@ validParameters = { # we need to make sure this matches develop
     #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
     #     the WaveTile/2 case needs TDMSplit
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
-    # See SolutionStructs/segment_interleave.py for layout and buffering constraints.
     #
     # Values:
     #    0 = off (default).

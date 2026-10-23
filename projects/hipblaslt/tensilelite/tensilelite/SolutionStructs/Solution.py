@@ -63,7 +63,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
-from ..Common.GlobalParameters import defaultSolution, \
+from ..Common.GlobalParameters import globalParameters, defaultSolution, \
                                             defaultInternalSupportParams
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
@@ -75,6 +75,7 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
+from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
@@ -846,6 +847,10 @@ class Solution(collections.abc.Mapping):
     # To avoid duplicates and noise from cascading issues.
     if not pre_records:
       mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
+
+    if (globalParameters["PrintLDSLayout"] and self["Valid"]
+        and not isHandwrittenCustomKernel and "LdsNumBytes" in self._state):
+      print(format_lds_layout(self._state, str(self)), flush=True)
 
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
