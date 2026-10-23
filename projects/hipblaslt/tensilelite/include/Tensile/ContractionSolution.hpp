@@ -181,7 +181,24 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* rocRoller Stream-K kernargs. rocRoller hoists its whole work
+           decomposition into kernargs; these are the host-evaluated values of
+           the .expression trees in the kernel's .amdgpu_metadata. The two
+           address slots are the partial-tile scratch and the per-workgroup
+           flag region. See RocRollerStreamKKernargs.hpp. */ \
+        X_MACRO(RR_SKNumTiles1) \
+        X_MACRO(RR_SKNumWGs) \
+        X_MACRO(RR_SKNumSKTiles) \
+        X_MACRO(RR_SKNumSKTilesPerWG) \
+        X_MACRO(RR_SKNumDPTiles) \
+        X_MACRO(RR_SKNumDPTilesPerWG) \
+        X_MACRO(RR_SKMagicMultipleIters) \
+        X_MACRO(RR_SKMagicShiftsIters) \
+        X_MACRO(RR_SKMagicMultipleNumTiles1) \
+        X_MACRO(RR_SKMagicShiftsNumTiles1) \
+        X_MACRO(RR_SKAddressPartials) \
+        X_MACRO(RR_SKAddressFlags)
 
     enum class CustomArgSemantic
     {
@@ -224,6 +241,16 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        // rocRoller's Stream-K decomposition is its own partitioning, carried
+        // in the kernargs above; it must not be routed through Tensile's.
+        //
+        // The identifier is suffixed only because this enum is unscoped: a bare
+        // RocRollerStreamK here would redeclare CustomWorkspaceType's
+        // enumerator of that name in the same namespace. The SERIALISED STRING
+        // is still "RocRollerStreamK" -- that is the contract with the logic
+        // files CustomKernels.py emits. Do not "fix" the toString to match the
+        // identifier.
+        RocRollerStreamKGrid,
         CustomGridSize_Count,
     };
 
@@ -238,6 +265,9 @@ namespace TensileLite
         SplitK,
         StreamK,
         StreamKWithReduction,
+        // One partial tile per workgroup, always reserved: rocRoller emits
+        // partials whenever tiles >= grid, with no `tiles % grid` exemption.
+        RocRollerStreamK,
         CustomWorkspaceType_Count,
     };
 
@@ -263,6 +293,10 @@ namespace TensileLite
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
         // paths must treat them like the legacy non-custom case.
         bool generated = false;
+        // Workgroups this kernel can keep resident per CU. Captured metadata
+        // only: nothing reads it yet. It is the input a later grid-selection
+        // refinement needs (see rocRollerStreamKGrid).
+        size_t occupancy = 0;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
@@ -1502,6 +1536,12 @@ namespace TensileLite
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
 
+        // True for an externally captured kernel (rocRoller, aiter, triton) as
+        // opposed to a Tensile-generated one that merely carries customKernel
+        // metadata. Public because hipBLASLt's dispatch layer needs it to tell
+        // the two apart when sizeMapping alone cannot (tensile_host.cpp).
+        bool handwrittenCustomKernel() const;
+
     private:
         void validateStreamKClusterDescriptor() const;
 
@@ -1512,7 +1552,22 @@ namespace TensileLite
                                                  size_t         gsu,
                                                  size_t         tiles) const;
 
-        bool handwrittenCustomKernel() const;
+        // The Stream-K grid for a rocRoller custom kernel: the single source of
+        // truth for both the launch geometry and the numWGs kernarg, which must
+        // never disagree, and for the partial-tile workspace sized from it.
+        //
+        // Deliberately NOT getPersistentGridImpl() / resolveStreamKSettings():
+        // rocRoller partitions work differently and substituting Tensile's
+        // decomposition would silently corrupt its fixup pass.
+        //
+        // Currently the CU count (honouring smCountTarget and persistentMaxCUs)
+        // clamped to the flag region's capacity, StreamKFlagElements. That is a
+        // valid Stream-K grid, but not necessarily the grid the rocRoller JIT
+        // path chooses. The intended replacement is a port of rocRoller's
+        // chooseStreamKGridSize -- origami::streamk::select_reduction followed
+        // by select_grid_size, as already adapted elsewhere in this file --
+        // keyed on customKernel.occupancy, once that value is validated.
+        uint32_t rocRollerStreamKGrid(Problem const& problem, Hardware const& hardware) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.
