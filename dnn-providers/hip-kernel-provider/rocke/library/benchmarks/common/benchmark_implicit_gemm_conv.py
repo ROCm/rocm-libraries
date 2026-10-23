@@ -4986,9 +4986,16 @@ def _launch_problem(direction, problem):
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`) -- the same
     bytes in all three tensors, in fewer and wider sub-GEMMs -- exactly as
     ``dispatch.grouped_convolution`` launches it, so what is benchmarked here
-    is what dispatch runs. Every other problem launches as it is.
+    is what dispatch runs.
+
+    A forward folds the same way: the identity behind ``fold_width`` does not
+    depend on the direction, so a patch embedding (stride = filter, no
+    padding) or a 2x2 stride-2 downsample runs as a ``Y x 1`` convolution
+    over ``X * C`` contiguous channels -- vector-wide A loads instead of
+    ``C``-element gathers -- on exactly the case's tensors. Every other
+    problem launches as it is.
     """
-    if direction != "dgrad":
+    if direction not in ("dgrad", "fwd"):
         return problem
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
