@@ -197,8 +197,9 @@ def test_halfplr_streamk_sk3_sia4_is_accepted(_gp_gfx1250, gfx1250_iim, assemble
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("half_plr", [1, 2, 3])
 @pytest.mark.parametrize("pgr", [1, 2])
+@pytest.mark.parametrize("force_dp", [0, 1])
 def test_halfplr_supports_prefetch_across_persistent(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr, force_dp
 ):
     sol, out = _derive(
         gfx1250_iim,
@@ -207,7 +208,7 @@ def test_halfplr_supports_prefetch_across_persistent(
         HalfPLR=half_plr,
         PrefetchGlobalRead=pgr,
         PrefetchAcrossPersistent=1,
-        StreamKForceDPOnly=1,
+        StreamKForceDPOnly=force_dp,
         AssertSummationElementMultiple=256,
     )
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
@@ -217,8 +218,9 @@ def test_halfplr_supports_prefetch_across_persistent(
 
 @pytest.mark.parametrize("half_plr", [1, 2, 3])
 @pytest.mark.parametrize("pgr", [1, 2])
+@pytest.mark.parametrize("force_dp", [0, 1])
 def test_halfplr_pap_supports_tail_capable_solution(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, pgr, force_dp
 ):
     sol, out = _derive(
         gfx1250_iim,
@@ -227,33 +229,26 @@ def test_halfplr_pap_supports_tail_capable_solution(
         HalfPLR=half_plr,
         PrefetchGlobalRead=pgr,
         PrefetchAcrossPersistent=1,
-        StreamKForceDPOnly=1,
+        StreamKForceDPOnly=force_dp,
         AssertSummationElementMultiple=32,
     )
     assert sol.get("Valid") is True, f"expected tail-capable accept, rejected with: {out!r}"
 
 
 # ---------------------------------------------------------------------------
-# Guard 1: HalfPLR + PrefetchAcrossPersistent outside the narrowly validated
-# StreamK=3 + StreamKForceDPOnly=1 path -> rejected.
+# Guard 1: queue/hybrid HalfPLR handoffs still need separate validation.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("half_plr", [1, 2, 3])
-def test_halfplr_pap_rejects_without_force_dp_only(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+@pytest.mark.parametrize("streamk", [4, 5])
+def test_halfplr_pap_rejects_nonstatic_assignment(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk
 ):
-    # Same knobs as the accept test above with StreamKForceDPOnly flipped to 0:
-    # only the DP-only handoff has been validated for the out-of-line PAP block.
     sol, out = _derive(
-        gfx1250_iim,
-        assembler,
-        capsys,
-        HalfPLR=half_plr,
-        PrefetchAcrossPersistent=1,
-        StreamKForceDPOnly=0,
+        gfx1250_iim, assembler, capsys, StreamK=streamk,
+        HalfPLR=1, PrefetchAcrossPersistent=1, StreamKForceDPOnly=0,
         AssertSummationElementMultiple=256,
     )
     assert sol.get("Valid") is False
-    assert "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid" in out
+    assert "TDM + PrefetchAcrossPersistent requires WorkAssignment=StaticGrid" in out
 
 
 @pytest.mark.parametrize("streamk", [1, 2])

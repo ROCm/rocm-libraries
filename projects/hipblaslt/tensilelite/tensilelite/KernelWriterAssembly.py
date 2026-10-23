@@ -21139,7 +21139,7 @@ class KernelWriterAssembly(KernelWriter):
             and not kernel.get("ProblemType", {}).get("Sparse", 0))
 
   def papTdmSupportsShadowAddressPair(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> bool:
-    """Whether this pair supports bounded pure classic PAP address arithmetic.
+    """Whether this pair supports bounded pure PAP address arithmetic.
 
     With SupportUserArgs, the caller may consume a prepared address only when
     ArgType's low byte is zero. Other modes may speculate, but must discard
@@ -21155,8 +21155,9 @@ class KernelWriterAssembly(KernelWriter):
             and kernel.get("ScheduleIterAlg") == 4
             and kernel.get("PrefetchGlobalRead") == 2
             and kernel.get("WavefrontSize") == 32
-            and not kernel.get("HalfPLR")
-            and not kernel.get("SuppressNoLoadLoop")
+            and ((kernel.get("HalfPLR") and kernel.get("NoTailLoop")
+                  and kernel.get("SuppressNoLoadLoop"))
+                 or (not kernel.get("HalfPLR") and not kernel.get("SuppressNoLoadLoop")))
             and not kernel.get("ReuseAcrossPersistent")
             and not kernel.get("UseCustomMainLoopSchedule")
             and not kernel.get("SpaceFillingAlgo")

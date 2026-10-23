@@ -7029,10 +7029,8 @@ class Solution(collections.abc.Mapping):
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
       state["ExpandPointerSwap"] = False
-      if state.get("PrefetchAcrossPersistent", 0):
-        if not isPersistentDataParallel(state):
-          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
-          return
+      # TDM PAP already requires StaticGrid above. Its shared HalfPLR
+      # handoff supports both full-K tiles and StreamK's local K ranges.
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
