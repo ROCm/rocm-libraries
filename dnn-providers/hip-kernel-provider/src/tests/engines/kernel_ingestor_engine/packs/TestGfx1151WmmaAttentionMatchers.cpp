@@ -80,6 +80,7 @@ constexpr int64_t LSE_UID = 5;
 constexpr int64_t RAGGED_OFFSET_UID = 6;
 constexpr int64_t SCALE_UID = 7;
 constexpr int64_t BIAS_UID = 8;
+constexpr int64_t SINK_UID = 9;
 
 enum class ScaleForm
 {
@@ -150,6 +151,8 @@ struct GraphSpec
     // Elements of padding after each Q row: a row stride that is not a multiple of 8
     // elements leaves rows off the kernels' 16-byte vector alignment.
     int64_t qRowPad = 0;
+    // Attention sinks: sink_token [1, Hq, 1, 1] in the Q data type.
+    bool sinks = false;
 };
 
 // The default device is gfx12: the dispatcher's rule keeps a small-query graph with a
@@ -254,6 +257,11 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                        0,
                                                        spec.bias->passByValue));
     }
+    if(spec.sinks)
+    {
+        const std::vector<int64_t> sinkDims{1, spec.queryHeads, 1, 1};
+        tensors.push_back(tensorFor(SINK_UID, spec.dtype, packedStrides(sinkDims), sinkDims));
+    }
     const std::vector<int64_t> scalarDims{1};
     switch(spec.scale)
     {
@@ -320,6 +328,10 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     if(spec.bias.has_value())
     {
         attributes.add_attn_mask_tensor_uid(BIAS_UID);
+    }
+    if(spec.sinks)
+    {
+        attributes.add_sink_token_tensor_uid(SINK_UID);
     }
     attributes.add_implementation(data_objects::AttentionImplementation::AUTO);
     attributes.add_mma_core_mode(data_objects::DataType::FLOAT);
@@ -389,6 +401,8 @@ struct KernelSpec
     int64_t blockSize = 256;
     int64_t blockM = 128;
     int64_t dvSplit = 1;
+    // 1: the object takes sink_ptr (shipped only for the paged prefill objects).
+    int64_t sinks = 0;
 };
 
 /// A shipped prefill object: the causal class, block_m 128 (64 over a wave pair).
@@ -438,7 +452,8 @@ KernelDefinition makeKernel(const KernelSpec& spec)
                        {"bias", spec.bias},
                        {"block_size", spec.blockSize},
                        {"block_m", spec.blockM},
-                       {"dv_split", spec.dvSplit}};
+                       {"dv_split", spec.dvSplit},
+                       {"sinks", spec.sinks}};
     return kernel;
 }
 
@@ -589,6 +604,26 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
         spec.raggedOperand = uid;
         EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
     }
+}
+
+// Only the paged prefill objects ship with attention sinks: a dense-layout graph carrying
+// a well-formed sink_token is declined (TestGfx1151WmmaAttentionPaged covers the paged
+// layout), and an object claiming sinks outside the paged layout serves nothing.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesAttentionSinksOnTheDenseLayout)
+{
+    GraphSpec spec;
+    spec.sinks = true;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    spec.dtype = data_objects::DataType::BFLOAT16;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ADenseObjectClaimingSinksServesNothing)
+{
+    auto prefill = prefillKernel(96, 96);
+    ASSERT_TRUE(matchesKernel(GraphSpec{}, prefill));
+    prefill.sinks = 1;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, prefill));
 }
 
 // Launch arguments are bound from the graph's shapes at prepare, so a graph whose

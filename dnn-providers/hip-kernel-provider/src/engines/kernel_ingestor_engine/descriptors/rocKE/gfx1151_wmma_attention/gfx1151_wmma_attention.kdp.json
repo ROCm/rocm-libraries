@@ -27,7 +27,8 @@
             "layout",
             "page_block_size",
             "dense_q",
-            "seqused_q"
+            "seqused_q",
+            "sinks"
           ],
           "matcher_only_fields": [],
           "bindings": {
@@ -69,6 +70,9 @@
             },
             "seqused_q": {
               "method": "catalog_seqused_q"
+            },
+            "sinks": {
+              "method": "catalog_sinks"
             }
           },
           "vocabulary": {
@@ -111,7 +115,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -145,7 +150,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -179,7 +185,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -212,7 +219,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -246,7 +254,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -280,7 +289,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -313,7 +323,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -347,7 +358,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -381,7 +393,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -414,7 +427,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -448,7 +462,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -482,7 +497,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -515,7 +531,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -549,7 +566,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -583,7 +601,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -616,7 +635,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -650,7 +670,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -684,7 +705,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -717,7 +739,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -751,7 +774,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -785,7 +809,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -818,7 +843,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -852,7 +878,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -886,7 +913,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -919,7 +947,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -963,7 +992,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1007,7 +1037,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1050,7 +1081,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1094,7 +1126,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1138,7 +1171,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1181,7 +1215,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1225,7 +1260,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1269,7 +1305,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1312,7 +1349,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1356,7 +1394,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1400,7 +1439,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1444,7 +1484,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1483,7 +1524,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1522,7 +1564,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1560,7 +1603,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1599,7 +1643,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1638,7 +1683,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1676,7 +1722,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1715,7 +1762,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1754,7 +1802,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1792,7 +1841,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1831,7 +1881,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1870,7 +1921,8 @@
         "layout": "dense",
         "page_block_size": 0,
         "dense_q": 0,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0,
       "arch": [
@@ -1910,7 +1962,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -1947,7 +2000,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -1983,7 +2037,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2019,7 +2074,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2056,7 +2112,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2092,7 +2149,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2128,7 +2186,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2165,7 +2224,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2201,7 +2261,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2237,7 +2298,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2274,7 +2336,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2310,7 +2373,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2346,7 +2410,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2383,7 +2448,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2419,7 +2485,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2455,7 +2522,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2492,7 +2560,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2528,7 +2597,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2564,7 +2634,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2601,7 +2672,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2637,7 +2709,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2673,7 +2746,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2710,7 +2784,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2746,7 +2821,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2782,7 +2858,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2819,7 +2896,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2855,7 +2933,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2891,7 +2970,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2928,7 +3008,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -2964,7 +3045,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3000,7 +3082,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3037,7 +3120,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3073,7 +3157,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3109,7 +3194,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3146,7 +3232,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3182,7 +3269,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3218,7 +3306,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3255,7 +3344,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3291,7 +3381,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3327,7 +3418,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3364,7 +3456,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3400,7 +3493,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3436,7 +3530,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3473,7 +3568,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3509,7 +3605,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3545,7 +3642,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3582,7 +3680,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3618,7 +3717,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3654,7 +3754,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3691,7 +3792,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3727,7 +3829,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3763,7 +3866,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3800,7 +3904,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3836,7 +3941,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3872,7 +3978,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3909,7 +4016,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3945,7 +4053,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -3981,7 +4090,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4018,7 +4128,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4054,7 +4165,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4090,7 +4202,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4127,7 +4240,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4163,7 +4277,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4199,7 +4314,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4236,7 +4352,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4272,7 +4389,8 @@
         "layout": "paged",
         "page_block_size": 16,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4308,7 +4426,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4345,7 +4464,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4381,7 +4501,8 @@
         "layout": "paged",
         "page_block_size": 32,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4417,7 +4538,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 0
+        "seqused_q": 0,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4454,7 +4576,8 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 1,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
       },
       "priority": 0
     },
@@ -4490,7 +4613,2768 @@
         "layout": "paged",
         "page_block_size": 64,
         "dense_q": 0,
-        "seqused_q": 1
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1a1bcae-cd85-4c5a-bb6e-0ac3aab5482d",
+      "name": "wmma_prefill_paged.fp16_d64v64_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fecef9c9-37a5-4f36-a7fe-6079d8c949ef",
+      "name": "wmma_prefill_paged.fp16_d64v64_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c6ca8a61-858b-4afa-ac01-32fa16b0e8e2",
+      "name": "wmma_prefill_paged.fp16_d64v64_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4dfcd872-6c84-494e-8e1b-922dc3b25990",
+      "name": "wmma_prefill_paged.fp16_d64v64_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f6dc56db-f378-4b42-a40f-05bc669d2b34",
+      "name": "wmma_prefill_paged.fp16_d64v64_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "910247ea-4c0e-4dec-a8a9-a41b34ddd2f7",
+      "name": "wmma_prefill_paged.fp16_d64v64_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4b7b9d53-fa30-4635-88a0-3adc6713b6db",
+      "name": "wmma_prefill_paged.fp16_d64v64_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6adf1360-cb49-4b88-9bfa-25c602c4b2dd",
+      "name": "wmma_prefill_paged.fp16_d64v64_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "23d81b6a-b0ad-418c-a214-5e71f7c84201",
+      "name": "wmma_prefill_paged.fp16_d64v64_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8c13d353-5c64-4cb7-9496-43f77978bdde",
+      "name": "wmma_prefill_paged.bf16_d64v64_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "43b6ad96-4440-47a0-aca8-4d0d6f554677",
+      "name": "wmma_prefill_paged.bf16_d64v64_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2d1e9cf9-0b60-490f-bd0d-7b70d46b9252",
+      "name": "wmma_prefill_paged.bf16_d64v64_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "660a0de9-4ee2-4e08-b0c1-3464ac49556b",
+      "name": "wmma_prefill_paged.bf16_d64v64_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "24f324c7-4ea0-4e49-b2c7-f093670aa7ee",
+      "name": "wmma_prefill_paged.bf16_d64v64_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4fec2928-62d7-4bd9-9026-f503acfd8e8d",
+      "name": "wmma_prefill_paged.bf16_d64v64_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2a12c7ed-8966-46fa-b491-cba76be89c61",
+      "name": "wmma_prefill_paged.bf16_d64v64_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "320215dd-d9cc-48c2-bc61-11bc11a41e2d",
+      "name": "wmma_prefill_paged.bf16_d64v64_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dd4e45b2-5699-42b3-bac3-ab971663eb77",
+      "name": "wmma_prefill_paged.bf16_d64v64_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 64,
+          "head_dim_v": 64,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 64,
+        "head_size_v": 64,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "780d5456-5814-466d-a07e-fb516a92000c",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f25f5ab6-3cef-426e-bf9c-dfb57dbabf81",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0814a8f4-242a-402f-b789-3e45b1104aab",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "67401497-a64d-4440-9604-584a9b5fbfec",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3bb9ecad-9ca0-4139-b352-7e3d8aa88c31",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8e19234f-665d-4786-bad0-5d6e3d4aee8c",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7ed75681-6e83-4925-ad82-869fc7080367",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8d5d2524-a8ab-4e0e-ab5c-914e9e003ea5",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02844590-eab7-48f7-ae82-1e6d733672dc",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6806e679-9a90-4609-bb0a-03b5b4e3b821",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "29308f6a-d71e-4fc1-b6b2-43e7ed905e96",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "14c810f0-0090-4272-aeca-a74ddc5bbc69",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c5b7ced2-2742-485e-aebc-0c319c37d23d",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "59ed746e-c797-4a40-9e6e-7197696446df",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b479b520-ead8-4d5f-bf59-afcb378671ae",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a879a1cf-e233-4e0b-af5b-c33d89e3b9ce",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "69bdaa7a-f5e9-4f3f-a077-f190f8565d1a",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "09acda94-00d5-48bc-aea4-c70765ef3f7d",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0e252a76-c5dc-49fc-b2e8-e7204a995b30",
+      "name": "wmma_prefill_paged.fp16_d128v128_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fb88340b-0d1b-4d19-baf3-45a632d64074",
+      "name": "wmma_prefill_paged.fp16_d128v128_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "908fa7d8-513e-4ff5-b48e-4119901e0f93",
+      "name": "wmma_prefill_paged.fp16_d128v128_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7d0bf550-7ff2-41a2-99f5-7afff40c153b",
+      "name": "wmma_prefill_paged.fp16_d128v128_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a857a259-e4d0-4d13-a7a6-019db6049cbf",
+      "name": "wmma_prefill_paged.fp16_d128v128_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f48e6e0b-7acd-4c31-a8ba-9ff0c76f0047",
+      "name": "wmma_prefill_paged.fp16_d128v128_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "249db275-a68c-469e-9792-ff30900a436e",
+      "name": "wmma_prefill_paged.fp16_d128v128_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "35f9cc0f-18ed-4780-88c2-005944e79ccd",
+      "name": "wmma_prefill_paged.fp16_d128v128_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6240186f-18be-45ec-a7a0-2dbe9cc8d031",
+      "name": "wmma_prefill_paged.fp16_d128v128_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8303b5e5-2ffb-4975-9182-addc6a7a8efb",
+      "name": "wmma_prefill_paged.bf16_d128v128_p16_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d207f3b5-1cd9-4228-a87a-2813ff73e676",
+      "name": "wmma_prefill_paged.bf16_d128v128_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dfe7bfab-045b-4be5-9e29-04a079c85147",
+      "name": "wmma_prefill_paged.bf16_d128v128_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e690cd8d-6daa-4aa8-b552-4034d165b2e5",
+      "name": "wmma_prefill_paged.bf16_d128v128_p32_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c2c69027-f49c-4c68-8f1b-d601ea9f3c6b",
+      "name": "wmma_prefill_paged.bf16_d128v128_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c714cb58-7605-45b9-a946-6ef4ec025285",
+      "name": "wmma_prefill_paged.bf16_d128v128_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "70fcef42-c04f-4f18-ae1f-fd8960ba0577",
+      "name": "wmma_prefill_paged.bf16_d128v128_p64_m128_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "65cca758-5320-4ce2-a19f-9abf6f47a3e5",
+      "name": "wmma_prefill_paged.bf16_d128v128_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9059535c-64ab-4fd1-b4b0-c5c2b9921ab6",
+      "name": "wmma_prefill_paged.bf16_d128v128_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 128,
+          "head_dim_v": 128,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 128,
+        "head_size_v": 128,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ccc46ecd-682d-4021-8c4d-c0267a041d07",
+      "name": "wmma_prefill_paged.fp16_d256v256_p16_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bae10d19-558b-4346-bff3-1f262c91761b",
+      "name": "wmma_prefill_paged.fp16_d256v256_p16_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "aaf12a2f-842c-4647-b88a-1d933e2dc200",
+      "name": "wmma_prefill_paged.fp16_d256v256_p16_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "23585746-60d3-4619-9c2b-80e533ae6ab9",
+      "name": "wmma_prefill_paged.fp16_d256v256_p32_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "841f5299-3930-4c13-aac9-f272684da3b8",
+      "name": "wmma_prefill_paged.fp16_d256v256_p32_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1ba6cbfd-ce0a-41af-a427-ed46d386846e",
+      "name": "wmma_prefill_paged.fp16_d256v256_p32_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f3ac1b29-d745-47d5-b9a6-7c0654f92ab9",
+      "name": "wmma_prefill_paged.fp16_d256v256_p64_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "397d1775-eecd-4a1c-9440-c06dd0ee2d86",
+      "name": "wmma_prefill_paged.fp16_d256v256_p64_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "999a202a-fa94-4465-a12d-c799d43cf72c",
+      "name": "wmma_prefill_paged.fp16_d256v256_p64_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b837ac4c-fc49-4bdf-8383-aa36ef729886",
+      "name": "wmma_prefill_paged.bf16_d256v256_p16_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "401d378d-b454-4356-899c-dff6f883ee23",
+      "name": "wmma_prefill_paged.bf16_d256v256_p16_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3ed5e5e2-e7f6-4de8-ae93-3fcab8a421cc",
+      "name": "wmma_prefill_paged.bf16_d256v256_p16_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f2c45cef-4f0a-405e-98cc-fcc0de4fb3af",
+      "name": "wmma_prefill_paged.bf16_d256v256_p32_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0e5b85a2-4fc2-41ea-a955-65f622b7e2c9",
+      "name": "wmma_prefill_paged.bf16_d256v256_p32_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5f87d73e-83a5-4793-8163-0fbdc5d984fc",
+      "name": "wmma_prefill_paged.bf16_d256v256_p32_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "dace88f2-9753-4e6d-8404-3307e3986304",
+      "name": "wmma_prefill_paged.bf16_d256v256_p64_m64_denseq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 0,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0ace0daf-4eff-45b2-8590-d9a929d44844",
+      "name": "wmma_prefill_paged.bf16_d256v256_p64_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bac68d28-6faf-49aa-be72-75a9e03f8be0",
+      "name": "wmma_prefill_paged.bf16_d256v256_p64_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 256,
+          "head_dim_v": 256,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 256,
+        "head_size_v": 256,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
       },
       "priority": 0
     }
