@@ -438,6 +438,21 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
                   pointerArray ? static_cast<void const*>(batchBias) : inputs.bias);
         EXPECT_EQ(value<uint32_t>(custom.args, "StrideA0"), initialStrides ? 1u : problem.a().strides()[1]);
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
+        if(layout == 2 && !initialStrides && !pointerArray && useBeta && alpha != 0.0f)
+        {
+            auto missing = inputs;
+            missing.ws = nullptr;
+            if(k != 0)
+                EXPECT_THROW(solution.generateCustomCall<true>(problem, missing, device, launch), std::runtime_error);
+            else
+                EXPECT_NO_THROW(solution.generateCustomCall<true>(problem, missing, device, launch));
+            missing = inputs;
+            missing.Synchronizer = nullptr;
+            EXPECT_THROW(solution.generateCustomCall<true>(problem, missing, device, launch), std::runtime_error);
+            auto invalid = launch;
+            invalid.argsVersion = 1;
+            EXPECT_THROW(solution.generateCustomCall<true>(problem, inputs, device, invalid), std::runtime_error);
+        }
     }
 }
 

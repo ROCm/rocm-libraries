@@ -21,6 +21,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef TENSILE_YAML
@@ -859,38 +860,59 @@ namespace
         }
     }
 
-    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsPhysicalThreadMismatch)
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsInvalidGeometry)
     {
-        configureSpatialCustomDescriptor();
-        for(const auto& threads : std::vector<std::vector<size_t>>{
-                {64, 1, 1}, {256, 1, 1}, {0, 1, 1}, {128, 0, 1}, {128, 1, 0},
-                {32, 4, 1}, {64, 1, 2}})
+        // Either unchecked logical multiplication would wrap to 128 threads.
+        const size_t overflowing = std::numeric_limits<size_t>::max() / 2 + 65;
+        for(const auto& [field, shape] : std::vector<std::pair<std::string, std::vector<size_t>>>{
+                {"threads", {64, 1, 1}}, {"threads", {256, 1, 1}}, {"threads", {0, 1, 1}},
+                {"threads", {128, 0, 1}}, {"threads", {128, 1, 0}},
+                {"threads", {32, 4, 1}}, {"threads", {64, 1, 2}},
+                {"workGroup", {0, 4, 1}}, {"workGroup", {32, 0, 1}},
+                {"workGroup", {32, 4, 0}}, {"workGroup", {0, 1, 1}},
+                {"workGroup", {overflowing, 2, 1}}, {"workGroup", {overflowing, 1, 2}}})
         {
-            SCOPED_TRACE(::testing::PrintToString(threads));
-            custom["threads"] = object(threads);
+            SCOPED_TRACE(::testing::Message() << field << ::testing::PrintToString(shape));
+            configureSpatialCustomDescriptor();
+            if(field == "workGroup" && (shape[0] == 0 || shape[1] == 0 || shape[2] == 0))
+                custom["threads"] = object(std::vector<size_t>{0, 1, 1});
+            (field == "threads" ? custom : size)[field] = object(shape);
             EXPECT_THROW(readSolution(), std::runtime_error);
         }
     }
 
-    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsEmptyAndOverflowingWorkGroups)
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsMalformedAbi)
     {
         configureSpatialCustomDescriptor();
-        custom["threads"] = object(std::vector<size_t>{0, 1, 1});
-        for(const auto& shape : std::vector<std::vector<size_t>>{
-                {0, 4, 1}, {32, 0, 1}, {32, 4, 0}, {0, 1, 1}})
+        const auto descriptor = readSolution()->customKernel;
+        using Mutation = std::pair<const char*, void (*)(CustomKernel&)>;
+        for(const auto& [name, mutate] : std::vector<Mutation>{
+                {"missing word", [](auto& d) { d.args.erase(d.args.begin() + 1); }},
+                {"duplicate word", [](auto& d) { d.args.push_back(d.args[1]); }},
+                {"word order", [](auto& d) { std::swap(d.args[1], d.args[2]); }},
+                {"word gap", [](auto& d) { d.args.insert(d.args.begin() + 2,
+                    {CustomArgType::address, CustomArgSemantic::AddressBias}); }},
+                {"word type", [](auto& d) { d.args[1].type = CustomArgType::uint64; }},
+                {"word padding", [](auto& d) { d.args[1].padding = 4; }},
+                {"missing flags", [](auto& d) { d.args.erase(d.args.begin()); }},
+                {"duplicate flags", [](auto& d) { d.args.push_back(d.args.front()); }},
+                {"missing workspace", [](auto& d) { d.args.pop_back(); }},
+                {"duplicate workspace", [](auto& d) { d.args.push_back(d.args.back()); }},
+                {"pointer type", [](auto& d) { d.args.front().type = CustomArgType::uint64; }},
+                {"pointer padding", [](auto& d) { d.args.back().padding = 8; }},
+                {"legacy scheduler", [](auto& d) { d.args.push_back(
+                    {CustomArgType::uint32, CustomArgSemantic::PersistentGrid}); }},
+                {"workspace kind", [](auto& d) { d.workspaceType = CustomWorkspaceType::None; }},
+                {"empty element", [](auto& d) { d.workspaceSizePerElemC = 0; }},
+                {"element mismatch", [](auto& d) { d.workspaceSizePerElemC = 8; }},
+                {"macro tile M", [](auto& d) { d.macrotile.x = 64; }},
+                {"macro tile N", [](auto& d) { d.macrotile.y = 64; }},
+                {"depth U", [](auto& d) { d.macrotile.z = 32; }}})
         {
-            SCOPED_TRACE(::testing::PrintToString(shape));
-            size["workGroup"] = object(shape);
-            EXPECT_THROW(readSolution(), std::runtime_error);
-        }
-        custom["threads"] = object(std::vector<size_t>{128, 1, 1});
-        // Either unchecked multiplication would wrap to the descriptor's 128.
-        const size_t overflowing = std::numeric_limits<size_t>::max() / 2 + 65;
-        for(const auto& shape : std::vector<std::vector<size_t>>{
-                {overflowing, 2, 1}, {overflowing, 1, 2}})
-        {
-            SCOPED_TRACE(::testing::PrintToString(shape));
-            size["workGroup"] = object(shape);
+            SCOPED_TRACE(name);
+            auto invalid = descriptor;
+            mutate(invalid);
+            custom = output(invalid);
             EXPECT_THROW(readSolution(), std::runtime_error);
         }
     }
