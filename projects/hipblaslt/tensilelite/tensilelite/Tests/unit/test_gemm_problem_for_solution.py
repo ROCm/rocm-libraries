@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Regular GEMM descriptors and explicit-index client input, without a GPU."""
 
+import os
+import subprocess
+import sys
 import zlib
 from dataclasses import replace
 from itertools import product
@@ -313,6 +316,43 @@ def test_unexpressible_mx_scale_is_an_adapter_error(tmp_path, changes):
     problem = replace(problem, **{"mx_block_a": 32, **changes})
     with pytest.raises(UnsupportedBenchProblem, match="MX A"):
         bench_yaml([problem])
+
+
+def test_generation_does_not_import_generator_or_rocisa(tmp_path):
+    mx = solution(18, trans_a=True, split=0)
+    mx["sizeMapping"].update(streamK=3, depthU=256)
+    mx["problemType"].update(
+        aType="Float4",
+        bType="Float4",
+        mxBlockA=32,
+        mxBlockB=32,
+        mxTypeA="E8",
+        mxTypeB="E8",
+        mxScaleFormat=1,
+    )
+    write_shard(tmp_path, [solution(), mx], "TensileLibrary_test_gfx950.dat")
+    script = """
+import importlib.abc
+import sys
+class Guard(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('rocisa', 'tensilelite.Common', 'tensilelite.SolutionStructs',
+                                'Tensile.Common', 'Tensile.SolutionStructs')):
+            raise AssertionError(fullname)
+sys.meta_path.insert(0, Guard())
+from tensilelite.Utilities.gemm_problem_bench import bench_yaml
+from tensilelite.Utilities.gemm_problem_for_solution import load_library_metadata
+library = load_library_metadata(sys.argv[1], target='gfx950')
+for index, k in [(17, 256), (18, 2048)]:
+    problem = library.choose_single_problem(index)
+    assert (problem.m, problem.n, problem.k) == (128, 96, k)
+    assert f'solution_index: {index}' in bench_yaml([problem])
+"""
+    subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        check=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+    )
 
 
 def test_compressed_precedence_missing_and_duplicate_indices(tmp_path):
