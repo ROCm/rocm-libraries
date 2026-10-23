@@ -348,9 +348,11 @@ class GlobalWriteBatchWriter:
       return 1
     VW1 = kernel["VectorWidthB"]
     outerTT1 = kernel["MIWaveTile"][1] // VW1
-    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+    # Non-square MI (e.g. 16x32) is stored as N//miT blocks of miT x miT; the
+    # block count must match AsmStoreState.getStoreElementsInfoForBatch.
+    miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * (kernel["MatrixInstN"] // miT)
     if kernel["SourceSwap"]:
-      miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
       miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
       miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
       OPM  = miM_ * miN_ // kernel["WavefrontSize"]
