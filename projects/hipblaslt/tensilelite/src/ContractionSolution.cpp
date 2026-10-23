@@ -3650,7 +3650,17 @@ namespace TensileLite
                 case CustomArgSemantic::BatchOffsetB:
                     rv.args.template append<int64_t>("batchOffsetB", inputs.batchOffsetB);
                     break;
-
+                case CustomArgSemantic::FusedA2ASegment:
+                {
+                    appendFusedSegment(rv.args,
+                                       inputs.fusedA2APeers,
+                                       inputs.fusedA2ACounter,
+                                       inputs.fusedA2AMyRank,
+                                       problem.fusedA2AWorld(),
+                                       inputs.fusedA2ADrain,
+                                       static_cast<uint32_t>(problem.fusedA2AExtent()));
+                    break;
+                }
                 // ---- Random seed args ----
                 case CustomArgSemantic::RNDSeed:
                 {
