@@ -828,6 +828,7 @@ class CustomKernel:
                  'macrotile',
                  'threads',
                  'grid',
+                 'occupancy',
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
@@ -840,6 +841,11 @@ class CustomKernel:
                    macrotile=d['macrotile'],
                    threads=d['threads'],
                    grid=d['grid'],
+                   # Workgroups resident per CU, captured from the kernel's
+                   # static resource usage. 0 means "not recorded". Only
+                   # rocRoller Stream-K grid selection needs it; everything
+                   # else carries it through untouched.
+                   occupancy=d.get('occupancy', 0),
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
